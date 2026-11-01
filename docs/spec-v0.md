@@ -232,6 +232,7 @@ data rows: [u16; 25] = [row_addr(i) for i in 0..25]
 - Compile time has its own number types: `int` (whole numbers with no size limit) and `real` (decimal numbers, with `sin`, `cos`, `sqrt`, `round` and similar). Neither exists at runtime. When a value leaves compile time into a `u8`, `u16` or `data` table, the compiler checks that it fits and reports an error if not.
 - Array-building syntax: `[expr for i in range]`.
 - A step limit stops a `const fn` that never finishes, with an error.
+- A `const fn` can live in an imported module (2.2), so table generators can be shared between programs as Tern scripts: `import tables` … `data sine = tables.sine(256)`. Reading files from compile-time code (e.g. converting an image into sprite data) is a possible later extension.
 
 ## 5. Statements
 
