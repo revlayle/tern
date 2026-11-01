@@ -1,0 +1,329 @@
+using Tern.Cpu;
+
+namespace Tern.Compiler.Tests;
+
+/// <summary>lib/mem (spec 10.1). Cycle counts include the jsr and rts.</summary>
+public class MemLibraryTests
+{
+    private static readonly Library Mem = new("import mem", """
+                mem.copy(0 as ptr u8, 0 as ptr u8, 0)
+                mem.fill(0 as ptr u8, 0, 0)
+        """);
+
+    private const int Dst = 0x4000;
+    private const int Src = 0x6000;
+
+    /// <summary>Fills $3E00-$7FFF with a pattern, so that stray writes show.</summary>
+    private static void Pattern(Ram ram)
+    {
+        for (int a = 0x3E00; a < 0x8000; a++) ram.Bytes[a] = (byte)(a * 7 + 3);
+    }
+
+    private static readonly int[] Counts = [0, 1, 2, 255, 256, 257, 511, 512, 513, 1000];
+
+    [Theory]
+    [InlineData(Dst)]
+    [InlineData(Dst + 0xFF)]
+    public void Fill(int dst)
+    {
+        lock (Mem)
+            foreach (int count in Counts)
+            {
+                Pattern(Mem.Ram);
+                var before = Mem.Ram.Bytes.ToArray();
+                Mem.Set16("mem.fill.dst", dst);
+                Mem.Set8("mem.fill.value", 0xA5);
+                Mem.Set16("mem.fill.count", count);
+                Mem.Call("mem.fill");
+                for (int a = 0x3E00; a < 0x8000; a++)
+                {
+                    int expected = a >= dst && a < dst + count ? 0xA5 : before[a];
+                    if (Mem.Ram.Bytes[a] != expected) Assert.Fail($"fill count {count}: ${a:X4} = {Mem.Ram.Bytes[a]}");
+                }
+            }
+    }
+
+    [Theory]
+    [InlineData(Dst, Src)]
+    [InlineData(Dst + 0x80, Src + 0x01)]
+    [InlineData(Dst, Dst + 0x10)]           // overlapping, dst below src
+    public void Copy(int dst, int src)
+    {
+        lock (Mem)
+            foreach (int count in Counts)
+            {
+                Pattern(Mem.Ram);
+                var before = Mem.Ram.Bytes.ToArray();
+                Mem.Set16("mem.copy.dst", dst);
+                Mem.Set16("mem.copy.src", src);
+                Mem.Set16("mem.copy.count", count);
+                Mem.Call("mem.copy");
+                for (int a = 0x3E00; a < 0x8000; a++)
+                {
+                    int expected = a >= dst && a < dst + count ? before[src + a - dst] : before[a];
+                    if (Mem.Ram.Bytes[a] != expected) Assert.Fail($"copy count {count}: ${a:X4} = {Mem.Ram.Bytes[a]}, expected {expected}");
+                }
+            }
+    }
+
+    [Fact]
+    public void Cycles()
+    {
+        lock (Mem)
+        {
+            Mem.Set16("mem.fill.dst", Dst);
+            Mem.Set16("mem.fill.count", 1000);
+            long fill = Mem.Call("mem.fill");
+            Mem.Set16("mem.copy.dst", Dst);
+            Mem.Set16("mem.copy.src", Src);
+            Mem.Set16("mem.copy.count", 1000);
+            long copy = Mem.Call("mem.copy");
+            // About 15 cycles per byte for fill and 17 for copy (13 and 16 inside whole pages).
+            Assert.Equal((14837, 16891), (fill, copy));
+        }
+    }
+}
+
+/// <summary>lib/text (spec 10.1). Digits are screen codes: '0'-'9' are $30-$39, 'A'-'F' are $01-$06.</summary>
+public class TextLibraryTests
+{
+    private static readonly Library Text = new("import text", """
+                text.put(0 as ptr u8, 0 as ptr u8, 0)
+                text.dec8(0 as ptr u8, 0)
+                text.dec16(0 as ptr u8, 0)
+                text.hex8(0 as ptr u8, 0)
+                text.hex16(0 as ptr u8, 0)
+                text.equal(0 as ptr u8, 0 as ptr u8, 0)
+                text.find(0 as ptr u8, 0, 0)
+        """);
+
+    private const int Dst = 0x4000;
+    private const int Src = 0x6000;
+
+    private static byte[] Screen(string s) =>
+        s.Select(c => (byte)(c is >= 'A' and <= 'F' ? c - 'A' + 1 : c)).ToArray();
+
+    private static (long Min, long Max) Range(IEnumerable<long> cycles) => (cycles.Min(), cycles.Max());
+
+    /// <summary>Calls dec8/dec16/hex8/hex16 and checks the digits, the returned count, and the byte after them.</summary>
+    private static long Digits(string function, int value, string expected, bool returnsCount)
+    {
+        Text.Ram.Bytes.AsSpan(Dst, 8).Fill(0xEE);
+        Text.Set16($"text.{function}.dst", Dst);
+        if (function.EndsWith("16")) Text.Set16($"text.{function}.value", value);
+        else Text.Set8($"text.{function}.value", value);
+        long cycles = Text.Call($"text.{function}");
+        var written = Text.Ram.Bytes.AsSpan(Dst, expected.Length).ToArray();
+        if (!written.SequenceEqual(Screen(expected)) || Text.Ram.Bytes[Dst + expected.Length] != 0xEE
+            || (returnsCount && Text.Cpu.A != expected.Length))
+            Assert.Fail($"{function}({value}) wrote {Convert.ToHexString(written)}, returned {Text.Cpu.A}; expected \"{expected}\"");
+        return cycles;
+    }
+
+    [Fact]
+    public void Dec8_for_every_value()
+    {
+        var cycles = new List<long>();
+        lock (Text)
+            for (int v = 0; v < 256; v++) cycles.Add(Digits("dec8", v, v.ToString(), returnsCount: true));
+        Assert.Equal((63, 354), Range(cycles));
+    }
+
+    [Fact]
+    public void Dec16_on_edge_values()
+    {
+        int[] values = [0, 1, 9, 10, 11, 99, 100, 101, 255, 256, 999, 1000, 1001, 9999, 10000, 10001, 32767, 32768, 59999, 60000, 65534, 65535];
+        var cycles = new List<long>();
+        lock (Text)
+            foreach (int v in values.Concat(Enumerable.Range(0, 1772).Select(i => i * 37)))
+                cycles.Add(Digits("dec16", v, v.ToString(), returnsCount: true));
+        Assert.Equal((296, 1640), Range(cycles));
+    }
+
+    [Fact]
+    public void Hex8_for_every_value()
+    {
+        var cycles = new List<long>();
+        lock (Text)
+            for (int v = 0; v < 256; v++) cycles.Add(Digits("hex8", v, v.ToString("X2"), returnsCount: false));
+        Assert.Equal((56, 58), Range(cycles));
+    }
+
+    [Fact]
+    public void Hex16_on_edge_values()
+    {
+        var cycles = new List<long>();
+        lock (Text)
+            foreach (int v in new[] { 0, 1, 0x0F, 0x10, 0xFF, 0x100, 0x1234, 0xABCD, 0x7FFF, 0x8000, 0xFFFF })
+                cycles.Add(Digits("hex16", v, v.ToString("X4"), returnsCount: false));
+        Assert.Equal((100, 104), Range(cycles));
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1)]
+    [InlineData(40)]
+    [InlineData(255)]
+    public void Put(int n)
+    {
+        lock (Text)
+        {
+            for (int i = 0; i < 300; i++)
+            {
+                Text.Ram.Bytes[Src + i] = (byte)(i * 3 + 1);
+                Text.Ram.Bytes[Dst + i] = 0xEE;
+            }
+            Text.Set16("text.put.dst", Dst);
+            Text.Set16("text.put.src", Src);
+            Text.Set8("text.put.n", n);
+            long cycles = Text.Call("text.put");
+            Assert.Equal(Text.Ram.Bytes.AsSpan(Src, n).ToArray(), Text.Ram.Bytes.AsSpan(Dst, n).ToArray());
+            Assert.Equal(0xEE, Text.Ram.Bytes[Dst + n]);
+            if (n == 40) Assert.Equal(778, cycles);    // 19 per byte
+        }
+    }
+
+    [Theory]
+    [InlineData("HELLO", "HELLO", 5, true)]
+    [InlineData("HELLO", "JELLO", 5, false)]
+    [InlineData("HELLO", "HELLX", 5, false)]
+    [InlineData("HELLO", "HELLX", 4, true)]
+    [InlineData("A", "B", 0, true)]
+    public void Equal(string a, string b, int n, bool expected)
+    {
+        lock (Text)
+        {
+            Text.Ram.Load(Dst, System.Text.Encoding.ASCII.GetBytes(a));
+            Text.Ram.Load(Src, System.Text.Encoding.ASCII.GetBytes(b));
+            Text.Set16("text.equal.a", Dst);
+            Text.Set16("text.equal.b", Src);
+            Text.Set8("text.equal.n", n);
+            Text.Call("text.equal");
+            Assert.Equal(expected, Text.Cpu.C);
+        }
+    }
+
+    [Theory]
+    [InlineData("HELLO", 5, 'H', 0)]
+    [InlineData("HELLO", 5, 'L', 2)]
+    [InlineData("HELLO", 5, 'O', 4)]
+    [InlineData("HELLO", 4, 'O', 0xFF)]
+    [InlineData("HELLO", 5, 'X', 0xFF)]
+    [InlineData("HELLO", 0, 'H', 0xFF)]
+    public void Find(string s, int n, char ch, int expected)
+    {
+        lock (Text)
+        {
+            Text.Ram.Load(Dst, System.Text.Encoding.ASCII.GetBytes(s));
+            Text.Set16("text.find.s", Dst);
+            Text.Set8("text.find.n", n);
+            Text.Set8("text.find.ch", ch);
+            Text.Call("text.find");
+            Assert.Equal(expected, Text.Cpu.A);
+        }
+    }
+
+    [Fact]
+    public void Writing_a_number_to_the_screen()
+    {
+        var r = Run.Program("""
+            import text
+            data title = screen"SCORE "
+            var score: u16 = 4711
+            var n: u8
+            fn main() {
+                text.put($0400, addr(title), len(title))
+                n = text.dec16($0400 + len(title), score)
+            }
+            """);
+        Assert.Equal(4, r.U8("n"));
+        Assert.Equal([0x13, 0x03, 0x0F, 0x12, 0x05, 0x20, 0x34, 0x37, 0x31, 0x31], r.Ram.Bytes.AsSpan(0x0400, 10).ToArray());
+    }
+}
+
+/// <summary>lib/c64 (spec 10.1), with stand-ins for the KERNAL routines.</summary>
+public class C64LibraryTests
+{
+    /// <summary>
+    /// $FFD2 CHROUT: appends A to $C500 (count at $C5FF), keeps X and Y.
+    /// $FFE4 GETIN: returns $41.
+    /// $FFF0 PLOT: carry set loads X and Y from $C5F0/$C5F1; carry clear stores them there.
+    /// </summary>
+    private static void Kernal(Ram ram)
+    {
+        ram.Load(0xFFD2, [0x4C, 0x40, 0xC0]);   // jmp $C040
+        ram.Load(0xC040, [
+            0x8C, 0xFE, 0xC5,   // sty $C5FE
+            0xAC, 0xFF, 0xC5,   // ldy $C5FF
+            0x99, 0x00, 0xC5,   // sta $C500,y
+            0xEE, 0xFF, 0xC5,   // inc $C5FF
+            0xAC, 0xFE, 0xC5,   // ldy $C5FE
+            0x60,               // rts
+        ]);
+        ram.Load(0xFFE4, [0xA9, 0x41, 0x60]);   // lda #$41 / rts
+        ram.Load(0xFFF0, [0x4C, 0x60, 0xC0]);   // jmp $C060
+        ram.Load(0xC060, [
+            0x90, 0x07,         // bcc set
+            0xAE, 0xF0, 0xC5,   // ldx $C5F0
+            0xAC, 0xF1, 0xC5,   // ldy $C5F1
+            0x60,               // rts
+            0x8E, 0xF0, 0xC5,   // set: stx $C5F0
+            0x8C, 0xF1, 0xC5,   // sty $C5F1
+            0x60,               // rts
+        ]);
+    }
+
+    [Fact]
+    public void Kernal_routines()
+    {
+        var r = Run.Program("""
+            import c64
+            data msg = "HELLO"
+            var key: u8
+            var pos: u16
+            fn main() {
+                c64.chrout(c64.WHITE)
+                c64.print(addr(msg), len(msg))
+                key = c64.getin()
+                c64.cursor(12, 30)
+                pos = c64.get_cursor()
+            }
+            """, setup: Kernal);
+        Assert.Equal([1, .. "HELLO"u8], r.Ram.Bytes.AsSpan(0xC500, r.Ram.Bytes[0xC5FF]).ToArray());
+        Assert.Equal(0x41, r.U8("key"));
+        Assert.Equal(12 | (30 << 8), r.U16("pos"));
+        // print: the character goes straight from (src),y to the KERNAL.
+        Assert.Matches(@"lda \(c64\.print\.src\),y.*\n.*jsr \$FFD2", r.Result.Listing);
+        Assert.Matches(@"ldx #\$0C.*\n.*ldy #\$1E.*\n.*clc.*\n.*jsr \$FFF0", r.Result.Listing);
+    }
+
+    [Fact]
+    public void Constants()
+    {
+        var r = Run.Program("""
+            import c64
+            var screen: u16
+            var color: u16
+            var colors: [u8; 3]
+            fn main() {
+                screen = c64.SCREEN
+                color = c64.COLOR
+                colors[0] = c64.BLACK
+                colors[1] = c64.LIGHT_BLUE
+                colors[2] = c64.LIGHT_GREY
+            }
+            """);
+        Assert.Equal(0x0400, r.U16("screen"));
+        Assert.Equal(0xD800, r.U16("color"));
+        Assert.Equal([0, 14, 15], r.Ram.Bytes.AsSpan(r.Address("colors"), 3).ToArray());
+    }
+
+    [Fact]
+    public void An_unused_import_adds_no_bytes()
+    {
+        var with = TernCompiler.Compile("import c64\nimport math\nimport mem\nimport text\nfn main() { }");
+        var without = TernCompiler.Compile("fn main() { }");
+        Assert.Equal(without.Image, with.Image);
+        Assert.Equal(without.Report, with.Report);
+    }
+}
