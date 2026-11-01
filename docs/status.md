@@ -4,26 +4,30 @@ Owned by the coding session. Updated at the end of every coding session.
 
 ## Current
 
-- **Milestone:** M2 (pointers, data and strings), review findings fixed.
-- **Branch:** `m2-pointers` (`main` with the review merged in).
-- **Next step:** re-review of `m2-pointers` against `docs/reviews/m2.md`, then merge. The spec session should also answer the questions below; the provisional choices are easy to change.
+- **Milestone:** M3 (assembly blocks and KERNAL calls), including the M2 follow-up. Complete.
+- **Branch:** `m3-asm` (from `main` after the M2 merge).
+- **Next step:** re-review of `m3-asm` against `docs/reviews/m3.md` (all findings addressed), then merge. After the merge, M4 (imports and the first standard library). The spec session should look at the questions below; the provisional choices are easy to change.
 
 ## Done
 
 - **M1 core compiler**, merged to `main` (2026-11-01).
-- **M2 pointers, data and strings** (branch `m2-pointers`, 2026-11-01). 354 tests pass (34 CPU, 320 compiler).
-  - `ptr T` for any number, bool or pointer type. Pointers work as globals, locals, parameters (also `using AX`), return values and array elements.
-  - `p[i]` compiles to `(zp),y`. `p[i] = v` has the spec 11 shape (`ldy i` / `lda v` / `sta (p),y`) whenever computing the value does not change Y; `dst[i] = src[i]` loads Y once; `p[i] op= v` changes the element in place with one Y load. A pointer that is not a zero-page variable (a computed pointer such as `rows[j][i]`, or one at a fixed address of `$100` or more) is copied to a zero-page temporary first. A pointer at a fixed zero-page address (`@ $FB`) is used directly.
-  - Dereferenced pointer variables are forced into zero page, after `@ zp` variables (spec 8.2 step 2). If zero page is full, the error lists every user and its size.
-  - `p + n`, `n + p`, `p - n`, `p += n`, `p -= n` (offset `u8` or `u16`, in bytes); `p += 1` is `inc`/`bne`/`inc`. Comparisons between pointers of the same type. `as` between pointers and `u16`, no code.
-  - `addr(name)` for globals, locals, parameters, arrays and data. Variables whose address is taken are never used directly as a `for` bound (a pointer could change them).
-  - Char literals `'A'` (PETSCII), strings `"..."` (PETSCII) and `screen"..."` (screen codes), escapes `\0`, `\n`, `\\`, `\"`, `\'`, `\$NN`. Encodings live in `Petscii.cs` and are chosen by the platform.
-  - `data` arrays and strings in the program image, read-only (writes are errors). Strings also initialize global `var` arrays.
-  - `include_bytes("file")`, relative to the source file (`TernCompiler.Compile(source, sourcePath: ...)`; the CLI passes it).
-  - Fixed: `len()` and `sizeof()` inside a `using X` loop were reported as function calls.
-  - Review fixes (`docs/reviews/m2.md`): 1, `p[i] = v` with `i` in X no longer saves A to a temporary (commit "Load Y before the value in p[i] = v"); 2, the three missing error tests; 3, 16-bit stores into split arrays skip the temporary when the value needs no code; 4, a function named like a built-in (`addr`, `len`, `sizeof`, `include_bytes`) is an error; 5, clearer messages for `addr()` in initial values, untyped data arrays and `screen'A'`, and escape errors point at the escape (commit "Address M2 review suggestions").
-  - `examples/hello.tern` clears the screen and prints a rainbow message through pointers; checked in VICE.
-  - Roadmap "done when": string copied to the screen through a pointer (`DataTests.Copies_a_string_to_the_screen_through_a_pointer`, `examples/hello.tern`), data table read by index (`DataTests.Data_table_is_readable_by_index`), pointer arithmetic across pages (`PointerTests.Pointer_arithmetic_in_bytes`, `Index_crosses_pages`, `Walks_a_buffer_across_a_page_boundary`).
+- **M2 pointers, data and strings**, merged to `main` (2026-11-01).
+- **M2 follow-up** (branch `m3-asm`, 2026-11-01):
+  - Encodings in `CharEncoding.cs`: `petscii`, `petscii_mixed`, `screen`, `screen_mixed`. The platform names its default (`Platform.DefaultEncoding`; C64: `petscii`). Any name right before a quote is an encoding prefix, for strings and chars: `screen'A'`, `petscii_mixed"Hello"`. Unknown prefixes are errors that list the known encodings.
+  - `p - q` of two pointers of the same type gives the `u16` byte distance.
+- **M3 assembly blocks and fixed-address routines** (branch `m3-asm`, 2026-11-01). 482 tests pass (34 CPU, 448 compiler).
+  - `asm { }` statements and `asm fn` with typed signatures. One instruction per line; `//` comments; local `.labels:`, separate in each block.
+  - Operands: `#imm`, `addr`, `addr,x`, `addr,y`, `(zp),y`, `(zp,x)`, `(addr)`, `asl a` / `asl`. An operand is a constant expression (`SIZE-1`, `len(t)`, `'A'`, `screen'A'`, `-1`), or the name of a variable, function or label plus or minus a constant (`score+1`, `buffer-1,x`). `.lo`/`.hi` give a byte of an address for immediates: `#msg.lo`, `#(buf+3).hi`.
+  - The checker (`Checker.Asm.cs`) picks the addressing mode; the assembler uses the zero-page form when the address is below `$100`. Variables used with a zero-page-only mode (`(p),y`, `(p,x)`, `stx v,y`) are forced into zero page (`VariableSymbol.AsmZeroPage`, same rules as dereferenced pointers).
+  - `AsmEffects` records the registers, flags and variables each block reads and writes; the listing shows it as a comment above the block (`; asm: reads A C D, changes A C Z N V, reads score, writes score`).
+  - Working around blocks: a block in a `for ... using X/Y` loop may read the loop register, but changing it or any `jsr` is an error. A local used as a `for` bound that a block writes is copied before the loop. Writing `data` or a loop variable is an error. Functions named in a block (`jsr f`, `jmp f`, `#f.lo`) are added to the call graph, so they are compiled and their frames do not overlap the caller's.
+  - `asm fn`: register parameters stay in their registers (no frame memory, not stored on entry); memory parameters are read by name. Return values as for any function (A, A/X, carry). `rts` is added unless the block ends with `rts`, `rti` or `jmp`.
+  - Instructions in a block are emitted as written: the assembler never replaces them, and an out-of-range branch in a block is a compile error pointing at the branch.
+  - Routines at a fixed address (spec 6.6): `fn chrout(ch: u8 using A) @ $FFD2 keeps X, Y`. No body, frame or code; `FunctionSymbol.FixedAddress`, and its label holds the address, so calls are `jsr $FFD2` and asm can use the name (`jsr chrout`, `#chrout.lo`). Register parameters only. `keeps` (a new keyword) lists A, X or Y; a register the return value uses cannot be kept. A `for ... using X/Y` loop may call a routine that keeps the register, from Tern or with `jsr` in asm; passing a parameter in the loop register is an error. A body with `@ $addr`, or `asm fn ... @`, is "not supported yet". The routine is in the symbol table and VICE labels at its address. Tests: `RoutineTests` (stand-in routines in RAM).
+  - Calls (all functions): a one-byte argument for A that needs code is computed straight into A after the other temporaries, instead of through a temporary, matching spec 11 (`lda x` / `jsr $FFD2`).
+  - `examples/kernal.tern`: `chrout` declared at `$FFD2` and called from a `for ... using X` loop (`txa / tay / lda (s),y / jsr $FFD2`), and an asm block calling `PLOT` between compiled statements. Checked in VICE; `AsmTests.Kernal_example_prints_through_chrout` runs it in the emulator with stand-ins for the ROM routines (`Run.Program(..., setup: ram => ...)`) and checks the listing.
+  - Roadmap "done when": the example prints text in VICE; the call is a direct `jsr $FFD2` in the listing; asm blocks mixed with compiled code are tested in the emulator (`AsmTests`: spec examples, loops, calls in both directions, all addressing modes, 47 error messages plus branch range and error positions).
+  - Review fixes (`docs/reviews/m3.md`), commit "Keep jmp (v) vectors off $xxFF; address M3 review suggestions": 1, a variable used as `jmp (v+n)` is never placed so that the vector starts at `$xxFF` (NMOS bug): `VariableSymbol.JumpVectorOffsets`, and a `Padding` item sized during layout before the variables after the program and before initialized globals used as vectors; a fixed address ending in `$FF` is an error. 2, `jsr f`/`jmp f` from asm to a function with memory parameters is an error. 3, clearer `keeps` without `@`. 4, test for the negation error. 5, `Register.Uses()`. 6, keywords are not encoding prefixes. 7, blank line.
 
 ## Known limitations and technical debt
 
@@ -39,27 +43,28 @@ Not bugs; things to improve, mostly in M7 (optimizer).
 - `Y` is reloaded for every pointer access in an expression, even with the same index: `x = p[i] + q[i]` loads Y twice. (`dst[i] = src[i]` and `p[i] += 1` load it once.)
 - When the value of `p[i] = v` changes Y (it reads through a pointer with another index, or calls a function), A is still saved to a temporary while Y is loaded.
 - `p += 256` adds `#0` to the low byte instead of `inc p+1`.
-- `addr()` cannot be used in global or data initializers: addresses are known only at link time, and initial values must be compile-time constants. Tables of pointers to data must be filled at runtime.
-- `VariableSymbol.AddressTaken` is set by `addr()`. The M7 optimizer must not cache such variables in registers across pointer writes.
+- `addr()` cannot be used in global or data initializers: addresses are known only at link time. Tables of pointers to data must be filled at runtime.
+- `VariableSymbol.AddressTaken` is set by `addr()` and by `#name.lo`/`#name.hi` in assembly. The M7 optimizer must not cache such variables in registers across pointer writes or asm blocks.
+- `AsmEffects` are unions over the whole block (a register "read" may be one the block set itself first, as in `clc` / `adc`). Good enough for the current checks; the optimizer may want "read before written".
+- Inside a `for ... using X` loop, only routines that declare `keeps X` may be called. An `asm fn` that never touches X is still rejected; `AsmEffects` would make allowing it easy (spec 6.1: the compiler may use each function's actual register use).
 
 ## Questions for the spec session
 
-1. **Type of `addr(name)`.** Spec 3.4 implies a pointer; the table in spec 10 says `u16`. Implemented: `ptr T` for a variable of type `T`, `ptr T` to the first element for an array of one-byte `T`, and `ptr u8` (the low-byte table) for a split array of 16-bit values. `addr()` of a function is "not supported yet" until there is something to do with the address (asm, interrupts, `fn()` variables).
-2. **Number literals as pointers.** Implemented: a number literal (or an untyped `const`) converts to a pointer without `as`, as literals take their type from context: `var p: ptr u8 = $0400`, `p == 0`, `print(SCREEN + 40, ...)`. A typed `u16` value needs `as`. Is that right?
-3. **`p[i]` on pointers to 16-bit values.** Implemented: the index counts elements, so `p[i]` reads bytes `2i` and `2i+1` (`asl` / `tay` / ... / `iny`). Constant indexes above 127 are an error; a variable index of 128 or more wraps silently within the 256 bytes `(zp),y` reaches (`asl` drops the top bit). The review asks that the spec state this in 3.4 if it is kept. Alternative: allow `p[i]` only on pointers to one-byte types.
-4. **`.lo` / `.hi` on pointers.** Not allowed; the error suggests `(p as u16).lo`. Allowing it would make `p.hi += 1` (next page) easy to write, but `.lo`/`.hi` could clash with struct fields through pointers (M4).
-5. **Pointer differences.** `p - q` is an error ("convert them to u16 first"). Should it give a `u16`?
-6. **Arrays longer than 256.** Strings and `include_bytes` may produce more than 256 bytes (e.g. a 2 KB charset); written array types are still limited to 256, and indexing a longer array is an error that points to `addr()`. The spec limits arrays to 256; is this exception right, or should long tables have their own form?
-7. **PETSCII for lower-case letters.** Implemented: `a`-`z` give the same codes as `A`-`Z` (`$41`-`$5A`), which the default character set shows as upper case. Programs that switch to the lower/upper case character set would want `A`-`Z` as `$C1`-`$DA`. Should there be a second encoding (e.g. `petscii_mixed"..."`) or a platform option?
-8. **Screen-code char literals.** There is `screen"..."` but no `screen'A'`. Writing single characters to the screen needs the screen code as a number (`$01`). Add `screen'A'`?
-9. **Escapes.** Implemented `\0`, `\n` (PETSCII `$0D`), `\\`, `\"`, `\'` and `\$NN` (a raw byte, not encoded). The spec only shows `\0`.
-10. **`data` placement.** `data x @ $C000 = ...` is "not supported yet" (the program image is one block). Needed later for fixed-address tables and `@ bank(n)`.
+The M2 questions were settled on 2026-11-01 (`docs/decisions.md`). New ones from M3; each is implemented as described and marked provisional:
+
+1. **`;` in assembly.** Most assemblers use `;` for comments, but in Tern it separates statements. Implemented: `;` in an asm block is an error ("write one instruction per line, and comments with //"), so pasted assembly fails loudly instead of being misread. Alternative: treat `;` as a comment inside asm blocks only.
+2. **Zero-page forms.** Spec 9 says the compiler never changes instructions in a block. Implemented: `lda v` becomes the zero-page form when `v` is in zero page, as every assembler does (it is the same instruction with a shorter encoding). Branches are never rewritten (out of range is an error). Is the zero-page choice acceptable, or should there be a way to force absolute addressing (e.g. for exact cycle counts)?
+3. **`asl a`.** `a` or `A` after `asl`/`lsr`/`rol`/`ror` means the accumulator, even if a variable named `a` exists. `asl` alone also works.
+4. **Immediate addresses.** `lda #name` for an address is an error ("write #name.lo or #name.hi"). Immediate numbers may be -128 to 255.
+5. **Case.** Mnemonics and the index registers in `,x`/`,y` ignore case (`LDA t,X`). Labels and Tern names are case-sensitive.
+6. **Calling Tern functions from assembly.** `jsr f` and `jmp f` work for functions with register parameters or none. For a function with memory parameters they are an error (review M3, finding 2), since assembly cannot write `f.x` (not a name outside `f`, spec 6.1); `#f.lo` is allowed. Should asm be allowed to write `f.x`, or is this the intended limit?
+7. **Function addresses in assembly.** `#f.lo` / `#f.hi` (e.g. to install a handler) makes `f` a callee of the function containing the block, which keeps it compiled and its frame separate. For interrupt handlers (M6) this will need the interrupt-root rule instead.
+8. **`p - q`** requires both pointers to have the same type, like comparisons. Should different pointer types be allowed, since the result is only a byte count?
+9. **`π` in `petscii_mixed`.** `$FF` shows a different character in the lower/upper-case set, so `petscii_mixed` has no code for `π`. `screen_mixed` is derived from `petscii_mixed` and also has none.
+10. **Flag parameters for fixed-address routines.** KERNAL `PLOT` ($FFF0) reads the cursor with carry set and sets it with carry clear, so it cannot be declared with 6.6: parameters can only use A, X and Y. With `bool using carry` parameters (and `-> u16 using XY` for the row and column), `fn plot(read: bool using carry, row: u8 using X, col: u8 using Y) -> u16 using XY @ $FFF0` would work, though a call would always pass `true` or `false`. The example uses an asm block for now.
 
 ## Provisional choices made while coding
 
-All M2 choices are listed as questions above (1-10). Also:
+Listed as questions 1-10 above. Also: `keeps` is a reserved word; a call in a `using X` loop that passes a parameter in X is an error.
 
-- Pointers move only by unsigned offsets (`p + s` with `s: i8` is an error); use `p - n` to move back.
-- Strings can initialize global `var` arrays as well as `data`; the string must have exactly the array's length.
-- Only functions are stopped from using a built-in's name; a variable named `len` is allowed, since it cannot be confused with a call.
-- Characters with no PETSCII code (`{`, `|`, `}`, `~`, `` ` ``, `\`, `^`, `_` and non-ASCII except `£ ↑ ← π`) are errors that suggest `\$NN`.
+Also from the M3 review (finding 4): new error tests live in per-feature files (`AsmTests`, `RoutineTests`, `DataTests`) as well as `ErrorTests.cs`. CLAUDE.md says `ErrorTests.cs`; the spec session should decide which convention to keep.

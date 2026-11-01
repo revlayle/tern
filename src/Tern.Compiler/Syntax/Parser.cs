@@ -1,4 +1,5 @@
 using Tern.Compiler.Semantics;
+using Tern.Cpu;
 
 namespace Tern.Compiler.Syntax;
 
@@ -68,6 +69,13 @@ public sealed class Parser
                 case TokenKind.Var: globals.Add(ParseVar()); break;
                 case TokenKind.Data: globals.Add(ParseData()); break;
                 case TokenKind.Fn: functions.Add(ParseFn()); break;
+                case TokenKind.Asm when PeekAt(1).Kind == TokenKind.Fn:
+                    Advance();
+                    functions.Add(ParseFn(isAsm: true));
+                    break;
+                case TokenKind.Asm:
+                    throw new CompileError(Current.Pos,
+                        "An asm block must be inside a function. Use 'asm fn name() { ... }' for a whole function in assembly");
                 default:
                     RejectUnsupported();
                     throw new CompileError(Current.Pos, $"Expected 'const', 'var', 'data' or 'fn', found {Describe(Current)}");
@@ -81,7 +89,7 @@ public sealed class Parser
     private void RejectUnsupported()
     {
         if (Current.Kind is TokenKind.Struct or TokenKind.Match or TokenKind.Inline
-            or TokenKind.Interrupt or TokenKind.Asm or TokenKind.Noinit or TokenKind.Linear)
+            or TokenKind.Interrupt or TokenKind.Noinit or TokenKind.Linear)
             throw new CompileError(Current.Pos, $"'{Current.Text}' is not supported yet");
     }
 
@@ -130,7 +138,7 @@ public sealed class Parser
         return new VarDecl(start.Pos, name.Text, type, Placement.None, init) { IsData = true };
     }
 
-    private FnDecl ParseFn()
+    private FnDecl ParseFn(bool isAsm = false)
     {
         var start = Expect(TokenKind.Fn, "'fn'");
         var name = Expect(TokenKind.Identifier, "function name");
@@ -156,8 +164,33 @@ public sealed class Parser
             returnType = ParseType();
             if (Accept(TokenKind.Using)) returnUsing = ParseRegister();
         }
-        var body = ParseBlock();
-        return new FnDecl(start.Pos, name.Text, parameters, returnType, returnUsing, body);
+        if (At(TokenKind.Keeps))
+            throw new CompileError(Current.Pos, $"'keeps' is only for routines at a fixed address: fn {name.Text}(...) @ $addr keeps X");
+
+        // A routine that already exists at a fixed address: no body.
+        if (At(TokenKind.At))
+        {
+            var at = Advance();
+            if (isAsm)
+                throw new CompileError(at.Pos, "An asm fn at a fixed address is not supported yet");
+            var address = ParseExpr();
+            var keeps = new List<(Register, SourcePos)>();
+            if (Accept(TokenKind.Keeps))
+            {
+                do keeps.Add((ParseRegister(), PeekAt(-1).Pos)); while (Accept(TokenKind.Comma));
+            }
+            if (At(TokenKind.LBrace))
+                throw new CompileError(at.Pos, "A function with a body at a fixed address is not supported yet. Without a body, it declares a routine that is already there");
+            ExpectEndOfStatement();
+            return new FnDecl(start.Pos, name.Text, parameters, returnType, returnUsing, new BlockStmt(at.Pos, []))
+            {
+                Address = address,
+                Keeps = keeps,
+            };
+        }
+
+        var body = isAsm ? new BlockStmt(Current.Pos, [ParseAsmBody()]) : ParseBlock();
+        return new FnDecl(start.Pos, name.Text, parameters, returnType, returnUsing, body) { IsAsm = isAsm };
     }
 
     private Register ParseRegister()
@@ -240,6 +273,11 @@ public sealed class Parser
             }
             case TokenKind.LBrace: return ParseBlock();
             case TokenKind.Data: throw new CompileError(Current.Pos, "'data' must be declared outside functions");
+            case TokenKind.Asm when PeekAt(1).Kind == TokenKind.Fn:
+                throw new CompileError(Current.Pos, "'asm fn' must be declared outside functions");
+            case TokenKind.Asm:
+                Advance();
+                return ParseAsmBody();
         }
         RejectUnsupported();
 
@@ -289,6 +327,111 @@ public sealed class Parser
         Register? reg = Accept(TokenKind.Using) ? ParseRegister() : null;
         var body = ParseBlock();
         return new ForStmt(start.Pos, name.Text == "_" ? null : name.Text, from, to, inclusive, step, reg, body);
+    }
+
+    // ---------- Assembly ----------
+
+    /// <summary>True while parsing assembly operands, where <c>.name</c> is a local label.</summary>
+    private bool _inAsm;
+
+    /// <summary>The <c>{ ... }</c> of an asm block or asm fn: one instruction per line, and <c>.labels:</c>.</summary>
+    private AsmStmt ParseAsmBody()
+    {
+        var start = Expect(TokenKind.LBrace, "'{' after 'asm'");
+        var lines = new List<AsmLine>();
+        _inAsm = true;
+        while (true)
+        {
+            while (Accept(TokenKind.Newline)) { }
+            if (At(TokenKind.RBrace)) break;
+            if (At(TokenKind.Eof)) throw new CompileError(start.Pos, "asm block is not closed with '}'");
+            if (At(TokenKind.Dot))
+            {
+                var dot = Advance();
+                var label = Expect(TokenKind.Identifier, "a label name after '.'");
+                Expect(TokenKind.Colon, "':' after the label");
+                lines.Add(new AsmLabel(dot.Pos, "." + label.Text));
+                continue;
+            }
+            if (At(TokenKind.Semicolon)) throw SemicolonInAsm();
+            var word = Expect(TokenKind.Identifier, "an instruction or a .label:");
+            if (At(TokenKind.Colon))
+                throw new CompileError(word.Pos, $"Labels in assembly start with '.', e.g. .{word.Text}:");
+            if (!Enum.TryParse<Mnemonic>(word.Text, ignoreCase: true, out var mnemonic) || !Enum.IsDefined(mnemonic))
+                throw new CompileError(word.Pos, $"Unknown instruction '{word.Text}'");
+            lines.Add(ParseAsmInstruction(word.Pos, mnemonic));
+
+            if (Accept(TokenKind.Newline) || At(TokenKind.RBrace)) continue;
+            if (At(TokenKind.Semicolon)) throw SemicolonInAsm();
+            throw new CompileError(Current.Pos, $"Expected the end of the line after the instruction, found {Describe(Current)}");
+        }
+        Advance();
+        _inAsm = false;
+        return new AsmStmt(start.Pos, lines);
+    }
+
+    private CompileError SemicolonInAsm() => new(Current.Pos,
+        "';' is not used in assembly: write one instruction per line, and comments with //");
+
+    private AsmInstruction ParseAsmInstruction(SourcePos pos, Mnemonic m)
+    {
+        if (At(TokenKind.Newline) || At(TokenKind.RBrace) || At(TokenKind.Semicolon) || At(TokenKind.Eof))
+            return new AsmInstruction(pos, m, AsmForm.None, null, null);
+
+        if (Accept(TokenKind.Hash))
+        {
+            if (At(TokenKind.Less) || At(TokenKind.Greater))
+                throw new CompileError(Current.Pos, "Write the bytes of an address with .lo and .hi, e.g. #name.lo and #name.hi");
+            return new AsmInstruction(pos, m, AsmForm.Immediate, ParseExpr(), null);
+        }
+
+        // "asl a": the accumulator, for the shifts and rotates.
+        if (m is Mnemonic.Asl or Mnemonic.Lsr or Mnemonic.Rol or Mnemonic.Ror
+            && At(TokenKind.Identifier) && Current.Text is "a" or "A"
+            && PeekAt(1).Kind is TokenKind.Newline or TokenKind.RBrace)
+        {
+            Advance();
+            return new AsmInstruction(pos, m, AsmForm.Accumulator, null, null);
+        }
+
+        if (Accept(TokenKind.LParen))
+        {
+            var inner = ParseExpr();
+            if (Accept(TokenKind.Comma))
+            {
+                ExpectIndexRegister(Register.X, "(address,x)");
+                Expect(TokenKind.RParen, "')'");
+                return new AsmInstruction(pos, m, AsmForm.IndexedIndirect, inner, Register.X);
+            }
+            Expect(TokenKind.RParen, "')'");
+            if (Accept(TokenKind.Comma))
+            {
+                ExpectIndexRegister(Register.Y, "(address),y");
+                return new AsmInstruction(pos, m, AsmForm.IndirectIndexed, inner, Register.Y);
+            }
+            return new AsmInstruction(pos, m, AsmForm.Indirect, inner, null);
+        }
+
+        var operand = ParseExpr();
+        Register? index = null;
+        if (Accept(TokenKind.Comma))
+        {
+            var r = Expect(TokenKind.Identifier, "x or y after ','");
+            index = r.Text switch
+            {
+                "x" or "X" => Register.X,
+                "y" or "Y" => Register.Y,
+                _ => throw new CompileError(r.Pos, $"Expected x or y after ',', found '{r.Text}'"),
+            };
+        }
+        return new AsmInstruction(pos, m, AsmForm.Direct, operand, index);
+    }
+
+    private void ExpectIndexRegister(Register reg, string form)
+    {
+        var r = Expect(TokenKind.Identifier, $"{reg.ToString().ToLowerInvariant()} in {form}");
+        if (!string.Equals(r.Text, reg.ToString(), StringComparison.OrdinalIgnoreCase))
+            throw new CompileError(r.Pos, $"Expected {reg.ToString().ToLowerInvariant()} in {form}, found '{r.Text}'");
     }
 
     // ---------- Expressions ----------
@@ -380,10 +523,16 @@ public sealed class Parser
                 return new NumberExpr(t.Pos, t.Value);
             case TokenKind.Char:
                 Advance();
-                return new CharExpr(t.Pos, t.Text[0]);
-            case TokenKind.String or TokenKind.ScreenString:
+                return new CharExpr(t.Pos, t.Text[0], t.Encoding);
+            case TokenKind.String:
                 Advance();
-                return new StringExpr(t.Pos, t.Text, t.Kind == TokenKind.ScreenString);
+                return new StringExpr(t.Pos, t.Text, t.Encoding);
+            case TokenKind.Dot when _inAsm:
+            {
+                Advance();
+                var label = Expect(TokenKind.Identifier, "a label name after '.'");
+                return new AsmLabelExpr(t.Pos, "." + label.Text);
+            }
             case TokenKind.True:
                 Advance();
                 return new BoolExpr(t.Pos, true);

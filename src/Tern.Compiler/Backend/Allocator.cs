@@ -64,7 +64,8 @@ public static class Allocator
                 $"Zero page is full: {what} need {ZpNeeded()} bytes, {zpCapacity} are free. Users: {users}");
         }
         Require(placeable.Where(v => v.RequireZeroPage), "'@ zp' variables");
-        Require(placeable.Where(v => v.Dereferenced && !v.RequireZeroPage), "'@ zp' variables and dereferenced pointers");
+        Require(placeable.Where(v => v.ForcedZeroPage && !v.RequireZeroPage),
+            "'@ zp' variables, dereferenced pointers and zero-page assembly operands");
 
         // 2. Best effort: the most used small variables.
         var candidates = placeable

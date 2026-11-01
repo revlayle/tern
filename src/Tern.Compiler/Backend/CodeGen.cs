@@ -36,8 +36,9 @@ public sealed class CodeGen
     {
         _program = program;
         _sourceLines = source.Split('\n');
+        // A routine at a fixed address is never placed: its label already has its address.
         foreach (var f in program.Functions)
-            _functionLabels[f] = new Label(f.Name);
+            _functionLabels[f] = new Label(f.Name) { Address = f.FixedAddress ?? -1 };
     }
 
     public Label LabelOf(FunctionSymbol f) => _functionLabels[f];
@@ -45,7 +46,7 @@ public sealed class CodeGen
     public List<AsmItem> GenerateFunctions()
     {
         var all = new List<AsmItem>();
-        foreach (var f in _program.Functions)
+        foreach (var f in _program.Functions.Where(f => f.FixedAddress is null))
         {
             GenFunction(f);
             all.AddRange(_out);
@@ -126,6 +127,16 @@ public sealed class CodeGen
         Source(f.Declaration!);
         Place(_functionLabels[f]);
 
+        // An asm fn: register parameters stay where they arrive. An rts is added unless the
+        // block ends with rts, rti or jmp.
+        if (f.Declaration!.IsAsm)
+        {
+            var block = (AsmStmt)f.Declaration.Body.Statements[0];
+            GenAsm(block);
+            if (block.Lines.LastOrDefault() is not AsmInstruction { Mnemonic: Rts or Rti or Mnemonic.Jmp }) Emit(Rts);
+            return;
+        }
+
         // Register parameters are stored into the frame, so the body can use A, X and Y freely.
         foreach (var p in f.Parameters)
         {
@@ -168,6 +179,7 @@ public sealed class CodeGen
             case BreakStmt: Jmp(_loops[^1].Break); break;
             case ContinueStmt: Jmp(_loops[^1].Continue); break;
             case ReturnStmt r: GenReturn(r); break;
+            case AsmStmt a: GenAsm(a); break;
             default: throw new InvalidOperationException(stmt.GetType().Name);
         }
     }
@@ -1234,7 +1246,10 @@ public sealed class CodeGen
         }
 
         // Register parameters: compute what needs code first, then load the registers last.
+        // A one-byte value for A is computed straight into A after the temporaries, since the
+        // ldx/ldy that follow do not change A.
         var loads = new List<(Register Reg, Operand Op)>();
+        Expr? intoA = null;
         for (int i = 0; i < call.Args.Count; i++)
         {
             var p = fn.Parameters[i];
@@ -1245,6 +1260,11 @@ public sealed class CodeGen
                 Operand op;
                 if (early.TryGetValue(i, out var t)) op = Var(t);
                 else if (Simple1(arg) is { } s) op = s;
+                else if (reg == Register.A)
+                {
+                    intoA = arg;
+                    continue;
+                }
                 else
                 {
                     var nt = AcquireTemp(1);
@@ -1277,11 +1297,54 @@ public sealed class CodeGen
                 loads.Add((hiReg, pair.Hi));
             }
         }
+        if (intoA is not null) GenA(intoA);
         foreach (var (reg, op) in loads.OrderBy(l => l.Reg == Register.A ? 1 : 0))
             Op(reg switch { Register.A => Lda, Register.X => Ldx, _ => Ldy }, op);
 
-        Emit(Jsr, Absolute, new LabelOperand(_functionLabels[fn]));
+        Emit(Jsr, Absolute, fn.FixedAddress is int at ? new AddrOperand(at) : new LabelOperand(_functionLabels[fn]));
         foreach (var t in temps) Release(t);
+    }
+
+    // ---------- Assembly ----------
+
+    /// <summary>Emits an asm block as written. The checker has made sure it leaves loop registers alone.</summary>
+    private void GenAsm(AsmStmt block)
+    {
+        var fx = block.Effects!;
+        string Names(IEnumerable<VariableSymbol> vs) => string.Join(" ", vs.Select(v => v.QualifiedName).Order(StringComparer.Ordinal));
+        var summary = $"asm: reads {AsmEffects.Describe(fx.Reads)}, changes {AsmEffects.Describe(fx.Writes)}";
+        if (fx.VariablesRead.Count > 0) summary += $", reads {Names(fx.VariablesRead)}";
+        if (fx.VariablesWritten.Count > 0) summary += $", writes {Names(fx.VariablesWritten)}";
+        if (fx.Calls) summary += ", calls subroutines";
+        _out.Add(new Comment(summary));
+
+        var labels = block.Lines.OfType<AsmLabel>().ToDictionary(l => l, l => NewLabel(l.Name[1..]));
+        foreach (var line in block.Lines)
+        {
+            Source(line);
+            switch (line)
+            {
+                case AsmLabel l:
+                    Place(labels[l]);
+                    break;
+                case AsmInstruction ins:
+                    _out.Add(new Instr(ins.Mnemonic, ins.Mode, AsmOperandOf(ins, labels), ins.Pos));
+                    break;
+            }
+        }
+    }
+
+    private Operand? AsmOperandOf(AsmInstruction ins, Dictionary<AsmLabel, Label> labels)
+    {
+        if (ins.Value is not { } v) return null;
+        int offset = (int)v.Number;
+        Label LabelOf() => v.Function is { } f ? _functionLabels[f] : labels[v.Label!];
+
+        if (v.High is bool high)
+            return v.Variable is { } hv ? new ImmVarByte(hv, high, offset) : new ImmLabelByte(LabelOf(), high, offset);
+        if (v.IsNumber) return ins.Mode == Immediate ? new Imm(offset) : new AddrOperand(offset);
+        if (v.Variable is { } variable) return new VarOperand(variable, offset);
+        return new LabelOperand(LabelOf(), offset);
     }
 
     // ---------- for loops ----------
@@ -1654,6 +1717,7 @@ public sealed class CodeGen
         IfStmt i => AssignsVar(i.Then, v) || (i.Else is not null && AssignsVar(i.Else, v)),
         WhileStmt w => AssignsVar(w.Body, v),
         ForStmt f => AssignsVar(f.Body, v),
+        AsmStmt asm => asm.Effects!.VariablesWritten.Contains(v),
         _ => false,
     };
 

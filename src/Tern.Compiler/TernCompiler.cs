@@ -39,6 +39,11 @@ public static class TernCompiler
         var gen = new CodeGen(program, source);
         var functionCode = gen.GenerateFunctions();
         var plan = Allocator.Allocate(program, platform);
+        foreach (var v in program.Globals.Concat(program.Functions.SelectMany(f => f.FrameVariables)))
+            if (v.Address is >= 0 and < 0x100 && v.FixedAddress is null)
+                foreach (int o in v.JumpVectorOffsets)
+                    if (((v.Address + o) & 0xFF) == 0xFF)
+                        throw new CompileError(v.Pos, $"'{v.Name}' is used as jmp ({v.Name}{o:+0;-0;''}) and was placed so that the vector starts at $FF, where the 6502 reads it wrongly");
 
         var start = new Label("start");
         var halt = new Label("halt");
@@ -55,9 +60,17 @@ public static class TernCompiler
         {
             var label = new Label(g.Name);
             imageLabels[g] = label;
+            if (g.JumpVectorOffsets.Count > 0)
+                items.Add(new Padding(pc => AvoidPageEnd(pc, g.JumpVectorOffsets), $"jmp ({g.Name}) must not read a vector at $xxFF"));
             items.Add(new LabelDef(label));
             items.Add(new DataBytes(MemoryLayout(g, g.InitialBytes!)));
         }
+        // Variables after the program start at bss. Move them all, if needed, so that no jmp (...)
+        // vector among them starts at an address ending in $FF.
+        var ramVectors = plan.ZeroedGlobals.Concat(plan.FrameVariables)
+            .SelectMany(e => e.Var.JumpVectorOffsets.Select(o => e.Offset + o)).ToList();
+        if (ramVectors.Count > 0)
+            items.Add(new Padding(pc => AvoidPageEnd(pc, ramVectors), "no jmp (...) vector may start at $xxFF"));
         items.Add(new LabelDef(bss));
 
         int ramEnd = 0;
@@ -106,6 +119,16 @@ public static class TernCompiler
             ViceLabels = vice.ToString(),
             Report = report.ToString(),
         };
+    }
+
+    /// <summary>
+    /// The number of bytes to skip at <paramref name="pc"/> so that no vector at <c>pc + skip + offset</c>
+    /// starts at an address ending in $FF. The NMOS 6502 reads the high byte of <c>jmp ($xxFF)</c> from $xx00.
+    /// </summary>
+    private static int AvoidPageEnd(int pc, IEnumerable<int> offsets)
+    {
+        for (int skip = 0; ; skip++)
+            if (offsets.All(o => ((pc + skip + o) & 0xFF) != 0xFF)) return skip;
     }
 
     /// <summary>Startup code: set up zero-page globals and clear the uninitialized ones in RAM.</summary>

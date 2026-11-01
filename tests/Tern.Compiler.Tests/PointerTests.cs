@@ -193,6 +193,32 @@ public class PointerTests
         Assert.Equal((start + n) & 0xFFFF, r.U16("stepped"));
     }
 
+    [Theory]
+    [InlineData(0x1000, 0x1000)]
+    [InlineData(0x10F0, 0x1010)]
+    [InlineData(0x1010, 0x10F0)]
+    [InlineData(0x0000, 0xFFFF)]
+    [InlineData(0xFFFF, 0x0000)]
+    public void Pointer_difference_is_a_u16_byte_distance(int p, int q)
+    {
+        var r = Run.Program($$"""
+            var p: ptr u16 = {{p}}
+            var q: ptr u16 = {{q}}
+            var d: u16
+            var hi: u8
+            var near: bool
+            fn main() {
+                d = p - q
+                hi = (p - q).hi
+                near = p - q < 256
+            }
+            """);
+        int expected = (p - q) & 0xFFFF;
+        Assert.Equal(expected, r.U16("d"));
+        Assert.Equal(expected >> 8, r.U8("hi"));
+        Assert.Equal(expected < 256 ? 1 : 0, r.U8("near"));
+    }
+
     [Fact]
     public void Walks_a_buffer_across_a_page_boundary()
     {

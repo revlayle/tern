@@ -10,10 +10,11 @@ public sealed class Run
     public Ram Ram { get; } = new();
     public Cpu6502 Cpu { get; }
 
-    private Run(string source, long maxCycles, string? sourcePath)
+    private Run(string source, long maxCycles, string? sourcePath, Action<Ram>? setup)
     {
         Result = TernCompiler.Compile(source, sourcePath: sourcePath);
         Ram.Load((ushort)Result.LoadAddress, Result.Image);
+        setup?.Invoke(Ram);
         Cpu = new Cpu6502(Ram) { PC = (ushort)Result.Entry, SP = 0xFF };
         while (Cpu.PC != Result.HaltAddress)
         {
@@ -23,8 +24,9 @@ public sealed class Run
         }
     }
 
-    public static Run Program(string source, long maxCycles = 5_000_000, string? sourcePath = null) =>
-        new(source, maxCycles, sourcePath);
+    /// <param name="setup">Prepares memory after loading the program, e.g. with stand-ins for ROM routines.</param>
+    public static Run Program(string source, long maxCycles = 5_000_000, string? sourcePath = null, Action<Ram>? setup = null) =>
+        new(source, maxCycles, sourcePath, setup);
 
     public int Address(string name) =>
         Result.Symbols.TryGetValue(name, out var a) ? a : throw new KeyNotFoundException($"No symbol '{name}'");

@@ -90,15 +90,86 @@ public class DataTests
     [Fact]
     public void Petscii_and_screen_code_tables()
     {
-        Assert.Equal(0x5C, Petscii.FromChar('£'));
-        Assert.Equal(0x5E, Petscii.FromChar('↑'));
-        Assert.Equal(0x5F, Petscii.FromChar('←'));
-        Assert.Equal(0xFF, Petscii.FromChar('π'));
-        Assert.Equal(0x1C, Petscii.ScreenCode('£'));
-        Assert.Equal(0x5E, Petscii.ScreenCode('π'));
-        Assert.Equal(0x3F, Petscii.ScreenCode('?'));
-        Assert.Null(Petscii.FromChar('{'));
-        Assert.Null(Petscii.ScreenCode('\n'));
+        var petscii = CharEncoding.Petscii;
+        var screen = CharEncoding.Screen;
+        Assert.Equal(0x5C, petscii.Encode('£'));
+        Assert.Equal(0x5E, petscii.Encode('↑'));
+        Assert.Equal(0x5F, petscii.Encode('←'));
+        Assert.Equal(0xFF, petscii.Encode('π'));
+        Assert.Equal(0x1C, screen.Encode('£'));
+        Assert.Equal(0x5E, screen.Encode('π'));
+        Assert.Equal(0x3F, screen.Encode('?'));
+        Assert.Null(petscii.Encode('{'));
+        Assert.Null(screen.Encode('\n'));
+    }
+
+    [Fact]
+    public void Mixed_case_encoding_tables()
+    {
+        var petscii = CharEncoding.PetsciiMixed;
+        var screen = CharEncoding.ScreenMixed;
+        Assert.Equal(0x41, petscii.Encode('a'));
+        Assert.Equal(0x5A, petscii.Encode('z'));
+        Assert.Equal(0xC1, petscii.Encode('A'));
+        Assert.Equal(0xDA, petscii.Encode('Z'));
+        Assert.Equal(0x40, petscii.Encode('@'));
+        Assert.Equal(0x0D, petscii.Encode('\n'));
+        Assert.Null(petscii.Encode('π'));
+        Assert.Equal(0x00, screen.Encode('@'));
+        Assert.Equal(0x01, screen.Encode('a'));
+        Assert.Equal(0x1A, screen.Encode('z'));
+        Assert.Equal(0x41, screen.Encode('A'));
+        Assert.Equal(0x5A, screen.Encode('Z'));
+        Assert.Equal(0x30, screen.Encode('0'));
+        Assert.Equal(0x1C, screen.Encode('£'));
+        Assert.Null(screen.Encode('\n'));
+    }
+
+    [Fact]
+    public void Encoding_prefixes_on_strings_and_chars()
+    {
+        var r = Run.Program("""
+            data p = petscii"Ab"
+            data pm = petscii_mixed"Ab"
+            data s = screen"Ab"
+            data sm = screen_mixed"Ab"
+            var c: [u8; 6]
+            fn main() {
+                c[0] = 'a'
+                c[1] = petscii'a'
+                c[2] = petscii_mixed'A'
+                c[3] = screen'A'
+                c[4] = screen_mixed'a'
+                c[5] = screen'\$80'
+            }
+            """);
+        Assert.Equal([0x41, 0x42], Bytes(r, "p", 2));
+        Assert.Equal([0xC1, 0x42], Bytes(r, "pm", 2));
+        Assert.Equal([0x01, 0x02], Bytes(r, "s", 2));
+        Assert.Equal([0x41, 0x02], Bytes(r, "sm", 2));
+        Assert.Equal([0x41, 0x41, 0xC1, 0x01, 0x01, 0x80], Bytes(r, "c", 6));
+    }
+
+    [Fact]
+    public void A_keyword_before_a_quote_is_not_an_encoding_prefix()
+    {
+        var r = Run.Program("""
+            var c: u8
+            fn f() -> u8 { return'A' }
+            fn main() { c = f() }
+            """);
+        Assert.Equal(0x41, r.U8("c"));
+    }
+
+    [Fact]
+    public void Prefixed_char_literals_are_constants()
+    {
+        var r = Run.Program("""
+            const A = screen'A'
+            var c: [u8; 2] = [screen'Z', A + 1]
+            fn main() { }
+            """);
+        Assert.Equal([26, 2], Bytes(r, "c", 2));
     }
 
     [Fact]
@@ -170,14 +241,17 @@ public class DataTests
     [InlineData("data d: [u8; 3] = \"AB\"\nfn main() { }", "Expected 3 bytes, found 2")]
     [InlineData("data d: [u16; 2] = \"AB\"\nfn main() { }", "is a [u8; 2] array, but 'd' is [u16; 2]")]
     [InlineData("data d = \"\"\nfn main() { }", "at least one character")]
-    [InlineData("data d = \"A{\"\nfn main() { }", "'{' has no PETSCII code")]
-    [InlineData("data d = screen\"A\\n\"\nfn main() { }", "'\\n' has no screen code")]
+    [InlineData("data d = \"A{\"\nfn main() { }", "'{' has no code in the petscii encoding")]
+    [InlineData("data d = screen\"A\\n\"\nfn main() { }", "'\\n' has no code in the screen encoding")]
+    [InlineData("var c: u8 = petscii_mixed'π'\nfn main() { }", "'π' has no code in the petscii_mixed encoding")]
+    [InlineData("data d = ascii\"A\"\nfn main() { }", "Unknown encoding 'ascii'. Known encodings: petscii, petscii_mixed, screen, screen_mixed")]
+    [InlineData("var c: u8\nfn main() { c = scren'A' }", "Unknown encoding 'scren'")]
+    [InlineData("data d = include_bytes(screen\"x\")\nfn main() { }", "takes a file name in quotes")]
     [InlineData("data d = \"A\\q\"\nfn main() { }", "Unknown escape '\\q'")]
     [InlineData("data d = \"AB\nfn main() { }", "String is not closed")]
     [InlineData("var c: u8 = 'AB'\nfn main() { }", "exactly one character")]
     [InlineData("var c: u8 = ''\nfn main() { }", "exactly one character")]
     [InlineData("var c: u8 = 'A\nfn main() { }", "Character literal is not closed")]
-    [InlineData("var c: u8\nfn main() { c = screen'A' }", "screen'A' is not supported yet")]
     [InlineData("data d = [1, 2, 3]\nfn main() { }", "Data arrays need a written type")]
     [InlineData("var c: u8\nfn main() { c = \"A\" }", "A string can only be the value of data or a global array")]
     [InlineData("data d = include_bytes(\"no-such-file.bin\")\nfn main() { }", "Cannot read 'no-such-file.bin'")]
