@@ -38,17 +38,20 @@ public sealed class NumberExpr(SourcePos pos, long value) : Expr(pos)
 {
     public long Value { get; } = value;
 }
-/// <summary>A char literal such as <c>'A'</c>; the checker turns it into a number.</summary>
-public sealed class CharExpr(SourcePos pos, char value) : Expr(pos)
+/// <summary>A char literal such as <c>'A'</c> or <c>screen'A'</c>; the checker turns it into a number.</summary>
+public sealed class CharExpr(SourcePos pos, char value, string? encoding) : Expr(pos)
 {
     public char Value { get; } = value;
+    /// <summary>The encoding prefix, or null for the target's default.</summary>
+    public string? Encoding { get; } = encoding;
 }
-/// <summary>A string literal: <c>"..."</c> in the platform encoding, or <c>screen"..."</c> in screen codes.</summary>
-public sealed class StringExpr(SourcePos pos, string text, bool screen) : Expr(pos)
+/// <summary>A string literal: <c>"..."</c> in the target's default encoding, or <c>screen"..."</c> in a named one.</summary>
+public sealed class StringExpr(SourcePos pos, string text, string? encoding) : Expr(pos)
 {
     /// <summary>The characters after escapes; see <see cref="Lexer.RawByteBase"/>.</summary>
     public string Text { get; } = text;
-    public bool Screen { get; } = screen;
+    /// <summary>The encoding prefix, or null for the target's default.</summary>
+    public string? Encoding { get; } = encoding;
 }
 public sealed class BoolExpr(SourcePos pos, bool value) : Expr(pos)
 {

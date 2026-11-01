@@ -380,10 +380,10 @@ public sealed class Parser
                 return new NumberExpr(t.Pos, t.Value);
             case TokenKind.Char:
                 Advance();
-                return new CharExpr(t.Pos, t.Text[0]);
-            case TokenKind.String or TokenKind.ScreenString:
+                return new CharExpr(t.Pos, t.Text[0], t.Encoding);
+            case TokenKind.String:
                 Advance();
-                return new StringExpr(t.Pos, t.Text, t.Kind == TokenKind.ScreenString);
+                return new StringExpr(t.Pos, t.Text, t.Encoding);
             case TokenKind.True:
                 Advance();
                 return new BoolExpr(t.Pos, true);

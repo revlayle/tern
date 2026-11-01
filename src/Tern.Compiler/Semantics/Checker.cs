@@ -180,7 +180,8 @@ public sealed class Checker
         {
             case StringExpr s:
                 if (s.Text.Length == 0) throw new CompileError(s.Pos, "A string must have at least one character");
-                return s.Text.Select(c => (byte)Encode(c, s.Screen, s.Pos)).ToArray();
+                var encoding = EncodingOf(s.Encoding, s.Pos);
+                return s.Text.Select(c => (byte)Encode(c, encoding, s.Pos)).ToArray();
             case CallExpr { Name: "include_bytes" } call:
                 return IncludeBytes(call);
             default:
@@ -188,20 +189,25 @@ public sealed class Checker
         }
     }
 
-    private int Encode(char c, bool screen, SourcePos pos)
+    /// <summary>The encoding named by a literal's prefix, or the target's default.</summary>
+    private CharEncoding EncodingOf(string? prefix, SourcePos pos)
+    {
+        if (prefix is null) return _platform.DefaultEncoding;
+        if (CharEncoding.ByName.TryGetValue(prefix, out var encoding)) return encoding;
+        throw new CompileError(pos, $"Unknown encoding '{prefix}'. Known encodings: {string.Join(", ", CharEncoding.ByName.Keys)}");
+    }
+
+    private static int Encode(char c, CharEncoding encoding, SourcePos pos)
     {
         if (Lexer.IsRawByte(c)) return c - Lexer.RawByteBase;
-        int? code = screen ? _platform.ScreenEncoding(c) : _platform.TextEncoding(c);
-        if (code is int value) return value;
+        if (encoding.Encode(c) is int value) return value;
         string shown = c == '\n' ? "\\n" : c.ToString();
-        throw new CompileError(pos, screen
-            ? $"'{shown}' has no screen code. Write the byte as \\$NN"
-            : $"'{shown}' has no {_platform.TextEncodingName} code. Write the byte as \\$NN");
+        throw new CompileError(pos, $"'{shown}' has no code in the {encoding.Name} encoding. Write the byte as \\$NN");
     }
 
     private byte[] IncludeBytes(CallExpr call)
     {
-        if (call.Args is not [StringExpr { Screen: false } file])
+        if (call.Args is not [StringExpr { Encoding: null } file])
             throw new CompileError(call.Pos, "include_bytes() takes a file name in quotes");
         var path = Path.Combine(_baseDirectory, file.Text);
         byte[] bytes;
@@ -582,7 +588,7 @@ public sealed class Checker
 
             case CharExpr ch:
                 e.Type = TernType.IntLiteral;
-                e.ConstValue = Encode(ch.Value, screen: false, ch.Pos);
+                e.ConstValue = Encode(ch.Value, EncodingOf(ch.Encoding, ch.Pos), ch.Pos);
                 break;
 
             case StringExpr:
@@ -811,15 +817,24 @@ public sealed class Checker
         }
     }
 
-    /// <summary><c>p + n</c>, <c>n + p</c> and <c>p - n</c>: a pointer moved by a number of bytes.</summary>
+    /// <summary>
+    /// <c>p + n</c>, <c>n + p</c> and <c>p - n</c>: a pointer moved by a number of bytes.
+    /// <c>p - q</c>: the distance between two pointers in bytes, a <c>u16</c>.
+    /// </summary>
     private static void CheckPointerArithmetic(BinaryExpr b)
     {
         bool leftPtr = b.Left.Type.IsPointer;
         if (b.Op is not (TokenKind.Plus or TokenKind.Minus))
             throw new CompileError(b.Pos, $"'{OpText(b.Op)}' does not work on pointers. Convert to u16 first: (p as u16)");
         if (leftPtr && b.Right.Type.IsPointer)
-            throw new CompileError(b.Pos,
-                $"Two pointers cannot be {(b.Op == TokenKind.Plus ? "added" : "subtracted")}. Convert them to u16 first: (p as u16)");
+        {
+            if (b.Op == TokenKind.Plus)
+                throw new CompileError(b.Pos, "Two pointers cannot be added. Convert them to u16 first: (p as u16)");
+            if (!b.Left.Type.SameAs(b.Right.Type))
+                throw new CompileError(b.Pos, $"Cannot subtract {b.Right.Type} from {b.Left.Type}; convert one side with 'as'");
+            b.Type = TernType.U16;
+            return;
+        }
         if (!leftPtr && b.Op == TokenKind.Minus)
             throw new CompileError(b.Pos, "A pointer cannot be subtracted from a number");
         CheckPointerOffset(leftPtr ? b.Right : b.Left);

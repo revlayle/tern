@@ -15,12 +15,8 @@ public sealed class Platform
     public required (int First, int Last) ZeroPage { get; init; }
     /// <summary>Last RAM address usable for variables after the program.</summary>
     public required int RamEnd { get; init; }
-    /// <summary>Encoding of char and string literals, e.g. PETSCII. Null means the character has no code.</summary>
-    public required Func<char, int?> TextEncoding { get; init; }
-    /// <summary>Encoding of <c>screen"..."</c> strings: the codes stored in screen memory.</summary>
-    public required Func<char, int?> ScreenEncoding { get; init; }
-    /// <summary>Name of <see cref="TextEncoding"/> for error messages.</summary>
-    public required string TextEncodingName { get; init; }
+    /// <summary>Encoding of char and string literals without a prefix.</summary>
+    public required CharEncoding DefaultEncoding { get; init; }
 
     public int CodeStart => LoadAddress + Header.Length;
 
@@ -44,8 +40,6 @@ public sealed class Platform
         ],
         ZeroPage = (0x02, 0x8F),
         RamEnd = 0x9FFF,
-        TextEncoding = Petscii.FromChar,
-        ScreenEncoding = Petscii.ScreenCode,
-        TextEncodingName = "PETSCII",
+        DefaultEncoding = CharEncoding.Petscii,
     };
 }

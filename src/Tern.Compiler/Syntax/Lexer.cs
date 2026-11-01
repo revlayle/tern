@@ -14,10 +14,10 @@ public sealed class CompileError(SourcePos pos, string message) : Exception($"{p
 public enum TokenKind
 {
     Identifier, Number, Newline, Eof,
-    /// <summary>Text holds the character, after escapes.</summary>
+    /// <summary>Text holds the character, after escapes. <see cref="Token.Encoding"/> holds a prefix such as <c>screen</c>.</summary>
     Char,
-    /// <summary>Text holds the characters, after escapes. <see cref="ScreenString"/> is <c>screen"..."</c>.</summary>
-    String, ScreenString,
+    /// <summary>Text holds the characters, after escapes. <see cref="Token.Encoding"/> holds a prefix such as <c>screen</c>.</summary>
+    String,
 
     // Keywords
     Const, Var, Data, Fn, Return, If, Else, While, For, In, Step, Using, Break, Continue,
@@ -32,7 +32,8 @@ public enum TokenKind
     PlusEq, MinusEq, AmpEq, PipeEq, CaretEq, ShlEq, ShrEq,
 }
 
-public readonly record struct Token(TokenKind Kind, string Text, long Value, SourcePos Pos)
+/// <param name="Encoding">The encoding prefix of a char or string literal (<c>screen"..."</c>), or null.</param>
+public readonly record struct Token(TokenKind Kind, string Text, long Value, SourcePos Pos, string? Encoding = null)
 {
     public override string ToString() => Kind == TokenKind.Identifier || Kind == TokenKind.Number ? Text : Kind.ToString();
 }
@@ -80,7 +81,7 @@ public static class Lexer
 
     /// <summary>Tokens after which a line break ends the statement.</summary>
     private static bool EndsStatement(TokenKind kind) => kind is
-        TokenKind.Identifier or TokenKind.Number or TokenKind.Char or TokenKind.String or TokenKind.ScreenString or TokenKind.RParen or TokenKind.RBracket or
+        TokenKind.Identifier or TokenKind.Number or TokenKind.Char or TokenKind.String or TokenKind.RParen or TokenKind.RBracket or
         TokenKind.RBrace or TokenKind.True or TokenKind.False or TokenKind.Return or
         TokenKind.Break or TokenKind.Continue or TokenKind.Zp;
 
@@ -91,7 +92,18 @@ public static class Lexer
 
         SourcePos Pos(int at) => new(line, at - lineStart + 1);
 
-        void Add(TokenKind kind, string text, long value, int start) => tokens.Add(new Token(kind, text, value, Pos(start)));
+        void Add(TokenKind kind, string text, long value, int start, string? encoding = null) =>
+            tokens.Add(new Token(kind, text, value, Pos(start), encoding));
+
+        // A char or string literal whose quote is at i. Its encoding prefix, if any, started at start.
+        void AddQuoted(int start, string? encoding)
+        {
+            char quote = source[i];
+            string text = ReadQuoted(source, ref i, Pos);
+            if (quote == '\'' && text.Length != 1)
+                throw new CompileError(Pos(start), "A character literal holds exactly one character; use \"...\" for a string");
+            Add(quote == '"' ? TokenKind.String : TokenKind.Char, text, 0, start, encoding);
+        }
 
         while (i < source.Length)
         {
@@ -129,11 +141,7 @@ public static class Lexer
 
             if (c == '"' || c == '\'')
             {
-                int start = i;
-                string text = ReadQuoted(source, ref i, Pos);
-                if (c == '\'' && text.Length != 1)
-                    throw new CompileError(Pos(start), "A character literal holds exactly one character; use \"...\" for a string");
-                Add(c == '"' ? TokenKind.String : TokenKind.Char, text, 0, start);
+                AddQuoted(i, null);
                 continue;
             }
 
@@ -142,14 +150,13 @@ public static class Lexer
                 int start = i;
                 while (i < source.Length && (char.IsLetterOrDigit(source[i]) || source[i] == '_')) i++;
                 string word = source[start..i];
-                if (word == "screen" && Peek(source, i) == '"')
+                // A name right before a quote is an encoding prefix: screen"HELLO". The checker
+                // reports unknown encodings.
+                if (Peek(source, i) is '"' or '\'')
                 {
-                    Add(TokenKind.ScreenString, ReadQuoted(source, ref i, Pos), 0, start);
+                    AddQuoted(start, word);
                     continue;
                 }
-                if (word == "screen" && Peek(source, i) == '\'')
-                    throw new CompileError(Pos(start),
-                        "screen'A' is not supported yet. Use screen\"A\" or write the screen code as a number");
                 Add(Keywords.TryGetValue(word, out var kw) ? kw : TokenKind.Identifier, word, 0, start);
                 continue;
             }

@@ -25,7 +25,8 @@ public class ErrorTests
     // Pointers
     [InlineData("var p: ptr\nfn main() { }", "'ptr' needs the type it points to")]
     [InlineData("var p: ptr u8\nvar q: ptr u8\nvar r: ptr u8\nfn main() { r = p + q }", "Two pointers cannot be added")]
-    [InlineData("var p: ptr u8\nvar q: ptr u8\nvar w: u16\nfn main() { w = p - q }", "Two pointers cannot be subtracted")]
+    [InlineData("var p: ptr u8\nvar q: ptr u16\nvar w: u16\nfn main() { w = p - q }", "Cannot subtract ptr u16 from ptr u8")]
+    [InlineData("var p: ptr u8\nvar q: ptr u8\nfn main() { q = p - q }", "Expected ptr u8, found u16")]
     [InlineData("var p: ptr u8\nfn main() { p = p & 7 }", "'&' does not work on pointers")]
     [InlineData("var p: ptr u8\nfn main() { p <<= 1 }", "only '+=' and '-=' do")]
     [InlineData("var p: ptr u8\nvar s: i8\nfn main() { p = p + s }", "moves by a u8 or u16, not i8")]
