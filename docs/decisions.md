@@ -75,3 +75,11 @@ Settled decisions and the reasons for them. Do not reopen one without new inform
 - A `for ... using X` loop cannot contain a function call (the call would change X).
 - Register parameters are stored into the frame on entry. The optimizer (M7) should keep them in registers when possible.
 - Signed loop variables are not supported yet.
+
+## 2026-11-01: standard library and imports
+
+- **The standard library is ordinary Tern and `asm fn` source** in the compiler's `lib/` folder, not language features. Reason: lower the entry barrier with ready-made routines, keep the language small, and let users read and change the routines.
+- **Modules: `math`, `mem`, `text`, `c64`** (KERNAL calls first; VIC-II/SID/CIA register structs once structs exist).
+- **Included with `import name`, used with qualified names** (`text.put`). Reasons: no name clashes as the library grows; platform modules only load on their platform; the same mechanism splits user programs into files. `.` keeps one meaning, "member of". Replaces "v0 is a single file with an always-available library".
+- **Strings and memory blocks are passed as pointer plus length.** Shortest loops, matches `len()` on literals, strings may contain any byte. No zero-terminated variants in the library.
+- **The library arrives early (M4, right after assembly blocks)**, since KERNAL calls need `asm fn`, and programs cannot multiply at runtime without `math`.

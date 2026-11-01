@@ -31,7 +31,18 @@ Spec: 9.
 
 Done when: the example prints text in VICE, and asm blocks mixing with compiled code are tested in the emulator.
 
-## M4: Structs
+## M4: Imports and the first standard library
+
+Spec: 2.2, 10.1.
+
+- `import name`, qualified names (`text.put`), module lookup in the compiler's `lib/` folder then next to the source file, each module loaded once, platform modules only on their platform
+- Multi-file programs through the same mechanism
+- `lib/math`, `lib/mem`, `lib/text`, and the KERNAL part of `lib/c64` (needs `asm fn` from M3)
+- Library functions tested exhaustively (8-bit) or on edge values (16-bit), with cycle counts recorded
+
+Done when: an example imports `text` and `c64`, prints a message and a number with the KERNAL and writes text to screen memory, verified in VICE; an unused import adds no bytes to the program.
+
+## M5: Structs
 
 Spec: 3.3.
 
@@ -40,9 +51,11 @@ Spec: 3.3.
 - Arrays of structs as one array per field; `linear` arrays of whole records
 - Errors: struct assignment, comparison, struct parameters, `p[i]` on struct pointers, variable index into array fields of struct arrays
 
+- `lib/c64` register structs for the VIC-II, SID and CIA chips
+
 Done when: a VIC-II register struct at `$D000` works in VICE, and a list of enemies updates through both indexing and pointers.
 
-## M5: match, interrupts and function modifiers
+## M6: match, interrupts and function modifiers
 
 Spec: 5 (`match`), 6.2, 6.3, 8.1 (interrupt roots).
 
@@ -52,14 +65,6 @@ Spec: 5 (`match`), 6.2, 6.3, 8.1 (interrupt roots).
 - An example raster interrupt on the C64
 
 Done when: the raster example runs in VICE and `match` code shapes are checked in tests.
-
-## M6: Standard library
-
-Spec: 10.1.
-
-- `mul8`, `mul8_fast`, `mul16`, `div8`, `div16` (with `remainder8`/`remainder16`), `shl8`/`shr8`/`shl16`/`shr16`, `copy`, `fill`
-- Written in Tern or `asm fn`; only used functions are linked
-- Each function tested exhaustively (8-bit) or on edge values (16-bit), with cycle counts recorded
 
 ## M7: Optimizer, first pass
 
@@ -78,7 +83,6 @@ Spec: 10.1.
 
 - Signed loop variables
 - `const fn` with compile-time `int` and `real`, array-building syntax (spec 4.1)
-- Modules and imports
 - `using` on local variables (spec 14.6)
 - 65C02 CPU variant and Commander X16 platform
 - NES: iNES output, `@ bank(n)`, calls between banks (spec 14.1)

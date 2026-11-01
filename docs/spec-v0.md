@@ -32,7 +32,7 @@ Tern is a programming language for 6502-family processors. It aims to be easy to
 - Comments: `// to end of line` and `/* block */`.
 - Statements end at a newline or `;`.
 - Identifiers: `[A-Za-z_][A-Za-z0-9_]*`. Case-sensitive.
-- In v0 a program is a single source file. The standard library (10.1) is always available without an import, and only the functions a program uses are linked. A module system comes later.
+- A program can be split into modules, one per file. `import name` loads `name.tern` (2.2).
 
 ### 2.1 Literals
 
@@ -44,6 +44,26 @@ Tern is a programming language for 6502-family processors. It aims to be easy to
 | Char | `'A'` | Converted with the platform's character encoding (C64: PETSCII) |
 | String | `"HELLO"` | Byte array in the platform encoding. No terminator unless written: `"HI\0"` |
 | Bool | `true`, `false` | |
+
+### 2.2 Modules and imports
+
+```
+import mem
+import text
+import c64                 // platform module: only when compiling for the C64
+
+fn main() {
+    text.put(c64.SCREEN, addr(title), len(title))
+    mem.fill(c64.COLOR, 1, 1000)
+}
+```
+
+- `import name` goes at the top of a file, before other declarations. It loads `name.tern` from the compiler's `lib/` folder (the standard library, 10.1), or else from the folder of the importing file. The same mechanism splits your own program into files.
+- Everything declared at the top level of a module is used with the module name: `text.put`, `c64.SCREEN`. `.` still means "member of", as for fields and `.lo`/`.hi`. Names in different modules never clash.
+- A module is loaded once, however many files import it. Modules may import each other.
+- Only the program's main file has `fn main()`.
+- Only functions reachable from `main` are compiled, so an imported module costs nothing for the parts that are not called.
+- Platform modules (such as `c64`) can only be imported when compiling for that platform.
 
 ## 3. Types
 
@@ -63,7 +83,7 @@ Tern is a programming language for 6502-family processors. It aims to be easy to
 - Narrowing must be explicit: `x = big as u8`. `as` on integers keeps the low bits.
 - Mixing signed and unsigned operands is a compile error. Cast one side.
 - **`*`, `/` and `%` are allowed only in constant expressions**, which are evaluated at compile time: `const SIZE = 40 * 25` is fine, `y * 40` with a variable `y` is a compile error. The 6502 has no multiply or divide instruction, so runtime multiplication and division use library functions (section 10.1), which makes their cost visible in the source.
-- `<<` and `>>` require a constant shift count and compile to `asl`/`lsr`/`rol`/`ror` sequences. Shifting by a variable amount uses the library functions `shl8`/`shr8` (section 10.1).
+- `<<` and `>>` require a constant shift count and compile to `asl`/`lsr`/`rol`/`ror` sequences. Shifting by a variable amount uses the library functions `math.shl8`/`math.shr8` (section 10.1).
 - `>>` on unsigned types is a logical shift (`lsr`). On signed types it keeps the sign (`cmp #$80` / `ror` per shift), which rounds down, not toward zero: `-1 >> 1` is `-1`, and `-3 >> 1` is `-2`.
 - **A number literal takes its type from where it is used.** A literal that does not fit that type is a compile error: `300` or `-1` assigned to a `u8`.
 
@@ -357,26 +377,61 @@ asm fn fill(value: u8 using A, count: u8 using X) {
 | `sizeof(T)` | Size of a type in bytes |
 | `len(a)` | Number of elements in an array (compile-time) |
 
-### 10.1 Standard library: cycle-heavy operations
+### 10.1 Standard library
 
-These are ordinary functions, written in Tern or as `asm fn`, and linked only if used. The compiler gives them no special treatment, so they can be read, replaced, or added to (e.g. a faster multiply for one program).
+The standard library is ordinary Tern and `asm fn` source in the compiler's `lib/` folder, imported like any module (2.2). It is not part of the language: the compiler gives it no special treatment, so it can be read, copied and changed (e.g. a faster multiply for one program). Its purpose is to make common tasks easy from the first program, and to be an example of good Tern code.
+
+**Strings and memory blocks are passed as a pointer plus a length**, matching `len()` on literals. The library has no zero-terminated variants.
+
+The tables below are the first version. Exact signatures may be refined when the library is written (roadmap M4).
+
+**`math`**: cycle-heavy arithmetic (the operators only work on constants, 3.1)
 
 | Function | Signature | Method |
 |---|---|---|
 | `mul8` | `(a: u8 using A, b: u8 using X) -> u16` | Shift-and-add loop: small, slower |
 | `mul8_fast` | `(a: u8 using A, b: u8 using X) -> u16` | Quarter-square tables: much faster, adds about 2 KB of tables |
 | `mul16` | `(a: u16, b: u16) -> u16` | Shift-and-add loop, low 16 bits of the product |
-| `div8` | `(a: u8 using A, b: u8 using X) -> u8` | Shift-and-subtract loop. Also sets `remainder8` |
-| `div16` | `(a: u16, b: u16) -> u16` | Shift-and-subtract loop. Also sets `remainder16` |
+| `div8` | `(a: u8 using A, b: u8 using X) -> u8` | Shift-and-subtract loop. Also sets `math.remainder8` |
+| `div16` | `(a: u16, b: u16) -> u16` | Shift-and-subtract loop. Also sets `math.remainder16` |
 | `shl8`, `shr8` | `(x: u8 using A, n: u8 using X) -> u8` | Loop of `n` shifts |
 | `shl16`, `shr16` | `(x: u16 using AX, n: u8 using Y) -> u16` | Loop of `n` shifts |
-| `copy` | `(dst: ptr u8, src: ptr u8, count: u16)` | Block copy |
-| `fill` | `(dst: ptr u8, value: u8, count: u16)` | Block fill |
 
-- Division computes the quotient and the remainder together, as in assembly. The remainder is left in a library variable (`remainder8`, `remainder16`) for the caller to read straight after the call.
+- Division computes the quotient and the remainder together, as in assembly. The remainder is left in a library variable (`math.remainder8`, `math.remainder16`) for the caller to read straight after the call.
 - Division by zero does not trap. The result is unspecified.
 - Multiplying or dividing by a constant needs no library call: write the shifts and adds (`(w << 5) + (w << 3)` for `w × 40`), or `& 7` for "mod 8".
-- Signed versions (`muls8`, `divs8`, …) follow the same pattern.
+- Signed versions (`muls8`, `divs8`, ...) follow the same pattern.
+
+**`mem`**: memory blocks
+
+| Function | Signature | Purpose |
+|---|---|---|
+| `copy` | `(dst: ptr u8, src: ptr u8, count: u16)` | Copy forward. Overlapping blocks work only when `dst` is below `src` |
+| `fill` | `(dst: ptr u8, value: u8, count: u16)` | Fill a block |
+
+**`text`**: text in memory, platform independent
+
+| Function | Signature | Purpose |
+|---|---|---|
+| `put` | `(dst: ptr u8, src: ptr u8, n: u8)` | Copy text to memory, e.g. a `screen"..."` string to screen memory |
+| `dec8`, `dec16` | `(dst: ptr u8, value: u8 or u16) -> u8` | Write a number in decimal, without leading zeros; returns the number of digits. Uses repeated subtraction, no division |
+| `hex8`, `hex16` | `(dst: ptr u8, value: u8 or u16)` | Write a number as 2 or 4 hex digits |
+| `equal` | `(a: ptr u8, b: ptr u8, n: u8) -> bool` | Compare two texts |
+| `find` | `(s: ptr u8, n: u8, ch: u8) -> u8` | Index of the first `ch`, or `$FF` if not found |
+
+Digits are written as screen codes, which are the same as PETSCII for `0`-`9`. Hex letters are screen codes too.
+
+**`c64`**: Commodore 64 only
+
+| Name | Purpose |
+|---|---|
+| `SCREEN`, `COLOR` | Screen memory (`$0400`) and color memory (`$D800`) |
+| `BLACK` ... `LIGHT_GREY` | The 16 color numbers |
+| `chrout(ch: u8 using A)` | Print one PETSCII character through the KERNAL (`$FFD2`) |
+| `print(src: ptr u8, n: u8)` | Print a PETSCII string through the KERNAL |
+| `getin() -> u8 using A` | Read a key from the keyboard buffer; 0 if none (KERNAL `$FFE4`) |
+| `cursor(row: u8 using X, col: u8 using Y)` | Move the text cursor (KERNAL `PLOT`) |
+| VIC-II, SID and CIA register structs | Planned with structs (roadmap M5), e.g. `c64.vic.border` |
 
 ## 11. Code shapes
 
@@ -403,7 +458,7 @@ These are the intended translations. The optimizer may produce something shorter
 | `-x` (u8) | `lda x` / `eor #$FF` / `clc` / `adc #1` |
 | `x << 2` | `asl` / `asl` (on A or directly on memory) |
 | `(w << 5) + (w << 3)` (w: u16, i.e. w × 40) | shifts and one 16-bit add, inline |
-| `mul8(a, b)` | `lda a` / `ldx b` / `jsr mul8` (result in A/X) |
+| `math.mul8(a, b)` | `lda a` / `ldx b` / `jsr math.mul8` (result in A/X) |
 | `i & 7` (i.e. i mod 8) | `lda i` / `and #7` |
 
 ## 12. Targets
