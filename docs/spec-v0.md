@@ -169,6 +169,7 @@ data msg = "GAME OVER"
   - `bank(n)`: in ROM bank `n` (for functions and `data`; see 12.2).
 - **Fixed-address variables (`@ addr`) are volatile.** Every read and write in the source happens exactly once and in order. The optimizer never removes, merges or reorders them. All other variables may be cached in registers.
 - Global variables without an initializer are zeroed at startup. A variable can be marked `noinit` to skip that.
+- Local variables (other than arrays) must have an initial value. Their memory is shared with other functions (8.1), so it holds no useful value on entry.
 
 ### 4.1 Compile-time evaluation
 
@@ -455,8 +456,8 @@ source → lexer → parser → AST
 | Project | Contents |
 |---|---|
 | `Tern.Cpu` | Instruction set table, encoder, 6502 emulator with cycle counting |
-| `Tern.Compiler` | Front end, allocation, code generation, optimizer, layout (planned) |
-| `Tern.Cli` | Command-line tool (planned) |
+| `Tern.Compiler` | Front end, allocation, code generation, layout (optimizer planned) |
+| `Tern.Cli` | Command-line tool: `tern file.tern` writes `.prg`, `.lst` and a VICE label file |
 | `Tern.Cpu.Tests` | Encoder and emulator tests, including Klaus Dormann's functional test |
 
 ### 13.2 Testing approach

@@ -1,0 +1,17 @@
+// Cycles the C64 border colour and fills the top screen row.
+var border: u8 @ $D020
+var screen: [u8; 40] @ $0400
+
+fn fill_row(ch: u8 using A) {
+    for i in 0..40 using X {
+        screen[i] = ch
+    }
+}
+
+fn main() {
+    fill_row(1)              // "A" in screen codes
+    while true {
+        for _ in 0..200 { }  // short delay
+        border += 1
+    }
+}

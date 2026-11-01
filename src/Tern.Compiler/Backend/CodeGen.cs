@@ -1,0 +1,1448 @@
+using Tern.Compiler.Semantics;
+using Tern.Compiler.Syntax;
+using Tern.Cpu;
+using static Tern.Cpu.AddressingMode;
+using static Tern.Cpu.Mnemonic;
+
+namespace Tern.Compiler.Backend;
+
+/// <summary>
+/// Generates instructions for each function. Variables are referred to symbolically; their
+/// addresses are assigned afterwards by the <see cref="Allocator"/>.
+/// </summary>
+public sealed class CodeGen
+{
+    /// <summary>A two-byte location in memory: <see cref="Var"/> + <see cref="Offset"/>.</summary>
+    private readonly record struct Loc(VariableSymbol Var, int Offset = 0)
+    {
+        public VarOperand Lo => new(Var, Offset);
+        public VarOperand Hi => new(Var, Offset + 1);
+    }
+
+    private readonly CheckedProgram _program;
+    private readonly string[] _sourceLines;
+    private readonly Dictionary<FunctionSymbol, Label> _functionLabels = new();
+    private List<AsmItem> _out = [];
+    private FunctionSymbol _fn = null!;
+    private int _labelCounter;
+    private int _lastSourceLine;
+    private int _loopDepth;
+    private readonly List<(Label Break, Label Continue)> _loops = [];
+    private readonly HashSet<Register> _reserved = [];
+    private readonly List<VariableSymbol> _freeTemps = [];
+    private int _tempCounter;
+
+    public CodeGen(CheckedProgram program, string source)
+    {
+        _program = program;
+        _sourceLines = source.Split('\n');
+        foreach (var f in program.Functions)
+            _functionLabels[f] = new Label(f.Name);
+    }
+
+    public Label LabelOf(FunctionSymbol f) => _functionLabels[f];
+
+    public List<AsmItem> GenerateFunctions()
+    {
+        var all = new List<AsmItem>();
+        foreach (var f in _program.Functions)
+        {
+            GenFunction(f);
+            all.AddRange(_out);
+        }
+        return all;
+    }
+
+    // ---------- Emission helpers ----------
+
+    private void Emit(Mnemonic m, AddressingMode mode = Implied, Operand? op = null) => _out.Add(new Instr(m, mode, op));
+
+    /// <summary>An instruction with a value operand: immediate or memory.</summary>
+    private void Op(Mnemonic m, Operand op) => Emit(m, op is Imm or ImmLabelByte ? Immediate : Absolute, op);
+
+    private void Place(Label l) => _out.Add(new LabelDef(l));
+    private void Jmp(Label l) => Emit(Mnemonic.Jmp, Absolute, new LabelOperand(l));
+    private void Branch(Mnemonic m, Label l) => Emit(m, Relative, new LabelOperand(l));
+    private Label NewLabel(string hint) => new($"{_fn.Name}.{hint}{_labelCounter++}");
+    private static VarOperand Var(VariableSymbol v, int offset = 0) => new(v, offset);
+    private static Imm Byte(long v) => new((int)(v & 0xFF));
+
+    private VariableSymbol AcquireTemp(int size)
+    {
+        int i = _freeTemps.FindIndex(t => t.Type.Size == size);
+        VariableSymbol temp;
+        if (i >= 0)
+        {
+            temp = _freeTemps[i];
+            _freeTemps.RemoveAt(i);
+        }
+        else
+        {
+            temp = new VariableSymbol($"_t{_tempCounter++}", default, size == 1 ? TernType.U8 : TernType.U16, VariableKind.Temp, _fn);
+            _fn.FrameVariables.Add(temp);
+        }
+        temp.Weight += 2 * (long)Math.Pow(8, Math.Min(_loopDepth, 5));
+        return temp;
+    }
+
+    private void Release(VariableSymbol temp) => _freeTemps.Add(temp);
+
+    /// <summary>True if the last instruction left N and Z matching the value in A.</summary>
+    private bool FlagsMatchA()
+    {
+        if (_out.Count == 0 || _out[^1] is not Instr i) return false;
+        return i.Mnemonic is Lda or And or Ora or Eor or Adc or Sbc or Txa or Tya or Pla
+            || (i.Mnemonic is Asl or Lsr or Rol or Ror && i.Mode == Accumulator);
+    }
+
+    private bool EndsWithJump() => _out.Count > 0 && _out[^1] is Instr { Mnemonic: Rts or Mnemonic.Jmp };
+
+    private void Source(Node node)
+    {
+        int line = node.Pos.Line;
+        if (line == _lastSourceLine || line <= 0 || line > _sourceLines.Length) return;
+        _lastSourceLine = line;
+        _out.Add(new SourceLine(line, _sourceLines[line - 1].TrimEnd('\r')));
+    }
+
+    private Register FreeIndexRegister(SourcePos pos) =>
+        !_reserved.Contains(Register.X) ? Register.X
+        : !_reserved.Contains(Register.Y) ? Register.Y
+        : throw new CompileError(pos, "No free index register: X and Y are both used by loop variables");
+
+    // ---------- Functions ----------
+
+    private void GenFunction(FunctionSymbol f)
+    {
+        _fn = f;
+        _out = [];
+        _freeTemps.Clear();
+        _lastSourceLine = 0;
+
+        Source(f.Declaration!);
+        Place(_functionLabels[f]);
+
+        // Register parameters are stored into the frame, so the body can use A, X and Y freely.
+        foreach (var p in f.Parameters)
+        {
+            switch (p.PassedIn)
+            {
+                case Register.A: Op(Sta, Var(p)); break;
+                case Register.X: Op(Stx, Var(p)); break;
+                case Register.Y: Op(Sty, Var(p)); break;
+                case Register.AX: Op(Sta, Var(p)); Op(Stx, Var(p, 1)); break;
+                case Register.AY: Op(Sta, Var(p)); Op(Sty, Var(p, 1)); break;
+                case Register.XY: Op(Stx, Var(p)); Op(Sty, Var(p, 1)); break;
+            }
+        }
+
+        GenBlock(f.Declaration!.Body);
+        if (!EndsWithJump()) Emit(Rts);
+    }
+
+    // ---------- Statements ----------
+
+    private void GenBlock(BlockStmt block)
+    {
+        foreach (var s in block.Statements) GenStmt(s);
+    }
+
+    private void GenStmt(Stmt stmt)
+    {
+        Source(stmt);
+        switch (stmt)
+        {
+            case VarDecl v:
+                if (v.Init is not null) Assign(new NameExpr(v.Pos, v.Name) { Symbol = v.Symbol, Type = v.Symbol!.Type }, v.Init);
+                break;
+            case AssignStmt a: GenAssign(a); break;
+            case ExprStmt e: GenCall((CallExpr)e.Expr); break;
+            case BlockStmt b: GenBlock(b); break;
+            case IfStmt i: GenIf(i); break;
+            case WhileStmt w: GenWhile(w); break;
+            case ForStmt f: GenFor(f); break;
+            case BreakStmt: Jmp(_loops[^1].Break); break;
+            case ContinueStmt: Jmp(_loops[^1].Continue); break;
+            case ReturnStmt r: GenReturn(r); break;
+            default: throw new InvalidOperationException(stmt.GetType().Name);
+        }
+    }
+
+    private void GenIf(IfStmt i)
+    {
+        var end = NewLabel("endif");
+        if (i.Else is null)
+        {
+            GenCond(i.Condition, end, false);
+            GenBlock(i.Then);
+        }
+        else
+        {
+            var otherwise = NewLabel("else");
+            GenCond(i.Condition, otherwise, false);
+            GenBlock(i.Then);
+            if (!EndsWithJump()) Jmp(end);
+            Place(otherwise);
+            GenStmt(i.Else);
+        }
+        Place(end);
+    }
+
+    private void GenWhile(WhileStmt w)
+    {
+        if (w.Condition.ConstValue == 0) return;
+        var top = NewLabel("while");
+        var test = NewLabel("test");
+        var end = NewLabel("wend");
+        _loopDepth++;
+        if (w.Condition.ConstValue == 1)
+        {
+            Place(top);
+            _loops.Add((end, top));
+            GenBlock(w.Body);
+            _loops.RemoveAt(_loops.Count - 1);
+            Jmp(top);
+        }
+        else
+        {
+            // Test at the bottom: one branch per pass instead of a branch and a jump.
+            Jmp(test);
+            Place(top);
+            _loops.Add((end, test));
+            GenBlock(w.Body);
+            _loops.RemoveAt(_loops.Count - 1);
+            Place(test);
+            GenCond(w.Condition, top, true);
+        }
+        _loopDepth--;
+        Place(end);
+    }
+
+    private void GenReturn(ReturnStmt r)
+    {
+        if (r.Value is null)
+        {
+            Emit(Rts);
+            return;
+        }
+        var value = r.Value;
+        switch (_fn.ReturnRegister)
+        {
+            case Register.A: GenA(value); break;
+            case Register.X: GenA(value); Emit(Tax); break;
+            case Register.Y: GenA(value); Emit(Tay); break;
+            case Register.AX or Register.AY or Register.XY:
+            {
+                var pair = Simple2(value);
+                VariableSymbol? temp = null;
+                if (pair is null)
+                {
+                    temp = AcquireTemp(2);
+                    Gen16(value, new Loc(temp));
+                    pair = (Var(temp), Var(temp, 1));
+                }
+                var (lo, hi) = pair.Value;
+                switch (_fn.ReturnRegister)
+                {
+                    case Register.AX: Op(Ldx, hi); Op(Lda, lo); break;
+                    case Register.AY: Op(Ldy, hi); Op(Lda, lo); break;
+                    default: Op(Ldx, lo); Op(Ldy, hi); break;
+                }
+                if (temp is not null) Release(temp);
+                break;
+            }
+            case Register.Carry or Register.Zero or Register.Negative:
+            {
+                Mnemonic setTrue, setFalse;
+                Operand? trueOp = null, falseOp = null;
+                if (_fn.ReturnRegister == Register.Carry) { setTrue = Sec; setFalse = Clc; }
+                else if (_fn.ReturnRegister == Register.Zero) { setTrue = Lda; trueOp = Byte(0); setFalse = Lda; falseOp = Byte(1); }
+                else { setTrue = Lda; trueOp = Byte(0x80); setFalse = Lda; falseOp = Byte(0); }
+
+                void Set(Mnemonic m, Operand? op) { if (op is null) Emit(m); else Op(m, op); }
+
+                if (value.ConstValue is long c)
+                {
+                    if (c != 0) Set(setTrue, trueOp); else Set(setFalse, falseOp);
+                }
+                else
+                {
+                    var isTrue = NewLabel("rtrue");
+                    GenCond(value, isTrue, true);
+                    Set(setFalse, falseOp);
+                    Emit(Rts);
+                    Place(isTrue);
+                    Set(setTrue, trueOp);
+                }
+                break;
+            }
+        }
+        Emit(Rts);
+    }
+
+    // ---------- Assignment ----------
+
+    private void GenAssign(AssignStmt a)
+    {
+        if (a.Op == TokenKind.Eq)
+        {
+            Assign(a.Target, a.Value);
+            return;
+        }
+
+        var target = a.Target;
+        bool byOne = a.Value.ConstValue == 1 && a.Op is TokenKind.PlusEq or TokenKind.MinusEq;
+
+        // x += 1 / x -= 1 on memory: inc / dec.
+        if (byOne && target is NameExpr { Symbol: { InMemory: true } v })
+        {
+            if (v.Type.Size == 1)
+            {
+                Op(a.Op == TokenKind.PlusEq ? Inc : Dec, Var(v));
+            }
+            else if (a.Op == TokenKind.PlusEq)
+            {
+                var done = NewLabel("inc");
+                Op(Inc, Var(v));
+                Branch(Bne, done);
+                Op(Inc, Var(v, 1));
+                Place(done);
+            }
+            else
+            {
+                var done = NewLabel("dec");
+                Op(Lda, Var(v));
+                Branch(Bne, done);
+                Op(Dec, Var(v, 1));
+                Place(done);
+                Op(Dec, Var(v));
+            }
+            return;
+        }
+
+        // Shifts of a memory byte: shift in place.
+        if (a.Op is TokenKind.ShlEq or TokenKind.ShrEq && target is NameExpr { Symbol: { InMemory: true } sv }
+            && sv.Type.Size == 1 && !(a.Op == TokenKind.ShrEq && sv.Type.IsSigned))
+        {
+            for (int i = 0; i < a.Value.ConstValue; i++) Op(a.Op == TokenKind.ShlEq ? Asl : Lsr, Var(sv));
+            return;
+        }
+
+        if (ContainsCall(target))
+            throw new CompileError(a.Pos, "Compound assignment to an element whose index calls a function is not supported");
+
+        var op = a.Op switch
+        {
+            TokenKind.PlusEq => TokenKind.Plus, TokenKind.MinusEq => TokenKind.Minus, TokenKind.AmpEq => TokenKind.Amp,
+            TokenKind.PipeEq => TokenKind.Pipe, TokenKind.CaretEq => TokenKind.Caret, TokenKind.ShlEq => TokenKind.Shl,
+            _ => TokenKind.Shr,
+        };
+        Assign(target, new BinaryExpr(a.Pos, op, target, a.Value) { Type = target.Type });
+    }
+
+    private void Assign(Expr target, Expr value)
+    {
+        if (target.Type.Size == 1)
+        {
+            GenA(value);
+            StoreA(target);
+            return;
+        }
+
+        switch (target)
+        {
+            case NameExpr { Symbol: { } v }:
+                Gen16(value, new Loc(v));
+                break;
+            case IndexExpr ix:
+            {
+                var arr = ArrayOf(ix);
+                if (ix.Index.ConstValue is long ci)
+                {
+                    var temp = AcquireTemp(2);
+                    Gen16(value, new Loc(temp));
+                    Op(Lda, Var(temp)); Op(Sta, Var(arr, (int)ci));
+                    Op(Lda, Var(temp, 1)); Op(Sta, Var(arr, arr.Type.Length + (int)ci));
+                    Release(temp);
+                }
+                else
+                {
+                    var temp = AcquireTemp(2);
+                    Gen16(value, new Loc(temp));
+                    var reg = LoadIndex(ix.Index);
+                    var mode = reg == Register.X ? AbsoluteX : AbsoluteY;
+                    Op(Lda, Var(temp)); Emit(Sta, mode, Var(arr));
+                    Op(Lda, Var(temp, 1)); Emit(Sta, mode, Var(arr, arr.Type.Length));
+                    Release(temp);
+                }
+                break;
+            }
+            default:
+                throw new InvalidOperationException();
+        }
+    }
+
+    private void StoreA(Expr target)
+    {
+        switch (target)
+        {
+            case NameExpr { Symbol: { } v }:
+                Op(Sta, Var(v));
+                break;
+            case IndexExpr ix:
+                StoreArrayByte(ix, 0);
+                break;
+            case MemberExpr m:
+                int b = m.Member == "hi" ? 1 : 0;
+                if (m.Target is NameExpr { Symbol: { } mv }) Op(Sta, Var(mv, b));
+                else StoreArrayByte((IndexExpr)m.Target, b);
+                break;
+            default:
+                throw new InvalidOperationException();
+        }
+    }
+
+    private void StoreArrayByte(IndexExpr ix, int byteIndex)
+    {
+        var arr = ArrayOf(ix);
+        int table = byteIndex == 0 ? 0 : arr.Type.Length;
+        if (ix.Index.ConstValue is long ci)
+        {
+            Op(Sta, Var(arr, table + (int)ci));
+            return;
+        }
+        VariableSymbol? saved = null;
+        if (!IndexIsCheap(ix.Index))
+        {
+            saved = AcquireTemp(1);
+            Op(Sta, Var(saved));
+        }
+        var reg = LoadIndex(ix.Index);
+        if (saved is not null)
+        {
+            Op(Lda, Var(saved));
+            Release(saved);
+        }
+        Emit(Sta, reg == Register.X ? AbsoluteX : AbsoluteY, Var(arr, table));
+    }
+
+    // ---------- 8-bit expressions: result in A ----------
+
+    private static VariableSymbol ArrayOf(IndexExpr ix) => (VariableSymbol)((NameExpr)ix.Target).Symbol!;
+
+    /// <summary>An operand for a one-byte value that needs no code to reach, or null.</summary>
+    private static Operand? Simple1(Expr e)
+    {
+        if (e.ConstValue is long c) return Byte(c);
+        switch (e)
+        {
+            case NameExpr { Symbol: { InMemory: true } v } when v.Type.Size == 1:
+                return Var(v);
+            case IndexExpr ix when ix.Index.ConstValue is long i && ix.Type.Size == 1:
+                return Var(ArrayOf(ix), (int)i);
+            case MemberExpr m:
+                int b = m.Member == "hi" ? 1 : 0;
+                if (m.Target is NameExpr { Symbol: { InMemory: true } mv }) return Var(mv, b);
+                if (m.Target is IndexExpr { Index.ConstValue: long mi } mix)
+                    return Var(ArrayOf(mix), (b == 1 ? ArrayOf(mix).Type.Length : 0) + (int)mi);
+                return null;
+            case CastExpr cast when cast.Type.Size == 1:
+                if (cast.Operand.Type.Size == 1) return Simple1(cast.Operand);
+                return Simple2(cast.Operand)?.Lo;
+            default:
+                return null;
+        }
+    }
+
+    /// <summary>Loading this index into X or Y does not change A.</summary>
+    private static bool IndexIsCheap(Expr index) =>
+        index is NameExpr { Symbol.Register: not null } || Simple1(index) is not null;
+
+    /// <summary>Puts an array index into X or Y and returns which.</summary>
+    private Register LoadIndex(Expr index)
+    {
+        if (index is NameExpr { Symbol.Register: { } r }) return r;
+        var reg = FreeIndexRegister(index.Pos);
+        if (Simple1(index) is { } op)
+            Op(reg == Register.X ? Ldx : Ldy, op);
+        else
+        {
+            GenA(index);
+            Emit(reg == Register.X ? Tax : Tay);
+        }
+        return reg;
+    }
+
+    private void LoadArrayByte(IndexExpr ix, int byteIndex)
+    {
+        var arr = ArrayOf(ix);
+        int table = byteIndex == 0 ? 0 : arr.Type.Length;
+        if (ix.Index.ConstValue is long ci)
+        {
+            Op(Lda, Var(arr, table + (int)ci));
+            return;
+        }
+        var reg = LoadIndex(ix.Index);
+        Emit(Lda, reg == Register.X ? AbsoluteX : AbsoluteY, Var(arr, table));
+    }
+
+    private void GenA(Expr e)
+    {
+        if (e.ConstValue is long c)
+        {
+            Op(Lda, Byte(c));
+            return;
+        }
+        switch (e)
+        {
+            case NameExpr { Symbol: { } v }:
+                if (v.Register == Register.X) Emit(Txa);
+                else if (v.Register == Register.Y) Emit(Tya);
+                else Op(Lda, Var(v));
+                return;
+
+            case IndexExpr ix:
+                LoadArrayByte(ix, 0);
+                return;
+
+            case MemberExpr m:
+            {
+                int b = m.Member == "hi" ? 1 : 0;
+                if (m.Target is NameExpr { Symbol: { InMemory: true } mv }) { Op(Lda, Var(mv, b)); return; }
+                if (m.Target is IndexExpr mix) { LoadArrayByte(mix, b); return; }
+                var temp = AcquireTemp(2);
+                Gen16(m.Target, new Loc(temp));
+                Op(Lda, Var(temp, b));
+                Release(temp);
+                return;
+            }
+
+            case UnaryExpr u:
+                GenA(u.Operand);
+                switch (u.Op)
+                {
+                    case TokenKind.Minus: Op(Eor, Byte(0xFF)); Emit(Clc); Op(Adc, Byte(1)); break;
+                    case TokenKind.Tilde: Op(Eor, Byte(0xFF)); break;
+                    case TokenKind.Bang: Op(Eor, Byte(1)); break;
+                }
+                return;
+
+            case BinaryExpr b when b.Type.Kind == TypeKind.Bool:
+                GenBoolValue(b);
+                return;
+
+            case BinaryExpr b:
+                GenBinaryA(b);
+                return;
+
+            case CallExpr call:
+                GenCall(call);
+                switch (call.Function!.ReturnRegister)
+                {
+                    case Register.X: Emit(Txa); break;
+                    case Register.Y: Emit(Tya); break;
+                    case Register.Carry: Op(Lda, Byte(0)); Emit(Rol, Accumulator); break;
+                    case Register.Zero or Register.Negative:
+                    {
+                        var isFalse = NewLabel("f");
+                        var done = NewLabel("b");
+                        Branch(call.Function.ReturnRegister == Register.Zero ? Bne : Bpl, isFalse);
+                        Op(Lda, Byte(1));
+                        Branch(Bne, done);
+                        Place(isFalse);
+                        Op(Lda, Byte(0));
+                        Place(done);
+                        break;
+                    }
+                }
+                return;
+
+            case CastExpr cast:
+                if (cast.Operand.Type.Size == 1)
+                    GenA(cast.Operand);
+                else if (Simple2(cast.Operand) is { } pair)
+                    Op(Lda, pair.Lo);
+                else
+                {
+                    var temp = AcquireTemp(2);
+                    Gen16(cast.Operand, new Loc(temp));
+                    Op(Lda, Var(temp));
+                    Release(temp);
+                }
+                return;
+        }
+        throw new InvalidOperationException(e.GetType().Name);
+    }
+
+    private static Mnemonic ArithMnemonic(TokenKind op) => op switch
+    {
+        TokenKind.Plus => Adc, TokenKind.Minus => Sbc, TokenKind.Amp => And, TokenKind.Pipe => Ora, _ => Eor,
+    };
+
+    private void CarryFor(TokenKind op)
+    {
+        if (op == TokenKind.Plus) Emit(Clc);
+        else if (op == TokenKind.Minus) Emit(Sec);
+    }
+
+    private void GenBinaryA(BinaryExpr b)
+    {
+        if (b.Op is TokenKind.Shl or TokenKind.Shr)
+        {
+            GenA(b.Left);
+            for (int i = 0; i < b.Right.ConstValue; i++)
+            {
+                if (b.Op == TokenKind.Shl) Emit(Asl, Accumulator);
+                else if (b.Type.IsSigned) { Op(Cmp, Byte(0x80)); Emit(Ror, Accumulator); }
+                else Emit(Lsr, Accumulator);
+            }
+            return;
+        }
+
+        var m = ArithMnemonic(b.Op);
+        var right = Simple1(b.Right);
+        bool commutative = b.Op != TokenKind.Minus;
+        if (right is null && commutative && Simple1(b.Left) is { } left)
+        {
+            GenA(b.Right);
+            CarryFor(b.Op);
+            Op(m, left);
+            return;
+        }
+        if (right is not null)
+        {
+            GenA(b.Left);
+            CarryFor(b.Op);
+            Op(m, right);
+            return;
+        }
+        var temp = AcquireTemp(1);
+        GenA(b.Right);
+        Op(Sta, Var(temp));
+        GenA(b.Left);
+        CarryFor(b.Op);
+        Op(m, Var(temp));
+        Release(temp);
+    }
+
+    /// <summary>Puts a bool expression's value (0 or 1) in A.</summary>
+    private void GenBoolValue(Expr e)
+    {
+        var isFalse = NewLabel("f");
+        var done = NewLabel("b");
+        GenCond(e, isFalse, false);
+        Op(Lda, Byte(1));
+        Branch(Bne, done);
+        Place(isFalse);
+        Op(Lda, Byte(0));
+        Place(done);
+    }
+
+    // ---------- 16-bit expressions: result stored to memory ----------
+
+    /// <summary>Operands for the two bytes of a value that needs no code to reach, or null.</summary>
+    private static (Operand Lo, Operand Hi)? Simple2(Expr e)
+    {
+        if (e.ConstValue is long c) return (Byte(c), Byte(c >> 8));
+        if (e.Type.Size == 1)
+            return !e.Type.IsSigned && Simple1(e) is { } op ? (op, Byte(0)) : null;
+        switch (e)
+        {
+            case NameExpr { Symbol: { InMemory: true } v }:
+                return (Var(v), Var(v, 1));
+            case IndexExpr ix when ix.Index.ConstValue is long i:
+                var arr = ArrayOf(ix);
+                return (Var(arr, (int)i), Var(arr, arr.Type.Length + (int)i));
+            case CastExpr cast when cast.Operand.Type.Size == 2:
+                return Simple2(cast.Operand);
+            default:
+                return null;
+        }
+    }
+
+    private void Gen16(Expr e, Loc d)
+    {
+        if (e.ConstValue is long c)
+        {
+            Op(Lda, Byte(c)); Op(Sta, d.Lo);
+            Op(Lda, Byte(c >> 8)); Op(Sta, d.Hi);
+            return;
+        }
+
+        // Widening a one-byte value.
+        if (e.Type.Size == 1)
+        {
+            GenA(e);
+            Op(Sta, d.Lo);
+            if (e.Type.IsSigned)
+            {
+                var positive = NewLabel("sx");
+                Op(Ora, Byte(0x7F));
+                Branch(Bmi, positive);
+                Op(Lda, Byte(0));
+                Place(positive);
+            }
+            else
+                Op(Lda, Byte(0));
+            Op(Sta, d.Hi);
+            return;
+        }
+
+        switch (e)
+        {
+            case NameExpr { Symbol: { } v }:
+                if (v == d.Var && d.Offset == 0) return;
+                Op(Lda, Var(v)); Op(Sta, d.Lo);
+                Op(Lda, Var(v, 1)); Op(Sta, d.Hi);
+                return;
+
+            case IndexExpr ix:
+            {
+                var arr = ArrayOf(ix);
+                if (ix.Index.ConstValue is long ci)
+                {
+                    Op(Lda, Var(arr, (int)ci)); Op(Sta, d.Lo);
+                    Op(Lda, Var(arr, arr.Type.Length + (int)ci)); Op(Sta, d.Hi);
+                    return;
+                }
+                var reg = LoadIndex(ix.Index);
+                var mode = reg == Register.X ? AbsoluteX : AbsoluteY;
+                Emit(Lda, mode, Var(arr)); Op(Sta, d.Lo);
+                Emit(Lda, mode, Var(arr, arr.Type.Length)); Op(Sta, d.Hi);
+                return;
+            }
+
+            case CallExpr call:
+                GenCall(call);
+                switch (call.Function!.ReturnRegister)
+                {
+                    case Register.AX: Op(Sta, d.Lo); Op(Stx, d.Hi); break;
+                    case Register.AY: Op(Sta, d.Lo); Op(Sty, d.Hi); break;
+                    default: Op(Stx, d.Lo); Op(Sty, d.Hi); break;
+                }
+                return;
+
+            case CastExpr cast:
+                Gen16(cast.Operand, d);
+                return;
+
+            case UnaryExpr u:
+                Gen16(u.Operand, d);
+                if (u.Op == TokenKind.Minus)
+                {
+                    Op(Lda, Byte(0)); Emit(Sec); Op(Sbc, d.Lo); Op(Sta, d.Lo);
+                    Op(Lda, Byte(0)); Op(Sbc, d.Hi); Op(Sta, d.Hi);
+                }
+                else if (u.Op == TokenKind.Tilde)
+                {
+                    Op(Lda, d.Lo); Op(Eor, Byte(0xFF)); Op(Sta, d.Lo);
+                    Op(Lda, d.Hi); Op(Eor, Byte(0xFF)); Op(Sta, d.Hi);
+                }
+                return;
+
+            case BinaryExpr b when b.Op is TokenKind.Shl or TokenKind.Shr:
+                Gen16(b.Left, d);
+                for (int i = 0; i < b.Right.ConstValue; i++)
+                {
+                    if (b.Op == TokenKind.Shl) { Op(Asl, d.Lo); Op(Rol, d.Hi); }
+                    else if (b.Type.IsSigned) { Op(Lda, d.Hi); Op(Cmp, Byte(0x80)); Op(Ror, d.Hi); Op(Ror, d.Lo); }
+                    else { Op(Lsr, d.Hi); Op(Ror, d.Lo); }
+                }
+                return;
+
+            case BinaryExpr b:
+            {
+                var right = Simple2(b.Right);
+                if (right is not null && ReadsVar(b.Right, d.Var)) right = null;
+                VariableSymbol? temp = null;
+                if (right is null)
+                {
+                    temp = AcquireTemp(2);
+                    Gen16(b.Right, new Loc(temp));
+                    right = (Var(temp), Var(temp, 1));
+                }
+                Gen16(b.Left, d);
+
+                var m = ArithMnemonic(b.Op);
+                CarryFor(b.Op);
+                Op(Lda, d.Lo); Op(m, right.Value.Lo); Op(Sta, d.Lo);
+                if (b.Op == TokenKind.Plus && right.Value.Hi is Imm { Value: 0 })
+                {
+                    var done = NewLabel("c");
+                    Branch(Bcc, done);
+                    Op(Inc, d.Hi);
+                    Place(done);
+                }
+                else
+                {
+                    Op(Lda, d.Hi); Op(m, right.Value.Hi); Op(Sta, d.Hi);
+                }
+                if (temp is not null) Release(temp);
+                return;
+            }
+        }
+        throw new InvalidOperationException(e.GetType().Name);
+    }
+
+    // ---------- Conditions ----------
+
+    /// <summary>Jumps to <paramref name="target"/> if the condition equals <paramref name="jumpIf"/>; otherwise falls through.</summary>
+    private void GenCond(Expr e, Label target, bool jumpIf)
+    {
+        if (e.ConstValue is long c)
+        {
+            if ((c != 0) == jumpIf) Jmp(target);
+            return;
+        }
+        switch (e)
+        {
+            case UnaryExpr { Op: TokenKind.Bang } u:
+                GenCond(u.Operand, target, !jumpIf);
+                return;
+
+            case BinaryExpr { Op: TokenKind.AmpAmp } b:
+                if (!jumpIf)
+                {
+                    GenCond(b.Left, target, false);
+                    GenCond(b.Right, target, false);
+                }
+                else
+                {
+                    var skip = NewLabel("and");
+                    GenCond(b.Left, skip, false);
+                    GenCond(b.Right, target, true);
+                    Place(skip);
+                }
+                return;
+
+            case BinaryExpr { Op: TokenKind.PipePipe } b:
+                if (jumpIf)
+                {
+                    GenCond(b.Left, target, true);
+                    GenCond(b.Right, target, true);
+                }
+                else
+                {
+                    var skip = NewLabel("or");
+                    GenCond(b.Left, skip, true);
+                    GenCond(b.Right, target, false);
+                    Place(skip);
+                }
+                return;
+
+            case BinaryExpr { Op: TokenKind.EqEq or TokenKind.NotEq or TokenKind.Less or TokenKind.LessEq
+                or TokenKind.Greater or TokenKind.GreaterEq } b:
+                GenCompare(b, target, jumpIf);
+                return;
+
+            case CallExpr call:
+                GenCall(call);
+                switch (call.Function!.ReturnRegister)
+                {
+                    case Register.Carry: Branch(jumpIf ? Bcs : Bcc, target); return;
+                    case Register.Zero: Branch(jumpIf ? Beq : Bne, target); return;
+                    case Register.Negative: Branch(jumpIf ? Bmi : Bpl, target); return;
+                    case Register.X: Op(Cpx, Byte(0)); break;
+                    case Register.Y: Op(Cpy, Byte(0)); break;
+                    default: Op(Cmp, Byte(0)); break;
+                }
+                Branch(jumpIf ? Bne : Beq, target);
+                return;
+
+            default:
+                GenA(e);
+                if (!FlagsMatchA()) Op(Cmp, Byte(0));
+                Branch(jumpIf ? Bne : Beq, target);
+                return;
+        }
+    }
+
+    private static TokenKind Negate(TokenKind op) => op switch
+    {
+        TokenKind.EqEq => TokenKind.NotEq, TokenKind.NotEq => TokenKind.EqEq,
+        TokenKind.Less => TokenKind.GreaterEq, TokenKind.GreaterEq => TokenKind.Less,
+        TokenKind.Greater => TokenKind.LessEq, _ => TokenKind.Greater,
+    };
+
+    private void GenCompare(BinaryExpr b, Label target, bool jumpIf)
+    {
+        var op = jumpIf ? b.Op : Negate(b.Op);
+        Expr left = b.Left, right = b.Right;
+        var type = left.Type.Size >= right.Type.Size ? left.Type : right.Type;
+        bool signed = type.IsSigned;
+
+        // Only ==, !=, < and >= remain: a > b is b < a, and a <= b is b >= a.
+        if (op is TokenKind.Greater or TokenKind.LessEq)
+        {
+            (left, right) = (right, left);
+            op = op == TokenKind.Greater ? TokenKind.Less : TokenKind.GreaterEq;
+        }
+
+        if (type.Size == 1) Compare8(left, right, op, signed, target);
+        else Compare16(left, right, op, signed, target);
+    }
+
+    private void Compare8(Expr left, Expr right, TokenKind op, bool signed, Label target)
+    {
+        VariableSymbol? temp = null;
+        var rop = Simple1(right);
+        if (rop is null && op is TokenKind.EqEq or TokenKind.NotEq && Simple1(left) is { } lop)
+        {
+            (left, right) = (right, left);
+            rop = lop;
+        }
+        if (rop is null)
+        {
+            temp = AcquireTemp(1);
+            GenA(right);
+            Op(Sta, Var(temp));
+            rop = Var(temp);
+        }
+
+        if (!signed && left is NameExpr { Symbol.Register: { } reg })
+        {
+            Op(reg == Register.X ? Cpx : Cpy, rop);
+        }
+        else
+        {
+            GenA(left);
+            if (signed && op is TokenKind.Less or TokenKind.GreaterEq)
+            {
+                // N = (left < right) after correcting for overflow.
+                var noOverflow = NewLabel("v");
+                Emit(Sec);
+                Op(Sbc, rop);
+                Branch(Bvc, noOverflow);
+                Op(Eor, Byte(0x80));
+                Place(noOverflow);
+                Branch(op == TokenKind.Less ? Bmi : Bpl, target);
+                if (temp is not null) Release(temp);
+                return;
+            }
+            if (!(rop is Imm { Value: 0 } && op is TokenKind.EqEq or TokenKind.NotEq && FlagsMatchA()))
+                Op(Cmp, rop);
+        }
+        Branch(op switch
+        {
+            TokenKind.EqEq => Beq, TokenKind.NotEq => Bne, TokenKind.Less => Bcc, _ => Bcs,
+        }, target);
+        if (temp is not null) Release(temp);
+    }
+
+    private void Compare16(Expr left, Expr right, TokenKind op, bool signed, Label target)
+    {
+        var temps = new List<VariableSymbol>();
+        (Operand Lo, Operand Hi) Operands(Expr e)
+        {
+            if (Simple2(e) is { } p) return p;
+            var t = AcquireTemp(2);
+            temps.Add(t);
+            Gen16(e, new Loc(t));
+            return (Var(t), Var(t, 1));
+        }
+        var l = Operands(left);
+        var r = Operands(right);
+
+        switch (op)
+        {
+            case TokenKind.EqEq:
+            {
+                var skip = NewLabel("ne");
+                Op(Lda, l.Lo); Op(Cmp, r.Lo); Branch(Bne, skip);
+                Op(Lda, l.Hi); Op(Cmp, r.Hi); Branch(Beq, target);
+                Place(skip);
+                break;
+            }
+            case TokenKind.NotEq:
+                Op(Lda, l.Lo); Op(Cmp, r.Lo); Branch(Bne, target);
+                Op(Lda, l.Hi); Op(Cmp, r.Hi); Branch(Bne, target);
+                break;
+            default: // < or >=
+                Op(Lda, l.Lo); Op(Cmp, r.Lo);
+                Op(Lda, l.Hi); Op(Sbc, r.Hi);
+                if (signed)
+                {
+                    var noOverflow = NewLabel("v");
+                    Branch(Bvc, noOverflow);
+                    Op(Eor, Byte(0x80));
+                    Place(noOverflow);
+                    Branch(op == TokenKind.Less ? Bmi : Bpl, target);
+                }
+                else
+                    Branch(op == TokenKind.Less ? Bcc : Bcs, target);
+                break;
+        }
+        foreach (var t in temps) Release(t);
+    }
+
+    // ---------- Calls ----------
+
+    private void GenCall(CallExpr call)
+    {
+        var fn = call.Function!;
+        var temps = new List<VariableSymbol>();
+        var early = new Dictionary<int, VariableSymbol>();
+
+        // Calls inside arguments run before any parameter is written: the callee of the inner
+        // call may share memory with this call's parameters.
+        for (int i = 0; i < call.Args.Count; i++)
+        {
+            if (!ContainsCall(call.Args[i])) continue;
+            var t = AcquireTemp(fn.Parameters[i].Type.Size);
+            temps.Add(t);
+            if (t.Type.Size == 1) { GenA(call.Args[i]); Op(Sta, Var(t)); }
+            else Gen16(call.Args[i], new Loc(t));
+            early[i] = t;
+        }
+
+        // Memory parameters: store straight into the callee's frame.
+        for (int i = 0; i < call.Args.Count; i++)
+        {
+            var p = fn.Parameters[i];
+            if (p.PassedIn is not null) continue;
+            if (early.TryGetValue(i, out var t))
+            {
+                Op(Lda, Var(t)); Op(Sta, Var(p));
+                if (p.Type.Size == 2) { Op(Lda, Var(t, 1)); Op(Sta, Var(p, 1)); }
+            }
+            else if (p.Type.Size == 1)
+            {
+                GenA(call.Args[i]);
+                Op(Sta, Var(p));
+            }
+            else
+                Gen16(call.Args[i], new Loc(p));
+        }
+
+        // Register parameters: compute what needs code first, then load the registers last.
+        var loads = new List<(Register Reg, Operand Op)>();
+        for (int i = 0; i < call.Args.Count; i++)
+        {
+            var p = fn.Parameters[i];
+            if (p.PassedIn is not { } reg) continue;
+            var arg = call.Args[i];
+            if (p.Type.Size == 1)
+            {
+                Operand op;
+                if (early.TryGetValue(i, out var t)) op = Var(t);
+                else if (Simple1(arg) is { } s) op = s;
+                else
+                {
+                    var nt = AcquireTemp(1);
+                    temps.Add(nt);
+                    GenA(arg);
+                    Op(Sta, Var(nt));
+                    op = Var(nt);
+                }
+                loads.Add((reg, op));
+            }
+            else
+            {
+                (Operand Lo, Operand Hi) pair;
+                if (early.TryGetValue(i, out var t)) pair = (Var(t), Var(t, 1));
+                else if (Simple2(arg) is { } s) pair = s;
+                else
+                {
+                    var nt = AcquireTemp(2);
+                    temps.Add(nt);
+                    Gen16(arg, new Loc(nt));
+                    pair = (Var(nt), Var(nt, 1));
+                }
+                var (loReg, hiReg) = reg switch
+                {
+                    Register.AX => (Register.A, Register.X),
+                    Register.AY => (Register.A, Register.Y),
+                    _ => (Register.X, Register.Y),
+                };
+                loads.Add((loReg, pair.Lo));
+                loads.Add((hiReg, pair.Hi));
+            }
+        }
+        foreach (var (reg, op) in loads.OrderBy(l => l.Reg == Register.A ? 1 : 0))
+            Op(reg switch { Register.A => Lda, Register.X => Ldx, _ => Ldy }, op);
+
+        Emit(Jsr, Absolute, new LabelOperand(_functionLabels[fn]));
+        foreach (var t in temps) Release(t);
+    }
+
+    // ---------- for loops ----------
+
+    private void GenFor(ForStmt f)
+    {
+        var c = f.Symbol!;
+        var type = c.Type;
+        if (type.IsSigned)
+            throw new CompileError(f.Pos, "Signed loop variables are not supported yet");
+
+        int step = f.StepValue;
+        bool up = step > 0;
+        int d = Math.Abs(step);
+        long? from = f.From.ConstValue, to = f.To.ConstValue;
+        bool inclusive = f.Inclusive;
+
+        var end = NewLabel("fend");
+        var cont = NewLabel("fnext");
+        var top = NewLabel("for");
+
+        if (from is not null && to is not null)
+        {
+            long span = up ? to.Value - from.Value : from.Value - to.Value;
+            long count = inclusive ? (span < 0 ? 0 : span / d + 1) : (span <= 0 ? 0 : (span + d - 1) / d);
+            if (count == 0)
+            {
+                _out.Add(new Comment("empty loop: no code"));
+                return;
+            }
+            if (count == 1)
+            {
+                if (f.Variable is not null) SetCounter(c, f.From);
+                _loops.Add((end, end));
+                GenBlock(f.Body);
+                _loops.RemoveAt(_loops.Count - 1);
+                Place(end);
+                return;
+            }
+            if (f.Variable is null && d == 1 && count <= (type.Size == 1 ? 256 : 65535))
+            {
+                GenRepeat(f, c, count, top, cont, end);
+                return;
+            }
+        }
+
+        // The end bound is evaluated once, before the loop.
+        VariableSymbol? boundTemp = null;
+        (Operand Lo, Operand Hi) bound;
+        if (to is not null)
+            bound = (Byte(to.Value), Byte(to.Value >> 8));
+        else if (f.To is NameExpr { Symbol: { InMemory: true, Kind: VariableKind.Local or VariableKind.Parameter } bv }
+                 && bv.Type.Size == type.Size && bv != c && !AssignsVar(f.Body, bv))
+            bound = (Var(bv), Var(bv, 1));
+        else
+        {
+            boundTemp = AcquireTemp(type.Size);
+            if (type.Size == 1) { GenA(f.To); Op(Sta, Var(boundTemp)); }
+            else Gen16(f.To, new Loc(boundTemp));
+            bound = (Var(boundTemp), Var(boundTemp, 1));
+        }
+
+        SetCounter(c, f.From);
+        if (c.Register is { } held) _reserved.Add(held);
+
+        // Skip the loop if the range is empty, unless the bounds prove it is not.
+        long max = type.MaxValue;
+        bool provablyNonEmpty = (from is not null && to is not null)
+            || (inclusive && up && to == max) || (inclusive && !up && to == 0);
+        if (!provablyNonEmpty)
+        {
+            var emptyIf = (up, inclusive) switch
+            {
+                (true, false) => TokenKind.GreaterEq,
+                (true, true) => TokenKind.Greater,
+                (false, false) => TokenKind.LessEq,
+                _ => TokenKind.Less,
+            };
+            CounterBranch(c, emptyIf, bound, end);
+        }
+
+        Place(top);
+        _loops.Add((end, cont));
+        _loopDepth++;
+        GenBlock(f.Body);
+        _loopDepth--;
+        _loops.RemoveAt(_loops.Count - 1);
+        Place(cont);
+
+        if (type.Size == 1 && d == 1)
+            StepByOne(c, up, inclusive, from, to, bound, top, end);
+        else
+            StepGeneral(c, up, d, inclusive, bound, top, end);
+
+        Place(end);
+        if (c.Register is { } r) _reserved.Remove(r);
+        if (boundTemp is not null) Release(boundTemp);
+    }
+
+    /// <summary><c>for _ in a..b</c> with constant bounds: count down to zero.</summary>
+    private void GenRepeat(ForStmt f, VariableSymbol c, long count, Label top, Label cont, Label end)
+    {
+        _out.Add(new Comment($"repeat {count} times"));
+        if (c.Type.Size == 1)
+        {
+            LoadCounterConst(c, count & 0xFF);
+            if (c.Register is { } held) _reserved.Add(held);
+            Place(top);
+            _loops.Add((end, cont));
+            _loopDepth++;
+            GenBlock(f.Body);
+            _loopDepth--;
+            _loops.RemoveAt(_loops.Count - 1);
+            Place(cont);
+            DecCounter(c);
+            Branch(Bne, top);
+            if (c.Register is { } r) _reserved.Remove(r);
+        }
+        else
+        {
+            Op(Lda, Byte(count)); Op(Sta, Var(c));
+            Op(Lda, Byte(count >> 8)); Op(Sta, Var(c, 1));
+            Place(top);
+            _loops.Add((end, cont));
+            _loopDepth++;
+            GenBlock(f.Body);
+            _loopDepth--;
+            _loops.RemoveAt(_loops.Count - 1);
+            Place(cont);
+            var noBorrow = NewLabel("nb");
+            Op(Lda, Var(c)); Branch(Bne, noBorrow); Op(Dec, Var(c, 1));
+            Place(noBorrow);
+            Op(Dec, Var(c));
+            Op(Lda, Var(c)); Op(Ora, Var(c, 1));
+            Branch(Bne, top);
+        }
+        Place(end);
+    }
+
+    private void SetCounter(VariableSymbol c, Expr from)
+    {
+        if (c.Type.Size == 2)
+        {
+            Gen16(from, new Loc(c));
+            return;
+        }
+        if (c.Register is { } reg)
+        {
+            if (Simple1(from) is { } op)
+                Op(reg == Register.X ? Ldx : Ldy, op);
+            else
+            {
+                GenA(from);
+                Emit(reg == Register.X ? Tax : Tay);
+            }
+            return;
+        }
+        GenA(from);
+        Op(Sta, Var(c));
+    }
+
+    private void LoadCounterConst(VariableSymbol c, long value)
+    {
+        if (c.Register == Register.X) Op(Ldx, Byte(value));
+        else if (c.Register == Register.Y) Op(Ldy, Byte(value));
+        else { Op(Lda, Byte(value)); Op(Sta, Var(c)); }
+    }
+
+    private void IncCounter(VariableSymbol c)
+    {
+        if (c.Register == Register.X) Emit(Inx);
+        else if (c.Register == Register.Y) Emit(Iny);
+        else Op(Inc, Var(c));
+    }
+
+    private void DecCounter(VariableSymbol c)
+    {
+        if (c.Register == Register.X) Emit(Dex);
+        else if (c.Register == Register.Y) Emit(Dey);
+        else Op(Dec, Var(c));
+    }
+
+    /// <summary>Compares an 8-bit counter with an operand: C = counter &gt;= op, Z = counter == op.</summary>
+    private void CompareCounter(VariableSymbol c, Operand op)
+    {
+        if (c.Register == Register.X) Op(Cpx, op);
+        else if (c.Register == Register.Y) Op(Cpy, op);
+        else { Op(Lda, Var(c)); Op(Cmp, op); }
+    }
+
+    /// <summary>Branches to <paramref name="target"/> if <c>counter rel bound</c> (unsigned).</summary>
+    private void CounterBranch(VariableSymbol c, TokenKind rel, (Operand Lo, Operand Hi) bound, Label target)
+    {
+        if (c.Type.Size == 1)
+        {
+            CompareCounter(c, bound.Lo);
+            switch (rel)
+            {
+                case TokenKind.EqEq: Branch(Beq, target); break;
+                case TokenKind.NotEq: Branch(Bne, target); break;
+                case TokenKind.Less: Branch(Bcc, target); break;
+                case TokenKind.GreaterEq: Branch(Bcs, target); break;
+                case TokenKind.LessEq: Branch(Bcc, target); Branch(Beq, target); break;
+                case TokenKind.Greater:
+                {
+                    var skip = NewLabel("eq");
+                    Branch(Beq, skip);
+                    Branch(Bcs, target);
+                    Place(skip);
+                    break;
+                }
+            }
+            return;
+        }
+
+        (Operand Lo, Operand Hi) counter = (Var(c), Var(c, 1));
+        var (l, r) = rel is TokenKind.Greater or TokenKind.LessEq ? (bound, counter) : (counter, bound);
+        rel = rel switch { TokenKind.Greater => TokenKind.Less, TokenKind.LessEq => TokenKind.GreaterEq, _ => rel };
+        switch (rel)
+        {
+            case TokenKind.EqEq:
+            {
+                var skip = NewLabel("ne");
+                Op(Lda, l.Lo); Op(Cmp, r.Lo); Branch(Bne, skip);
+                Op(Lda, l.Hi); Op(Cmp, r.Hi); Branch(Beq, target);
+                Place(skip);
+                break;
+            }
+            case TokenKind.NotEq:
+                Op(Lda, l.Lo); Op(Cmp, r.Lo); Branch(Bne, target);
+                Op(Lda, l.Hi); Op(Cmp, r.Hi); Branch(Bne, target);
+                break;
+            default:
+                Op(Lda, l.Lo); Op(Cmp, r.Lo);
+                Op(Lda, l.Hi); Op(Sbc, r.Hi);
+                Branch(rel == TokenKind.Less ? Bcc : Bcs, target);
+                break;
+        }
+    }
+
+    /// <summary>The end of an 8-bit loop with step +1 or -1, using the shortest exit test.</summary>
+    private void StepByOne(VariableSymbol c, bool up, bool inclusive, long? from, long? to,
+        (Operand Lo, Operand Hi) bound, Label top, Label end)
+    {
+        if (up)
+        {
+            if (!inclusive)
+            {
+                IncCounter(c);
+                CompareCounter(c, bound.Lo);
+                Branch(Bne, top);
+            }
+            else if (to == 255)
+            {
+                IncCounter(c);
+                Branch(Bne, top);
+            }
+            else if (to is not null)
+            {
+                IncCounter(c);
+                CompareCounter(c, Byte(to.Value + 1));
+                Branch(Bne, top);
+            }
+            else
+            {
+                // Test before stepping, so a bound of 255 cannot wrap around.
+                CompareCounter(c, bound.Lo);
+                Branch(Beq, end);
+                IncCounter(c);
+                Branch(Bne, top); // never zero here, so always taken
+            }
+            return;
+        }
+
+        if (!inclusive)
+        {
+            DecCounter(c);
+            if (to != 0) CompareCounter(c, bound.Lo);
+            Branch(Bne, top);
+        }
+        else if (to == 0 && from is <= 127)
+        {
+            DecCounter(c);
+            Branch(Bpl, top);
+        }
+        else if (to == 0 && from is not null && from != 255)
+        {
+            DecCounter(c);
+            CompareCounter(c, Byte(0xFF));
+            Branch(Bne, top);
+        }
+        else if (to is > 0)
+        {
+            DecCounter(c);
+            CompareCounter(c, Byte(to.Value - 1));
+            Branch(Bne, top);
+        }
+        else
+        {
+            CompareCounter(c, bound.Lo);
+            Branch(Beq, end);
+            DecCounter(c);
+            Jmp(top);
+        }
+    }
+
+    /// <summary>The end of a loop with a larger step or a 16-bit counter.</summary>
+    private void StepGeneral(VariableSymbol c, bool up, int d, bool inclusive, (Operand Lo, Operand Hi) bound, Label top, Label end)
+    {
+        if (c.Register is { } reg)
+        {
+            Emit(reg == Register.X ? Txa : Tya);
+            if (up) { Emit(Clc); Op(Adc, Byte(d)); } else { Emit(Sec); Op(Sbc, Byte(d)); }
+            Emit(reg == Register.X ? Tax : Tay);
+        }
+        else
+        {
+            Op(Lda, Var(c));
+            if (up) { Emit(Clc); Op(Adc, Byte(d)); } else { Emit(Sec); Op(Sbc, Byte(d)); }
+            Op(Sta, Var(c));
+            if (c.Type.Size == 2)
+            {
+                Op(Lda, Var(c, 1));
+                Op(up ? Adc : Sbc, Byte(0));
+                Op(Sta, Var(c, 1));
+            }
+        }
+        // Leave if the counter went past the end of its type.
+        Branch(up ? Bcs : Bcc, end);
+
+        var continueIf = (up, inclusive) switch
+        {
+            (true, false) => TokenKind.Less,
+            (true, true) => TokenKind.LessEq,
+            (false, false) => TokenKind.Greater,
+            _ => TokenKind.GreaterEq,
+        };
+        CounterBranch(c, continueIf, bound, top);
+    }
+
+    // ---------- Tree queries ----------
+
+    private static bool ContainsCall(Expr e) => e switch
+    {
+        CallExpr call => call.Function is not null,
+        UnaryExpr u => ContainsCall(u.Operand),
+        BinaryExpr b => ContainsCall(b.Left) || ContainsCall(b.Right),
+        IndexExpr ix => ContainsCall(ix.Index),
+        MemberExpr m => ContainsCall(m.Target),
+        CastExpr c => ContainsCall(c.Operand),
+        _ => false,
+    };
+
+    private static bool ReadsVar(Expr e, VariableSymbol v) => e switch
+    {
+        NameExpr n => n.Symbol == v,
+        UnaryExpr u => ReadsVar(u.Operand, v),
+        BinaryExpr b => ReadsVar(b.Left, v) || ReadsVar(b.Right, v),
+        IndexExpr ix => ReadsVar(ix.Target, v) || ReadsVar(ix.Index, v),
+        MemberExpr m => ReadsVar(m.Target, v),
+        CastExpr c => ReadsVar(c.Operand, v),
+        CallExpr call => call.Args.Any(a => ReadsVar(a, v)),
+        _ => false,
+    };
+
+    private static bool AssignsVar(Stmt s, VariableSymbol v) => s switch
+    {
+        AssignStmt a => BaseVar(a.Target) == v,
+        BlockStmt b => b.Statements.Any(x => AssignsVar(x, v)),
+        IfStmt i => AssignsVar(i.Then, v) || (i.Else is not null && AssignsVar(i.Else, v)),
+        WhileStmt w => AssignsVar(w.Body, v),
+        ForStmt f => AssignsVar(f.Body, v),
+        _ => false,
+    };
+
+    private static VariableSymbol? BaseVar(Expr e) => e switch
+    {
+        NameExpr n => n.Symbol,
+        IndexExpr ix => BaseVar(ix.Target),
+        MemberExpr m => BaseVar(m.Target),
+        _ => null,
+    };
+}
