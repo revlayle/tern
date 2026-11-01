@@ -58,7 +58,7 @@ public sealed class CodeGen
     private void Emit(Mnemonic m, AddressingMode mode = Implied, Operand? op = null) => _out.Add(new Instr(m, mode, op));
 
     /// <summary>An instruction with a value operand: immediate or memory.</summary>
-    private void Op(Mnemonic m, Operand op) => Emit(m, op is Imm or ImmLabelByte ? Immediate : Absolute, op);
+    private void Op(Mnemonic m, Operand op) => Emit(m, op is Imm or ImmLabelByte or ImmVarByte ? Immediate : Absolute, op);
 
     private void Place(Label l) => _out.Add(new LabelDef(l));
     private void Jmp(Label l) => Emit(Mnemonic.Jmp, Absolute, new LabelOperand(l));
@@ -67,9 +67,10 @@ public sealed class CodeGen
     private static VarOperand Var(VariableSymbol v, int offset = 0) => new(v, offset);
     private static Imm Byte(long v) => new((int)(v & 0xFF));
 
-    private VariableSymbol AcquireTemp(int size)
+    /// <param name="zeroPage">The temporary must be in zero page, e.g. to hold a pointer for (zp),y.</param>
+    private VariableSymbol AcquireTemp(int size, bool zeroPage = false)
     {
-        int i = _freeTemps.FindIndex(t => t.Type.Size == size);
+        int i = _freeTemps.FindIndex(t => t.Type.Size == size && t.Dereferenced == zeroPage);
         VariableSymbol temp;
         if (i >= 0)
         {
@@ -78,7 +79,10 @@ public sealed class CodeGen
         }
         else
         {
-            temp = new VariableSymbol($"_t{_tempCounter++}", default, size == 1 ? TernType.U8 : TernType.U16, VariableKind.Temp, _fn);
+            temp = new VariableSymbol($"_t{_tempCounter++}", default, size == 1 ? TernType.U8 : TernType.U16, VariableKind.Temp, _fn)
+            {
+                Dereferenced = zeroPage,
+            };
             _fn.FrameVariables.Add(temp);
         }
         temp.Weight += 2 * (long)Math.Pow(8, Math.Min(_loopDepth, 5));
@@ -331,6 +335,30 @@ public sealed class CodeGen
         if (ContainsCall(target))
             throw new CompileError(a.Pos, "Compound assignment to an element whose index calls a function is not supported");
 
+        // p[i] op= v: read, change and write the element with one Y load.
+        if (target is IndexExpr pix && IsPointerIndex(pix) && pix.Type.Size == 1
+            && (a.Op is TokenKind.ShlEq or TokenKind.ShrEq || Simple1(a.Value) is not null))
+        {
+            var (p, temp) = PointerBase(pix.Target);
+            LoadPointerIndex(pix, 0);
+            Emit(Lda, IndirectIndexed, p);
+            if (a.Op is TokenKind.ShlEq or TokenKind.ShrEq)
+                ShiftA(a.Op == TokenKind.ShlEq ? TokenKind.Shl : TokenKind.Shr, a.Value.ConstValue!.Value, pix.Type.IsSigned);
+            else
+            {
+                var binary = a.Op switch
+                {
+                    TokenKind.PlusEq => TokenKind.Plus, TokenKind.MinusEq => TokenKind.Minus, TokenKind.AmpEq => TokenKind.Amp,
+                    TokenKind.PipeEq => TokenKind.Pipe, _ => TokenKind.Caret,
+                };
+                CarryFor(binary);
+                Op(ArithMnemonic(binary), Simple1(a.Value)!);
+            }
+            Emit(Sta, IndirectIndexed, p);
+            if (temp is not null) Release(temp);
+            return;
+        }
+
         var op = a.Op switch
         {
             TokenKind.PlusEq => TokenKind.Plus, TokenKind.MinusEq => TokenKind.Minus, TokenKind.AmpEq => TokenKind.Amp,
@@ -344,6 +372,7 @@ public sealed class CodeGen
     {
         if (target.Type.Size == 1)
         {
+            if (target is IndexExpr pix && IsPointerIndex(pix) && StorePointerByteIndexFirst(pix, value)) return;
             GenA(value);
             StoreA(target);
             return;
@@ -354,27 +383,34 @@ public sealed class CodeGen
             case NameExpr { Symbol: { } v }:
                 Gen16(value, new Loc(v));
                 break;
+            case IndexExpr ix when IsPointerIndex(ix):
+                StorePointerWord(ix, value);
+                break;
             case IndexExpr ix:
             {
                 var arr = ArrayOf(ix);
+                VariableSymbol? temp = null;
+                var pair = Simple2(value);
+                if (pair is null)
+                {
+                    temp = AcquireTemp(2);
+                    Gen16(value, new Loc(temp));
+                    pair = (Var(temp), Var(temp, 1));
+                }
+                var (lo, hi) = pair.Value;
                 if (ix.Index.ConstValue is long ci)
                 {
-                    var temp = AcquireTemp(2);
-                    Gen16(value, new Loc(temp));
-                    Op(Lda, Var(temp)); Op(Sta, Var(arr, (int)ci));
-                    Op(Lda, Var(temp, 1)); Op(Sta, Var(arr, arr.Type.Length + (int)ci));
-                    Release(temp);
+                    Op(Lda, lo); Op(Sta, Var(arr, (int)ci));
+                    Op(Lda, hi); Op(Sta, Var(arr, arr.Type.Length + (int)ci));
                 }
                 else
                 {
-                    var temp = AcquireTemp(2);
-                    Gen16(value, new Loc(temp));
                     var reg = LoadIndex(ix.Index);
                     var mode = reg == Register.X ? AbsoluteX : AbsoluteY;
-                    Op(Lda, Var(temp)); Emit(Sta, mode, Var(arr));
-                    Op(Lda, Var(temp, 1)); Emit(Sta, mode, Var(arr, arr.Type.Length));
-                    Release(temp);
+                    Op(Lda, lo); Emit(Sta, mode, Var(arr));
+                    Op(Lda, hi); Emit(Sta, mode, Var(arr, arr.Type.Length));
                 }
+                if (temp is not null) Release(temp);
                 break;
             }
             default:
@@ -389,12 +425,16 @@ public sealed class CodeGen
             case NameExpr { Symbol: { } v }:
                 Op(Sta, Var(v));
                 break;
+            case IndexExpr ix when IsPointerIndex(ix):
+                PointerByte(ix, 0, Sta);
+                break;
             case IndexExpr ix:
                 StoreArrayByte(ix, 0);
                 break;
             case MemberExpr m:
                 int b = m.Member == "hi" ? 1 : 0;
                 if (m.Target is NameExpr { Symbol: { } mv }) Op(Sta, Var(mv, b));
+                else if (m.Target is IndexExpr pix && IsPointerIndex(pix)) PointerByte(pix, b, Sta);
                 else StoreArrayByte((IndexExpr)m.Target, b);
                 break;
             default:
@@ -438,13 +478,14 @@ public sealed class CodeGen
         {
             case NameExpr { Symbol: { InMemory: true } v } when v.Type.Size == 1:
                 return Var(v);
-            case IndexExpr ix when ix.Index.ConstValue is long i && ix.Type.Size == 1:
+            case IndexExpr ix when !IsPointerIndex(ix) && ix.Index.ConstValue is long i && ix.Type.Size == 1:
                 return Var(ArrayOf(ix), (int)i);
             case MemberExpr m:
                 int b = m.Member == "hi" ? 1 : 0;
                 if (m.Target is NameExpr { Symbol: { InMemory: true } mv }) return Var(mv, b);
-                if (m.Target is IndexExpr { Index.ConstValue: long mi } mix)
+                if (m.Target is IndexExpr { Index.ConstValue: long mi } mix && !IsPointerIndex(mix))
                     return Var(ArrayOf(mix), (b == 1 ? ArrayOf(mix).Type.Length : 0) + (int)mi);
+                if (Simple2(m.Target) is { } pair) return b == 1 ? pair.Hi : pair.Lo;
                 return null;
             case CastExpr cast when cast.Type.Size == 1:
                 if (cast.Operand.Type.Size == 1) return Simple1(cast.Operand);
@@ -501,6 +542,10 @@ public sealed class CodeGen
                 else Op(Lda, Var(v));
                 return;
 
+            case IndexExpr ix when IsPointerIndex(ix):
+                PointerByte(ix, 0, Lda);
+                return;
+
             case IndexExpr ix:
                 LoadArrayByte(ix, 0);
                 return;
@@ -508,7 +553,8 @@ public sealed class CodeGen
             case MemberExpr m:
             {
                 int b = m.Member == "hi" ? 1 : 0;
-                if (m.Target is NameExpr { Symbol: { InMemory: true } mv }) { Op(Lda, Var(mv, b)); return; }
+                if (Simple1(m) is { } mop) { Op(Lda, mop); return; }
+                if (m.Target is IndexExpr pix && IsPointerIndex(pix)) { PointerByte(pix, b, Lda); return; }
                 if (m.Target is IndexExpr mix) { LoadArrayByte(mix, b); return; }
                 var temp = AcquireTemp(2);
                 Gen16(m.Target, new Loc(temp));
@@ -590,12 +636,7 @@ public sealed class CodeGen
         if (b.Op is TokenKind.Shl or TokenKind.Shr)
         {
             GenA(b.Left);
-            for (int i = 0; i < b.Right.ConstValue; i++)
-            {
-                if (b.Op == TokenKind.Shl) Emit(Asl, Accumulator);
-                else if (b.Type.IsSigned) { Op(Cmp, Byte(0x80)); Emit(Ror, Accumulator); }
-                else Emit(Lsr, Accumulator);
-            }
+            ShiftA(b.Op, b.Right.ConstValue!.Value, b.Type.IsSigned);
             return;
         }
 
@@ -625,6 +666,16 @@ public sealed class CodeGen
         Release(temp);
     }
 
+    private void ShiftA(TokenKind op, long count, bool signed)
+    {
+        for (int i = 0; i < count; i++)
+        {
+            if (op == TokenKind.Shl) Emit(Asl, Accumulator);
+            else if (signed) { Op(Cmp, Byte(0x80)); Emit(Ror, Accumulator); }
+            else Emit(Lsr, Accumulator);
+        }
+    }
+
     /// <summary>Puts a bool expression's value (0 or 1) in A.</summary>
     private void GenBoolValue(Expr e)
     {
@@ -650,7 +701,9 @@ public sealed class CodeGen
         {
             case NameExpr { Symbol: { InMemory: true } v }:
                 return (Var(v), Var(v, 1));
-            case IndexExpr ix when ix.Index.ConstValue is long i:
+            case CallExpr { AddressOf: { } av }:
+                return (new ImmVarByte(av, false), new ImmVarByte(av, true));
+            case IndexExpr ix when !IsPointerIndex(ix) && ix.Index.ConstValue is long i:
                 var arr = ArrayOf(ix);
                 return (Var(arr, (int)i), Var(arr, arr.Type.Length + (int)i));
             case CastExpr cast when cast.Operand.Type.Size == 2:
@@ -696,6 +749,10 @@ public sealed class CodeGen
                 Op(Lda, Var(v, 1)); Op(Sta, d.Hi);
                 return;
 
+            case IndexExpr ix when IsPointerIndex(ix):
+                LoadPointerWord(ix, d);
+                return;
+
             case IndexExpr ix:
             {
                 var arr = ArrayOf(ix);
@@ -709,6 +766,14 @@ public sealed class CodeGen
                 var mode = reg == Register.X ? AbsoluteX : AbsoluteY;
                 Emit(Lda, mode, Var(arr)); Op(Sta, d.Lo);
                 Emit(Lda, mode, Var(arr, arr.Type.Length)); Op(Sta, d.Hi);
+                return;
+            }
+
+            case CallExpr { AddressOf: not null }:
+            {
+                var (lo, hi) = Simple2(e)!.Value;
+                Op(Lda, lo); Op(Sta, d.Lo);
+                Op(Lda, hi); Op(Sta, d.Hi);
                 return;
             }
 
@@ -975,6 +1040,160 @@ public sealed class CodeGen
         foreach (var t in temps) Release(t);
     }
 
+    // ---------- Pointers: p[i] with (zp),y ----------
+
+    private static bool IsPointerIndex(IndexExpr ix) => ix.Target.Type.IsPointer;
+
+    /// <summary>The pointer variable itself, if (zp),y can use it directly.</summary>
+    private static VariableSymbol? DirectPointer(Expr target) =>
+        target is NameExpr { Symbol: { InMemory: true } v } && v.FixedAddress is null or <= 0xFE ? v : null;
+
+    /// <summary>
+    /// The zero-page pointer for p[i]: the variable, or a temporary holding a computed pointer
+    /// (or one at a fixed address outside zero page). Release the temporary after use.
+    /// </summary>
+    private (VarOperand Base, VariableSymbol? Temp) PointerBase(Expr target)
+    {
+        if (DirectPointer(target) is { } v) return (Var(v), null);
+        var temp = AcquireTemp(2, zeroPage: true);
+        Gen16(target, new Loc(temp));
+        return (Var(temp), temp);
+    }
+
+    /// <summary>Loading Y for this element does not change A.</summary>
+    private static bool PointerIndexIsCheap(IndexExpr ix) =>
+        ix.Index.ConstValue is not null
+        || (ix.Type.Size == 1 && (ix.Index is NameExpr { Symbol.Register: Register.Y } || Simple1(ix.Index) is not null));
+
+    /// <summary>Puts the offset of byte <paramref name="byteIndex"/> of element p[i] in Y.</summary>
+    private void LoadPointerIndex(IndexExpr ix, int byteIndex)
+    {
+        int size = ix.Type.Size;
+        var index = ix.Index;
+        if (size == 1 && index is NameExpr { Symbol.Register: Register.Y }) return;
+        if (_reserved.Contains(Register.Y))
+            throw new CompileError(ix.Pos, "p[i] needs the Y register, which holds a loop variable. Use 'using X' for that loop");
+        if (index.ConstValue is long c)
+        {
+            Op(Ldy, Byte(c * size + byteIndex));
+            return;
+        }
+        if (size == 1 && Simple1(index) is { } op)
+            Op(Ldy, op);
+        else
+        {
+            GenA(index);
+            if (size == 2) Emit(Asl, Accumulator);
+            Emit(Tay);
+        }
+        if (byteIndex > 0) Emit(Iny);
+    }
+
+    /// <summary>Reads (lda) or writes (sta) one byte of p[i]. For a write, the value is in A.</summary>
+    private void PointerByte(IndexExpr ix, int byteIndex, Mnemonic m)
+    {
+        VariableSymbol? saved = null;
+        if (m == Sta && (DirectPointer(ix.Target) is null || !PointerIndexIsCheap(ix)))
+        {
+            saved = AcquireTemp(1);
+            Op(Sta, Var(saved));
+        }
+        var (p, temp) = PointerBase(ix.Target);
+        LoadPointerIndex(ix, byteIndex);
+        if (saved is not null)
+        {
+            Op(Lda, Var(saved));
+            Release(saved);
+        }
+        Emit(m, IndirectIndexed, p);
+        if (temp is not null) Release(temp);
+    }
+
+    /// <summary>
+    /// <c>p[i] = v</c> in the spec 11 shape: Y first, then the value, so A never needs saving.
+    /// Returns false if computing the value would change Y.
+    /// </summary>
+    private bool StorePointerByteIndexFirst(IndexExpr ix, Expr value)
+    {
+        if (ix.Type.Size != 1) return false;
+        // dst[i] = src[i]: one Y load for both.
+        var source = value is IndexExpr vix && IsPointerIndex(vix) && vix.Type.Size == 1 && SameIndex(vix.Index, ix.Index)
+            ? DirectPointer(vix.Target) : null;
+        if (source is null && UsesY(value)) return false;
+
+        var (p, temp) = PointerBase(ix.Target);
+        LoadPointerIndex(ix, 0);
+        if (source is not null) Emit(Lda, IndirectIndexed, Var(source));
+        else GenA(value);
+        Emit(Sta, IndirectIndexed, p);
+        if (temp is not null) Release(temp);
+        return true;
+    }
+
+    private static bool SameIndex(Expr a, Expr b) =>
+        (a.ConstValue is long ca && b.ConstValue == ca)
+        || (a is NameExpr { Symbol: { } va } && b is NameExpr { Symbol: { } vb } && va == vb && !va.IsVolatile);
+
+    /// <summary>True if computing <paramref name="e"/> may change Y (conservative).</summary>
+    private bool UsesY(Expr e)
+    {
+        if (e.ConstValue is not null) return false;
+        return e switch
+        {
+            NameExpr => false,
+            IndexExpr ix when IsPointerIndex(ix) => true,
+            // Arrays are indexed with X unless a loop holds X.
+            IndexExpr ix => ix.Index.ConstValue is null && (_reserved.Contains(Register.X) || UsesY(ix.Index)),
+            CallExpr call => call.AddressOf is null,
+            UnaryExpr u => UsesY(u.Operand),
+            BinaryExpr b => UsesY(b.Left) || UsesY(b.Right),
+            MemberExpr m => UsesY(m.Target),
+            CastExpr c => UsesY(c.Operand),
+            _ => true,
+        };
+    }
+
+    /// <summary>Reads a two-byte element p[i] into <paramref name="d"/>.</summary>
+    private void LoadPointerWord(IndexExpr ix, Loc d)
+    {
+        if (ReadsVar(ix.Target, d.Var))
+        {
+            // Writing the low byte would change the pointer before the high byte is read.
+            var copy = AcquireTemp(2);
+            LoadPointerWord(ix, new Loc(copy));
+            Op(Lda, Var(copy)); Op(Sta, d.Lo);
+            Op(Lda, Var(copy, 1)); Op(Sta, d.Hi);
+            Release(copy);
+            return;
+        }
+        var (p, temp) = PointerBase(ix.Target);
+        LoadPointerIndex(ix, 0);
+        Emit(Lda, IndirectIndexed, p); Op(Sta, d.Lo);
+        Emit(Iny);
+        Emit(Lda, IndirectIndexed, p); Op(Sta, d.Hi);
+        if (temp is not null) Release(temp);
+    }
+
+    /// <summary>Writes a two-byte value to element p[i].</summary>
+    private void StorePointerWord(IndexExpr ix, Expr value)
+    {
+        VariableSymbol? valueTemp = null;
+        var pair = Simple2(value);
+        if (pair is null)
+        {
+            valueTemp = AcquireTemp(2);
+            Gen16(value, new Loc(valueTemp));
+            pair = (Var(valueTemp), Var(valueTemp, 1));
+        }
+        var (p, temp) = PointerBase(ix.Target);
+        LoadPointerIndex(ix, 0);
+        Op(Lda, pair.Value.Lo); Emit(Sta, IndirectIndexed, p);
+        Emit(Iny);
+        Op(Lda, pair.Value.Hi); Emit(Sta, IndirectIndexed, p);
+        if (temp is not null) Release(temp);
+        if (valueTemp is not null) Release(valueTemp);
+    }
+
     // ---------- Calls ----------
 
     private void GenCall(CallExpr call)
@@ -1115,7 +1334,7 @@ public sealed class CodeGen
         if (to is not null)
             bound = (Byte(to.Value), Byte(to.Value >> 8));
         else if (f.To is NameExpr { Symbol: { InMemory: true, Kind: VariableKind.Local or VariableKind.Parameter } bv }
-                 && bv.Type.Size == type.Size && bv != c && !AssignsVar(f.Body, bv))
+                 && bv.Type.Size == type.Size && bv != c && !bv.AddressTaken && !AssignsVar(f.Body, bv))
             bound = (Var(bv), Var(bv, 1));
         else
         {
@@ -1410,7 +1629,7 @@ public sealed class CodeGen
         CallExpr call => call.Function is not null,
         UnaryExpr u => ContainsCall(u.Operand),
         BinaryExpr b => ContainsCall(b.Left) || ContainsCall(b.Right),
-        IndexExpr ix => ContainsCall(ix.Index),
+        IndexExpr ix => ContainsCall(ix.Target) || ContainsCall(ix.Index),
         MemberExpr m => ContainsCall(m.Target),
         CastExpr c => ContainsCall(c.Operand),
         _ => false,

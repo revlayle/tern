@@ -66,10 +66,11 @@ public sealed class Parser
             {
                 case TokenKind.Const: consts.Add(ParseConst()); break;
                 case TokenKind.Var: globals.Add(ParseVar()); break;
+                case TokenKind.Data: globals.Add(ParseData()); break;
                 case TokenKind.Fn: functions.Add(ParseFn()); break;
                 default:
                     RejectUnsupported();
-                    throw new CompileError(Current.Pos, $"Expected 'const', 'var' or 'fn', found {Describe(Current)}");
+                    throw new CompileError(Current.Pos, $"Expected 'const', 'var', 'data' or 'fn', found {Describe(Current)}");
             }
             SkipTerminators();
         }
@@ -79,7 +80,7 @@ public sealed class Parser
     /// <summary>Keywords from the spec that this compiler version does not implement yet.</summary>
     private void RejectUnsupported()
     {
-        if (Current.Kind is TokenKind.Data or TokenKind.Struct or TokenKind.Match or TokenKind.Inline
+        if (Current.Kind is TokenKind.Struct or TokenKind.Match or TokenKind.Inline
             or TokenKind.Interrupt or TokenKind.Asm or TokenKind.Noinit or TokenKind.Linear)
             throw new CompileError(Current.Pos, $"'{Current.Text}' is not supported yet");
     }
@@ -115,6 +116,18 @@ public sealed class Parser
         Expr? init = Accept(TokenKind.Eq) ? ParseExpr() : null;
         ExpectEndOfStatement();
         return new VarDecl(start.Pos, name.Text, type, placement, init);
+    }
+
+    private VarDecl ParseData()
+    {
+        var start = Expect(TokenKind.Data, "'data'");
+        var name = Expect(TokenKind.Identifier, "data name");
+        TypeSyntax? type = Accept(TokenKind.Colon) ? ParseType() : null;
+        if (At(TokenKind.At)) throw new CompileError(Current.Pos, "'@' on data is not supported yet");
+        Expect(TokenKind.Eq, "'=' and the data's value");
+        var init = ParseExpr();
+        ExpectEndOfStatement();
+        return new VarDecl(start.Pos, name.Text, type, Placement.None, init) { IsData = true };
     }
 
     private FnDecl ParseFn()
@@ -171,6 +184,8 @@ public sealed class Parser
             return new ArrayTypeSyntax(start.Pos, element, length);
         }
         var name = Expect(TokenKind.Identifier, "a type");
+        if (name.Text == "ptr" && (At(TokenKind.Identifier) || At(TokenKind.LBracket)))
+            return new PointerTypeSyntax(name.Pos, ParseType());
         return new NamedTypeSyntax(name.Pos, name.Text);
     }
 
@@ -224,6 +239,7 @@ public sealed class Parser
                 return new ReturnStmt(t.Pos, value);
             }
             case TokenKind.LBrace: return ParseBlock();
+            case TokenKind.Data: throw new CompileError(Current.Pos, "'data' must be declared outside functions");
         }
         RejectUnsupported();
 
@@ -362,6 +378,12 @@ public sealed class Parser
             case TokenKind.Number:
                 Advance();
                 return new NumberExpr(t.Pos, t.Value);
+            case TokenKind.Char:
+                Advance();
+                return new CharExpr(t.Pos, t.Text[0]);
+            case TokenKind.String or TokenKind.ScreenString:
+                Advance();
+                return new StringExpr(t.Pos, t.Text, t.Kind == TokenKind.ScreenString);
             case TokenKind.True:
                 Advance();
                 return new BoolExpr(t.Pos, true);

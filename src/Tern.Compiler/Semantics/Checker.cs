@@ -25,8 +25,18 @@ public sealed class Checker
     private int _loopDepth;
     private readonly HashSet<Register> _loopRegisters = [];
     private int _hiddenCounter;
+    private readonly Platform _platform;
+    private readonly string _baseDirectory;
 
-    public static CheckedProgram Check(ProgramSyntax program) => new Checker().Run(program);
+    private Checker(Platform platform, string baseDirectory)
+    {
+        _platform = platform;
+        _baseDirectory = baseDirectory;
+    }
+
+    /// <param name="baseDirectory">Where <c>include_bytes</c> looks for files: the source file's directory.</param>
+    public static CheckedProgram Check(ProgramSyntax program, Platform platform, string baseDirectory) =>
+        new Checker(platform, baseDirectory).Run(program);
 
     private CheckedProgram Run(ProgramSyntax program)
     {
@@ -79,6 +89,8 @@ public sealed class Checker
 
     private void DeclareFunction(FnDecl decl)
     {
+        if (decl.Name is "addr" or "len" or "sizeof" or "include_bytes")
+            throw new CompileError(decl.Pos, $"'{decl.Name}' is a built-in function; choose another name");
         var fn = new FunctionSymbol(decl.Name, decl.Pos) { Declaration = decl };
         decl.Symbol = fn;
 
@@ -109,7 +121,7 @@ public sealed class Checker
             fn.ReturnRegister = decl.ReturnUsing ?? fn.ReturnType.Kind switch
             {
                 TypeKind.Bool => Register.Carry,
-                TypeKind.U16 or TypeKind.I16 => Register.AX,
+                TypeKind.U16 or TypeKind.I16 or TypeKind.Ptr => Register.AX,
                 _ => Register.A,
             };
             CheckRegisterFits(fn.ReturnRegister.Value, fn.ReturnType, decl.ReturnType.Pos, allowFlags: true);
@@ -133,19 +145,76 @@ public sealed class Checker
 
     private void DeclareGlobal(VarDecl decl)
     {
-        var type = DeclaredType(decl);
-        var v = new VariableSymbol(decl.Name, decl.Pos, type, VariableKind.Global, null);
+        // A string or include_bytes() gives a [u8; N] array, which may be longer than 256 bytes.
+        var bytes = decl.Init is null ? null : ByteSource(decl.Init);
+        var type = bytes is not null && decl.TypeSyntax is null ? TernType.ArrayOf(TernType.U8, bytes.Length) : DeclaredType(decl);
+        var v = new VariableSymbol(decl.Name, decl.Pos, type, VariableKind.Global, null) { IsData = decl.IsData };
         decl.Symbol = v;
         ApplyPlacement(decl, v, allowAddress: true);
 
+        if (decl.IsData && !type.IsArray)
+            throw new CompileError(decl.Pos, "Data must be an array or a string. For a single value, use 'const'");
         if (decl.Init is not null)
         {
             if (v.FixedAddress is not null)
                 throw new CompileError(decl.Init.Pos, "A variable at a fixed address cannot have an initial value");
-            v.InitialBytes = ConstantBytes(decl.Init, type);
+            if (bytes is not null)
+            {
+                if (!type.IsArray || type.Element!.Kind != TypeKind.U8)
+                    throw new CompileError(decl.Init.Pos, $"This value is a [u8; {bytes.Length}] array, but '{decl.Name}' is {type}");
+                if (type.Length != bytes.Length)
+                    throw new CompileError(decl.Init.Pos, $"Expected {type.Length} bytes, found {bytes.Length}");
+                v.InitialBytes = bytes;
+            }
+            else
+                v.InitialBytes = ConstantBytes(decl.Init, type);
         }
         Declare(v);
         _globals.Add(v);
+    }
+
+    /// <summary>The bytes of a string literal or <c>include_bytes()</c>, or null for other initializers.</summary>
+    private byte[]? ByteSource(Expr init)
+    {
+        switch (init)
+        {
+            case StringExpr s:
+                if (s.Text.Length == 0) throw new CompileError(s.Pos, "A string must have at least one character");
+                return s.Text.Select(c => (byte)Encode(c, s.Screen, s.Pos)).ToArray();
+            case CallExpr { Name: "include_bytes" } call:
+                return IncludeBytes(call);
+            default:
+                return null;
+        }
+    }
+
+    private int Encode(char c, bool screen, SourcePos pos)
+    {
+        if (Lexer.IsRawByte(c)) return c - Lexer.RawByteBase;
+        int? code = screen ? _platform.ScreenEncoding(c) : _platform.TextEncoding(c);
+        if (code is int value) return value;
+        string shown = c == '\n' ? "\\n" : c.ToString();
+        throw new CompileError(pos, screen
+            ? $"'{shown}' has no screen code. Write the byte as \\$NN"
+            : $"'{shown}' has no {_platform.TextEncodingName} code. Write the byte as \\$NN");
+    }
+
+    private byte[] IncludeBytes(CallExpr call)
+    {
+        if (call.Args is not [StringExpr { Screen: false } file])
+            throw new CompileError(call.Pos, "include_bytes() takes a file name in quotes");
+        var path = Path.Combine(_baseDirectory, file.Text);
+        byte[] bytes;
+        try
+        {
+            bytes = File.ReadAllBytes(path);
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
+        {
+            throw new CompileError(file.Pos, $"Cannot read '{file.Text}' ({path}): {e.Message}");
+        }
+        if (bytes.Length == 0) throw new CompileError(file.Pos, $"'{file.Text}' is empty");
+        return bytes;
     }
 
     /// <summary>The variable's type: written out, or taken from the initializer.</summary>
@@ -153,7 +222,10 @@ public sealed class Checker
     {
         if (decl.TypeSyntax is not null) return ResolveType(decl.TypeSyntax);
         if (decl.Init is null) throw new CompileError(decl.Pos, $"'{decl.Name}' needs a type or an initial value");
-        if (decl.Init is ArrayLiteralExpr) throw new CompileError(decl.Pos, "Array variables need a written type, e.g. [u8; 4]");
+        if (decl.Init is ArrayLiteralExpr)
+            throw new CompileError(decl.Pos, decl.IsData
+                ? $"Data arrays need a written type, e.g. data {decl.Name}: [u8; 4] = [...]"
+                : "Array variables need a written type, e.g. [u8; 4]");
         CheckExpr(decl.Init);
         return DefaultType(decl.Init);
     }
@@ -194,9 +266,21 @@ public sealed class Checker
         CheckExpr(init);
         Coerce(init, type);
         if (init.ConstValue is not long value)
-            throw new CompileError(init.Pos, "A global's initial value must be known at compile time");
+            throw new CompileError(init.Pos, UsesAddr(init)
+                ? "addr() cannot be used in an initial value, since addresses are known only after compiling. Assign it at the start of main"
+                : "A global's initial value must be known at compile time");
         return type.Size == 1 ? [(byte)value] : [(byte)value, (byte)(value >> 8)];
     }
+
+    private static bool UsesAddr(Expr e) => e switch
+    {
+        CallExpr c => c.AddressOf is not null,
+        UnaryExpr u => UsesAddr(u.Operand),
+        BinaryExpr b => UsesAddr(b.Left) || UsesAddr(b.Right),
+        CastExpr c => UsesAddr(c.Operand),
+        MemberExpr m => UsesAddr(m.Target),
+        _ => false,
+    };
 
     private TernType ResolveType(TypeSyntax syntax)
     {
@@ -207,9 +291,13 @@ public sealed class Checker
                 {
                     "u8" => TernType.U8, "i8" => TernType.I8, "u16" => TernType.U16, "i16" => TernType.I16,
                     "bool" => TernType.Bool,
-                    "ptr" => throw new CompileError(n.Pos, "Pointers are not supported yet"),
+                    "ptr" => throw new CompileError(n.Pos, "'ptr' needs the type it points to, e.g. 'ptr u8'"),
                     _ => throw new CompileError(n.Pos, $"Unknown type '{n.Name}'"),
                 };
+            case PointerTypeSyntax p:
+                var target = ResolveType(p.Target);
+                if (!target.IsScalar) throw new CompileError(p.Pos, "A pointer must point to a number, bool or pointer");
+                return TernType.PointerTo(target);
             case ArrayTypeSyntax a:
                 var element = ResolveType(a.Element);
                 if (!element.IsScalar) throw new CompileError(a.Pos, "Array elements must be numbers or bool");
@@ -331,6 +419,13 @@ public sealed class Checker
             Coerce(a.Value, target.Type);
             return;
         }
+        if (target.Type.IsPointer)
+        {
+            if (a.Op is not (TokenKind.PlusEq or TokenKind.MinusEq))
+                throw new CompileError(a.Pos, $"'{OpText(a.Op)}' does not work on pointers; only '+=' and '-=' do");
+            CheckPointerOffset(a.Value);
+            return;
+        }
         if (!target.Type.IsInteger)
             throw new CompileError(a.Pos, $"'{OpText(a.Op)}' needs a number on the left");
         if (a.Op is TokenKind.ShlEq or TokenKind.ShrEq)
@@ -344,9 +439,12 @@ public sealed class Checker
         switch (e)
         {
             case NameExpr { Symbol: VariableSymbol v }:
+                if (v.IsData) throw new CompileError(e.Pos, $"'{v.Name}' is data, which is read-only");
                 if (v.ReadOnly) throw new CompileError(e.Pos, $"Loop variable '{v.Name}' cannot be changed inside the loop");
                 return true;
-            case IndexExpr:
+            case IndexExpr ix:
+                if (ix.Target is NameExpr { Symbol: { IsData: true } d })
+                    throw new CompileError(e.Pos, $"'{d.Name}' is data, which is read-only");
                 return true;
             case MemberExpr m:
                 return m.Target is NameExpr or IndexExpr && IsAssignable(m.Target);
@@ -422,7 +520,7 @@ public sealed class Checker
 
     private static bool ContainsCall(Node node) => node switch
     {
-        CallExpr => true,
+        CallExpr c => c.Name is not ("addr" or "len" or "sizeof") || c.Args.Any(ContainsCall),
         BlockStmt b => b.Statements.Any(ContainsCall),
         IfStmt i => ContainsCall(i.Condition) || ContainsCall(i.Then) || (i.Else is not null && ContainsCall(i.Else)),
         WhileStmt w => ContainsCall(w.Condition) || ContainsCall(w.Body),
@@ -433,7 +531,7 @@ public sealed class Checker
         VarDecl v => v.Init is not null && ContainsCall(v.Init),
         UnaryExpr u => ContainsCall(u.Operand),
         BinaryExpr b => ContainsCall(b.Left) || ContainsCall(b.Right),
-        IndexExpr ix => ContainsCall(ix.Index),
+        IndexExpr ix => ContainsCall(ix.Target) || ContainsCall(ix.Index),
         MemberExpr m => ContainsCall(m.Target),
         CastExpr c => ContainsCall(c.Operand),
         _ => false,
@@ -482,6 +580,14 @@ public sealed class Checker
                 e.ConstValue = b.Value ? 1 : 0;
                 break;
 
+            case CharExpr ch:
+                e.Type = TernType.IntLiteral;
+                e.ConstValue = Encode(ch.Value, screen: false, ch.Pos);
+                break;
+
+            case StringExpr:
+                throw new CompileError(e.Pos, "A string can only be the value of data or a global array");
+
             case NameExpr n:
                 switch (Lookup(n.Name))
                 {
@@ -506,10 +612,23 @@ public sealed class Checker
 
             case IndexExpr ix:
                 CheckExpr(ix.Target);
-                if (ix.Target is not NameExpr { Symbol: VariableSymbol arr } || !arr.Type.IsArray)
-                    throw new CompileError(ix.Pos, "Only array variables can be indexed");
                 CheckExpr(ix.Index);
                 Coerce(ix.Index, TernType.U8);
+                if (ix.Target.Type.IsPointer)
+                {
+                    var element = ix.Target.Type.Element!;
+                    if (element.Size == 2 && ix.Index.ConstValue is > 127)
+                        throw new CompileError(ix.Index.Pos,
+                            $"Index {ix.Index.ConstValue} is too large: p[i] reaches 256 bytes, which is 128 {element} values");
+                    if (ix.Target is NameExpr { Symbol: { } pv }) pv.Dereferenced = true;
+                    e.Type = element;
+                    break;
+                }
+                if (ix.Target is not NameExpr { Symbol: VariableSymbol arr } || !arr.Type.IsArray)
+                    throw new CompileError(ix.Pos, "Only arrays and pointers can be indexed");
+                if (arr.Type.Length > 256)
+                    throw new CompileError(ix.Pos,
+                        $"'{arr.Name}' has {arr.Type.Length} elements, too many for a u8 index. Read it through a pointer: addr({arr.Name})");
                 if (ix.Index.ConstValue is long idx && idx >= arr.Type.Length)
                     throw new CompileError(ix.Index.Pos, $"Index {idx} is past the end of '{arr.Name}' (length {arr.Type.Length})");
                 e.Type = arr.Type.Element!;
@@ -520,6 +639,8 @@ public sealed class Checker
                 if (m.Member is not ("lo" or "hi"))
                     throw new CompileError(m.Pos, $"Unknown member '.{m.Member}'");
                 if (m.Target.Type.Kind == TypeKind.IntLiteral) Coerce(m.Target, DefaultType(m.Target));
+                if (m.Target.Type.IsPointer)
+                    throw new CompileError(m.Pos, $".{m.Member} needs a number; convert the pointer first: (p as u16).{m.Member}");
                 if (m.Target.Type.Size != 2 || !m.Target.Type.IsInteger)
                     throw new CompileError(m.Pos, $".{m.Member} needs a 16-bit value, not {m.Target.Type}");
                 e.Type = TernType.U8;
@@ -534,7 +655,16 @@ public sealed class Checker
                 if (!target.IsScalar) throw new CompileError(c.Pos, $"Cannot convert to {target}");
                 if (target.Kind == TypeKind.Bool)
                     throw new CompileError(c.Pos, "Numbers cannot be converted to bool; compare instead, e.g. 'x != 0'");
-                if (source.Kind == TypeKind.IntLiteral)
+                if (target.IsPointer || source.IsPointer)
+                {
+                    // Pointers convert to other pointers and to and from u16, with no code.
+                    if (source.Kind == TypeKind.IntLiteral) Coerce(c.Operand, TernType.U16);
+                    else if (!(source.IsPointer || source.Kind == TypeKind.U16))
+                        throw new CompileError(c.Pos, $"Cannot convert {source} to {target}; only u16 and pointers convert to a pointer");
+                    if (!(target.IsPointer || target.Kind == TypeKind.U16))
+                        throw new CompileError(c.Pos, $"Cannot convert {source} to {target}; a pointer converts only to u16 or another pointer");
+                }
+                else if (source.Kind == TypeKind.IntLiteral)
                     Coerce(c.Operand, DefaultType(c.Operand));
                 else if (!source.IsScalar)
                     throw new CompileError(c.Pos, $"Cannot convert {source} to {target}");
@@ -601,7 +731,14 @@ public sealed class Checker
 
             case TokenKind.EqEq or TokenKind.NotEq or TokenKind.Less or TokenKind.LessEq or TokenKind.Greater or TokenKind.GreaterEq:
             {
-                if (b.Left.Type.Kind == TypeKind.Bool || b.Right.Type.Kind == TypeKind.Bool)
+                if (b.Left.Type.IsPointer || b.Right.Type.IsPointer)
+                {
+                    if (b.Left.Type.Kind == TypeKind.IntLiteral) Coerce(b.Left, b.Right.Type);
+                    else if (b.Right.Type.Kind == TypeKind.IntLiteral) Coerce(b.Right, b.Left.Type);
+                    else if (!b.Left.Type.SameAs(b.Right.Type))
+                        throw new CompileError(b.Pos, $"Cannot compare {b.Left.Type} with {b.Right.Type}; convert one side with 'as'");
+                }
+                else if (b.Left.Type.Kind == TypeKind.Bool || b.Right.Type.Kind == TypeKind.Bool)
                 {
                     if (b.Left.Type.Kind != b.Right.Type.Kind || b.Op is not (TokenKind.EqEq or TokenKind.NotEq))
                         throw new CompileError(b.Pos, "bool values can only be compared with == and !=");
@@ -651,6 +788,11 @@ public sealed class Checker
 
             default: // + - & | ^
             {
+                if (b.Left.Type.IsPointer || b.Right.Type.IsPointer)
+                {
+                    CheckPointerArithmetic(b);
+                    return;
+                }
                 var t = Unify(b.Left, b.Right, b.Pos);
                 if (!(t.IsInteger || t.Kind == TypeKind.IntLiteral))
                     throw new CompileError(b.Pos, $"'{OpText(b.Op)}' needs numbers");
@@ -667,6 +809,35 @@ public sealed class Checker
                 return;
             }
         }
+    }
+
+    /// <summary><c>p + n</c>, <c>n + p</c> and <c>p - n</c>: a pointer moved by a number of bytes.</summary>
+    private static void CheckPointerArithmetic(BinaryExpr b)
+    {
+        bool leftPtr = b.Left.Type.IsPointer;
+        if (b.Op is not (TokenKind.Plus or TokenKind.Minus))
+            throw new CompileError(b.Pos, $"'{OpText(b.Op)}' does not work on pointers. Convert to u16 first: (p as u16)");
+        if (leftPtr && b.Right.Type.IsPointer)
+            throw new CompileError(b.Pos,
+                $"Two pointers cannot be {(b.Op == TokenKind.Plus ? "added" : "subtracted")}. Convert them to u16 first: (p as u16)");
+        if (!leftPtr && b.Op == TokenKind.Minus)
+            throw new CompileError(b.Pos, "A pointer cannot be subtracted from a number");
+        CheckPointerOffset(leftPtr ? b.Right : b.Left);
+        b.Type = leftPtr ? b.Left.Type : b.Right.Type;
+    }
+
+    /// <summary>The number of bytes a pointer moves by: an unsigned number.</summary>
+    private static void CheckPointerOffset(Expr offset)
+    {
+        if (offset.Type.Kind == TypeKind.IntLiteral)
+        {
+            if (offset.ConstValue < 0)
+                throw new CompileError(offset.Pos, "A pointer moves by an unsigned number; use '-' to move back");
+            Coerce(offset, offset.ConstValue <= 255 ? TernType.U8 : TernType.U16);
+            return;
+        }
+        if (!offset.Type.IsInteger || offset.Type.IsSigned)
+            throw new CompileError(offset.Pos, $"A pointer moves by a u8 or u16, not {offset.Type}");
     }
 
     private void CheckShiftCount(Expr count, TernType shifted)
@@ -691,6 +862,32 @@ public sealed class Checker
                 c.Type = TernType.IntLiteral;
                 c.ConstValue = c.Args[0].Type.Length;
                 return;
+            }
+            case "include_bytes":
+                throw new CompileError(c.Pos, "include_bytes() can only be the value of data or a global array");
+            case "addr":
+            {
+                if (c.Args.Count != 1 || c.Args[0] is not NameExpr name)
+                    throw new CompileError(c.Pos, "addr() takes the name of a variable, array or data");
+                switch (Lookup(name.Name))
+                {
+                    case null: throw new CompileError(name.Pos, $"'{name.Name}' is not declared");
+                    case ConstSymbol: throw new CompileError(name.Pos, $"'{name.Name}' is a constant, which has no address");
+                    case FunctionSymbol: throw new CompileError(name.Pos, "addr() of a function is not supported yet");
+                    case VariableSymbol v:
+                        if (!v.InMemory) throw new CompileError(name.Pos, $"'{name.Name}' lives in a register and has no address");
+                        name.Symbol = v;
+                        name.Type = v.Type;
+                        v.AddressTaken = true;
+                        c.AddressOf = v;
+                        // An array gives a pointer to its first element. A split array of 16-bit
+                        // values gives a pointer to its table of low bytes.
+                        c.Type = !v.Type.IsArray ? TernType.PointerTo(v.Type)
+                            : v.Type.Element!.Size == 1 ? TernType.PointerTo(v.Type.Element!)
+                            : TernType.PointerTo(TernType.U8);
+                        return;
+                }
+                throw new InvalidOperationException();
             }
             case "sizeof":
             {
@@ -755,7 +952,7 @@ public sealed class Checker
 
         if (source.Kind == TypeKind.IntLiteral)
         {
-            if (!target.IsInteger)
+            if (!target.IsInteger && !target.IsPointer)
                 throw new CompileError(e.Pos, $"Expected {target}, found a number");
             long v = e.ConstValue!.Value;
             if (v < target.MinValue || v > target.MaxValue)
@@ -764,10 +961,12 @@ public sealed class Checker
             return;
         }
         if (source.SameAs(target)) return;
+        if (target.IsPointer && source.IsPointer)
+            throw new CompileError(e.Pos, $"Expected {target}, found {source}. Convert with 'as {target}'");
         if (source.IsInteger && target.IsInteger && source.IsSigned == target.IsSigned && source.Size < target.Size)
             return; // automatic widening; the code generator extends the value
-        throw new CompileError(e.Pos, $"Expected {target}, found {source}" +
-            (source.IsInteger && target.IsInteger ? $". Convert with 'as {target}'" : ""));
+        bool convertible = (source.IsInteger || source.IsPointer) && (target.IsInteger || target.IsPointer);
+        throw new CompileError(e.Pos, $"Expected {target}, found {source}" + (convertible ? $". Convert with 'as {target}'" : ""));
     }
 
     /// <summary>Wraps a value to the range of <paramref name="t"/>, as the CPU would.</summary>
@@ -775,7 +974,7 @@ public sealed class Checker
     {
         TypeKind.U8 => v & 0xFF,
         TypeKind.I8 => (sbyte)(v & 0xFF),
-        TypeKind.U16 => v & 0xFFFF,
+        TypeKind.U16 or TypeKind.Ptr => v & 0xFFFF,
         TypeKind.I16 => (short)(v & 0xFFFF),
         TypeKind.Bool => v != 0 ? 1 : 0,
         _ => v,

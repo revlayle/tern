@@ -158,6 +158,7 @@ public static class Assembler
         null => 0,
         Imm imm => imm.Value & 0xFF,
         ImmLabelByte b => b.High ? Resolve(b.Label) >> 8 : Resolve(b.Label) & 0xFF,
+        ImmVarByte v => v.High ? Address(new VarOperand(v.Variable)) >> 8 : Address(new VarOperand(v.Variable)) & 0xFF,
         VarOperand v => Address(v),
         AddrOperand a => a.Address,
         LabelOperand l => Resolve(l.Label) + l.Offset,

@@ -53,18 +53,22 @@ public static class Allocator
             return globals + frames;
         }
 
-        // 1. Required: variables marked "@ zp".
-        foreach (var v in placeable.Where(v => v.RequireZeroPage)) inZp.Add(v);
-        if (ZpNeeded() > zpCapacity)
+        // 1. Required: variables marked "@ zp", then pointers that are dereferenced with (zp),y.
+        void Require(IEnumerable<VariableSymbol> vars, string what)
         {
+            var added = vars.ToList();
+            foreach (var v in added) inZp.Add(v);
+            if (ZpNeeded() <= zpCapacity) return;
             var users = string.Join(", ", inZp.Select(v => $"{v.QualifiedName} ({v.Type.Size})"));
-            throw new CompileError(inZp.First().Pos,
-                $"Zero page is full: '@ zp' variables need {ZpNeeded()} bytes, {zpCapacity} are free. Users: {users}");
+            throw new CompileError(added.First().Pos,
+                $"Zero page is full: {what} need {ZpNeeded()} bytes, {zpCapacity} are free. Users: {users}");
         }
+        Require(placeable.Where(v => v.RequireZeroPage), "'@ zp' variables");
+        Require(placeable.Where(v => v.Dereferenced && !v.RequireZeroPage), "'@ zp' variables and dereferenced pointers");
 
         // 2. Best effort: the most used small variables.
         var candidates = placeable
-            .Where(v => !v.RequireZeroPage && !v.Type.IsArray && v.Weight > 0)
+            .Where(v => !v.ForcedZeroPage && !v.Type.IsArray && v.Weight > 0)
             .OrderByDescending(v => v.Weight).ThenBy(v => v.QualifiedName, StringComparer.Ordinal);
         foreach (var v in candidates)
         {

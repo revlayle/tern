@@ -39,7 +39,7 @@ catch (IOException e)
 
 try
 {
-    var result = TernCompiler.Compile(source);
+    var result = TernCompiler.Compile(source, sourcePath: input);
     File.WriteAllBytes(output, result.Prg);
     File.WriteAllText(Path.ChangeExtension(output, ".lst"), result.Listing);
     File.WriteAllText(Path.ChangeExtension(output, ".vs"), result.ViceLabels);
