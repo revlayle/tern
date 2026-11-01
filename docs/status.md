@@ -67,5 +67,4 @@ The M2 questions were settled on 2026-11-01 (`docs/decisions.md`). New ones from
 
 Listed as questions 1-10 above. Also: `keeps` is a reserved word; a call in a `using X` loop that passes a parameter in X is an error.
 
-
 Also from the M3 review (finding 4): new error tests live in per-feature files (`AsmTests`, `RoutineTests`, `DataTests`) as well as `ErrorTests.cs`. CLAUDE.md says `ErrorTests.cs`; the spec session should decide which convention to keep.
