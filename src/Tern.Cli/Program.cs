@@ -49,6 +49,6 @@ try
 }
 catch (CompileError e)
 {
-    Console.Error.WriteLine($"{input}:{e.Pos.Line}:{e.Pos.Column}: error: {e.Description}");
+    Console.Error.WriteLine($"{e.Pos.File ?? input}:{e.Pos.Line}:{e.Pos.Column}: error: {e.Description}");
     return 1;
 }

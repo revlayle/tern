@@ -27,16 +27,19 @@ public sealed class CompileResult
 
 public static class TernCompiler
 {
-    /// <param name="sourcePath">The source file's path. <c>include_bytes</c> paths are relative to its directory.</param>
-    public static CompileResult Compile(string source, Platform? platform = null, string? sourcePath = null)
+    /// <summary>The standard library: the <c>lib</c> folder next to the compiler.</summary>
+    public static string DefaultLibraryDirectory => Path.Combine(AppContext.BaseDirectory, "lib");
+
+    /// <param name="sourcePath">The source file's path. <c>include_bytes</c> paths and imports of your own modules are relative to its directory.</param>
+    /// <param name="libraryDirectory">Where <c>import</c> looks first; <see cref="DefaultLibraryDirectory"/> if null.</param>
+    public static CompileResult Compile(string source, Platform? platform = null, string? sourcePath = null, string? libraryDirectory = null)
     {
         platform ??= Platform.C64;
 
-        var syntax = Parser.Parse(source);
-        var baseDirectory = Path.GetDirectoryName(Path.GetFullPath(sourcePath ?? "x")) ?? ".";
-        var program = Checker.Check(syntax, platform, baseDirectory);
+        var modules = ModuleLoader.Load(source, sourcePath, platform, libraryDirectory ?? DefaultLibraryDirectory);
+        var program = Checker.Check(modules, platform);
 
-        var gen = new CodeGen(program, source);
+        var gen = new CodeGen(program);
         var functionCode = gen.GenerateFunctions();
         var plan = Allocator.Allocate(program, platform);
         foreach (var v in program.Globals.Concat(program.Functions.SelectMany(f => f.FrameVariables)))

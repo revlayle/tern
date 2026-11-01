@@ -20,22 +20,26 @@ public sealed class CodeGen
     }
 
     private readonly CheckedProgram _program;
-    private readonly string[] _sourceLines;
+    /// <summary>The lines of each source file, by path ("" for source given without one).</summary>
+    private readonly Dictionary<string, string[]> _sourceLines = new();
+    private readonly string? _mainFile;
     private readonly Dictionary<FunctionSymbol, Label> _functionLabels = new();
     private List<AsmItem> _out = [];
     private FunctionSymbol _fn = null!;
     private int _labelCounter;
-    private int _lastSourceLine;
+    private SourcePos _lastSource;
     private int _loopDepth;
     private readonly List<(Label Break, Label Continue)> _loops = [];
     private readonly HashSet<Register> _reserved = [];
     private readonly List<VariableSymbol> _freeTemps = [];
     private int _tempCounter;
 
-    public CodeGen(CheckedProgram program, string source)
+    public CodeGen(CheckedProgram program)
     {
         _program = program;
-        _sourceLines = source.Split('\n');
+        foreach (var m in program.Modules)
+            _sourceLines[m.Path ?? ""] = m.Source.Split('\n');
+        _mainFile = program.Modules[^1].Path;
         // A routine at a fixed address is never placed: its label already has its address.
         foreach (var f in program.Functions)
             _functionLabels[f] = new Label(f.Name) { Address = f.FixedAddress ?? -1 };
@@ -104,10 +108,13 @@ public sealed class CodeGen
 
     private void Source(Node node)
     {
-        int line = node.Pos.Line;
-        if (line == _lastSourceLine || line <= 0 || line > _sourceLines.Length) return;
-        _lastSourceLine = line;
-        _out.Add(new SourceLine(line, _sourceLines[line - 1].TrimEnd('\r')));
+        var pos = node.Pos;
+        if ((pos.Line == _lastSource.Line && pos.File == _lastSource.File)
+            || !_sourceLines.TryGetValue(pos.File ?? "", out var lines) || pos.Line <= 0 || pos.Line > lines.Length) return;
+        _lastSource = pos;
+        // Lines from a module show its file name.
+        var file = pos.File == _mainFile ? null : Path.GetFileName(pos.File);
+        _out.Add(new SourceLine(pos.Line, lines[pos.Line - 1].TrimEnd('\r'), file));
     }
 
     private Register FreeIndexRegister(SourcePos pos) =>
@@ -122,7 +129,7 @@ public sealed class CodeGen
         _fn = f;
         _out = [];
         _freeTemps.Clear();
-        _lastSourceLine = 0;
+        _lastSource = default;
 
         Source(f.Declaration!);
         Place(_functionLabels[f]);

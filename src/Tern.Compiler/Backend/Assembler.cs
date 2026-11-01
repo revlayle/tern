@@ -114,7 +114,9 @@ public static class Assembler
                     listing.AppendLine($"{l.Label.Name}:");
                     break;
                 case SourceLine src:
-                    listing.AppendLine($"                                ; {src.Line,4}: {src.Text.Trim()}");
+                    listing.AppendLine(src.File is null
+                        ? $"                                ; {src.Line,4}: {src.Text.Trim()}"
+                        : $"                                ; {src.File}:{src.Line}: {src.Text.Trim()}");
                     break;
                 case Comment c:
                     listing.AppendLine($"                                ; {c.Text}");

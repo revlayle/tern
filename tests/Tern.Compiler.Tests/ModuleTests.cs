@@ -1,0 +1,285 @@
+using Tern.Compiler.Syntax;
+
+namespace Tern.Compiler.Tests;
+
+/// <summary>Modules and imports (spec 2.2): <c>import name</c>, qualified names, lookup, platform modules.</summary>
+public sealed class ModuleTests : IDisposable
+{
+    /// <summary>A temporary folder for the program's files, with a library folder inside it.</summary>
+    private readonly DirectoryInfo _dir = Directory.CreateTempSubdirectory("tern");
+    private string Lib => Path.Combine(_dir.FullName, "lib");
+    private string Src => Path.Combine(_dir.FullName, "src");
+
+    public ModuleTests()
+    {
+        Directory.CreateDirectory(Lib);
+        Directory.CreateDirectory(Src);
+    }
+
+    public void Dispose() => _dir.Delete(recursive: true);
+
+    private void Write(string folder, string name, string text)
+    {
+        var path = Path.Combine(folder, name);
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        File.WriteAllText(path, text);
+    }
+
+    private Run RunMain(string source) =>
+        Run.Program(source, sourcePath: Path.Combine(Src, "main.tern"), libraryDirectory: Lib);
+
+    private CompileResult CompileMain(string source, Platform? platform = null) =>
+        TernCompiler.Compile(source, platform, Path.Combine(Src, "main.tern"), Lib);
+
+    private const string Util = """
+        const LIMIT = 200
+        var counter: u8
+        data table: [u8; 4] = [10, 20, 30, 40]
+
+        fn add(a: u8, b: u8) -> u8 { return clamp(a + b) }
+        fn clamp(v: u8) -> u8 {
+            if v > LIMIT { return LIMIT }
+            return v
+        }
+        fn bump() { counter += 1 }
+        asm fn twice(v: u8 using A) -> u8 {
+            asl
+        }
+        """;
+
+    [Fact]
+    public void A_program_in_several_files()
+    {
+        Write(Src, "util.tern", Util);
+        var r = RunMain("""
+            import util
+            var a: u8
+            var b: u8
+            var c: u8
+            var d: u8
+            var e: u8
+            fn main() {
+                a = util.add(5, 6)
+                b = util.add(150, 100)
+                for i in 0..3 { util.bump() }
+                c = util.counter
+                d = util.table[2] + util.LIMIT
+                e = util.twice(21)
+                asm {
+                    jsr util.bump
+                    lda util.counter
+                    sta util.counter
+                }
+            }
+            """);
+        Assert.Equal(11, r.U8("a"));
+        Assert.Equal(200, r.U8("b"));
+        Assert.Equal(3, r.U8("c"));
+        Assert.Equal((30 + 200) & 0xFF, r.U8("d"));
+        Assert.Equal(42, r.U8("e"));
+        Assert.Equal(4, r.U8("util.counter"));
+        Assert.Contains("jsr util.add", r.Result.Listing);
+        Assert.Contains("al C:", r.Result.ViceLabels);
+        Assert.Contains(".util_counter", r.Result.ViceLabels);
+    }
+
+    [Fact]
+    public void Names_in_different_modules_do_not_clash()
+    {
+        Write(Src, "left.tern", "var x: u8\nfn init() { x = 1 }\nfn get() -> u8 { return x }");
+        Write(Src, "right.tern", "var x: u8\nfn init() { x = 2 }\nfn get() -> u8 { return x }");
+        var r = RunMain("""
+            import left
+            import right
+            var x: u8
+            var l: u8
+            var rr: u8
+            fn init() { x = 3 }
+            fn main() {
+                left.init()
+                right.init()
+                init()
+                l = left.get()
+                rr = right.get()
+            }
+            """);
+        Assert.Equal(1, r.U8("left.x"));
+        Assert.Equal(2, r.U8("right.x"));
+        Assert.Equal(3, r.U8("x"));
+        Assert.Equal(1, r.U8("l"));
+        Assert.Equal(2, r.U8("rr"));
+    }
+
+    [Fact]
+    public void A_module_is_loaded_once_and_modules_may_import_each_other()
+    {
+        Write(Src, "shared.tern", "var total: u8\nconst STEP = 5");
+        Write(Src, "ping.tern", "import shared\nimport pong\nfn hit(n: u8) { shared.total += shared.STEP\n if n > 0 { pong.hit(n - 1) } }");
+        Write(Src, "pong.tern", "import shared\nfn hit(n: u8) { shared.total += 1 }");
+        var r = RunMain("""
+            import shared
+            import ping
+            var t: u8
+            fn main() {
+                ping.hit(1)
+                shared.total += 100
+                t = shared.total
+            }
+            """);
+        Assert.Equal(106, r.U8("t"));
+        Assert.Single(r.Result.Symbols.Keys, k => k == "shared.total");
+    }
+
+    [Fact]
+    public void Constants_of_an_imported_module_can_be_used_in_declarations()
+    {
+        Write(Src, "sizes.tern", "const N = 3\nconst BASE = $C000");
+        var r = RunMain("""
+            import sizes
+            const LAST = sizes.N - 1
+            var buf: [u8; sizes.N]
+            var hw: u8 @ sizes.BASE + 1
+            fn main() {
+                buf[LAST] = 7
+                hw = 9
+            }
+            """);
+        Assert.Equal(7, r.U8("buf", 2));
+        Assert.Equal(9, r.Ram.Bytes[0xC001]);
+    }
+
+    [Fact]
+    public void The_library_comes_before_the_source_folder()
+    {
+        Write(Lib, "pick.tern", "const WHO = 1");
+        Write(Src, "pick.tern", "const WHO = 2");
+        Write(Src, "mine.tern", "const WHO = 3");
+        var r = RunMain("""
+            import pick
+            import mine
+            var a: u8
+            var b: u8
+            fn main() {
+                a = pick.WHO
+                b = mine.WHO
+            }
+            """);
+        Assert.Equal(1, r.U8("a"));
+        Assert.Equal(3, r.U8("b"));
+    }
+
+    [Fact]
+    public void A_library_module_imports_user_modules_next_to_itself()
+    {
+        Write(Lib, "outer.tern", "import inner\nconst V = inner.V + 1");
+        Write(Lib, "inner.tern", "const V = 10");
+        var r = RunMain("import outer\nvar v: u8\nfn main() { v = outer.V }");
+        Assert.Equal(11, r.U8("v"));
+    }
+
+    [Fact]
+    public void Platform_modules_load_only_on_their_platform()
+    {
+        Write(Path.Combine(Lib, "c64"), "hw.tern", "const BORDER = $D020");
+        var r = RunMain("import hw\nvar b: u16\nfn main() { b = hw.BORDER }");
+        Assert.Equal(0xD020, r.U16("b"));
+
+        var other = new Platform
+        {
+            Name = "other",
+            Cpu = Platform.C64.Cpu,
+            LoadAddress = Platform.C64.LoadAddress,
+            Header = Platform.C64.Header,
+            ZeroPage = Platform.C64.ZeroPage,
+            RamEnd = Platform.C64.RamEnd,
+            DefaultEncoding = Platform.C64.DefaultEncoding,
+        };
+        var e = Assert.Throws<CompileError>(() => CompileMain("import hw\nfn main() { }", other));
+        Assert.Equal("'hw' is a module for the c64 platform; this program is compiled for other", e.Description);
+    }
+
+    [Fact]
+    public void An_unused_import_adds_no_bytes()
+    {
+        Write(Src, "util.tern", Util + "\nvar big: [u8; 200]\ndata more: [u8; 3] = [1, 2, 3]\nvar zp_ptr: ptr u8 @ zp");
+        var with = CompileMain("import util\nfn main() { }");
+        var without = CompileMain("fn main() { }");
+        Assert.Equal(without.Image, with.Image);
+        Assert.DoesNotContain("util.table", with.Symbols.Keys);
+        Assert.DoesNotContain("util.counter", with.Symbols.Keys);
+        Assert.Equal(without.Report, with.Report);
+
+        // Using one function keeps only it and the globals it names.
+        var one = CompileMain("import util\nvar v: u8\nfn main() { v = util.add(1, 2) }");
+        Assert.Contains("util.clamp", one.Symbols.Keys);
+        Assert.DoesNotContain("util.bump", one.Symbols.Keys);
+        Assert.DoesNotContain("util.counter", one.Symbols.Keys);
+        Assert.DoesNotContain("util.table", one.Symbols.Keys);
+    }
+
+    [Fact]
+    public void The_listing_names_the_module_file()
+    {
+        Write(Src, "util.tern", Util);
+        var r = CompileMain("import util\nvar v: u8\nfn main() { v = util.add(1, 2) }");
+        Assert.Contains("; util.tern:5: fn add(a: u8, b: u8) -> u8 { return clamp(a + b) }", r.Listing);
+        Assert.Contains(";    3: fn main() { v = util.add(1, 2) }", r.Listing);
+    }
+
+    [Fact]
+    public void Include_bytes_in_a_module_is_relative_to_the_module()
+    {
+        Write(Lib, "gfx.tern", "data ship = include_bytes(\"ship.bin\")");
+        File.WriteAllBytes(Path.Combine(Lib, "ship.bin"), [7, 8, 9]);
+        var r = RunMain("import gfx\nvar v: u8\nfn main() { v = gfx.ship[2] }");
+        Assert.Equal(9, r.U8("v"));
+    }
+
+    [Fact]
+    public void Errors_in_a_module_name_its_file()
+    {
+        Write(Src, "bad.tern", "fn f() {\n    x = 1\n}");
+        var e = Assert.Throws<CompileError>(() => CompileMain("import bad\nfn main() { }"));
+        Assert.Equal("'x' is not declared", e.Description);
+        Assert.Equal(new SourcePos(2, 5, Path.Combine(Src, "bad.tern")), e.Pos);
+        Assert.StartsWith("bad.tern:2:5", e.Message);
+    }
+
+    [Theory]
+    [InlineData("import nothing\nfn main() { }", "Cannot find module 'nothing': there is no nothing.tern in the library")]
+    [InlineData("var x: u8\nimport util\nfn main() { }", "'import' must be at the top of the file, before other declarations")]
+    [InlineData("import util\nimport util\nfn main() { }", "'util' is imported twice")]
+    [InlineData("import 5\nfn main() { }", "Expected a module name after 'import'")]
+    [InlineData("import util\nfn main() { util = 1 }", "'util' is a module; use the names in it as util.name")]
+    [InlineData("import util\nvar v: u8\nfn main() { v = util }", "'util' is a module; use the names in it as util.name")]
+    [InlineData("import util\nvar v: u8\nfn main() { v = util.nope }", "'util.nope' is not declared")]
+    [InlineData("import util\nfn main() { util.nope() }", "'util.nope' is not declared")]
+    [InlineData("import util\nfn main() { util.LIMIT() }", "'util.LIMIT' is not a function")]
+    [InlineData("import util\nfn main() { util.add(1) }", "'util.add' takes 2 argument(s), not 1")]
+    [InlineData("import util\nfn main() { var util: u8 = 1 }", "'util' is the name of an imported module; choose another name")]
+    [InlineData("import util\nfn util() { }\nfn main() { }", "'util' is the name of an imported module; choose another name")]
+    [InlineData("import util\nfn main() { for util in 0..3 { } }", "'util' is the name of an imported module; choose another name")]
+    [InlineData("import util\nfn main() { util. }", "Expected a name in module 'util' after '.'")]
+    [InlineData("import util\nvar v: u8\nfn main() { v = clamp(1) }", "'clamp' is not a function")]
+    [InlineData("import util\nfn main() { asm {\n jsr util.nope\n } }", "'util.nope' is not declared")]
+    [InlineData("import withmain\nfn main() { }", "Only the program's main file has 'fn main()'; 'withmain' is a module")]
+    [InlineData("import util", "The program has no 'fn main()'")]
+    public void Reports_errors(string source, string expected)
+    {
+        Write(Src, "util.tern", Util);
+        Write(Src, "withmain.tern", "fn main() { }");
+        var e = Assert.Throws<CompileError>(() => CompileMain(source));
+        Assert.Contains(expected, e.Description);
+    }
+
+    [Fact]
+    public void A_module_cannot_use_names_its_importer_did_not_give_it()
+    {
+        // Each file sees only its own names and the modules it imports.
+        Write(Src, "a.tern", "import b\nfn f() -> u8 { return b.V }");
+        Write(Src, "b.tern", "const V = 1");
+        Write(Src, "c.tern", "fn g() -> u8 { return b.V }");
+        var e = Assert.Throws<CompileError>(() => CompileMain("import a\nimport c\nfn main() { }"));
+        Assert.Equal("'b' is not declared", e.Description);
+    }
+}

@@ -73,6 +73,7 @@ public sealed record DataBytes(byte[] Bytes) : AsmItem;
 public sealed record Padding(Func<int, int> SizeAt, string Reason) : AsmItem;
 
 /// <summary>A source line, shown in the listing above the code it produced.</summary>
-public sealed record SourceLine(int Line, string Text) : AsmItem;
+/// <param name="File">The file name for lines from a module; null for the main file.</param>
+public sealed record SourceLine(int Line, string Text, string? File = null) : AsmItem;
 
 public sealed record Comment(string Text) : AsmItem;

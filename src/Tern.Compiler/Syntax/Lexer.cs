@@ -1,8 +1,9 @@
 namespace Tern.Compiler.Syntax;
 
-public readonly record struct SourcePos(int Line, int Column)
+/// <param name="File">The source file's path, or null for source text given without one.</param>
+public readonly record struct SourcePos(int Line, int Column, string? File = null)
 {
-    public override string ToString() => $"{Line}:{Column}";
+    public override string ToString() => File is null ? $"{Line}:{Column}" : $"{Path.GetFileName(File)}:{Line}:{Column}";
 }
 
 public sealed class CompileError(SourcePos pos, string message) : Exception($"{pos}: {message}")
@@ -21,7 +22,7 @@ public enum TokenKind
 
     // Keywords
     Const, Var, Data, Fn, Return, If, Else, While, For, In, Step, Using, Break, Continue,
-    True, False, As, Zp, Struct, Match, Bank, Linear, Inline, Interrupt, Asm, Noinit, Keeps,
+    True, False, As, Zp, Struct, Match, Bank, Linear, Inline, Interrupt, Asm, Noinit, Keeps, Import,
 
     // Punctuation and operators
     LParen, RParen, LBracket, RBracket, LBrace, RBrace, Comma, Colon, Semicolon,
@@ -61,7 +62,7 @@ public static class Lexer
         ["zp"] = TokenKind.Zp, ["struct"] = TokenKind.Struct, ["match"] = TokenKind.Match,
         ["bank"] = TokenKind.Bank, ["linear"] = TokenKind.Linear, ["inline"] = TokenKind.Inline,
         ["interrupt"] = TokenKind.Interrupt, ["asm"] = TokenKind.Asm, ["noinit"] = TokenKind.Noinit,
-        ["keeps"] = TokenKind.Keeps,
+        ["keeps"] = TokenKind.Keeps, ["import"] = TokenKind.Import,
     };
 
     // Longest operators first, so "<<=" wins over "<<" and "<".
@@ -88,12 +89,13 @@ public static class Lexer
         TokenKind.RBrace or TokenKind.True or TokenKind.False or TokenKind.Return or
         TokenKind.Break or TokenKind.Continue or TokenKind.Zp;
 
-    public static List<Token> Tokenize(string source)
+    /// <param name="file">The source file, for positions in error messages and the listing.</param>
+    public static List<Token> Tokenize(string source, string? file = null)
     {
         var tokens = new List<Token>();
         int i = 0, line = 1, lineStart = 0;
 
-        SourcePos Pos(int at) => new(line, at - lineStart + 1);
+        SourcePos Pos(int at) => new(line, at - lineStart + 1, file);
 
         void Add(TokenKind kind, string text, long value, int start, string? encoding = null) =>
             tokens.Add(new Token(kind, text, value, Pos(start), encoding));
