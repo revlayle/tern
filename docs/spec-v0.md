@@ -300,7 +300,7 @@ inline fn wait_frame() { ... }
 - Function calls inside arguments, as in `f(a, g(b))`, run before any parameter of the outer call is written. `f` and `g` may share memory (8.1), so writing `f`'s parameters first could let `g` overwrite them.
 - Tern code cannot read a function's parameters from outside the function. After the call, their memory may already be in use by another function.
 - `using` always means "kept in this register or flag". A parameter written `using A`, `using X` or `using Y` is passed in that register. A `u16` parameter can use a register pair: `using AX`, `using AY` or `using XY` (low byte first).
-- **Return values:** `u8`/`i8` in A; `u16`/`i16` in A (low) and X (high); `bool` in the carry flag. Other placements can be written out: `-> u8 using Y`, `-> bool using zero` (the Z flag), `-> bool using negative` (the N flag).
+- **Return values:** `u8`/`i8` in A; `u16`/`i16` in A (low) and X (high); `bool` in the carry flag. Other placements can be written out: `-> u8 using Y`, `-> u16 using XY` (any register pair `AX`, `AY`, `XY`, low byte first), `-> bool using zero` (the Z flag), `-> bool using negative` (the N flag).
 - Registers not used for return values may be changed by any call. The compiler knows each function's actual register use and uses that instead where it can.
 
 ### 6.2 Inline functions
@@ -341,6 +341,15 @@ chrout('A')                        // lda #$41 / jsr $FFD2
 - A call is a direct `jsr` to the address. No stand-in function is generated.
 - The address is a constant expression, as for any `@`.
 - **Parameters must be passed in registers** (`using A`, `X`, `Y`, `AX`, `AY`, `XY`). A memory parameter is an error, since the routine has no frame to write into. Return values follow 6.1, including flags: `-> bool using carry`.
+- **Fixed inputs.** A constant in place of a parameter name is a value the compiler passes on every call; callers do not write it. It can go in a register (`3 using X`) or in the carry (`true using carry`, `false using carry`). Fixed inputs and ordinary parameters can be mixed. This lets one routine that takes a mode in a flag or register be declared under several names:
+  ```
+  fn get_cursor(true using carry) -> u16 using XY @ $FFF0       // KERNAL PLOT: read
+  fn set_cursor(false using carry, row: u8 using X, col: u8 using Y) @ $FFF0
+
+  set_cursor(5, 10)                // ldx #5 / ldy #10 / clc / jsr $FFF0
+  var pos = get_cursor()           // sec / jsr $FFF0 (row in pos.lo, column in pos.hi)
+  ```
+  A fixed register value is loaded with `lda`/`ldx`/`ldy #n`, and a fixed carry is one `sec` or `clc` right before the `jsr`, after all other arguments. The carry is the only flag allowed, since it is the only one with both a set and a clear instruction. Fixed inputs are only for routines at a fixed address: an `asm fn` sets them up in its own code.
 - **Registers:** the compiler cannot see inside the routine, so it assumes that a call changes A, X, Y and the flags. `keeps` after the address lists registers the routine leaves unchanged (`A`, `X`, `Y`; flags always count as changed). This is a promise taken from the routine's documentation; the compiler does not check it. A `for ... using X` loop may call a routine that keeps X (likewise Y); calls to other functions in such a loop are still an error.
 - The routine is a leaf in the call graph: it has no frame and calls nothing the compiler knows about.
 - In assembly the name stands for the address, as for any function: `jsr chrout`, `lda #chrout.lo`. `addr()` of a function is not supported yet (3.4).
@@ -500,6 +509,7 @@ These are the intended translations. The optimizer may produce something shorter
 | `match` with dense constant cases | jump table: low/high address tables indexed by the value |
 | `f(x)` with parameter `using A` | `lda x` / `jsr f` |
 | `chrout(x)` with `fn chrout(...) @ $FFD2` | `lda x` / `jsr $FFD2` |
+| `get_cursor()` with `fn get_cursor(true using carry) ... @ $FFF0` | `sec` / `jsr $FFF0` |
 | `return true` with `-> bool using carry` | `sec` / `rts` |
 | `-x` (u8) | `lda x` / `eor #$FF` / `clc` / `adc #1` |
 | `x << 2` | `asl` / `asl` (on A or directly on memory) |
