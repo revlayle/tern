@@ -1,0 +1,34 @@
+// Clears the screen and prints a message in rainbow colours, through pointers.
+const SCREEN = $0400
+const COLORS = $D800
+var border: u8 @ $D020
+var background: u8 @ $D021
+
+data msg = screen"HELLO FROM TERN"
+data rainbow: [u8; 8] = [2, 8, 7, 5, 3, 14, 4, 6]
+
+// Fills 1000 bytes: four pages of 256, minus the last 24.
+fn clear(p: ptr u8, value: u8) {
+    for _ in 0..3 {
+        for i in 0..=255 { p[i] = value }
+        p += 256
+    }
+    for i in 0..232 { p[i] = value }
+}
+
+fn print(dst: ptr u8, src: ptr u8, n: u8) {
+    for i in 0..n { dst[i] = src[i] }
+}
+
+fn main() {
+    border = 0
+    background = 0
+    clear(SCREEN, $20)              // a space in screen codes
+    clear(COLORS, 1)
+    print(SCREEN + 12 * 40 + 12, addr(msg), len(msg))
+
+    var color: ptr u8 = COLORS + 12 * 40 + 12
+    for i in 0..len(msg) {
+        color[i] = rainbow[i & 7]
+    }
+}
