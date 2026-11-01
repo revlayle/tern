@@ -555,3 +555,4 @@ Each item is decided when the feature it belongs to is built.
 7. **A general decorator syntax.** Only if modifier keywords grow past five or six.
 8. **Language name.** "Tern" is a placeholder.
 9. **`data` at a fixed address** (`data x @ $C000 = ...`). Not supported yet, since the program image is one block. Needed for fixed-address tables and for `@ bank(n)` (item 1).
+10. **Fixed-address RAM that is not volatile.** All `@ addr` variables are volatile (section 4), which suits hardware registers such as `$D020` but blocks optimizations on plain RAM at a fixed address (a buffer at `$C000`, sprite data the program draws into). Needed: a way to mark fixed-address memory as ordinary RAM. Decide before the optimizer (roadmap M7).
