@@ -25,17 +25,111 @@ public class PointerTests
         Assert.True(r.Address("main.p") < 0x100, "a dereferenced pointer must be in zero page");
     }
 
-    [Fact]
-    public void Store_through_pointer_has_the_spec_code_shape()
+    /// <summary>The instructions of main, without addresses, bytes and cycles.</summary>
+    private static string[] MainCode(Run r) =>
+        r.Result.Listing[r.Result.Listing.IndexOf("main:")..].Split('\n')
+            .Where(l => l.StartsWith('$'))
+            .Select(l => l[17..].Split(';')[0].Trim())
+            .ToArray();
+
+    [Theory]
+    // Spec 11: p[i] = v is ldy i / lda v / sta (p),y.
+    [InlineData("p[i] = v", "ldy i|lda v|sta (p),y|rts")]
+    [InlineData("for k in 0..4 using X { p[k] = v }",
+        "ldx #$00|txa|tay|lda v|sta (p),y|inx|cpx #$04|bne main.for2|rts")]
+    // dst[i] = src[i] loads Y once.
+    [InlineData("for k in 0..4 using X { p[k] = q[k] }",
+        "ldx #$00|txa|tay|lda (q),y|sta (p),y|inx|cpx #$04|bne main.for2|rts")]
+    [InlineData("p[i] = q[i]", "ldy i|lda (q),y|sta (p),y|rts")]
+    // p[i] op= v changes the element in place.
+    [InlineData("for k in 0..4 using X { p[k] += 1 }",
+        "ldx #$00|txa|tay|lda (p),y|clc|adc #$01|sta (p),y|inx|cpx #$04|bne main.for2|rts")]
+    [InlineData("p[i] <<= 2", "ldy i|lda (p),y|asl a|asl a|sta (p),y|rts")]
+    // A 16-bit store into a split array needs no temporary when the value needs no code.
+    [InlineData("rows[1] = addr(v)", "lda #v.lo|sta rows+1|lda #v.hi|sta rows+3|rts")]
+    public void Pointer_code_shapes(string statement, string expected)
     {
-        var r = Run.Program("""
+        var r = Run.Program($$"""
             var p: ptr u8
+            var q: ptr u8
             var i: u8
             var v: u8
-            fn main() { p[i] = v }
+            var rows: [ptr u8; 2]
+            fn main() { {{statement}} }
             """);
-        var main = r.Result.Listing[r.Result.Listing.IndexOf("main:")..];
-        Assert.Matches(@"lda v\s.*\n.*ldy i\s.*\n.*sta \(p\),y", main);
+        Assert.Equal(expected, string.Join("|", MainCode(r)));
+    }
+
+    [Fact]
+    public void Stores_with_the_index_in_a_register_give_the_right_values()
+    {
+        var r = Run.Program("""
+            var src: [u8; 4] = [5, 6, 7, 8]
+            var dst: [u8; 4]
+            var other: [u8; 4]
+            var v: u8 = 9
+            var arr: [u8; 4] = [1, 2, 3, 4]
+            fn ten() -> u8 { return 10 }
+            fn main() {
+                var s: ptr u8 = addr(src)
+                var d: ptr u8 = addr(dst)
+                var o: ptr u8 = addr(other)
+                for i in 0..4 using X { d[i] = s[i] }
+                for i in 0..4 using X { s[i] += v }
+                for i in 0..2 using X { o[i] = s[3 - i] }      // value uses Y with another index
+                for i in 0..2 { o[i + 2] = ten() + arr[i] }      // value calls a function
+                for i in 0..4 using Y { d[i] = d[i] ^ arr[i] }   // arrays use X while Y is held
+            }
+            """);
+        Assert.Equal([5 ^ 1, 6 ^ 2, 7 ^ 3, 8 ^ 4], r.Ram.Bytes.AsSpan(r.Address("dst"), 4).ToArray());
+        Assert.Equal([14, 15, 16, 17], r.Ram.Bytes.AsSpan(r.Address("src"), 4).ToArray());
+        Assert.Equal([17, 16, 11, 12], r.Ram.Bytes.AsSpan(r.Address("other"), 4).ToArray());
+    }
+
+    [Fact]
+    public void Compound_assignment_through_pointers()
+    {
+        var r = Run.Program("""
+            var a: [u8; 6] = [10, 10, $F0, $0F, 3, 200]
+            var s: [i8; 1] = [-8]
+            var n: u8 = 4
+            fn main() {
+                var p: ptr u8 = addr(a)
+                var q: ptr i8 = addr(s)
+                p[0] += n
+                p[1] -= 11
+                p[2] &= $3C
+                p[3] |= $80
+                p[4] ^= 1
+                p[5] >>= 3
+                q[0] >>= 1
+                (p + 1)[3] <<= 1
+            }
+            """);
+        Assert.Equal([14, 255, 0x30, 0x8F, 4, 25], r.Ram.Bytes.AsSpan(r.Address("a"), 6).ToArray());
+        Assert.Equal(-4, r.I8("s"));
+    }
+
+    [Fact]
+    public void Sixteen_bit_stores_into_split_arrays()
+    {
+        var r = Run.Program("""
+            var rows: [ptr u8; 3]
+            var ws: [u16; 3]
+            var w: u16 = $1234
+            var j: u8 = 2
+            var buf: [u8; 2]
+            fn main() {
+                rows[0] = addr(buf)
+                rows[j] = $C000
+                ws[1] = w
+                ws[j] = w + 1
+            }
+            """);
+        Assert.Equal(r.Address("buf"), r.U16At("rows", 0, 3));
+        Assert.Equal(0xC000, r.U16At("rows", 2, 3));
+        Assert.Equal(0x1234, r.U16At("ws", 1, 3));
+        Assert.Equal(0x1235, r.U16At("ws", 2, 3));
     }
 
     [Theory]

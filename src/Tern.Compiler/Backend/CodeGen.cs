@@ -335,6 +335,30 @@ public sealed class CodeGen
         if (ContainsCall(target))
             throw new CompileError(a.Pos, "Compound assignment to an element whose index calls a function is not supported");
 
+        // p[i] op= v: read, change and write the element with one Y load.
+        if (target is IndexExpr pix && IsPointerIndex(pix) && pix.Type.Size == 1
+            && (a.Op is TokenKind.ShlEq or TokenKind.ShrEq || Simple1(a.Value) is not null))
+        {
+            var (p, temp) = PointerBase(pix.Target);
+            LoadPointerIndex(pix, 0);
+            Emit(Lda, IndirectIndexed, p);
+            if (a.Op is TokenKind.ShlEq or TokenKind.ShrEq)
+                ShiftA(a.Op == TokenKind.ShlEq ? TokenKind.Shl : TokenKind.Shr, a.Value.ConstValue!.Value, pix.Type.IsSigned);
+            else
+            {
+                var binary = a.Op switch
+                {
+                    TokenKind.PlusEq => TokenKind.Plus, TokenKind.MinusEq => TokenKind.Minus, TokenKind.AmpEq => TokenKind.Amp,
+                    TokenKind.PipeEq => TokenKind.Pipe, _ => TokenKind.Caret,
+                };
+                CarryFor(binary);
+                Op(ArithMnemonic(binary), Simple1(a.Value)!);
+            }
+            Emit(Sta, IndirectIndexed, p);
+            if (temp is not null) Release(temp);
+            return;
+        }
+
         var op = a.Op switch
         {
             TokenKind.PlusEq => TokenKind.Plus, TokenKind.MinusEq => TokenKind.Minus, TokenKind.AmpEq => TokenKind.Amp,
@@ -348,6 +372,7 @@ public sealed class CodeGen
     {
         if (target.Type.Size == 1)
         {
+            if (target is IndexExpr pix && IsPointerIndex(pix) && StorePointerByteIndexFirst(pix, value)) return;
             GenA(value);
             StoreA(target);
             return;
@@ -364,24 +389,28 @@ public sealed class CodeGen
             case IndexExpr ix:
             {
                 var arr = ArrayOf(ix);
+                VariableSymbol? temp = null;
+                var pair = Simple2(value);
+                if (pair is null)
+                {
+                    temp = AcquireTemp(2);
+                    Gen16(value, new Loc(temp));
+                    pair = (Var(temp), Var(temp, 1));
+                }
+                var (lo, hi) = pair.Value;
                 if (ix.Index.ConstValue is long ci)
                 {
-                    var temp = AcquireTemp(2);
-                    Gen16(value, new Loc(temp));
-                    Op(Lda, Var(temp)); Op(Sta, Var(arr, (int)ci));
-                    Op(Lda, Var(temp, 1)); Op(Sta, Var(arr, arr.Type.Length + (int)ci));
-                    Release(temp);
+                    Op(Lda, lo); Op(Sta, Var(arr, (int)ci));
+                    Op(Lda, hi); Op(Sta, Var(arr, arr.Type.Length + (int)ci));
                 }
                 else
                 {
-                    var temp = AcquireTemp(2);
-                    Gen16(value, new Loc(temp));
                     var reg = LoadIndex(ix.Index);
                     var mode = reg == Register.X ? AbsoluteX : AbsoluteY;
-                    Op(Lda, Var(temp)); Emit(Sta, mode, Var(arr));
-                    Op(Lda, Var(temp, 1)); Emit(Sta, mode, Var(arr, arr.Type.Length));
-                    Release(temp);
+                    Op(Lda, lo); Emit(Sta, mode, Var(arr));
+                    Op(Lda, hi); Emit(Sta, mode, Var(arr, arr.Type.Length));
                 }
+                if (temp is not null) Release(temp);
                 break;
             }
             default:
@@ -607,12 +636,7 @@ public sealed class CodeGen
         if (b.Op is TokenKind.Shl or TokenKind.Shr)
         {
             GenA(b.Left);
-            for (int i = 0; i < b.Right.ConstValue; i++)
-            {
-                if (b.Op == TokenKind.Shl) Emit(Asl, Accumulator);
-                else if (b.Type.IsSigned) { Op(Cmp, Byte(0x80)); Emit(Ror, Accumulator); }
-                else Emit(Lsr, Accumulator);
-            }
+            ShiftA(b.Op, b.Right.ConstValue!.Value, b.Type.IsSigned);
             return;
         }
 
@@ -640,6 +664,16 @@ public sealed class CodeGen
         CarryFor(b.Op);
         Op(m, Var(temp));
         Release(temp);
+    }
+
+    private void ShiftA(TokenKind op, long count, bool signed)
+    {
+        for (int i = 0; i < count; i++)
+        {
+            if (op == TokenKind.Shl) Emit(Asl, Accumulator);
+            else if (signed) { Op(Cmp, Byte(0x80)); Emit(Ror, Accumulator); }
+            else Emit(Lsr, Accumulator);
+        }
     }
 
     /// <summary>Puts a bool expression's value (0 or 1) in A.</summary>
@@ -1073,6 +1107,50 @@ public sealed class CodeGen
         }
         Emit(m, IndirectIndexed, p);
         if (temp is not null) Release(temp);
+    }
+
+    /// <summary>
+    /// <c>p[i] = v</c> in the spec 11 shape: Y first, then the value, so A never needs saving.
+    /// Returns false if computing the value would change Y.
+    /// </summary>
+    private bool StorePointerByteIndexFirst(IndexExpr ix, Expr value)
+    {
+        if (ix.Type.Size != 1) return false;
+        // dst[i] = src[i]: one Y load for both.
+        var source = value is IndexExpr vix && IsPointerIndex(vix) && vix.Type.Size == 1 && SameIndex(vix.Index, ix.Index)
+            ? DirectPointer(vix.Target) : null;
+        if (source is null && UsesY(value)) return false;
+
+        var (p, temp) = PointerBase(ix.Target);
+        LoadPointerIndex(ix, 0);
+        if (source is not null) Emit(Lda, IndirectIndexed, Var(source));
+        else GenA(value);
+        Emit(Sta, IndirectIndexed, p);
+        if (temp is not null) Release(temp);
+        return true;
+    }
+
+    private static bool SameIndex(Expr a, Expr b) =>
+        (a.ConstValue is long ca && b.ConstValue == ca)
+        || (a is NameExpr { Symbol: { } va } && b is NameExpr { Symbol: { } vb } && va == vb && !va.IsVolatile);
+
+    /// <summary>True if computing <paramref name="e"/> may change Y (conservative).</summary>
+    private bool UsesY(Expr e)
+    {
+        if (e.ConstValue is not null) return false;
+        return e switch
+        {
+            NameExpr => false,
+            IndexExpr ix when IsPointerIndex(ix) => true,
+            // Arrays are indexed with X unless a loop holds X.
+            IndexExpr ix => ix.Index.ConstValue is null && (_reserved.Contains(Register.X) || UsesY(ix.Index)),
+            CallExpr call => call.AddressOf is null,
+            UnaryExpr u => UsesY(u.Operand),
+            BinaryExpr b => UsesY(b.Left) || UsesY(b.Right),
+            MemberExpr m => UsesY(m.Target),
+            CastExpr c => UsesY(c.Operand),
+            _ => true,
+        };
     }
 
     /// <summary>Reads a two-byte element p[i] into <paramref name="d"/>.</summary>
