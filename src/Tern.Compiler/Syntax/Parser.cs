@@ -164,6 +164,9 @@ public sealed class Parser
             returnType = ParseType();
             if (Accept(TokenKind.Using)) returnUsing = ParseRegister();
         }
+        if (At(TokenKind.Keeps))
+            throw new CompileError(Current.Pos, $"'keeps' is only for routines at a fixed address: fn {name.Text}(...) @ $addr keeps X");
+
         // A routine that already exists at a fixed address: no body.
         if (At(TokenKind.At))
         {

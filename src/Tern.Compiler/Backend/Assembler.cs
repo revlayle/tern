@@ -53,6 +53,7 @@ public static class Assembler
                 {
                     Instr i => s.LongBranch ? 5 : InstructionSet.OperandSize(s.Mode) + 1,
                     DataBytes d => d.Bytes.Length,
+                    Padding p => p.SizeAt(pc),
                     _ => 0,
                 };
                 if (s.Item is LabelDef l) l.Label.Address = pc;
@@ -104,6 +105,10 @@ public static class Assembler
                         var chunk = d.Bytes.Skip(k).Take(8).ToArray();
                         listing.AppendLine($"${s.Address + k:X4}  {string.Join(" ", chunk.Select(b => b.ToString("X2")))}");
                     }
+                    break;
+                case Padding p when s.Size > 0:
+                    bytes.AddRange(new byte[s.Size]);
+                    listing.AppendLine($"${s.Address:X4}  {s.Size} byte(s) of padding: {p.Reason}");
                     break;
                 case LabelDef l:
                     listing.AppendLine($"{l.Label.Name}:");

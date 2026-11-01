@@ -215,12 +215,27 @@ public sealed partial class Checker
         var v = ins.Value;
         if (v?.Function is { } f && (f != _function || ins.Mnemonic == Mnemonic.Jsr))
             _function!.Callees.Add(f);
+        // Assembly cannot write a function's memory parameters (they are not names outside it).
+        if (v?.Function is { FixedAddress: null } callee && callee != _function && v.High is null
+            && ins.Mnemonic is Mnemonic.Jsr or Mnemonic.Jmp && ins.Mode == Absolute
+            && callee.Parameters.FirstOrDefault(p => p.PassedIn is null) is { } memoryParam)
+            throw new CompileError(ins.Operand!.Pos,
+                $"'{callee.Name}' takes '{memoryParam.Name}' in memory, which assembly cannot set. "
+                + $"Pass it in a register ({memoryParam.Name}: {memoryParam.Type} using A), or call {callee.Name} from Tern");
         if (v?.Variable is not { } variable) return;
         if (v.High is not null)
         {
             // #name.lo / #name.hi: the address is used, perhaps as a pointer.
             variable.AddressTaken = true;
             return;
+        }
+        if (ins.Mode == Indirect)
+        {
+            // jmp ($xxFF) reads the high byte from $xx00 on the NMOS 6502.
+            if (variable.FixedAddress is int fixedAt && ((fixedAt + v.Number) & 0xFF) == 0xFF)
+                throw new CompileError(ins.Operand!.Pos,
+                    $"jmp (...) at ${fixedAt + v.Number:X4} reads its high byte from ${(fixedAt + v.Number) & 0xFF00:X4} on the 6502, since the address ends in $FF. Move '{variable.Name}'");
+            variable.JumpVectorOffsets.Add((int)v.Number);
         }
         if (AsmEffects.ReadsMemory(ins.Mnemonic, ins.Mode)) effects.VariablesRead.Add(variable);
         if (AsmEffects.WritesMemory(ins.Mnemonic, ins.Mode))

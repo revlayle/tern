@@ -514,10 +514,36 @@ public class AsmTests
     [InlineData("fn main() { for i in 0..3 using X { asm {\n jsr $FFD2\n } } }", "'jsr' calls a subroutine, which can change X")]
     [InlineData("asm fn f() {\n jsr f\n}\nfn main() { f() }", "Recursion is not allowed: f -> f")]
     [InlineData("fn main() { asm {\n jmp (.x)\n .x:\n lda (.x),y\n } }", "needs a zero-page address, not a label")]
+    [InlineData("var score: u8\nfn main() { asm {\n lda -score\n } }", "Only numbers can be negated or inverted")]
+    [InlineData("var v: u16 @ $10FF\nfn main() { asm {\n jmp (v)\n } }", "jmp (...) at $10FF reads its high byte from $1000 on the 6502")]
+    [InlineData("var t: [u8; 4] @ $10FD\nfn main() { asm {\n jmp (t+2)\n } }", "jmp (...) at $10FF reads its high byte from $1000")]
+    [InlineData("fn f(v: u8) { }\nfn main() { asm {\n jsr f\n } }", "'f' takes 'v' in memory, which assembly cannot set. Pass it in a register (v: u8 using A), or call f from Tern")]
+    [InlineData("fn f(a: u8 using A, v: u16) { }\nfn main() { asm {\n jmp f\n } }", "'f' takes 'v' in memory")]
     public void Reports_errors(string source, string expected)
     {
         var e = Assert.Throws<CompileError>(() => TernCompiler.Compile(source));
         Assert.Contains(expected, e.Description);
+    }
+
+    [Fact]
+    public void Address_of_a_function_with_memory_parameters_is_allowed()
+    {
+        var r = Run.Program("""
+            var lo: u8
+            fn f(v: u8) { }
+            fn main() { asm {
+                lda #f.lo
+                sta lo
+            } }
+            """);
+        Assert.Equal(r.Address("f") & 0xFF, r.U8("lo"));
+    }
+
+    [Fact]
+    public void Jump_vector_at_a_fixed_address_away_from_a_page_end_is_kept()
+    {
+        var r = TernCompiler.Compile("var v: u16 @ $10FE\nfn main() { asm {\n jmp (v)\n } }");
+        Assert.Contains("6C FE 10", r.Listing);
     }
 
     [Fact]
@@ -583,6 +609,56 @@ public class AsmTests
             if (File.Exists(path)) return path;
         }
         throw new FileNotFoundException($"examples/{name} not found above {AppContext.BaseDirectory}");
+    }
+
+    /// <summary>
+    /// The NMOS 6502 reads the high byte of jmp ($xxFF) from $xx00 (the emulator does too). The
+    /// compiler places a vector it allocates so that it never starts at $xxFF. Zero page is full,
+    /// so v goes after the program, and the size of pad moves it across a page end.
+    /// </summary>
+    [Fact]
+    public void Jump_vectors_never_start_at_the_end_of_a_page()
+    {
+        bool padded = false;
+        foreach (string init in new[] { "", " = 0" })
+        {
+            for (int n = 1; n <= 256; n++)
+            {
+                var r = Run.Program($$"""
+                    var zp1: [u8; 142] @ zp
+                    var pad: [u8; {{n}}]
+                    var v: u16{{init}}
+                    var t: [u8; 3]
+                    var hit: u8
+                    asm fn target() { inc hit }
+                    fn main() {
+                        zp1[0] = 1
+                        pad[0] = 1
+                        asm {
+                            lda #target.lo
+                            sta v
+                            sta t+1
+                            lda #target.hi
+                            sta v+1
+                            sta t+2
+                            jsr .go
+                            jsr .go2
+                            jmp .end
+                        .go:
+                            jmp (v)
+                        .go2:
+                            jmp (t+1)
+                        .end:
+                        }
+                    }
+                    """);
+                Assert.True((r.Address("v") & 0xFF) != 0xFF, $"v at ${r.Address("v"):X4} with pad {n}");
+                Assert.True(((r.Address("t") + 1) & 0xFF) != 0xFF, $"t+1 at ${r.Address("t") + 1:X4} with pad {n}");
+                Assert.Equal(2, r.U8("hit"));
+                padded |= r.Result.Listing.Contains("of padding");
+            }
+        }
+        Assert.True(padded);
     }
 
     [Fact]

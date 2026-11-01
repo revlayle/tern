@@ -154,8 +154,8 @@ public static class Lexer
                 while (i < source.Length && (char.IsLetterOrDigit(source[i]) || source[i] == '_')) i++;
                 string word = source[start..i];
                 // A name right before a quote is an encoding prefix: screen"HELLO". The checker
-                // reports unknown encodings.
-                if (Peek(source, i) is '"' or '\'')
+                // reports unknown encodings. Keywords are never prefixes: return'A'.
+                if (Peek(source, i) is '"' or '\'' && !Keywords.ContainsKey(word))
                 {
                     AddQuoted(start, word);
                     continue;

@@ -71,6 +71,18 @@ public sealed class TernType
 /// <summary>A CPU register, register pair or flag named by <c>using</c>.</summary>
 public enum Register { A, X, Y, AX, AY, XY, Carry, Zero, Negative }
 
+public static class RegisterExtensions
+{
+    /// <summary>True if <paramref name="reg"/> is or contains <paramref name="part"/>: AX uses A and X.</summary>
+    public static bool Uses(this Register reg, Register part) => reg switch
+    {
+        Register.AX => part is Register.A or Register.X,
+        Register.AY => part is Register.A or Register.Y,
+        Register.XY => part is Register.X or Register.Y,
+        _ => reg == part,
+    };
+}
+
 public abstract class Symbol(string name, SourcePos pos)
 {
     public string Name { get; } = name;
@@ -112,6 +124,11 @@ public sealed class VariableSymbol(string name, SourcePos pos, TernType type, Va
     public bool AddressTaken { get; set; }
     /// <summary>Used in assembly with a zero-page-only mode, e.g. <c>lda (p),y</c>. It must be in zero page.</summary>
     public bool AsmZeroPage { get; set; }
+    /// <summary>
+    /// Offsets at which this variable is used as <c>jmp (name+offset)</c>. On the NMOS 6502 such a
+    /// vector must not start at an address ending in $FF, so the variable is placed to avoid that.
+    /// </summary>
+    public HashSet<int> JumpVectorOffsets { get; } = [];
 
     /// <summary>Estimated access count, used to rank zero-page candidates.</summary>
     public long Weight { get; set; }

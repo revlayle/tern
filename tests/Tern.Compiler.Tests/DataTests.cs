@@ -151,6 +151,17 @@ public class DataTests
     }
 
     [Fact]
+    public void A_keyword_before_a_quote_is_not_an_encoding_prefix()
+    {
+        var r = Run.Program("""
+            var c: u8
+            fn f() -> u8 { return'A' }
+            fn main() { c = f() }
+            """);
+        Assert.Equal(0x41, r.U8("c"));
+    }
+
+    [Fact]
     public void Prefixed_char_literals_are_constants()
     {
         var r = Run.Program("""

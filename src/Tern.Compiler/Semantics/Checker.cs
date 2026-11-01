@@ -138,7 +138,6 @@ public sealed partial class Checker
         else if (decl.ReturnUsing is not null)
             throw new CompileError(decl.Pos, "'using' needs a return type");
 
-
         Declare(fn);
     }
 
@@ -158,7 +157,7 @@ public sealed partial class Checker
                 throw new CompileError(pos, $"'keeps' lists the registers A, X and Y, not {reg}. Flags always count as changed");
             if (!fn.Keeps.Add(reg))
                 throw new CompileError(pos, $"{reg} is listed twice after 'keeps'");
-            if (fn.ReturnRegister is { } ret && ret.ToString().Contains(reg.ToString()))
+            if (fn.ReturnRegister is { } ret && ret.Uses(reg))
                 throw new CompileError(pos, $"'{fn.Name}' returns a value in {reg}, so it cannot keep {reg}");
         }
     }
@@ -960,7 +959,7 @@ public sealed partial class Checker
         }
         foreach (var p in fn.Parameters)
             foreach (var held in _loopRegisters)
-                if (p.PassedIn is { } pr && pr.ToString().Contains(held.ToString()))
+                if (p.PassedIn is { } pr && pr.Uses(held))
                     throw new CompileError(c.Pos, $"'{fn.Name}' takes '{p.Name}' in {held}, which holds the loop variable. Remove 'using {held}' from the loop");
         c.Function = fn;
         c.Type = fn.ReturnType;

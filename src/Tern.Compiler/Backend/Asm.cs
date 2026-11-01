@@ -69,6 +69,9 @@ public sealed record LabelDef(Label Label) : AsmItem;
 
 public sealed record DataBytes(byte[] Bytes) : AsmItem;
 
+/// <summary>Zero bytes whose count depends on the address where they start, worked out during layout.</summary>
+public sealed record Padding(Func<int, int> SizeAt, string Reason) : AsmItem;
+
 /// <summary>A source line, shown in the listing above the code it produced.</summary>
 public sealed record SourceLine(int Line, string Text) : AsmItem;
 
