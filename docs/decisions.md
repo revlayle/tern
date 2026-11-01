@@ -83,3 +83,18 @@ Settled decisions and the reasons for them. Do not reopen one without new inform
 - **Included with `import name`, used with qualified names** (`text.put`). Reasons: no name clashes as the library grows; platform modules only load on their platform; the same mechanism splits user programs into files. `.` keeps one meaning, "member of". Replaces "v0 is a single file with an always-available library".
 - **Strings and memory blocks are passed as pointer plus length.** Shortest loops, matches `len()` on literals, strings may contain any byte. No zero-terminated variants in the library.
 - **The library arrives early (M4, right after assembly blocks)**, since KERNAL calls need `asm fn`, and programs cannot multiply at runtime without `math`.
+
+## 2026-11-01: M2 questions settled
+
+- **Encodings are built into the compiler, per target.** The target sets the default for unprefixed literals; a prefix (`screen"..."`, `petscii_mixed'a'`) overrides it. Reason: every 8-bit system has its own character codes, and lower/upper-case sets differ even on one machine. First set: `petscii`, `petscii_mixed`, `screen`, `screen_mixed`, `ascii`, `apple`, `atascii`, `atari_screen`, each added with its platform. The NES has no default; user-defined encodings later.
+- **`screen'A'`** and other prefixed char literals are allowed, matching strings.
+- **Escapes:** `\0`, `\n`, `\\`, `\"`, `\'`, `\$NN` (raw byte). Characters an encoding cannot represent are errors.
+- **`addr(name)` gives a pointer** (`ptr T`), not a `u16`. Arrays give a pointer to the first element; split 16-bit arrays a `ptr u8` to the low-byte table.
+- **Number literals convert to pointers without `as`**, consistent with literals taking their type from context. Typed `u16` values need `as`.
+- **`p[i]` on 16-bit pointers counts elements** (a shift, a short fixed sequence). The byte offset must fit in 256: constant indexes above 127 are errors; variable ones wrap.
+- **No `.lo`/`.hi` on pointers**: `p.name` is reserved for fields of the pointed-to struct.
+- **`p - q` gives a `u16` byte distance.** Pointer offsets are unsigned; `p - n` moves back.
+- **`data` from strings and `include_bytes` may exceed 256 bytes**, used through pointers, not indexes.
+- **Strings can initialize global `var` arrays** of exactly their length.
+- **Only functions are stopped from reusing a built-in's name.**
+- **Deferred:** `data` at a fixed address (needed with banking), user-defined encodings.

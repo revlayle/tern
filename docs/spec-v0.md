@@ -41,9 +41,26 @@ Tern is a programming language for 6502-family processors. It aims to be easy to
 | Decimal | `200`, `-5`, `+5` | |
 | Hex | `$C000` | |
 | Binary | `0b1010_0101` | `_` is allowed as a separator in any number |
-| Char | `'A'` | Converted with the platform's character encoding (C64: PETSCII) |
-| String | `"HELLO"` | Byte array in the platform encoding. No terminator unless written: `"HI\0"` |
+| Char | `'A'`, `screen'A'` | One byte in the target's default encoding, or in the named encoding |
+| String | `"HELLO"`, `screen"HELLO"` | Byte array in the target's default encoding, or in the named encoding. No terminator unless written: `"HI\0"` |
 | Bool | `true`, `false` | |
+
+**Escapes** in char and string literals: `\0` (zero byte), `\n` (the encoding's line break; PETSCII `$0D`), `\\`, `\"`, `\'`, and `\$NN` (a raw byte, not converted by the encoding). A character the encoding has no code for is a compile error that suggests `\$NN`.
+
+**Encodings** are built into the compiler. The compilation target sets the default for literals without a prefix; a prefix names another encoding: `petscii_mixed"Hello"`. Any encoding may be used on any target, since an encoding is only a mapping from characters to bytes. A prefix has one meaning: the encoding of the literal right after it.
+
+| Encoding | Machine | Notes |
+|---|---|---|
+| `petscii` | C64, Commander X16 | Default on the C64. Upper case and graphics character set; `a`-`z` give the same codes as `A`-`Z` |
+| `petscii_mixed` | C64, Commander X16 | For the lower/upper-case character set |
+| `screen` | C64 | Screen codes (bytes stored directly in screen memory), upper case and graphics set |
+| `screen_mixed` | C64 | Screen codes for the lower/upper-case set |
+| `ascii` | Commander X16 (ISO mode), general | Plain 7-bit ASCII |
+| `apple` | Apple II | ASCII with the high bit set (normal text) |
+| `atascii` | Atari 8-bit | Default on the Atari |
+| `atari_screen` | Atari 8-bit | Atari internal screen codes |
+
+Each encoding is implemented together with its platform. The NES has no character set (text is tile numbers chosen by each game), so it has no default encoding: a literal without a prefix is an error there. User-defined encodings are planned (14.5).
 
 ### 2.2 Modules and imports
 
@@ -90,6 +107,7 @@ fn main() {
 ### 3.2 Arrays
 
 - Array length is at most 256, so any index fits in the X or Y register.
+- Exception: `data` from a string literal or `include_bytes` may be longer than 256 bytes (e.g. a 2 KB character set). It cannot be indexed; use it through a pointer (`addr(name)`).
 - Array indexes are always `u8` and produce `abs,X`/`abs,Y` addressing. For memory larger than 256 bytes, use a `ptr`.
 - **Arrays with multi-byte elements are split.** `[u16; 32]` is stored as two 32-byte tables, low bytes and high bytes. `a[i]` becomes `lda a_lo,x` / `lda a_hi,x`. Declare it `linear` to get a normal interleaved layout, e.g. for data shared with hardware or assembly: `linear var pts: [u16; 32]`.
 
@@ -138,11 +156,15 @@ e.pos.y = 5                        // ldy #1 / sta (e),y
 
 ### 3.4 Pointers
 
-- `ptr T` is a 16-bit address. `addr(name)` gives the address of a variable, array or function.
+- `ptr T` is a 16-bit address. `addr(name)` gives a pointer to a variable or array: `ptr T` for a variable of type `T`, a pointer to the first element for an array of one-byte elements, and `ptr u8` to the low-byte table for a split array of 16-bit values. Use `as u16` for the address as a number. `addr()` of a function is not supported yet.
+- A number literal (or an untyped `const`) converts to a pointer without `as`, since literals take their type from context: `var p: ptr u8 = $0400`, `p == 0`. A typed `u16` value needs `as`.
 - `p[i]` with `i: u8` compiles to `(zp),Y` addressing. There is no separate dereference operator: use `p[0]`.
+- On a pointer to a 16-bit type, the index counts elements: `p[i]` reads the bytes at offsets `2*i` and `2*i+1`. The byte offset must fit in the 256 bytes `(zp),Y` reaches: a constant index above 127 is an error, and a variable index of 128 or more wraps within those 256 bytes.
+- `.lo` and `.hi` cannot be used on pointers, since `p.name` means a field of the struct `p` points to (3.3). Write `(p as u16).hi`.
 - For a pointer to a struct, `p.field` accesses a field (3.3). `p[i]` is not allowed on struct pointers, since it would need a multiply by the struct size.
 - A pointer that is dereferenced must be in zero page. The compiler puts it there automatically (section 8.2) and reports an error if zero page runs out.
-- Pointer arithmetic is in bytes: `p + 1` is the next byte. Use `p + sizeof(T)` to step by one element.
+- Pointer arithmetic is in bytes: `p + 1` is the next byte. Use `p + sizeof(T)` to step by one element. Offsets are unsigned; use `p - n` to move back.
+- `p - q` of two pointers gives the distance in bytes as a `u16`.
 - **Any pointer converts to any other pointer type with `as`**, with no restrictions and no generated code: `p as ptr Enemy` reads the same memory as an `Enemy`. Pointers also convert to and from `u16` with `as`. The element type only tells the compiler how to read the memory; it never limits what the memory can be used as.
 
 ### 3.5 Conversions
@@ -373,7 +395,7 @@ asm fn fill(value: u8 using A, count: u8 using X) {
 
 | Built-in | Meaning |
 |---|---|
-| `addr(name)` | Address of a variable, array or function, as `u16` |
+| `addr(name)` | Pointer to a variable or array (3.4) |
 | `sizeof(T)` | Size of a type in bytes |
 | `len(a)` | Number of elements in an array (compile-time) |
 
@@ -474,7 +496,7 @@ These are the intended translations. The optimizer may produce something shorter
 
 ### 12.2 Platforms
 
-A platform description gives: CPU variant, free zero-page ranges, RAM ranges for variables, code start address, output file format, startup code, and character encoding.
+A platform description gives: CPU variant, free zero-page ranges, RAM ranges for variables, code start address, output file format, startup code, and the default character encoding (2.1).
 
 **C64 (first platform)**
 
@@ -482,7 +504,7 @@ A platform description gives: CPU variant, free zero-page ranges, RAM ranges for
 - Startup: a BASIC line `10 SYS 2061`, then the startup code (zero globals, copy initialized data, call `main`).
 - Free zero page: `$02–$8F` (BASIC's work area; the program does not return to BASIC) and `$FB–$FE`.
 - Variables: RAM after the program up to `$9FFF`. KERNAL and I/O stay mapped in v0.
-- Encoding: PETSCII for strings, with `screen"..."` for screen codes.
+- Default encoding: `petscii` (2.1).
 
 **Planned:** NES (iNES, `ricoh2a03`, PRG/CHR banks), Commander X16 (`wdc65c02`), Apple II (binary for DOS 3.3/ProDOS), Atari 8-bit (`.xex`).
 
@@ -528,7 +550,8 @@ Each item is decided when the feature it belongs to is built.
 2. **Functions called from both main and interrupts.** v0: a compile error. Likely direction: the compiler makes a second copy of the function for the interrupt side, which costs ROM but no speed and needs no stack.
 3. **`pha`/`pla` for temporaries.** `pha`/`pla` is 2 bytes and 7 cycles, against 4 bytes and 6 cycles for a zero-page temporary. Likely direction: the optimizer chooses, but never across a function call. Settle with benchmarks.
 4. **Overflow checks in debug builds.** Likely direction: no extra code in the program. The built-in emulator checks for overflow while running tests, using the compiler's debug information.
-5. **Character encodings** for platforms other than C64. Each platform file defines its own.
+5. **User-defined encodings,** e.g. for the NES, where each game decides which tile shows which character: a character-to-byte table declared in source. Built-in encodings are settled (2.1).
+9. **`data` at a fixed address** (`data x @ $C000 = ...`). Not supported yet, since the program image is one block. Needed for fixed-address tables and for `@ bank(n)` (item 1).
 6. **`using` on local variables** (`var count: u8 using Y`). Leave out until generated code shows a need.
 7. **A general decorator syntax.** Only if modifier keywords grow past five or six.
 8. **Language name.** "Tern" is a placeholder.

@@ -20,6 +20,15 @@ Spec: 2.1 (char and string literals), 3.4, 3.5 (pointer conversions), 4 (`data`)
 
 Done when: a program can copy a string to the screen through a pointer, a `data` table is readable by index, and pointer arithmetic across page boundaries is tested.
 
+## M2 follow-up (small, at the start of M3)
+
+Spec: 2.1, 3.4. From the M2 questions settled in `docs/decisions.md`.
+
+- `p - q` of two pointers gives a `u16`
+- Prefixed char literals (`screen'A'`)
+- The `petscii_mixed` and `screen_mixed` encodings; explicit `petscii` prefix
+- The encoding is part of the platform description (default per target)
+
 ## M3: Assembly blocks and KERNAL calls
 
 Spec: 9.
