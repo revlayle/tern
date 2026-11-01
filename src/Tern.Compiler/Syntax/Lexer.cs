@@ -97,8 +97,17 @@ public static class Lexer
 
         SourcePos Pos(int at) => new(line, at - lineStart + 1, file);
 
-        void Add(TokenKind kind, string text, long value, int start, string? encoding = null) =>
+        // Line breaks inside ( ) and [ ] do not end a statement, so long argument lists and tables
+        // can span lines. A brace resets the count, so an unclosed bracket is reported near it.
+        int nesting = 0;
+
+        void Add(TokenKind kind, string text, long value, int start, string? encoding = null)
+        {
             tokens.Add(new Token(kind, text, value, Pos(start), encoding));
+            if (kind is TokenKind.LParen or TokenKind.LBracket) nesting++;
+            else if (kind is TokenKind.RParen or TokenKind.RBracket) nesting = Math.Max(0, nesting - 1);
+            else if (kind is TokenKind.LBrace or TokenKind.RBrace) nesting = 0;
+        }
 
         // A char or string literal whose quote is at i. Its encoding prefix, if any, started at start.
         void AddQuoted(int start, string? encoding)
@@ -116,7 +125,7 @@ public static class Lexer
 
             if (c == '\n')
             {
-                if (tokens.Count > 0 && EndsStatement(tokens[^1].Kind))
+                if (nesting == 0 && tokens.Count > 0 && EndsStatement(tokens[^1].Kind))
                     Add(TokenKind.Newline, "\\n", 0, i);
                 i++;
                 line++;

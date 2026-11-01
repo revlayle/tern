@@ -1,0 +1,90 @@
+// Text in memory, platform independent. Texts are a pointer plus a length.
+// Digits are screen codes, which are the same as PETSCII for 0-9.
+
+data DIGITS = screen"0123456789ABCDEF"
+data POWERS: [u16; 4] = [10000, 1000, 100, 10]
+
+// Copy n bytes of text to dst, e.g. a screen"..." string to screen memory.
+fn put(dst: ptr u8, src: ptr u8, n: u8) {
+    for i in 0..n using Y {
+        dst[i] = src[i]
+    }
+}
+
+// Write value in decimal at dst, without leading zeros. Returns the number of digits (1 to 3).
+fn dec8(dst: ptr u8, value: u8) -> u8 {
+    var n: u8 = 0
+    if value >= 100 {
+        var d: u8 = DIGITS[0]
+        while value >= 100 {
+            value -= 100
+            d += 1
+        }
+        dst[0] = d
+        n = 1
+    }
+    if value >= 10 || n != 0 {
+        var d: u8 = DIGITS[0]
+        while value >= 10 {
+            value -= 10
+            d += 1
+        }
+        dst[n] = d
+        n += 1
+    }
+    dst[n] = value + DIGITS[0]
+    return n + 1
+}
+
+// Write value in decimal at dst, without leading zeros. Returns the number of digits (1 to 5).
+fn dec16(dst: ptr u8, value: u16) -> u8 {
+    var n: u8 = 0
+    for k in 0..4 {
+        var power: u16 = POWERS[k]
+        var d: u8 = 0
+        while value >= power {
+            value -= power
+            d += 1
+        }
+        if d != 0 || n != 0 {
+            dst[n] = DIGITS[d]
+            n += 1
+        }
+    }
+    dst[n] = DIGITS[value.lo]
+    return n + 1
+}
+
+// Write value as 2 hex digits at dst.
+fn hex8(dst: ptr u8, value: u8) {
+    dst[0] = DIGITS[value >> 4]
+    dst[1] = DIGITS[value & 15]
+}
+
+// Write value as 4 hex digits at dst.
+fn hex16(dst: ptr u8, value: u16) {
+    dst[0] = DIGITS[value.hi >> 4]
+    dst[1] = DIGITS[value.hi & 15]
+    dst[2] = DIGITS[value.lo >> 4]
+    dst[3] = DIGITS[value.lo & 15]
+}
+
+// True if the n bytes at a and b are the same.
+fn equal(a: ptr u8, b: ptr u8, n: u8) -> bool {
+    for i in 0..n using Y {
+        if a[i] != b[i] {
+            return false
+        }
+    }
+    return true
+}
+
+// The index of the first ch in the n bytes at s, or $FF if there is none.
+fn find(s: ptr u8, n: u8, ch: u8) -> u8 {
+    for i in 0..n using Y {
+        if s[i] == ch {
+            return i
+        }
+    }
+    return $FF
+}

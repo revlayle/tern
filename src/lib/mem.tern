@@ -1,0 +1,29 @@
+// Memory blocks: copy and fill. Whole pages first, then the rest.
+
+// Copy count bytes from src to dst, first byte first. Overlapping blocks
+// work only when dst is below src.
+fn copy(dst: ptr u8, src: ptr u8, count: u16) {
+    for _ in 0..count.hi {
+        for i in 0..=255 using Y {
+            dst[i] = src[i]
+        }
+        dst += 256
+        src += 256
+    }
+    for i in 0..count.lo using Y {
+        dst[i] = src[i]
+    }
+}
+
+// Set count bytes at dst to value.
+fn fill(dst: ptr u8, value: u8, count: u16) {
+    for _ in 0..count.hi {
+        for i in 0..=255 using Y {
+            dst[i] = value
+        }
+        dst += 256
+    }
+    for i in 0..count.lo using Y {
+        dst[i] = value
+    }
+}
