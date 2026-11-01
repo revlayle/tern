@@ -1,0 +1,30 @@
+// The standard library: print a message and a number through the KERNAL,
+// and write text, a product and colors straight to screen memory.
+import c64
+import math
+import mem
+import text
+
+const CLEAR = $93                       // PETSCII "clear screen"
+const ROW = c64.SCREEN + 40 * 10        // screen row 10
+const ROW_COLOR = c64.COLOR + 40 * 10
+
+data greeting = "HELLO FROM THE TERN LIBRARY.\n"
+data year = "YEAR "
+data label = screen"6 X 7 = "
+
+var digits: [u8; 5]
+
+fn main() {
+    // Through the KERNAL: PETSCII text, then a number. Digits are the same in PETSCII and screen codes.
+    c64.chrout(CLEAR)
+    c64.print(addr(greeting), len(greeting))
+    c64.print(addr(year), len(year))
+    var n: u8 = text.dec16(addr(digits), 1982)
+    c64.print(addr(digits), n)
+
+    // Straight to screen memory: a screen-code label, a product, and a row of color.
+    text.put(ROW, addr(label), len(label))
+    text.dec16(ROW + len(label), math.mul8(6, 7))
+    mem.fill(ROW_COLOR, c64.YELLOW, 40)
+}

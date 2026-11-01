@@ -601,7 +601,7 @@ public class AsmTests
         Assert.Contains("20 D2 FF  jsr $FFD2", result.Listing);
     }
 
-    private static string FindExample(string name)
+    internal static string FindExample(string name)
     {
         for (var dir = new DirectoryInfo(AppContext.BaseDirectory); dir is not null; dir = dir.Parent)
         {

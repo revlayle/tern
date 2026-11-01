@@ -298,6 +298,24 @@ public class C64LibraryTests
     }
 
     [Fact]
+    public void Library_example_prints_and_writes_to_the_screen()
+    {
+        var path = AsmTests.FindExample("library.tern");
+        var r = Run.Program(File.ReadAllText(path), sourcePath: path, setup: Kernal);
+        var printed = "HELLO FROM THE TERN LIBRARY.\nYEAR 1982".Select(c => (byte)CharEncoding.Petscii.Encode(c)!.Value);
+        Assert.Equal([0x93, .. printed], r.Ram.Bytes.AsSpan(0xC500, r.Ram.Bytes[0xC5FF]).ToArray());
+        var row = 0x0400 + 400;
+        Assert.Equal("6 X 7 = 42"u8.ToArray().Select(c => (byte)CharEncoding.Screen.Encode((char)c)!.Value),
+            r.Ram.Bytes.AsSpan(row, 10).ToArray());
+        Assert.All(r.Ram.Bytes.AsSpan(0xD800 + 400, 40).ToArray(), b => Assert.Equal(7, b));
+        Assert.Equal(0, r.Ram.Bytes[0xD800 + 399]);
+        Assert.Equal(0, r.Ram.Bytes[0xD800 + 440]);
+        // KERNAL routines are called in ROM, with no stand-in functions.
+        Assert.DoesNotContain("\nc64.chrout:", r.Result.Listing);
+        Assert.Contains("jsr $FFD2", r.Result.Listing);
+    }
+
+    [Fact]
     public void Constants()
     {
         var r = Run.Program("""
