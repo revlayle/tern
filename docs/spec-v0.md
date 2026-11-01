@@ -327,6 +327,26 @@ handler = walk
 handler()                          // jsr to a "jmp (handler)" stub
 ```
 
+### 6.6 Routines at a fixed address
+
+A routine that already exists in memory, such as a KERNAL routine in ROM, is declared as a function with no body, placed with `@`:
+
+```
+fn chrout(ch: u8 using A) @ $FFD2 keeps X, Y
+fn getin() -> u8 using A @ $FFE4
+
+chrout('A')                        // lda #$41 / jsr $FFD2
+```
+
+- A call is a direct `jsr` to the address. No stand-in function is generated.
+- The address is a constant expression, as for any `@`.
+- **Parameters must be passed in registers** (`using A`, `X`, `Y`, `AX`, `AY`, `XY`). A memory parameter is an error, since the routine has no frame to write into. Return values follow 6.1, including flags: `-> bool using carry`.
+- **Registers:** the compiler cannot see inside the routine, so it assumes that a call changes A, X, Y and the flags. `keeps` after the address lists registers the routine leaves unchanged (`A`, `X`, `Y`; flags always count as changed). This is a promise taken from the routine's documentation; the compiler does not check it. A `for ... using X` loop may call a routine that keeps X (likewise Y); calls to other functions in such a loop are still an error.
+- The routine is a leaf in the call graph: it has no frame and calls nothing the compiler knows about.
+- In assembly the name stands for the address, as for any function: `jsr chrout`, `lda #chrout.lo`. `addr()` of a function is not supported yet (3.4).
+- A routine that returns values in more than the return registers of 6.1, or needs other setup, is wrapped in an `asm fn` (section 9).
+- A function with a body and `@ $addr` (compiled code placed at a fixed address) is not supported yet.
+
 ## 7. Flags as values
 
 A `bool` can live in a CPU flag instead of memory. This removes the "load 0 or 1, then compare" step common in compiled code.
@@ -456,6 +476,8 @@ Digits are written as screen codes, which are the same as PETSCII for `0`-`9`. H
 | `cursor(row: u8 using X, col: u8 using Y)` | Move the text cursor (KERNAL `PLOT`) |
 | VIC-II, SID and CIA register structs | Planned with structs (roadmap M5), e.g. `c64.vic.border` |
 
+KERNAL routines that fit 6.1 are declared as routines at a fixed address (6.6), so calls go straight to the ROM. The others are `asm fn` wrappers.
+
 ## 11. Code shapes
 
 These are the intended translations. The optimizer may produce something shorter, never longer.
@@ -477,6 +499,7 @@ These are the intended translations. The optimizer may produce something shorter
 | `if a < b { }` unsigned | `lda a` / `cmp b` / `bcs skip` |
 | `match` with dense constant cases | jump table: low/high address tables indexed by the value |
 | `f(x)` with parameter `using A` | `lda x` / `jsr f` |
+| `chrout(x)` with `fn chrout(...) @ $FFD2` | `lda x` / `jsr $FFD2` |
 | `return true` with `-> bool using carry` | `sec` / `rts` |
 | `-x` (u8) | `lda x` / `eor #$FF` / `clc` / `adc #1` |
 | `x << 2` | `asl` / `asl` (on A or directly on memory) |
