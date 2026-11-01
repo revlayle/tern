@@ -58,7 +58,7 @@ These come from the spec and `docs/decisions.md`. Apply them to every change.
 ## Coding conventions
 
 - Every language feature gets end-to-end tests in `tests/Tern.Compiler.Tests` that compile a program, run it in the emulator (`Run.Program`) and check memory. Test edge values (0, 255, 256, -128, wrap-around) and compare against results computed in C#.
-- Every new compile error gets a test in `ErrorTests.cs`. Error messages say what is wrong and how to fix it.
+- Every new compile error gets a test, in the feature's test file (`AsmTests`, `PointerTests`, ...), or in `ErrorTests.cs` for errors with no feature file (lexer, parser, general type errors). Error messages say what is wrong and how to fix it.
 - When code shape matters, check the listing (`result.Listing`) in a test.
 - A spec keyword that is not implemented yet must give "'x' is not supported yet", not a confusing parse error.
 - No new NuGet dependencies without asking.
