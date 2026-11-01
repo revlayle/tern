@@ -16,7 +16,7 @@ public sealed class CheckedProgram(
 /// Resolves names, assigns types, folds constants and builds the call graph.
 /// Reports the first error as a <see cref="CompileError"/>.
 /// </summary>
-public sealed class Checker
+public sealed partial class Checker
 {
     private readonly Dictionary<string, Symbol> _globalScope = new();
     private readonly List<Dictionary<string, Symbol>> _scopes = [];
@@ -109,9 +109,11 @@ public sealed class Checker
                     if (!usedRegisters.Add(r))
                         throw new CompileError(p.Pos, $"Register {r} is used by more than one parameter");
                 param.PassedIn = reg;
+                // An asm fn uses register parameters where they arrive; they have no memory.
+                if (decl.IsAsm) param.Register = reg;
             }
             fn.Parameters.Add(param);
-            fn.FrameVariables.Add(param);
+            if (param.InMemory) fn.FrameVariables.Add(param);
         }
 
         if (decl.ReturnType is not null)
@@ -328,7 +330,7 @@ public sealed class Checker
 
         CheckBlock(decl.Body, newScope: false);
 
-        if (_function.ReturnType.Kind != TypeKind.Void && !AlwaysReturns(decl.Body))
+        if (_function.ReturnType.Kind != TypeKind.Void && !decl.IsAsm && !AlwaysReturns(decl.Body))
             throw new CompileError(decl.Pos, $"'{decl.Name}' can reach its end without returning a value");
 
         _scopes.Clear();
@@ -366,6 +368,7 @@ public sealed class Checker
                 _loopDepth--;
                 break;
             case ForStmt f: CheckFor(f); break;
+            case AsmStmt a: CheckAsm(a); break;
             case BreakStmt or ContinueStmt:
                 if (_loopDepth == 0) throw new CompileError(stmt.Pos, "'break' and 'continue' must be inside a loop");
                 break;

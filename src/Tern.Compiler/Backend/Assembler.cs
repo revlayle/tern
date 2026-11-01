@@ -1,4 +1,5 @@
 using System.Text;
+using Tern.Compiler.Syntax;
 using Tern.Cpu;
 using Encoder = Tern.Cpu.Encoder;
 
@@ -62,9 +63,12 @@ public static class Assembler
             changed = false;
             foreach (var s in slots)
             {
-                if (s.Item is Instr { Mode: AddressingMode.Relative, Operand: LabelOperand target } && !s.LongBranch
-                    && !Encoder.BranchInRange(Resolve(target.Label), s.Address))
+                if (s.Item is Instr { Mode: AddressingMode.Relative, Operand: LabelOperand target } i && !s.LongBranch
+                    && !Encoder.BranchInRange(Resolve(target.Label) + target.Offset, s.Address))
                 {
+                    if (i.AsmPos is { } pos)
+                        throw new CompileError(pos,
+                            $"Branch to {target} is out of range ({Resolve(target.Label) + target.Offset - s.Address - 2} bytes; a branch reaches -128 to 127). Use jmp");
                     s.LongBranch = true;
                     changed = true;
                 }
@@ -157,13 +161,15 @@ public static class Assembler
     {
         null => 0,
         Imm imm => imm.Value & 0xFF,
-        ImmLabelByte b => b.High ? Resolve(b.Label) >> 8 : Resolve(b.Label) & 0xFF,
-        ImmVarByte v => v.High ? Address(new VarOperand(v.Variable)) >> 8 : Address(new VarOperand(v.Variable)) & 0xFF,
+        ImmLabelByte b => Byte(Resolve(b.Label) + b.Offset, b.High),
+        ImmVarByte v => Byte(Address(new VarOperand(v.Variable, v.Offset)), v.High),
         VarOperand v => Address(v),
         AddrOperand a => a.Address,
         LabelOperand l => Resolve(l.Label) + l.Offset,
         _ => throw new InvalidOperationException(),
     };
+
+    private static int Byte(int address, bool high) => high ? (address >> 8) & 0xFF : address & 0xFF;
 
     private static Mnemonic Invert(Mnemonic branch) => branch switch
     {

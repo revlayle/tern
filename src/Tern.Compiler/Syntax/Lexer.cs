@@ -26,6 +26,8 @@ public enum TokenKind
     // Punctuation and operators
     LParen, RParen, LBracket, RBracket, LBrace, RBrace, Comma, Colon, Semicolon,
     Dot, DotDot, DotDotEq, Arrow, FatArrow, At,
+    /// <summary><c>#</c>, only used in assembly blocks (immediate operands).</summary>
+    Hash,
     Plus, Minus, Star, Slash, Percent, Amp, Pipe, Caret, Tilde, Bang,
     Shl, Shr, AmpAmp, PipePipe,
     Eq, EqEq, NotEq, Less, LessEq, Greater, GreaterEq,
@@ -72,7 +74,7 @@ public static class Lexer
         ("|=", TokenKind.PipeEq), ("^=", TokenKind.CaretEq),
         ("(", TokenKind.LParen), (")", TokenKind.RParen), ("[", TokenKind.LBracket), ("]", TokenKind.RBracket),
         ("{", TokenKind.LBrace), ("}", TokenKind.RBrace), (",", TokenKind.Comma), (":", TokenKind.Colon),
-        (";", TokenKind.Semicolon), (".", TokenKind.Dot), ("@", TokenKind.At),
+        (";", TokenKind.Semicolon), (".", TokenKind.Dot), ("@", TokenKind.At), ("#", TokenKind.Hash),
         ("+", TokenKind.Plus), ("-", TokenKind.Minus), ("*", TokenKind.Star), ("/", TokenKind.Slash),
         ("%", TokenKind.Percent), ("&", TokenKind.Amp), ("|", TokenKind.Pipe), ("^", TokenKind.Caret),
         ("~", TokenKind.Tilde), ("!", TokenKind.Bang), ("=", TokenKind.Eq),

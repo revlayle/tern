@@ -78,7 +78,7 @@ public class ErrorTests
             var p: ptr u8
             fn main() { p[0] = 1 }
             """));
-        Assert.Contains("Zero page is full: '@ zp' variables and dereferenced pointers need 143 bytes, 142 are free", e.Description);
+        Assert.Contains("Zero page is full: '@ zp' variables, dereferenced pointers and zero-page assembly operands need 143 bytes, 142 are free", e.Description);
         Assert.Contains("big (141), p (2)", e.Description);
     }
 

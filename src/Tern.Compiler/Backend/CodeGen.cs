@@ -126,6 +126,16 @@ public sealed class CodeGen
         Source(f.Declaration!);
         Place(_functionLabels[f]);
 
+        // An asm fn: register parameters stay where they arrive. An rts is added unless the
+        // block ends with rts, rti or jmp.
+        if (f.Declaration!.IsAsm)
+        {
+            var block = (AsmStmt)f.Declaration.Body.Statements[0];
+            GenAsm(block);
+            if (block.Lines.LastOrDefault() is not AsmInstruction { Mnemonic: Rts or Rti or Mnemonic.Jmp }) Emit(Rts);
+            return;
+        }
+
         // Register parameters are stored into the frame, so the body can use A, X and Y freely.
         foreach (var p in f.Parameters)
         {
@@ -168,6 +178,7 @@ public sealed class CodeGen
             case BreakStmt: Jmp(_loops[^1].Break); break;
             case ContinueStmt: Jmp(_loops[^1].Continue); break;
             case ReturnStmt r: GenReturn(r); break;
+            case AsmStmt a: GenAsm(a); break;
             default: throw new InvalidOperationException(stmt.GetType().Name);
         }
     }
@@ -1284,6 +1295,48 @@ public sealed class CodeGen
         foreach (var t in temps) Release(t);
     }
 
+    // ---------- Assembly ----------
+
+    /// <summary>Emits an asm block as written. The checker has made sure it leaves loop registers alone.</summary>
+    private void GenAsm(AsmStmt block)
+    {
+        var fx = block.Effects!;
+        string Names(IEnumerable<VariableSymbol> vs) => string.Join(" ", vs.Select(v => v.QualifiedName).Order(StringComparer.Ordinal));
+        var summary = $"asm: reads {AsmEffects.Describe(fx.Reads)}, changes {AsmEffects.Describe(fx.Writes)}";
+        if (fx.VariablesRead.Count > 0) summary += $", reads {Names(fx.VariablesRead)}";
+        if (fx.VariablesWritten.Count > 0) summary += $", writes {Names(fx.VariablesWritten)}";
+        if (fx.Calls) summary += ", calls subroutines";
+        _out.Add(new Comment(summary));
+
+        var labels = block.Lines.OfType<AsmLabel>().ToDictionary(l => l, l => NewLabel(l.Name[1..]));
+        foreach (var line in block.Lines)
+        {
+            Source(line);
+            switch (line)
+            {
+                case AsmLabel l:
+                    Place(labels[l]);
+                    break;
+                case AsmInstruction ins:
+                    _out.Add(new Instr(ins.Mnemonic, ins.Mode, AsmOperandOf(ins, labels), ins.Pos));
+                    break;
+            }
+        }
+    }
+
+    private Operand? AsmOperandOf(AsmInstruction ins, Dictionary<AsmLabel, Label> labels)
+    {
+        if (ins.Value is not { } v) return null;
+        int offset = (int)v.Number;
+        Label LabelOf() => v.Function is { } f ? _functionLabels[f] : labels[v.Label!];
+
+        if (v.High is bool high)
+            return v.Variable is { } hv ? new ImmVarByte(hv, high, offset) : new ImmLabelByte(LabelOf(), high, offset);
+        if (v.IsNumber) return ins.Mode == Immediate ? new Imm(offset) : new AddrOperand(offset);
+        if (v.Variable is { } variable) return new VarOperand(variable, offset);
+        return new LabelOperand(LabelOf(), offset);
+    }
+
     // ---------- for loops ----------
 
     private void GenFor(ForStmt f)
@@ -1654,6 +1707,7 @@ public sealed class CodeGen
         IfStmt i => AssignsVar(i.Then, v) || (i.Else is not null && AssignsVar(i.Else, v)),
         WhileStmt w => AssignsVar(w.Body, v),
         ForStmt f => AssignsVar(f.Body, v),
+        AsmStmt asm => asm.Effects!.VariablesWritten.Contains(v),
         _ => false,
     };
 

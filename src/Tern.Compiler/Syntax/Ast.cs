@@ -1,4 +1,5 @@
 using Tern.Compiler.Semantics;
+using Tern.Cpu;
 
 namespace Tern.Compiler.Syntax;
 
@@ -171,6 +172,76 @@ public sealed class ForStmt(
     public int StepValue { get; set; }
 }
 public sealed class BreakStmt(SourcePos pos) : Stmt(pos);
+
+// ---------- Assembly ----------
+
+/// <summary>An <c>asm { ... }</c> block, or the body of an <c>asm fn</c>.</summary>
+public sealed class AsmStmt(SourcePos pos, List<AsmLine> lines) : Stmt(pos)
+{
+    public List<AsmLine> Lines { get; } = lines;
+    /// <summary>Set by the checker: what the block reads and changes.</summary>
+    public AsmEffects? Effects { get; set; }
+}
+
+public abstract class AsmLine(SourcePos pos) : Node(pos);
+
+/// <summary>A local label such as <c>.loop:</c>. <see cref="Name"/> includes the dot.</summary>
+public sealed class AsmLabel(SourcePos pos, string name) : AsmLine(pos)
+{
+    public string Name { get; } = name;
+}
+
+/// <summary>How an operand is written, before the checker picks the addressing mode.</summary>
+public enum AsmForm
+{
+    /// <summary>No operand: <c>rts</c>, <c>asl</c>.</summary>
+    None,
+    /// <summary><c>asl a</c></summary>
+    Accumulator,
+    /// <summary><c>#value</c></summary>
+    Immediate,
+    /// <summary><c>address</c>, <c>address,x</c>, <c>address,y</c>, or a branch target.</summary>
+    Direct,
+    /// <summary><c>(address)</c>, only for <c>jmp</c>.</summary>
+    Indirect,
+    /// <summary><c>(zp,x)</c></summary>
+    IndexedIndirect,
+    /// <summary><c>(zp),y</c></summary>
+    IndirectIndexed,
+}
+
+public sealed class AsmInstruction(SourcePos pos, Mnemonic mnemonic, AsmForm form, Expr? operand, Register? index)
+    : AsmLine(pos)
+{
+    public Mnemonic Mnemonic { get; } = mnemonic;
+    public AsmForm Form { get; } = form;
+    public Expr? Operand { get; } = operand;
+    /// <summary>X or Y for <c>address,x</c> and <c>address,y</c>.</summary>
+    public Register? Index { get; } = index;
+
+    /// <summary>Set by the checker. Absolute modes may still become zero-page modes in the assembler.</summary>
+    public AddressingMode Mode { get; set; }
+    /// <summary>Set by the checker: the operand's value.</summary>
+    public AsmValue? Value { get; set; }
+}
+
+/// <summary>A local label used as an operand: <c>bne .loop</c>.</summary>
+public sealed class AsmLabelExpr(SourcePos pos, string name) : Expr(pos)
+{
+    /// <summary>Includes the dot.</summary>
+    public string Name { get; } = name;
+}
+
+/// <summary>
+/// The value of an assembly operand: a number, or the address of a variable, function or local
+/// label plus <see cref="Number"/> as an offset. <see cref="High"/> selects a byte of the address
+/// (<c>.lo</c> is false, <c>.hi</c> is true).
+/// </summary>
+public sealed record AsmValue(
+    long Number, VariableSymbol? Variable = null, FunctionSymbol? Function = null, AsmLabel? Label = null, bool? High = null)
+{
+    public bool IsNumber => Variable is null && Function is null && Label is null;
+}
 public sealed class ContinueStmt(SourcePos pos) : Stmt(pos);
 public sealed class ReturnStmt(SourcePos pos, Expr? value) : Stmt(pos)
 {
@@ -202,6 +273,8 @@ public sealed class FnDecl(
     public TypeSyntax? ReturnType { get; } = returnType;
     public Register? ReturnUsing { get; } = returnUsing;
     public BlockStmt Body { get; } = body;
+    /// <summary>An <c>asm fn</c>: the body holds one <see cref="AsmStmt"/>.</summary>
+    public bool IsAsm { get; init; }
     public FunctionSymbol? Symbol { get; set; }
 }
 

@@ -108,8 +108,10 @@ public sealed class VariableSymbol(string name, SourcePos pos, TernType type, Va
     public bool IsData { get; set; }
     /// <summary>A pointer read or written through with <c>p[i]</c>. It must be in zero page.</summary>
     public bool Dereferenced { get; set; }
-    /// <summary>Its address is taken with <c>addr()</c>, so a pointer may change it.</summary>
+    /// <summary>Its address is taken with <c>addr()</c> or in assembly (<c>#name.lo</c>), so a pointer may change it.</summary>
     public bool AddressTaken { get; set; }
+    /// <summary>Used in assembly with a zero-page-only mode, e.g. <c>lda (p),y</c>. It must be in zero page.</summary>
+    public bool AsmZeroPage { get; set; }
 
     /// <summary>Estimated access count, used to rank zero-page candidates.</summary>
     public long Weight { get; set; }
@@ -118,7 +120,7 @@ public sealed class VariableSymbol(string name, SourcePos pos, TernType type, Va
 
     public bool IsVolatile => FixedAddress.HasValue;
     /// <summary>Must be placed in zero page; compilation fails if it does not fit.</summary>
-    public bool ForcedZeroPage => RequireZeroPage || Dereferenced;
+    public bool ForcedZeroPage => RequireZeroPage || Dereferenced || AsmZeroPage;
     public bool InMemory => Register is null;
 
     /// <summary>Name used in listings and label files, unique per program.</summary>
