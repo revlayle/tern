@@ -47,6 +47,11 @@ public class ErrorTests
     [InlineData("var p: ptr u8\nfn main() { p = addr(nothing) }", "'nothing' is not declared")]
     [InlineData("var p: ptr u8\nvar a: [u8; 2]\nfn main() { p = addr(a[1]) }", "addr() takes the name")]
     [InlineData("var p: ptr u8\nfn main() { for i in 0..4 using X { p = addr(i) } }", "lives in a register")]
+    [InlineData("var p: ptr [u8; 4]\nfn main() { }", "A pointer must point to a number, bool or pointer")]
+    [InlineData("var b: [u8; 2]\nvar p: ptr u8 = addr(b)\nfn main() { }", "addr() cannot be used in an initial value")]
+    [InlineData("var b: [u8; 2]\nvar w: u16 = (addr(b) + 1) as u16\nfn main() { }", "addr() cannot be used in an initial value")]
+    [InlineData("fn addr(x: u8) -> u8 { return x }\nfn main() { }", "'addr' is a built-in function; choose another name")]
+    [InlineData("fn len() { }\nfn main() { }", "'len' is a built-in function")]
     public void Reports_errors(string source, string expected)
     {
         var e = Assert.Throws<CompileError>(() => TernCompiler.Compile(source));

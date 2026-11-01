@@ -130,7 +130,7 @@ public static class Lexer
             if (c == '"' || c == '\'')
             {
                 int start = i;
-                string text = ReadQuoted(source, ref i, Pos(start));
+                string text = ReadQuoted(source, ref i, Pos);
                 if (c == '\'' && text.Length != 1)
                     throw new CompileError(Pos(start), "A character literal holds exactly one character; use \"...\" for a string");
                 Add(c == '"' ? TokenKind.String : TokenKind.Char, text, 0, start);
@@ -144,9 +144,12 @@ public static class Lexer
                 string word = source[start..i];
                 if (word == "screen" && Peek(source, i) == '"')
                 {
-                    Add(TokenKind.ScreenString, ReadQuoted(source, ref i, Pos(start)), 0, start);
+                    Add(TokenKind.ScreenString, ReadQuoted(source, ref i, Pos), 0, start);
                     continue;
                 }
+                if (word == "screen" && Peek(source, i) == '\'')
+                    throw new CompileError(Pos(start),
+                        "screen'A' is not supported yet. Use screen\"A\" or write the screen code as a number");
                 Add(Keywords.TryGetValue(word, out var kw) ? kw : TokenKind.Identifier, word, 0, start);
                 continue;
             }
@@ -197,8 +200,10 @@ public static class Lexer
     }
 
     /// <summary>Reads a quoted char or string literal starting at the quote, and decodes its escapes.</summary>
-    private static string ReadQuoted(string source, ref int i, SourcePos pos)
+    /// <param name="posAt">Converts an index in <paramref name="source"/> to a source position.</param>
+    private static string ReadQuoted(string source, ref int i, Func<int, SourcePos> posAt)
     {
+        var pos = posAt(i);
         char quote = source[i++];
         var sb = new System.Text.StringBuilder();
         while (true)
@@ -212,6 +217,7 @@ public static class Lexer
                 sb.Append(c);
                 continue;
             }
+            var escapePos = posAt(i - 1);
             char e = Peek(source, i++);
             switch (e)
             {
@@ -223,7 +229,7 @@ public static class Lexer
                     i += 2;
                     break;
                 default:
-                    throw new CompileError(pos, $"Unknown escape '\\{e}'. Use \\0, \\n, \\\\, \\\", \\' or \\$NN for a byte");
+                    throw new CompileError(escapePos, $"Unknown escape '\\{e}'. Use \\0, \\n, \\\\, \\\", \\' or \\$NN for a byte");
             }
         }
     }

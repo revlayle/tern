@@ -176,6 +176,9 @@ public class DataTests
     [InlineData("data d = \"AB\nfn main() { }", "String is not closed")]
     [InlineData("var c: u8 = 'AB'\nfn main() { }", "exactly one character")]
     [InlineData("var c: u8 = ''\nfn main() { }", "exactly one character")]
+    [InlineData("var c: u8 = 'A\nfn main() { }", "Character literal is not closed")]
+    [InlineData("var c: u8\nfn main() { c = screen'A' }", "screen'A' is not supported yet")]
+    [InlineData("data d = [1, 2, 3]\nfn main() { }", "Data arrays need a written type")]
     [InlineData("var c: u8\nfn main() { c = \"A\" }", "A string can only be the value of data or a global array")]
     [InlineData("data d = include_bytes(\"no-such-file.bin\")\nfn main() { }", "Cannot read 'no-such-file.bin'")]
     [InlineData("data d = include_bytes(5)\nfn main() { }", "takes a file name in quotes")]
@@ -188,5 +191,29 @@ public class DataTests
     {
         var e = Assert.Throws<CompileError>(() => TernCompiler.Compile(source));
         Assert.Contains(expected, e.Description);
+    }
+
+    [Fact]
+    public void Escape_errors_point_at_the_escape()
+    {
+        var e = Assert.Throws<CompileError>(() => TernCompiler.Compile("data d = \"AB\\q\"\nfn main() { }"));
+        Assert.Equal(new SourcePos(1, 13), e.Pos);
+    }
+
+    [Fact]
+    public void Empty_include_file_is_an_error()
+    {
+        var dir = Directory.CreateTempSubdirectory("tern");
+        try
+        {
+            File.WriteAllBytes(Path.Combine(dir.FullName, "empty.bin"), []);
+            var e = Assert.Throws<CompileError>(() => TernCompiler.Compile(
+                "data d = include_bytes(\"empty.bin\")\nfn main() { }", sourcePath: Path.Combine(dir.FullName, "x.tern")));
+            Assert.Contains("'empty.bin' is empty", e.Description);
+        }
+        finally
+        {
+            dir.Delete(recursive: true);
+        }
     }
 }

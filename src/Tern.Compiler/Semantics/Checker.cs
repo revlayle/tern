@@ -89,6 +89,8 @@ public sealed class Checker
 
     private void DeclareFunction(FnDecl decl)
     {
+        if (decl.Name is "addr" or "len" or "sizeof" or "include_bytes")
+            throw new CompileError(decl.Pos, $"'{decl.Name}' is a built-in function; choose another name");
         var fn = new FunctionSymbol(decl.Name, decl.Pos) { Declaration = decl };
         decl.Symbol = fn;
 
@@ -220,7 +222,10 @@ public sealed class Checker
     {
         if (decl.TypeSyntax is not null) return ResolveType(decl.TypeSyntax);
         if (decl.Init is null) throw new CompileError(decl.Pos, $"'{decl.Name}' needs a type or an initial value");
-        if (decl.Init is ArrayLiteralExpr) throw new CompileError(decl.Pos, "Array variables need a written type, e.g. [u8; 4]");
+        if (decl.Init is ArrayLiteralExpr)
+            throw new CompileError(decl.Pos, decl.IsData
+                ? $"Data arrays need a written type, e.g. data {decl.Name}: [u8; 4] = [...]"
+                : "Array variables need a written type, e.g. [u8; 4]");
         CheckExpr(decl.Init);
         return DefaultType(decl.Init);
     }
@@ -261,9 +266,21 @@ public sealed class Checker
         CheckExpr(init);
         Coerce(init, type);
         if (init.ConstValue is not long value)
-            throw new CompileError(init.Pos, "A global's initial value must be known at compile time");
+            throw new CompileError(init.Pos, UsesAddr(init)
+                ? "addr() cannot be used in an initial value, since addresses are known only after compiling. Assign it at the start of main"
+                : "A global's initial value must be known at compile time");
         return type.Size == 1 ? [(byte)value] : [(byte)value, (byte)(value >> 8)];
     }
+
+    private static bool UsesAddr(Expr e) => e switch
+    {
+        CallExpr c => c.AddressOf is not null,
+        UnaryExpr u => UsesAddr(u.Operand),
+        BinaryExpr b => UsesAddr(b.Left) || UsesAddr(b.Right),
+        CastExpr c => UsesAddr(c.Operand),
+        MemberExpr m => UsesAddr(m.Target),
+        _ => false,
+    };
 
     private TernType ResolveType(TypeSyntax syntax)
     {
