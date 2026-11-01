@@ -1,0 +1,8 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Tern.Cpu/Tern.Cpu.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Tern.Cpu.Tests/Tern.Cpu.Tests.csproj" />
+  </Folder>
+</Solution>
