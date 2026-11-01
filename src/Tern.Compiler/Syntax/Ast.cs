@@ -14,6 +14,10 @@ public sealed class NamedTypeSyntax(SourcePos pos, string name) : TypeSyntax(pos
 {
     public string Name { get; } = name;
 }
+public sealed class PointerTypeSyntax(SourcePos pos, TypeSyntax target) : TypeSyntax(pos)
+{
+    public TypeSyntax Target { get; } = target;
+}
 public sealed class ArrayTypeSyntax(SourcePos pos, TypeSyntax element, Expr length) : TypeSyntax(pos)
 {
     public TypeSyntax Element { get; } = element;
@@ -60,6 +64,8 @@ public sealed class CallExpr(SourcePos pos, string name, List<Expr> args) : Expr
     public string Name { get; } = name;
     public List<Expr> Args { get; } = args;
     public FunctionSymbol? Function { get; set; }
+    /// <summary>Set by the checker for <c>addr(name)</c>.</summary>
+    public VariableSymbol? AddressOf { get; set; }
 }
 public sealed class IndexExpr(SourcePos pos, Expr target, Expr index) : Expr(pos)
 {

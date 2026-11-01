@@ -22,6 +22,31 @@ public class ErrorTests
     [InlineData("fn other() { }", "no 'fn main()'")]
     [InlineData("struct S { x: u8 }\nfn main() { }", "'struct' is not supported yet")]
     [InlineData("fn main() { var b: bool = 1 as bool }", "cannot be converted to bool")]
+    // Pointers
+    [InlineData("var p: ptr\nfn main() { }", "'ptr' needs the type it points to")]
+    [InlineData("var p: ptr u8\nvar q: ptr u8\nvar r: ptr u8\nfn main() { r = p + q }", "Two pointers cannot be added")]
+    [InlineData("var p: ptr u8\nvar q: ptr u8\nvar w: u16\nfn main() { w = p - q }", "Two pointers cannot be subtracted")]
+    [InlineData("var p: ptr u8\nfn main() { p = p & 7 }", "'&' does not work on pointers")]
+    [InlineData("var p: ptr u8\nfn main() { p <<= 1 }", "only '+=' and '-=' do")]
+    [InlineData("var p: ptr u8\nvar s: i8\nfn main() { p = p + s }", "moves by a u8 or u16, not i8")]
+    [InlineData("var p: ptr u8\nfn main() { p = p + -1 }", "use '-' to move back")]
+    [InlineData("var p: ptr u8\nvar q: ptr u8\nfn main() { q = 1 - p }", "cannot be subtracted from a number")]
+    [InlineData("var p: ptr u8\nvar w: u16\nfn main() { p = w }", "Expected ptr u8, found u16. Convert with 'as ptr u8'")]
+    [InlineData("var p: ptr u8\nvar w: u16\nfn main() { w = p }", "Expected u16, found ptr u8. Convert with 'as u16'")]
+    [InlineData("var p: ptr u8\nvar q: ptr u16\nfn main() { q = p }", "Convert with 'as ptr u16'")]
+    [InlineData("var p: ptr u8\nvar b: u8\nfn main() { b = p as u8 }", "a pointer converts only to u16 or another pointer")]
+    [InlineData("var p: ptr u8\nvar b: u8\nfn main() { p = b as ptr u8 }", "only u16 and pointers convert to a pointer")]
+    [InlineData("var p: ptr u8\nvar q: ptr u16\nfn main() { if p == q { } }", "Cannot compare ptr u8 with ptr u16")]
+    [InlineData("var p: ptr u8\nvar w: u16\nfn main() { if p == w { } }", "Cannot compare ptr u8 with u16")]
+    [InlineData("var p: ptr u8\nvar b: u8\nfn main() { b = p.lo }", "(p as u16).lo")]
+    [InlineData("var p: ptr u16\nvar w: u16\nfn main() { w = p[128] }", "Index 128 is too large")]
+    [InlineData("var b: u8\nvar c: u8\nfn main() { c = b[0] }", "Only arrays and pointers can be indexed")]
+    [InlineData("var p: ptr u8\nfn main() { for i in 0..4 using Y { p[0] = i } }", "needs the Y register")]
+    [InlineData("const C = 5\nvar p: ptr u8\nfn main() { p = addr(C) }", "is a constant, which has no address")]
+    [InlineData("var p: ptr u8\nfn main() { p = addr(main) }", "addr() of a function is not supported yet")]
+    [InlineData("var p: ptr u8\nfn main() { p = addr(nothing) }", "'nothing' is not declared")]
+    [InlineData("var p: ptr u8\nvar a: [u8; 2]\nfn main() { p = addr(a[1]) }", "addr() takes the name")]
+    [InlineData("var p: ptr u8\nfn main() { for i in 0..4 using X { p = addr(i) } }", "lives in a register")]
     public void Reports_errors(string source, string expected)
     {
         var e = Assert.Throws<CompileError>(() => TernCompiler.Compile(source));
@@ -36,5 +61,29 @@ public class ErrorTests
             fn main() { }
             """));
         Assert.Contains("Zero page is full", e.Description);
+    }
+
+    [Fact]
+    public void Dereferenced_pointer_that_does_not_fit_in_zero_page_is_an_error()
+    {
+        // $02-$8F is 142 bytes; the array leaves one byte, too few for a pointer.
+        var e = Assert.Throws<CompileError>(() => TernCompiler.Compile("""
+            var big: [u8; 141] @ zp
+            var p: ptr u8
+            fn main() { p[0] = 1 }
+            """));
+        Assert.Contains("Zero page is full: '@ zp' variables and dereferenced pointers need 143 bytes, 142 are free", e.Description);
+        Assert.Contains("big (141), p (2)", e.Description);
+    }
+
+    [Fact]
+    public void Pointers_that_are_not_dereferenced_are_not_forced_into_zero_page()
+    {
+        var r = TernCompiler.Compile("""
+            var big: [u8; 141] @ zp
+            var p: ptr u8
+            fn main() { p = $1234 }
+            """);
+        Assert.True(r.Symbols["p"] >= 0x100);
     }
 }

@@ -26,6 +26,12 @@ public sealed record ImmLabelByte(Label Label, bool High) : Operand
     public override string ToString() => $"#{Label}.{(High ? "hi" : "lo")}";
 }
 
+/// <summary><c>#addr.lo</c> or <c>#addr.hi</c>: a byte of a variable's address.</summary>
+public sealed record ImmVarByte(VariableSymbol Variable, bool High) : Operand
+{
+    public override string ToString() => $"#{Variable.QualifiedName}.{(High ? "hi" : "lo")}";
+}
+
 /// <summary>A byte of a variable: its address plus <see cref="Offset"/>.</summary>
 public sealed record VarOperand(VariableSymbol Variable, int Offset = 0) : Operand
 {

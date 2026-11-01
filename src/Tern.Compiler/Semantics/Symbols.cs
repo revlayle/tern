@@ -3,7 +3,7 @@ using Tern.Compiler.Syntax;
 namespace Tern.Compiler.Semantics;
 
 /// <summary><see cref="IntLiteral"/> is a number literal that has not yet taken a type from its context.</summary>
-public enum TypeKind { Error, Void, U8, I8, U16, I16, Bool, Array, IntLiteral }
+public enum TypeKind { Error, Void, U8, I8, U16, I16, Bool, Array, Ptr, IntLiteral }
 
 public sealed class TernType
 {
@@ -28,17 +28,19 @@ public sealed class TernType
     }
 
     public static TernType ArrayOf(TernType element, int length) => new(TypeKind.Array, element, length);
+    public static TernType PointerTo(TernType target) => new(TypeKind.Ptr, target);
 
     public bool IsInteger => Kind is TypeKind.U8 or TypeKind.I8 or TypeKind.U16 or TypeKind.I16;
     public bool IsSigned => Kind is TypeKind.I8 or TypeKind.I16;
     public bool IsArray => Kind == TypeKind.Array;
+    public bool IsPointer => Kind == TypeKind.Ptr;
     /// <summary>A value that fits in one or two bytes and can be loaded, stored and compared.</summary>
-    public bool IsScalar => IsInteger || Kind == TypeKind.Bool;
+    public bool IsScalar => IsInteger || Kind == TypeKind.Bool || Kind == TypeKind.Ptr;
 
     public int Size => Kind switch
     {
         TypeKind.U8 or TypeKind.I8 or TypeKind.Bool => 1,
-        TypeKind.U16 or TypeKind.I16 => 2,
+        TypeKind.U16 or TypeKind.I16 or TypeKind.Ptr => 2,
         TypeKind.Array => Element!.Size * Length,
         _ => 0,
     };
@@ -46,15 +48,21 @@ public sealed class TernType
     public long MinValue => Kind switch { TypeKind.I8 => -128, TypeKind.I16 => -32768, _ => 0 };
     public long MaxValue => Kind switch
     {
-        TypeKind.U8 => 255, TypeKind.I8 => 127, TypeKind.U16 => 65535, TypeKind.I16 => 32767, TypeKind.Bool => 1, _ => 0,
+        TypeKind.U8 => 255, TypeKind.I8 => 127, TypeKind.U16 or TypeKind.Ptr => 65535, TypeKind.I16 => 32767, TypeKind.Bool => 1, _ => 0,
     };
 
     public bool SameAs(TernType other) =>
-        Kind == other.Kind && (Kind != TypeKind.Array || (Length == other.Length && Element!.SameAs(other.Element!)));
+        Kind == other.Kind && Kind switch
+        {
+            TypeKind.Array => Length == other.Length && Element!.SameAs(other.Element!),
+            TypeKind.Ptr => Element!.SameAs(other.Element!),
+            _ => true,
+        };
 
     public override string ToString() => Kind switch
     {
         TypeKind.Array => $"[{Element}; {Length}]",
+        TypeKind.Ptr => $"ptr {Element}",
         TypeKind.IntLiteral => "number",
         _ => Kind.ToString().ToLowerInvariant(),
     };
@@ -96,6 +104,12 @@ public sealed class VariableSymbol(string name, SourcePos pos, TernType type, Va
     public bool ReadOnly { get; set; }
     /// <summary>Initial bytes for globals (null means zero).</summary>
     public byte[]? InitialBytes { get; set; }
+    /// <summary>Declared with <c>data</c>: read-only, stored in the program image.</summary>
+    public bool IsData { get; set; }
+    /// <summary>A pointer read or written through with <c>p[i]</c>. It must be in zero page.</summary>
+    public bool Dereferenced { get; set; }
+    /// <summary>Its address is taken with <c>addr()</c>, so a pointer may change it.</summary>
+    public bool AddressTaken { get; set; }
 
     /// <summary>Estimated access count, used to rank zero-page candidates.</summary>
     public long Weight { get; set; }
@@ -103,6 +117,8 @@ public sealed class VariableSymbol(string name, SourcePos pos, TernType type, Va
     public int Address { get; set; } = -1;
 
     public bool IsVolatile => FixedAddress.HasValue;
+    /// <summary>Must be placed in zero page; compilation fails if it does not fit.</summary>
+    public bool ForcedZeroPage => RequireZeroPage || Dereferenced;
     public bool InMemory => Register is null;
 
     /// <summary>Name used in listings and label files, unique per program.</summary>

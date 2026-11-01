@@ -171,6 +171,8 @@ public sealed class Parser
             return new ArrayTypeSyntax(start.Pos, element, length);
         }
         var name = Expect(TokenKind.Identifier, "a type");
+        if (name.Text == "ptr" && (At(TokenKind.Identifier) || At(TokenKind.LBracket)))
+            return new PointerTypeSyntax(name.Pos, ParseType());
         return new NamedTypeSyntax(name.Pos, name.Text);
     }
 
