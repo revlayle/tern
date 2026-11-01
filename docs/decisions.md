@@ -113,3 +113,15 @@ Settled decisions and the reasons for them. Do not reopen one without new inform
 - **Only on routines at a fixed address.** An `asm fn` sets up its own inputs in code.
 - **Not now: carry as a runtime parameter** (`read: bool using carry`). No need once fixed inputs exist; add if a routine needs a variable flag input.
 - **16-bit returns may use any register pair** (`-> u16 using XY`), stated in 6.1; needed for `PLOT`'s row and column.
+
+## 2026-11-01: M3 questions 1-9 settled (provisional choices confirmed)
+
+- **`;` in an asm block is an error**, not a comment. Reason: `;` already separates Tern statements; pasted assembly fails loudly instead of being misread.
+- **Zero-page operands use the zero-page form** of the instruction, as in any assembler. Branches are never rewritten. Forcing absolute addressing is left until timing-exact code needs it.
+- **`asl a`, `asl A` and `asl` mean the accumulator** (also `lsr`, `rol`, `ror`), even if a variable `a` exists.
+- **`#name` for an address is an error**; write `#name.lo` / `#name.hi`. Immediate numbers are -128 to 255.
+- **Mnemonics and `,x`/`,y` ignore case**; labels and Tern names do not.
+- **Assembly can `jsr`/`jmp` only to functions without memory parameters.** Parameters cannot be named outside their function (6.1), so asm cannot set them.
+- **`#f.lo` / `#f.hi` count as a call** from the enclosing function. Interrupt handlers (M6) will need their own rule.
+- **`p - q` needs pointers of the same type**, like comparisons; `as` costs nothing.
+- **`petscii_mixed` and `screen_mixed` have no `π`**; `\$FF` gives the raw byte.

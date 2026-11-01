@@ -52,7 +52,7 @@ Tern is a programming language for 6502-family processors. It aims to be easy to
 | Encoding | Machine | Notes |
 |---|---|---|
 | `petscii` | C64, Commander X16 | Default on the C64. Upper case and graphics character set; `a`-`z` give the same codes as `A`-`Z` |
-| `petscii_mixed` | C64, Commander X16 | For the lower/upper-case character set |
+| `petscii_mixed` | C64, Commander X16 | For the lower/upper-case character set. No `π` (`$FF` shows another character in this set) |
 | `screen` | C64 | Screen codes (bytes stored directly in screen memory), upper case and graphics set |
 | `screen_mixed` | C64 | Screen codes for the lower/upper-case set |
 | `ascii` | Commander X16 (ISO mode), general | Plain 7-bit ASCII |
@@ -164,7 +164,7 @@ e.pos.y = 5                        // ldy #1 / sta (e),y
 - For a pointer to a struct, `p.field` accesses a field (3.3). `p[i]` is not allowed on struct pointers, since it would need a multiply by the struct size.
 - A pointer that is dereferenced must be in zero page. The compiler puts it there automatically (section 8.2) and reports an error if zero page runs out.
 - Pointer arithmetic is in bytes: `p + 1` is the next byte. Use `p + sizeof(T)` to step by one element. Offsets are unsigned; use `p - n` to move back.
-- `p - q` of two pointers gives the distance in bytes as a `u16`.
+- `p - q` of two pointers of the same type gives the distance in bytes as a `u16`. For different types, convert one with `as` (no code).
 - **Any pointer converts to any other pointer type with `as`**, with no restrictions and no generated code: `p as ptr Enemy` reads the same memory as an `Enemy`. Pointers also convert to and from `u16` with `as`. The element type only tells the compiler how to read the memory; it never limits what the memory can be used as.
 
 ### 3.5 Conversions
@@ -417,8 +417,12 @@ asm fn fill(value: u8 using A, count: u8 using X) {
 - Assembly is parsed by the compiler into the same instruction objects it generates itself.
 - Operands may name Tern variables, constants, arrays (use `enemies.x` for a field array) and functions. As usual in assembly, a name stands for its address: `lda score` reads the byte at `score`, and `score+1` is the next byte.
 - Low and high bytes of an address are written `.lo` and `.hi`, as in Tern: `lda #msg.lo` / `ldx #msg.hi`. The assembler-style `<` and `>` are not used, since they are comparison operators in Tern.
+- An immediate operand is a number from -128 to 255, or a byte of an address: `#name.lo`, `#name.hi`. `#name` alone is an error.
 - Labels starting with `.` are local to the block.
-- The compiler computes which registers, flags and variables a block reads and writes, and works around them. It never changes instructions inside a block.
+- One instruction per line. Comments use `//` and `/* */` as elsewhere; `;` is an error in a block, so pasted assembly with `;` comments fails instead of being misread.
+- Mnemonics and the index registers in `,x`/`,y` ignore case (`LDA t,X`). Labels and Tern names are case-sensitive. `asl a` (or `A`, or `asl` alone) means the accumulator, also for `lsr`, `rol` and `ror`, even if a variable `a` exists.
+- The compiler computes which registers, flags and variables a block reads and writes, and works around them. It never changes instructions inside a block, except that an operand in zero page uses the zero-page form of the same instruction, as in any assembler. Branches are never rewritten: a branch out of range is an error. A way to force absolute addressing may be added if timing-exact code needs it.
+- `jsr f` and `jmp f` can call Tern functions whose parameters are all registers (or that have none). For a function with memory parameters they are an error, since its parameters cannot be named outside it (6.1). `#f.lo` / `#f.hi` take a function's address; this counts as a call from the enclosing function, for the call graph and frame sharing.
 - `asm fn` defines a whole function in assembly with a normal typed signature. The compiler adds the final `rts` unless the block ends in `rts`, `rti` or `jmp`.
 
 ## 10. Built-ins
