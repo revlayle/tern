@@ -36,8 +36,9 @@ public sealed class CodeGen
     {
         _program = program;
         _sourceLines = source.Split('\n');
+        // A routine at a fixed address is never placed: its label already has its address.
         foreach (var f in program.Functions)
-            _functionLabels[f] = new Label(f.Name);
+            _functionLabels[f] = new Label(f.Name) { Address = f.FixedAddress ?? -1 };
     }
 
     public Label LabelOf(FunctionSymbol f) => _functionLabels[f];
@@ -45,7 +46,7 @@ public sealed class CodeGen
     public List<AsmItem> GenerateFunctions()
     {
         var all = new List<AsmItem>();
-        foreach (var f in _program.Functions)
+        foreach (var f in _program.Functions.Where(f => f.FixedAddress is null))
         {
             GenFunction(f);
             all.AddRange(_out);
@@ -1245,7 +1246,10 @@ public sealed class CodeGen
         }
 
         // Register parameters: compute what needs code first, then load the registers last.
+        // A one-byte value for A is computed straight into A after the temporaries, since the
+        // ldx/ldy that follow do not change A.
         var loads = new List<(Register Reg, Operand Op)>();
+        Expr? intoA = null;
         for (int i = 0; i < call.Args.Count; i++)
         {
             var p = fn.Parameters[i];
@@ -1256,6 +1260,11 @@ public sealed class CodeGen
                 Operand op;
                 if (early.TryGetValue(i, out var t)) op = Var(t);
                 else if (Simple1(arg) is { } s) op = s;
+                else if (reg == Register.A)
+                {
+                    intoA = arg;
+                    continue;
+                }
                 else
                 {
                     var nt = AcquireTemp(1);
@@ -1288,10 +1297,11 @@ public sealed class CodeGen
                 loads.Add((hiReg, pair.Hi));
             }
         }
+        if (intoA is not null) GenA(intoA);
         foreach (var (reg, op) in loads.OrderBy(l => l.Reg == Register.A ? 1 : 0))
             Op(reg switch { Register.A => Lda, Register.X => Ldx, _ => Ldy }, op);
 
-        Emit(Jsr, Absolute, new LabelOperand(_functionLabels[fn]));
+        Emit(Jsr, Absolute, fn.FixedAddress is int at ? new AddrOperand(at) : new LabelOperand(_functionLabels[fn]));
         foreach (var t in temps) Release(t);
     }
 

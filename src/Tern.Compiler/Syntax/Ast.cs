@@ -275,6 +275,10 @@ public sealed class FnDecl(
     public BlockStmt Body { get; } = body;
     /// <summary>An <c>asm fn</c>: the body holds one <see cref="AsmStmt"/>.</summary>
     public bool IsAsm { get; init; }
+    /// <summary>For a routine at a fixed address (<c>fn f() @ $FFD2</c>): the address. Such a function has no body.</summary>
+    public Expr? Address { get; init; }
+    /// <summary>Registers named after <c>keeps</c>, with their positions.</summary>
+    public List<(Register Register, SourcePos Pos)> Keeps { get; init; } = [];
     public FunctionSymbol? Symbol { get; set; }
 }
 

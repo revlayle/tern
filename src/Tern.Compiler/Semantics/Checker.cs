@@ -43,13 +43,17 @@ public sealed partial class Checker
         foreach (var c in program.Consts) DeclareConst(c);
         foreach (var f in program.Functions) DeclareFunction(f);
         foreach (var g in program.Globals) DeclareGlobal(g);
+        // After the globals, so that a variable named as an address gets the right error.
+        foreach (var f in program.Functions.Where(f => f.Address is not null)) DeclareRoutine(f, f.Symbol!);
 
         if (!_globalScope.TryGetValue("main", out var m) || m is not FunctionSymbol main)
             throw new CompileError(new SourcePos(1, 1), "The program has no 'fn main()'");
         if (main.Parameters.Count > 0 || main.ReturnType.Kind != TypeKind.Void)
             throw new CompileError(main.Pos, "'main' must have no parameters and no return value");
+        if (main.FixedAddress is not null)
+            throw new CompileError(main.Pos, "'main' must have a body");
 
-        foreach (var f in program.Functions) CheckFunctionBody(f);
+        foreach (var f in program.Functions.Where(f => f.Address is null)) CheckFunctionBody(f);
 
         var reachable = OrderReachable(main);
         return new CheckedProgram(program, _globals, reachable, main);
@@ -109,9 +113,12 @@ public sealed partial class Checker
                     if (!usedRegisters.Add(r))
                         throw new CompileError(p.Pos, $"Register {r} is used by more than one parameter");
                 param.PassedIn = reg;
-                // An asm fn uses register parameters where they arrive; they have no memory.
-                if (decl.IsAsm) param.Register = reg;
+                // An asm fn or a fixed-address routine uses register parameters where they arrive; they have no memory.
+                if (decl.IsAsm || decl.Address is not null) param.Register = reg;
             }
+            else if (decl.Address is not null)
+                throw new CompileError(p.Pos,
+                    $"Parameter '{p.Name}' must be passed in a register (using A, X, Y, AX, AY or XY): a routine at a fixed address has no memory for parameters");
             fn.Parameters.Add(param);
             if (param.InMemory) fn.FrameVariables.Add(param);
         }
@@ -131,7 +138,29 @@ public sealed partial class Checker
         else if (decl.ReturnUsing is not null)
             throw new CompileError(decl.Pos, "'using' needs a return type");
 
+
         Declare(fn);
+    }
+
+    /// <summary>A routine that already exists at a fixed address: the address and the registers it keeps.</summary>
+    private void DeclareRoutine(FnDecl decl, FunctionSymbol fn)
+    {
+        CheckExpr(decl.Address!);
+        if (decl.Address!.ConstValue is not long a)
+            throw new CompileError(decl.Address.Pos, "The address must be known at compile time");
+        if (a < 0 || a > 0xFFFF)
+            throw new CompileError(decl.Address.Pos, $"Address ${a:X} is outside memory");
+        fn.FixedAddress = (int)a;
+
+        foreach (var (reg, pos) in decl.Keeps)
+        {
+            if (reg is not (Register.A or Register.X or Register.Y))
+                throw new CompileError(pos, $"'keeps' lists the registers A, X and Y, not {reg}. Flags always count as changed");
+            if (!fn.Keeps.Add(reg))
+                throw new CompileError(pos, $"{reg} is listed twice after 'keeps'");
+            if (fn.ReturnRegister is { } ret && ret.ToString().Contains(reg.ToString()))
+                throw new CompileError(pos, $"'{fn.Name}' returns a value in {reg}, so it cannot keep {reg}");
+        }
     }
 
     private static void CheckRegisterFits(Register reg, TernType type, SourcePos pos, bool allowFlags)
@@ -504,8 +533,9 @@ public sealed partial class Checker
                 throw new CompileError(f.Pos, $"A {type} loop variable does not fit in {reg}");
             if (!_loopRegisters.Add(reg))
                 throw new CompileError(f.Pos, $"{reg} is already used by an enclosing loop");
-            if (ContainsCall(f.Body))
-                throw new CompileError(f.Pos, $"The loop body calls a function, which can change {reg}. Remove 'using {reg}'");
+            if (ContainsCall(f.Body, reg))
+                throw new CompileError(f.Pos,
+                    $"The loop body calls a function, which can change {reg}. Remove 'using {reg}', or call only routines that keep {reg}");
         }
 
         var counter = new VariableSymbol(f.Variable ?? $"_loop{_hiddenCounter++}", f.Pos, type, VariableKind.Local, _function)
@@ -527,22 +557,24 @@ public sealed partial class Checker
         if (f.UsingRegister is { } r) _loopRegisters.Remove(r);
     }
 
-    private static bool ContainsCall(Node node) => node switch
+    /// <summary>True if the code calls a function that may change <paramref name="reg"/>: any function except a routine that keeps it.</summary>
+    private bool ContainsCall(Node node, Register reg) => node switch
     {
-        CallExpr c => c.Name is not ("addr" or "len" or "sizeof") || c.Args.Any(ContainsCall),
-        BlockStmt b => b.Statements.Any(ContainsCall),
-        IfStmt i => ContainsCall(i.Condition) || ContainsCall(i.Then) || (i.Else is not null && ContainsCall(i.Else)),
-        WhileStmt w => ContainsCall(w.Condition) || ContainsCall(w.Body),
-        ForStmt f => ContainsCall(f.From) || ContainsCall(f.To) || ContainsCall(f.Body),
-        ReturnStmt r => r.Value is not null && ContainsCall(r.Value),
-        AssignStmt a => ContainsCall(a.Target) || ContainsCall(a.Value),
-        ExprStmt e => ContainsCall(e.Expr),
-        VarDecl v => v.Init is not null && ContainsCall(v.Init),
-        UnaryExpr u => ContainsCall(u.Operand),
-        BinaryExpr b => ContainsCall(b.Left) || ContainsCall(b.Right),
-        IndexExpr ix => ContainsCall(ix.Target) || ContainsCall(ix.Index),
-        MemberExpr m => ContainsCall(m.Target),
-        CastExpr c => ContainsCall(c.Operand),
+        CallExpr c => (c.Name is not ("addr" or "len" or "sizeof") && !(Lookup(c.Name) is FunctionSymbol f && f.Keeps.Contains(reg)))
+            || c.Args.Any(a => ContainsCall(a, reg)),
+        BlockStmt b => b.Statements.Any(x => ContainsCall(x, reg)),
+        IfStmt i => ContainsCall(i.Condition, reg) || ContainsCall(i.Then, reg) || (i.Else is not null && ContainsCall(i.Else, reg)),
+        WhileStmt w => ContainsCall(w.Condition, reg) || ContainsCall(w.Body, reg),
+        ForStmt f => ContainsCall(f.From, reg) || ContainsCall(f.To, reg) || ContainsCall(f.Body, reg),
+        ReturnStmt r => r.Value is not null && ContainsCall(r.Value, reg),
+        AssignStmt a => ContainsCall(a.Target, reg) || ContainsCall(a.Value, reg),
+        ExprStmt e => ContainsCall(e.Expr, reg),
+        VarDecl v => v.Init is not null && ContainsCall(v.Init, reg),
+        UnaryExpr u => ContainsCall(u.Operand, reg),
+        BinaryExpr b => ContainsCall(b.Left, reg) || ContainsCall(b.Right, reg),
+        IndexExpr ix => ContainsCall(ix.Target, reg) || ContainsCall(ix.Index, reg),
+        MemberExpr m => ContainsCall(m.Target, reg),
+        CastExpr c => ContainsCall(c.Operand, reg),
         _ => false,
     };
 
@@ -926,6 +958,10 @@ public sealed partial class Checker
             CheckExpr(c.Args[i]);
             Coerce(c.Args[i], fn.Parameters[i].Type);
         }
+        foreach (var p in fn.Parameters)
+            foreach (var held in _loopRegisters)
+                if (p.PassedIn is { } pr && pr.ToString().Contains(held.ToString()))
+                    throw new CompileError(c.Pos, $"'{fn.Name}' takes '{p.Name}' in {held}, which holds the loop variable. Remove 'using {held}' from the loop");
         c.Function = fn;
         c.Type = fn.ReturnType;
         _function?.Callees.Add(fn);

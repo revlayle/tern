@@ -164,6 +164,28 @@ public sealed class Parser
             returnType = ParseType();
             if (Accept(TokenKind.Using)) returnUsing = ParseRegister();
         }
+        // A routine that already exists at a fixed address: no body.
+        if (At(TokenKind.At))
+        {
+            var at = Advance();
+            if (isAsm)
+                throw new CompileError(at.Pos, "An asm fn at a fixed address is not supported yet");
+            var address = ParseExpr();
+            var keeps = new List<(Register, SourcePos)>();
+            if (Accept(TokenKind.Keeps))
+            {
+                do keeps.Add((ParseRegister(), PeekAt(-1).Pos)); while (Accept(TokenKind.Comma));
+            }
+            if (At(TokenKind.LBrace))
+                throw new CompileError(at.Pos, "A function with a body at a fixed address is not supported yet. Without a body, it declares a routine that is already there");
+            ExpectEndOfStatement();
+            return new FnDecl(start.Pos, name.Text, parameters, returnType, returnUsing, new BlockStmt(at.Pos, []))
+            {
+                Address = address,
+                Keeps = keeps,
+            };
+        }
+
         var body = isAsm ? new BlockStmt(Current.Pos, [ParseAsmBody()]) : ParseBlock();
         return new FnDecl(start.Pos, name.Text, parameters, returnType, returnUsing, body) { IsAsm = isAsm };
     }

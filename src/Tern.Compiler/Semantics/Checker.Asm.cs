@@ -193,6 +193,10 @@ public sealed partial class Checker
     private void AddEffects(AsmInstruction ins, AsmEffects effects)
     {
         var (reads, writes) = AsmEffects.Of(ins.Mnemonic, ins.Mode);
+        var routine = ins.Mnemonic == Mnemonic.Jsr && ins.Value?.Function is { FixedAddress: not null } r ? r : null;
+        if (routine is not null)
+            foreach (var kept in routine.Keeps)
+                writes &= ~(kept switch { Register.A => CpuState.A, Register.X => CpuState.X, _ => CpuState.Y });
         effects.Reads |= reads;
         effects.Writes |= writes;
         if (ins.Mnemonic == Mnemonic.Jsr) effects.Calls = true;
@@ -200,9 +204,9 @@ public sealed partial class Checker
         // A register that holds a loop variable must survive the block.
         foreach (var reg in _loopRegisters)
         {
-            if (ins.Mnemonic == Mnemonic.Jsr)
+            if (ins.Mnemonic == Mnemonic.Jsr && routine?.Keeps.Contains(reg) != true)
                 throw new CompileError(ins.Pos,
-                    $"'jsr' calls a subroutine, which can change {reg}, the register of the loop variable. Remove 'using {reg}' from the loop");
+                    $"'jsr' calls a subroutine, which can change {reg}, the register of the loop variable. Remove 'using {reg}' from the loop, or call a routine that keeps {reg}");
             if (writes.HasFlag(reg == Register.X ? CpuState.X : CpuState.Y))
                 throw new CompileError(ins.Pos,
                     $"This changes {reg}, which holds the loop variable. Remove 'using {reg}' from the loop, or leave {reg} unchanged");

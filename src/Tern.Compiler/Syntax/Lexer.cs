@@ -21,7 +21,7 @@ public enum TokenKind
 
     // Keywords
     Const, Var, Data, Fn, Return, If, Else, While, For, In, Step, Using, Break, Continue,
-    True, False, As, Zp, Struct, Match, Bank, Linear, Inline, Interrupt, Asm, Noinit,
+    True, False, As, Zp, Struct, Match, Bank, Linear, Inline, Interrupt, Asm, Noinit, Keeps,
 
     // Punctuation and operators
     LParen, RParen, LBracket, RBracket, LBrace, RBrace, Comma, Colon, Semicolon,
@@ -61,6 +61,7 @@ public static class Lexer
         ["zp"] = TokenKind.Zp, ["struct"] = TokenKind.Struct, ["match"] = TokenKind.Match,
         ["bank"] = TokenKind.Bank, ["linear"] = TokenKind.Linear, ["inline"] = TokenKind.Inline,
         ["interrupt"] = TokenKind.Interrupt, ["asm"] = TokenKind.Asm, ["noinit"] = TokenKind.Noinit,
+        ["keeps"] = TokenKind.Keeps,
     };
 
     // Longest operators first, so "<<=" wins over "<<" and "<".

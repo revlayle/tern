@@ -139,6 +139,10 @@ public sealed class FunctionSymbol(string name, SourcePos pos) : Symbol(name, po
     public List<VariableSymbol> FrameVariables { get; } = [];
     public HashSet<FunctionSymbol> Callees { get; } = [];
     public FnDecl? Declaration { get; set; }
+    /// <summary>Set for a routine that already exists at this address (<c>fn f() @ $FFD2</c>). It has no body or frame.</summary>
+    public int? FixedAddress { get; set; }
+    /// <summary>Registers (A, X, Y) a routine at a fixed address promises to leave unchanged.</summary>
+    public HashSet<Register> Keeps { get; } = [];
 
     public string Label => Name;
 

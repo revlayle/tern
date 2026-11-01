@@ -555,7 +555,24 @@ public class AsmTests
         var expected = new[] { (byte)0x93 }.Concat(text.Select(c => (byte)CharEncoding.Petscii.Encode(c)!.Value)).ToArray();
         Assert.Equal(expected.Length, r.Ram.Bytes[0xC0FE]);
         Assert.Equal(expected, r.Ram.Bytes.AsSpan(0xC000, expected.Length).ToArray());
-        Assert.Contains("4C D2 FF  jmp $FFD2", r.Result.Listing);
+        // chrout is called directly, from a loop that keeps its counter in X.
+        Assert.Equal(0xFFD2, r.Address("chrout"));
+        Assert.Equal(
+            ["ldx #$00", "cpx print.n", "bcs print.fend0", "txa", "tay", "lda (print.s),y", "jsr $FFD2", "inx", "cpx print.n", "bne print.for2", "rts"],
+            Instructions(ListingOf(r, "print")));
+    }
+
+    private static string[] Instructions(string listing) =>
+        listing.Split('\n').Where(l => l.StartsWith('$') && l.Length > 17 && l[16] == ' ' && char.IsLetter(l[17]))
+            .Select(l => l[16..].Split(';')[0].Trim()).ToArray();
+
+    [Fact]
+    public void Kernal_example_listing_has_no_stand_in_for_chrout()
+    {
+        var path = FindExample("kernal.tern");
+        var result = TernCompiler.Compile(File.ReadAllText(path), sourcePath: path);
+        Assert.DoesNotContain("\nchrout:", result.Listing);
+        Assert.Contains("20 D2 FF  jsr $FFD2", result.Listing);
     }
 
     private static string FindExample(string name)
