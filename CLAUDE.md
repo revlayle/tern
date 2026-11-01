@@ -13,7 +13,7 @@ Tern (working name) is a small, readable language that compiles to efficient 650
 | `docs/reviews/` | Review findings, one file per milestone. | review session |
 | `docs/workflow.md` | How the spec, coding and review sessions work together. | spec session |
 
-Each session edits only the files it owns (see `docs/workflow.md`). Start a session with `/spec`, `/code` or `/review`.
+Each session edits only the files it owns (see `docs/workflow.md`). Start a session with `/spec`, `/code`, `/review` or `/merge`.
 
 ## Layout
 

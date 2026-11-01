@@ -7,6 +7,7 @@ Work happens in three kinds of sessions, each in its own terminal. They communic
 | **Spec** | `/spec` | Language design discussions with you | `docs/spec-v0.md`, `docs/decisions.md`, `docs/roadmap.md`, `docs/workflow.md` |
 | **Coding** | `/code` | One milestone (or part of one) per session | `src/`, `tests/`, `examples/`, `docs/status.md` |
 | **Review** | `/review` | Reviewing a milestone branch | `docs/reviews/` |
+| **Merge** | `/merge` | Merging a branch whose review is clean | nothing (creates the merge commit on `main`) |
 
 **Starting a session:** run `/clear` (or start a new `claude`), then the command. The commands cannot clear the session themselves. Clear whenever a session gets long: everything that matters is in the files, so nothing is lost.
 
@@ -34,7 +35,7 @@ Start the coding terminal in `C:\game-dev\6502-language-dev`.
    - a large milestone can take several coding sessions; each one picks up from `docs/status.md`
 3. **Review session** (main checkout) reviews the branch against the spec and the roadmap's "done when" list, runs the tests, and writes `docs/reviews/m2.md`.
 4. **Coding session** fixes the findings marked "must fix" and notes the fixes in the review file's checklist (by commit message; it does not edit the review file).
-5. **You** merge when the review is clean:
+5. **Merge session**: when the review is clean, run `/merge m2-pointers` in the main checkout. It checks the review verdict and the tests, merges, and tests the result. Alternatively, merge by hand:
    ```
    git merge --no-ff m2-pointers
    ```
