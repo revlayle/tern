@@ -6,7 +6,7 @@ Owned by the coding session. Updated at the end of every coding session.
 
 - **Milestone:** M3 (assembly blocks and KERNAL calls), including the M2 follow-up. Complete.
 - **Branch:** `m3-asm` (from `main` after the M2 merge).
-- **Next step:** `/review` of `m3-asm`. After the merge, M4 (imports and the first standard library). The spec session should look at the questions below; the provisional choices are easy to change.
+- **Next step:** re-review of `m3-asm` against `docs/reviews/m3.md` (all findings addressed), then merge. After the merge, M4 (imports and the first standard library). The spec session should look at the questions below; the provisional choices are easy to change.
 
 ## Done
 
@@ -15,7 +15,7 @@ Owned by the coding session. Updated at the end of every coding session.
 - **M2 follow-up** (branch `m3-asm`, 2026-11-01):
   - Encodings in `CharEncoding.cs`: `petscii`, `petscii_mixed`, `screen`, `screen_mixed`. The platform names its default (`Platform.DefaultEncoding`; C64: `petscii`). Any name right before a quote is an encoding prefix, for strings and chars: `screen'A'`, `petscii_mixed"Hello"`. Unknown prefixes are errors that list the known encodings.
   - `p - q` of two pointers of the same type gives the `u16` byte distance.
-- **M3 assembly blocks and fixed-address routines** (branch `m3-asm`, 2026-11-01). 472 tests pass (34 CPU, 438 compiler).
+- **M3 assembly blocks and fixed-address routines** (branch `m3-asm`, 2026-11-01). 482 tests pass (34 CPU, 448 compiler).
   - `asm { }` statements and `asm fn` with typed signatures. One instruction per line; `//` comments; local `.labels:`, separate in each block.
   - Operands: `#imm`, `addr`, `addr,x`, `addr,y`, `(zp),y`, `(zp,x)`, `(addr)`, `asl a` / `asl`. An operand is a constant expression (`SIZE-1`, `len(t)`, `'A'`, `screen'A'`, `-1`), or the name of a variable, function or label plus or minus a constant (`score+1`, `buffer-1,x`). `.lo`/`.hi` give a byte of an address for immediates: `#msg.lo`, `#(buf+3).hi`.
   - The checker (`Checker.Asm.cs`) picks the addressing mode; the assembler uses the zero-page form when the address is below `$100`. Variables used with a zero-page-only mode (`(p),y`, `(p,x)`, `stx v,y`) are forced into zero page (`VariableSymbol.AsmZeroPage`, same rules as dereferenced pointers).
@@ -27,6 +27,7 @@ Owned by the coding session. Updated at the end of every coding session.
   - Calls (all functions): a one-byte argument for A that needs code is computed straight into A after the other temporaries, instead of through a temporary, matching spec 11 (`lda x` / `jsr $FFD2`).
   - `examples/kernal.tern`: `chrout` declared at `$FFD2` and called from a `for ... using X` loop (`txa / tay / lda (s),y / jsr $FFD2`), and an asm block calling `PLOT` between compiled statements. Checked in VICE; `AsmTests.Kernal_example_prints_through_chrout` runs it in the emulator with stand-ins for the ROM routines (`Run.Program(..., setup: ram => ...)`) and checks the listing.
   - Roadmap "done when": the example prints text in VICE; the call is a direct `jsr $FFD2` in the listing; asm blocks mixed with compiled code are tested in the emulator (`AsmTests`: spec examples, loops, calls in both directions, all addressing modes, 47 error messages plus branch range and error positions).
+  - Review fixes (`docs/reviews/m3.md`), commit "Keep jmp (v) vectors off $xxFF; address M3 review suggestions": 1, a variable used as `jmp (v+n)` is never placed so that the vector starts at `$xxFF` (NMOS bug): `VariableSymbol.JumpVectorOffsets`, and a `Padding` item sized during layout before the variables after the program and before initialized globals used as vectors; a fixed address ending in `$FF` is an error. 2, `jsr f`/`jmp f` from asm to a function with memory parameters is an error. 3, clearer `keeps` without `@`. 4, test for the negation error. 5, `Register.Uses()`. 6, keywords are not encoding prefixes. 7, blank line.
 
 ## Known limitations and technical debt
 
@@ -56,7 +57,7 @@ The M2 questions were settled on 2026-11-01 (`docs/decisions.md`). New ones from
 3. **`asl a`.** `a` or `A` after `asl`/`lsr`/`rol`/`ror` means the accumulator, even if a variable named `a` exists. `asl` alone also works.
 4. **Immediate addresses.** `lda #name` for an address is an error ("write #name.lo or #name.hi"). Immediate numbers may be -128 to 255.
 5. **Case.** Mnemonics and the index registers in `,x`/`,y` ignore case (`LDA t,X`). Labels and Tern names are case-sensitive.
-6. **Calling Tern functions from assembly.** `jsr f` works for functions with register parameters or none. There is no way to write a memory parameter from assembly (`f.x` is not a name outside `f`, spec 6.1). Should asm be allowed to write `f.x`, or is this the intended limit?
+6. **Calling Tern functions from assembly.** `jsr f` and `jmp f` work for functions with register parameters or none. For a function with memory parameters they are an error (review M3, finding 2), since assembly cannot write `f.x` (not a name outside `f`, spec 6.1); `#f.lo` is allowed. Should asm be allowed to write `f.x`, or is this the intended limit?
 7. **Function addresses in assembly.** `#f.lo` / `#f.hi` (e.g. to install a handler) makes `f` a callee of the function containing the block, which keeps it compiled and its frame separate. For interrupt handlers (M6) this will need the interrupt-root rule instead.
 8. **`p - q`** requires both pointers to have the same type, like comparisons. Should different pointer types be allowed, since the result is only a byte count?
 9. **`π` in `petscii_mixed`.** `$FF` shows a different character in the lower/upper-case set, so `petscii_mixed` has no code for `π`. `screen_mixed` is derived from `petscii_mixed` and also has none.
@@ -65,3 +66,6 @@ The M2 questions were settled on 2026-11-01 (`docs/decisions.md`). New ones from
 ## Provisional choices made while coding
 
 Listed as questions 1-10 above. Also: `keeps` is a reserved word; a call in a `using X` loop that passes a parameter in X is an error.
+
+
+Also from the M3 review (finding 4): new error tests live in per-feature files (`AsmTests`, `RoutineTests`, `DataTests`) as well as `ErrorTests.cs`. CLAUDE.md says `ErrorTests.cs`; the spec session should decide which convention to keep.
