@@ -1,0 +1,44 @@
+// Prints text through the C64 KERNAL, using asm fn for the KERNAL calls
+// and an asm block in the middle of compiled code.
+const CHROUT = $FFD2    // print the PETSCII character in A
+const PLOT = $FFF0      // with carry set: read the cursor row into X, column into Y
+const CLEAR = $93       // PETSCII "clear screen"
+
+data title = "HELLO FROM TERN, VIA CHROUT."
+data where = "\nTHE CURSOR WAS AT ROW $"
+data column = ", COLUMN $"
+data digits = "0123456789ABCDEF"
+
+// The KERNAL routine ends with rts, so a jmp is all that is needed.
+asm fn chrout(ch: u8 using A) {
+    jmp CHROUT
+}
+
+fn print(s: ptr u8, n: u8) {
+    for i in 0..n { chrout(s[i]) }
+}
+
+fn print_hex(v: u8) {
+    chrout(digits[v >> 4])
+    chrout(digits[v & 15])
+}
+
+fn main() {
+    chrout(CLEAR)
+    print(addr(title), len(title))
+
+    var row: u8 = 0
+    var col: u8 = 0
+    asm {
+        sec
+        jsr PLOT
+        stx row
+        sty col
+    }
+
+    print(addr(where), len(where))
+    print_hex(row)
+    print(addr(column), len(column))
+    print_hex(col)
+    chrout('\n')
+}

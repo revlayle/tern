@@ -528,6 +528,47 @@ public class AsmTests
     }
 
     [Fact]
+    public void Kernal_example_prints_through_chrout()
+    {
+        var path = FindExample("kernal.tern");
+        var r = Run.Program(File.ReadAllText(path), sourcePath: path, setup: ram =>
+        {
+            // The emulator has no ROM. CHROUT appends A to a buffer at $C000 (count at $C0FE);
+            // PLOT returns row 0 and the column of the last character printed.
+            ram.Load(0xFFD2, [
+                0x8E, 0xFF, 0xC0,   // stx $C0FF
+                0xAE, 0xFE, 0xC0,   // ldx $C0FE
+                0x9D, 0x00, 0xC0,   // sta $C000,x
+                0xEE, 0xFE, 0xC0,   // inc $C0FE
+                0xAE, 0xFF, 0xC0,   // ldx $C0FF
+                0x60,               // rts
+            ]);
+            ram.Load(0xFFF0, [
+                0xA2, 0x00,         // ldx #0
+                0xAC, 0xFE, 0xC0,   // ldy $C0FE
+                0x88,               // dey
+                0x60,               // rts
+            ]);
+        });
+        const string title = "HELLO FROM TERN, VIA CHROUT.";
+        var text = title + $"\nTHE CURSOR WAS AT ROW $00, COLUMN ${title.Length:X2}\n";
+        var expected = new[] { (byte)0x93 }.Concat(text.Select(c => (byte)CharEncoding.Petscii.Encode(c)!.Value)).ToArray();
+        Assert.Equal(expected.Length, r.Ram.Bytes[0xC0FE]);
+        Assert.Equal(expected, r.Ram.Bytes.AsSpan(0xC000, expected.Length).ToArray());
+        Assert.Contains("4C D2 FF  jmp $FFD2", r.Result.Listing);
+    }
+
+    private static string FindExample(string name)
+    {
+        for (var dir = new DirectoryInfo(AppContext.BaseDirectory); dir is not null; dir = dir.Parent)
+        {
+            var path = Path.Combine(dir.FullName, "examples", name);
+            if (File.Exists(path)) return path;
+        }
+        throw new FileNotFoundException($"examples/{name} not found above {AppContext.BaseDirectory}");
+    }
+
+    [Fact]
     public void Asm_fn_can_jump_to_itself()
     {
         // jmp to the function's own label is a loop, not recursion.
