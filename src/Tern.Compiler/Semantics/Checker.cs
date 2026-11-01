@@ -101,6 +101,15 @@ public sealed partial class Checker
         var usedRegisters = new HashSet<char>();
         foreach (var p in decl.Parameters)
         {
+            if (p.FixedValue is not null)
+            {
+                // Checked with the routine's address, after the globals are declared.
+                if (decl.Address is null)
+                    throw new CompileError(p.Pos, decl.IsAsm
+                        ? "Fixed inputs are only for routines at a fixed address. An asm fn sets up its inputs in its own code"
+                        : "Fixed inputs are only for routines at a fixed address (fn name(...) @ $addr). Give the parameter a name and a type: 'name: type'");
+                continue;
+            }
             var type = ResolveType(p.Type);
             if (!type.IsScalar) throw new CompileError(p.Pos, "Parameters must be numbers or bool");
             var param = new VariableSymbol(p.Name, p.Pos, type, VariableKind.Parameter, fn);
@@ -141,6 +150,32 @@ public sealed partial class Checker
         Declare(fn);
     }
 
+    /// <summary>A constant passed on every call of a routine at a fixed address: <c>true using carry</c>, <c>3 using X</c>.</summary>
+    private void DeclareFixedInput(FunctionSymbol fn, ParamSyntax p, HashSet<char> usedRegisters)
+    {
+        var reg = p.UsingRegister!.Value;
+        var value = p.FixedValue!;
+        CheckExpr(value);
+        if (value.ConstValue is not long v)
+            throw new CompileError(value.Pos, "A fixed input must be a constant");
+        switch (reg)
+        {
+            case Register.Carry:
+                if (value.Type.Kind != TypeKind.Bool)
+                    throw new CompileError(value.Pos, "The carry takes true or false");
+                break;
+            case Register.A or Register.X or Register.Y:
+                Coerce(value, TernType.U8);
+                break;
+            default:
+                throw new CompileError(p.Pos, $"A fixed input goes in A, X, Y or the carry, not {reg}");
+        }
+        char key = reg == Register.Carry ? 'c' : reg.ToString()[0];
+        if (!usedRegisters.Add(key))
+            throw new CompileError(p.Pos, reg == Register.Carry ? "The carry is set more than once" : $"Register {reg} is used by more than one parameter");
+        fn.FixedInputs.Add((reg, v));
+    }
+
     /// <summary>A routine that already exists at a fixed address: the address and the registers it keeps.</summary>
     private void DeclareRoutine(FnDecl decl, FunctionSymbol fn)
     {
@@ -150,6 +185,10 @@ public sealed partial class Checker
         if (a < 0 || a > 0xFFFF)
             throw new CompileError(decl.Address.Pos, $"Address ${a:X} is outside memory");
         fn.FixedAddress = (int)a;
+
+        var usedRegisters = fn.Parameters.SelectMany(p => p.PassedIn!.Value.ToString().Where(char.IsUpper)).ToHashSet();
+        foreach (var p in decl.Parameters.Where(p => p.FixedValue is not null))
+            DeclareFixedInput(fn, p, usedRegisters);
 
         foreach (var (reg, pos) in decl.Keeps)
         {
@@ -961,6 +1000,9 @@ public sealed partial class Checker
             foreach (var held in _loopRegisters)
                 if (p.PassedIn is { } pr && pr.Uses(held))
                     throw new CompileError(c.Pos, $"'{fn.Name}' takes '{p.Name}' in {held}, which holds the loop variable. Remove 'using {held}' from the loop");
+        foreach (var (reg, _) in fn.FixedInputs)
+            if (_loopRegisters.Contains(reg))
+                throw new CompileError(c.Pos, $"'{fn.Name}' takes a fixed input in {reg}, which holds the loop variable. Remove 'using {reg}' from the loop");
         c.Function = fn;
         c.Type = fn.ReturnType;
         _function?.Callees.Add(fn);

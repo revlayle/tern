@@ -1297,9 +1297,14 @@ public sealed class CodeGen
                 loads.Add((hiReg, pair.Hi));
             }
         }
+        foreach (var (reg, value) in fn.FixedInputs)
+            if (reg != Register.Carry) loads.Add((reg, Byte(value)));
         if (intoA is not null) GenA(intoA);
         foreach (var (reg, op) in loads.OrderBy(l => l.Reg == Register.A ? 1 : 0))
             Op(reg switch { Register.A => Lda, Register.X => Ldx, _ => Ldy }, op);
+        // A fixed carry goes right before the jsr, after everything that could change it.
+        foreach (var (reg, value) in fn.FixedInputs)
+            if (reg == Register.Carry) Emit(value != 0 ? Sec : Clc);
 
         Emit(Jsr, Absolute, fn.FixedAddress is int at ? new AddrOperand(at) : new LabelOperand(_functionLabels[fn]));
         foreach (var t in temps) Release(t);

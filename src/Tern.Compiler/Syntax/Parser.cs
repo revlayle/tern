@@ -148,6 +148,16 @@ public sealed class Parser
         {
             do
             {
+                // A fixed input: a constant in place of the name, e.g. "true using carry".
+                if (!(At(TokenKind.Identifier) && PeekAt(1).Kind == TokenKind.Colon))
+                {
+                    var value = ParseExpr();
+                    if (!At(TokenKind.Using))
+                        throw new CompileError(Current.Pos, $"Expected a parameter 'name: type', or a fixed input such as 'true using carry'; found {Describe(Current)}");
+                    Advance();
+                    parameters.Add(new ParamSyntax(value.Pos, "", new NamedTypeSyntax(value.Pos, ""), ParseRegister()) { FixedValue = value });
+                    continue;
+                }
                 var pname = Expect(TokenKind.Identifier, "parameter name");
                 Expect(TokenKind.Colon, "':'");
                 var ptype = ParseType();

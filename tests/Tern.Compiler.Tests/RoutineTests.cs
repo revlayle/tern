@@ -13,6 +13,8 @@ public class RoutineTests
     /// $C020 is_big: carry set if A >= 100.
     /// $C030 widen: returns A as the low byte and $12 in X.
     /// $C040 log: appends A to $C500 (count at $C5FF), changes A, keeps X and Y.
+    /// $C060 cursor, like KERNAL PLOT: carry set loads X and Y from $C5F0/$C5F1; carry clear stores them there.
+    /// $C080 mode: stores X at $C5F2 and A at $C5F3.
     /// </summary>
     private static void Stubs(Ram ram)
     {
@@ -29,6 +31,26 @@ public class RoutineTests
             0xA9, 0xEE,         // lda #$EE
             0x60,               // rts
         ]);
+        ram.Load(0xC060, [
+            0x90, 0x07,         // bcc set
+            0xAE, 0xF0, 0xC5,   // ldx $C5F0
+            0xAC, 0xF1, 0xC5,   // ldy $C5F1
+            0x60,               // rts
+            0x8E, 0xF0, 0xC5,   // set: stx $C5F0
+            0x8C, 0xF1, 0xC5,   // sty $C5F1
+            0x60,               // rts
+        ]);
+        ram.Load(0xC080, [0x8E, 0xF2, 0xC5, 0x8D, 0xF3, 0xC5, 0x60]);    // stx $C5F2 / sta $C5F3 / rts
+    }
+
+    /// <summary>The mnemonics and operands of main's instructions, one per line, e.g. "ldx row".</summary>
+    private static List<string> MainCode(Run r)
+    {
+        var listing = r.Result.Listing;
+        var lines = listing[(listing.IndexOf("\nmain:") + 1)..].Split('\n').Skip(1);
+        return lines.TakeWhile(l => l.StartsWith('$') || l.StartsWith(' '))
+            .Where(l => l.StartsWith('$'))
+            .Select(l => l[17..].Split(';')[0].Trim()).ToList();
     }
 
     private const string Declarations = """
@@ -154,6 +176,66 @@ public class RoutineTests
     }
 
     [Fact]
+    public void Fixed_inputs_in_the_carry()
+    {
+        var r = RunWithStubs("""
+            fn get_cursor(true using carry) -> u16 using XY @ $C060
+            fn set_cursor(false using carry, row: u8 using X, col: u8 using Y) @ $C060
+            var pos: u16
+            var row: u8 = 5
+            fn main() {
+                set_cursor(row, 10)
+                pos = get_cursor()
+            }
+            """);
+        Assert.Equal(5, r.Ram.Bytes[0xC5F0]);
+        Assert.Equal(10, r.Ram.Bytes[0xC5F1]);
+        Assert.Equal(0x0A05, r.U16("pos"));
+        // Spec 6.6 and 11: the carry is set or cleared right before the jsr.
+        Assert.Equal(["ldx row", "ldy #$0A", "clc", "jsr $C060", "sec", "jsr $C060", "stx pos", "sty pos+1", "rts"], MainCode(r));
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(255)]
+    public void Fixed_inputs_in_registers(int v)
+    {
+        var r = RunWithStubs($$"""
+            const MODE = 3
+            fn mode(MODE using X, v: u8 using A) @ $C080
+            fn mode7(v: u8 using A, 7 using X) @ $C080
+            fn both(200 using A, $FF using X) @ $C080
+            var seen: [u8; 6]
+            var x: u8 = {{v}}
+            fn main() {
+                mode(x)
+                asm {
+                    lda $C5F2
+                    sta seen
+                    lda $C5F3
+                    sta seen+1
+                }
+                mode7(x)
+                asm {
+                    lda $C5F2
+                    sta seen+2
+                    lda $C5F3
+                    sta seen+3
+                }
+                both()
+                asm {
+                    lda $C5F2
+                    sta seen+4
+                    lda $C5F3
+                    sta seen+5
+                }
+            }
+            """);
+        Assert.Equal([3, (byte)v, 7, (byte)v, 0xFF, 200], r.Ram.Bytes.AsSpan(r.Address("seen"), 6).ToArray());
+        Assert.Contains("ldx #$03", r.Result.Listing);
+    }
+
+    [Fact]
     public void Unused_routines_add_nothing()
     {
         var with = TernCompiler.Compile(Declarations + "fn main() { }");
@@ -181,6 +263,19 @@ public class RoutineTests
     [InlineData("fn f(v: u16 using XY) @ $C000 keeps X, Y\nfn main() { for i in 0..3 using Y { f(1) } }", "'f' takes 'v' in Y, which holds the loop variable")]
     [InlineData("fn f() @ $C000 keeps Y\nfn main() { for i in 0..3 using X { asm {\n jsr f\n } } }", "'jsr' calls a subroutine, which can change X")]
     [InlineData("fn f() @ $C000\nvar p: ptr u8\nfn main() { p = addr(f) }", "addr() of a function is not supported yet")]
+    [InlineData("fn f(true using carry) { }\nfn main() { }", "Fixed inputs are only for routines at a fixed address (fn name(...) @ $addr)")]
+    [InlineData("asm fn f(1 using X) { }\nfn main() { }", "An asm fn sets up its inputs in its own code")]
+    [InlineData("var m: u8\nfn f(m using X) @ $C000\nfn main() { }", "A fixed input must be a constant")]
+    [InlineData("fn f(1 using carry) @ $C000\nfn main() { }", "The carry takes true or false")]
+    [InlineData("fn f(true using X) @ $C000\nfn main() { }", "Expected u8, found bool")]
+    [InlineData("fn f(256 using X) @ $C000\nfn main() { }", "256 does not fit in u8")]
+    [InlineData("fn f(1 using AX) @ $C000\nfn main() { }", "A fixed input goes in A, X, Y or the carry, not AX")]
+    [InlineData("fn f(true using zero) @ $C000\nfn main() { }", "A fixed input goes in A, X, Y or the carry, not Zero")]
+    [InlineData("fn f(1 using X, v: u8 using X) @ $C000\nfn main() { }", "Register X is used by more than one parameter")]
+    [InlineData("fn f(true using carry, false using carry) @ $C000\nfn main() { }", "The carry is set more than once")]
+    [InlineData("fn f(1) @ $C000\nfn main() { }", "Expected a parameter 'name: type', or a fixed input such as 'true using carry'")]
+    [InlineData("fn f(2 using X) @ $C000 keeps X\nfn main() { for i in 0..3 using X { f() } }", "'f' takes a fixed input in X, which holds the loop variable")]
+    [InlineData("fn f(true using carry) @ $C000\nfn main() { f(true) }", "'f' takes 0 argument(s), not 1")]
     public void Reports_errors(string source, string expected)
     {
         var e = Assert.Throws<CompileError>(() => TernCompiler.Compile(source));

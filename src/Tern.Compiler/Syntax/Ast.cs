@@ -262,6 +262,8 @@ public sealed class ParamSyntax(SourcePos pos, string name, TypeSyntax type, Reg
     public string Name { get; } = name;
     public TypeSyntax Type { get; } = type;
     public Register? UsingRegister { get; } = usingRegister;
+    /// <summary>A fixed input (<c>true using carry</c>): the constant passed on every call. Name and type are then empty.</summary>
+    public Expr? FixedValue { get; init; }
 }
 
 public sealed class FnDecl(
