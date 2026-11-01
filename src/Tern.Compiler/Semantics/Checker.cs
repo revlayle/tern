@@ -25,8 +25,18 @@ public sealed class Checker
     private int _loopDepth;
     private readonly HashSet<Register> _loopRegisters = [];
     private int _hiddenCounter;
+    private readonly Platform _platform;
+    private readonly string _baseDirectory;
 
-    public static CheckedProgram Check(ProgramSyntax program) => new Checker().Run(program);
+    private Checker(Platform platform, string baseDirectory)
+    {
+        _platform = platform;
+        _baseDirectory = baseDirectory;
+    }
+
+    /// <param name="baseDirectory">Where <c>include_bytes</c> looks for files: the source file's directory.</param>
+    public static CheckedProgram Check(ProgramSyntax program, Platform platform, string baseDirectory) =>
+        new Checker(platform, baseDirectory).Run(program);
 
     private CheckedProgram Run(ProgramSyntax program)
     {
@@ -133,19 +143,76 @@ public sealed class Checker
 
     private void DeclareGlobal(VarDecl decl)
     {
-        var type = DeclaredType(decl);
-        var v = new VariableSymbol(decl.Name, decl.Pos, type, VariableKind.Global, null);
+        // A string or include_bytes() gives a [u8; N] array, which may be longer than 256 bytes.
+        var bytes = decl.Init is null ? null : ByteSource(decl.Init);
+        var type = bytes is not null && decl.TypeSyntax is null ? TernType.ArrayOf(TernType.U8, bytes.Length) : DeclaredType(decl);
+        var v = new VariableSymbol(decl.Name, decl.Pos, type, VariableKind.Global, null) { IsData = decl.IsData };
         decl.Symbol = v;
         ApplyPlacement(decl, v, allowAddress: true);
 
+        if (decl.IsData && !type.IsArray)
+            throw new CompileError(decl.Pos, "Data must be an array or a string. For a single value, use 'const'");
         if (decl.Init is not null)
         {
             if (v.FixedAddress is not null)
                 throw new CompileError(decl.Init.Pos, "A variable at a fixed address cannot have an initial value");
-            v.InitialBytes = ConstantBytes(decl.Init, type);
+            if (bytes is not null)
+            {
+                if (!type.IsArray || type.Element!.Kind != TypeKind.U8)
+                    throw new CompileError(decl.Init.Pos, $"This value is a [u8; {bytes.Length}] array, but '{decl.Name}' is {type}");
+                if (type.Length != bytes.Length)
+                    throw new CompileError(decl.Init.Pos, $"Expected {type.Length} bytes, found {bytes.Length}");
+                v.InitialBytes = bytes;
+            }
+            else
+                v.InitialBytes = ConstantBytes(decl.Init, type);
         }
         Declare(v);
         _globals.Add(v);
+    }
+
+    /// <summary>The bytes of a string literal or <c>include_bytes()</c>, or null for other initializers.</summary>
+    private byte[]? ByteSource(Expr init)
+    {
+        switch (init)
+        {
+            case StringExpr s:
+                if (s.Text.Length == 0) throw new CompileError(s.Pos, "A string must have at least one character");
+                return s.Text.Select(c => (byte)Encode(c, s.Screen, s.Pos)).ToArray();
+            case CallExpr { Name: "include_bytes" } call:
+                return IncludeBytes(call);
+            default:
+                return null;
+        }
+    }
+
+    private int Encode(char c, bool screen, SourcePos pos)
+    {
+        if (Lexer.IsRawByte(c)) return c - Lexer.RawByteBase;
+        int? code = screen ? _platform.ScreenEncoding(c) : _platform.TextEncoding(c);
+        if (code is int value) return value;
+        string shown = c == '\n' ? "\\n" : c.ToString();
+        throw new CompileError(pos, screen
+            ? $"'{shown}' has no screen code. Write the byte as \\$NN"
+            : $"'{shown}' has no {_platform.TextEncodingName} code. Write the byte as \\$NN");
+    }
+
+    private byte[] IncludeBytes(CallExpr call)
+    {
+        if (call.Args is not [StringExpr { Screen: false } file])
+            throw new CompileError(call.Pos, "include_bytes() takes a file name in quotes");
+        var path = Path.Combine(_baseDirectory, file.Text);
+        byte[] bytes;
+        try
+        {
+            bytes = File.ReadAllBytes(path);
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
+        {
+            throw new CompileError(file.Pos, $"Cannot read '{file.Text}' ({path}): {e.Message}");
+        }
+        if (bytes.Length == 0) throw new CompileError(file.Pos, $"'{file.Text}' is empty");
+        return bytes;
     }
 
     /// <summary>The variable's type: written out, or taken from the initializer.</summary>
@@ -496,6 +563,14 @@ public sealed class Checker
                 e.ConstValue = b.Value ? 1 : 0;
                 break;
 
+            case CharExpr ch:
+                e.Type = TernType.IntLiteral;
+                e.ConstValue = Encode(ch.Value, screen: false, ch.Pos);
+                break;
+
+            case StringExpr:
+                throw new CompileError(e.Pos, "A string can only be the value of data or a global array");
+
             case NameExpr n:
                 switch (Lookup(n.Name))
                 {
@@ -771,6 +846,8 @@ public sealed class Checker
                 c.ConstValue = c.Args[0].Type.Length;
                 return;
             }
+            case "include_bytes":
+                throw new CompileError(c.Pos, "include_bytes() can only be the value of data or a global array");
             case "addr":
             {
                 if (c.Args.Count != 1 || c.Args[0] is not NameExpr name)

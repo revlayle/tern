@@ -14,6 +14,10 @@ public sealed class CompileError(SourcePos pos, string message) : Exception($"{p
 public enum TokenKind
 {
     Identifier, Number, Newline, Eof,
+    /// <summary>Text holds the character, after escapes.</summary>
+    Char,
+    /// <summary>Text holds the characters, after escapes. <see cref="ScreenString"/> is <c>screen"..."</c>.</summary>
+    String, ScreenString,
 
     // Keywords
     Const, Var, Data, Fn, Return, If, Else, While, For, In, Step, Using, Break, Continue,
@@ -35,6 +39,14 @@ public readonly record struct Token(TokenKind Kind, string Text, long Value, Sou
 
 public static class Lexer
 {
+    /// <summary>
+    /// An escape such as <c>\$93</c> or <c>\0</c> stands for a byte that is not encoded. In the text
+    /// of a char or string token it is stored as a character from this private-use range.
+    /// </summary>
+    public const char RawByteBase = '\uE000';
+
+    public static bool IsRawByte(char c) => c >= RawByteBase && c <= RawByteBase + 0xFF;
+
     private static readonly Dictionary<string, TokenKind> Keywords = new()
     {
         ["const"] = TokenKind.Const, ["var"] = TokenKind.Var, ["data"] = TokenKind.Data,
@@ -68,7 +80,7 @@ public static class Lexer
 
     /// <summary>Tokens after which a line break ends the statement.</summary>
     private static bool EndsStatement(TokenKind kind) => kind is
-        TokenKind.Identifier or TokenKind.Number or TokenKind.RParen or TokenKind.RBracket or
+        TokenKind.Identifier or TokenKind.Number or TokenKind.Char or TokenKind.String or TokenKind.ScreenString or TokenKind.RParen or TokenKind.RBracket or
         TokenKind.RBrace or TokenKind.True or TokenKind.False or TokenKind.Return or
         TokenKind.Break or TokenKind.Continue or TokenKind.Zp;
 
@@ -115,11 +127,26 @@ public static class Lexer
                 continue;
             }
 
+            if (c == '"' || c == '\'')
+            {
+                int start = i;
+                string text = ReadQuoted(source, ref i, Pos(start));
+                if (c == '\'' && text.Length != 1)
+                    throw new CompileError(Pos(start), "A character literal holds exactly one character; use \"...\" for a string");
+                Add(c == '"' ? TokenKind.String : TokenKind.Char, text, 0, start);
+                continue;
+            }
+
             if (char.IsLetter(c) || c == '_')
             {
                 int start = i;
                 while (i < source.Length && (char.IsLetterOrDigit(source[i]) || source[i] == '_')) i++;
                 string word = source[start..i];
+                if (word == "screen" && Peek(source, i) == '"')
+                {
+                    Add(TokenKind.ScreenString, ReadQuoted(source, ref i, Pos(start)), 0, start);
+                    continue;
+                }
                 Add(Keywords.TryGetValue(word, out var kw) ? kw : TokenKind.Identifier, word, 0, start);
                 continue;
             }
@@ -167,6 +194,38 @@ public static class Lexer
             Add(TokenKind.Newline, "\\n", 0, i);
         tokens.Add(new Token(TokenKind.Eof, "", 0, Pos(i)));
         return tokens;
+    }
+
+    /// <summary>Reads a quoted char or string literal starting at the quote, and decodes its escapes.</summary>
+    private static string ReadQuoted(string source, ref int i, SourcePos pos)
+    {
+        char quote = source[i++];
+        var sb = new System.Text.StringBuilder();
+        while (true)
+        {
+            if (i >= source.Length || source[i] == '\n')
+                throw new CompileError(pos, quote == '"' ? "String is not closed with '\"'" : "Character literal is not closed with '''");
+            char c = source[i++];
+            if (c == quote) return sb.ToString();
+            if (c != '\\')
+            {
+                sb.Append(c);
+                continue;
+            }
+            char e = Peek(source, i++);
+            switch (e)
+            {
+                case '0': sb.Append(RawByteBase); break;
+                case 'n': sb.Append('\n'); break;
+                case '\\' or '"' or '\'': sb.Append(e); break;
+                case '$' when IsHexDigit(Peek(source, i)) && IsHexDigit(Peek(source, i + 1)):
+                    sb.Append((char)(RawByteBase + Convert.ToInt32(source.Substring(i, 2), 16)));
+                    i += 2;
+                    break;
+                default:
+                    throw new CompileError(pos, $"Unknown escape '\\{e}'. Use \\0, \\n, \\\\, \\\", \\' or \\$NN for a byte");
+            }
+        }
     }
 
     private static char Peek(string s, int i) => i < s.Length ? s[i] : '\0';

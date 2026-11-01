@@ -10,9 +10,9 @@ public sealed class Run
     public Ram Ram { get; } = new();
     public Cpu6502 Cpu { get; }
 
-    private Run(string source, long maxCycles)
+    private Run(string source, long maxCycles, string? sourcePath)
     {
-        Result = TernCompiler.Compile(source);
+        Result = TernCompiler.Compile(source, sourcePath: sourcePath);
         Ram.Load((ushort)Result.LoadAddress, Result.Image);
         Cpu = new Cpu6502(Ram) { PC = (ushort)Result.Entry, SP = 0xFF };
         while (Cpu.PC != Result.HaltAddress)
@@ -23,7 +23,8 @@ public sealed class Run
         }
     }
 
-    public static Run Program(string source, long maxCycles = 5_000_000) => new(source, maxCycles);
+    public static Run Program(string source, long maxCycles = 5_000_000, string? sourcePath = null) =>
+        new(source, maxCycles, sourcePath);
 
     public int Address(string name) =>
         Result.Symbols.TryGetValue(name, out var a) ? a : throw new KeyNotFoundException($"No symbol '{name}'");

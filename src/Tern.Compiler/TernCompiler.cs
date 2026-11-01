@@ -27,12 +27,14 @@ public sealed class CompileResult
 
 public static class TernCompiler
 {
-    public static CompileResult Compile(string source, Platform? platform = null)
+    /// <param name="sourcePath">The source file's path. <c>include_bytes</c> paths are relative to its directory.</param>
+    public static CompileResult Compile(string source, Platform? platform = null, string? sourcePath = null)
     {
         platform ??= Platform.C64;
 
         var syntax = Parser.Parse(source);
-        var program = Checker.Check(syntax);
+        var baseDirectory = Path.GetDirectoryName(Path.GetFullPath(sourcePath ?? "x")) ?? ".";
+        var program = Checker.Check(syntax, platform, baseDirectory);
 
         var gen = new CodeGen(program, source);
         var functionCode = gen.GenerateFunctions();

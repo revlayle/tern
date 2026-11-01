@@ -38,6 +38,18 @@ public sealed class NumberExpr(SourcePos pos, long value) : Expr(pos)
 {
     public long Value { get; } = value;
 }
+/// <summary>A char literal such as <c>'A'</c>; the checker turns it into a number.</summary>
+public sealed class CharExpr(SourcePos pos, char value) : Expr(pos)
+{
+    public char Value { get; } = value;
+}
+/// <summary>A string literal: <c>"..."</c> in the platform encoding, or <c>screen"..."</c> in screen codes.</summary>
+public sealed class StringExpr(SourcePos pos, string text, bool screen) : Expr(pos)
+{
+    /// <summary>The characters after escapes; see <see cref="Lexer.RawByteBase"/>.</summary>
+    public string Text { get; } = text;
+    public bool Screen { get; } = screen;
+}
 public sealed class BoolExpr(SourcePos pos, bool value) : Expr(pos)
 {
     public bool Value { get; } = value;
@@ -107,6 +119,8 @@ public sealed class VarDecl(SourcePos pos, string name, TypeSyntax? type, Placem
     public TypeSyntax? TypeSyntax { get; } = type;
     public Placement Placement { get; } = placement;
     public Expr? Init { get; } = init;
+    /// <summary>Declared with <c>data</c> instead of <c>var</c>.</summary>
+    public bool IsData { get; init; }
     public VariableSymbol? Symbol { get; set; }
 }
 public sealed class AssignStmt(SourcePos pos, Expr target, TokenKind op, Expr value) : Stmt(pos)
