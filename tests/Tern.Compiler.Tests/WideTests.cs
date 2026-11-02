@@ -280,6 +280,16 @@ public class WideTests
     }
 
     [Fact]
+    public void The_arcade_example_compiles_with_every_new_module()
+    {
+        var path = AsmTests.FindExample("arcade.tern");
+        var result = TernCompiler.Compile(File.ReadAllText(path), sourcePath: path);
+        foreach (var name in new[] { "wide.add32_u16", "wide.dec32z", "bcd.add", "bcd.digits", "random.next8", "random.below", "math.mul8", "text.hex16" })
+            Assert.Contains($"\n{name}:", result.Listing);
+        Assert.Contains("math.SINE", result.Listing);
+    }
+
+    [Fact]
     public void An_unused_wide_module_adds_no_bytes()
     {
         Assert.Equal(TernCompiler.Compile("fn main() { }").Image.Length, TernCompiler.Compile("import wide\nfn main() { }").Image.Length);

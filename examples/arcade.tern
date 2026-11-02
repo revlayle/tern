@@ -1,0 +1,99 @@
+// A score of two kinds, a sprite on a circle and random notes.
+//
+// SCORE is a 32-bit number (wide.U32). Adding to it is cheap, but turning it into digits
+// takes thousands of cycles, so the digits are made only when the score has changed.
+// BONUS is a packed decimal counter (bcd): adding to it is as cheap, and it already is digits.
+// The sprite goes round a circle with sin8 and cos8; random picks the points added to SCORE
+// and the notes played on the SID.
+//
+// Main works in step with the screen, one pass per frame (it waits for raster line 250).
+import bcd
+import c64
+import math
+import mem
+import random
+import text
+import wide
+
+const SPRITE_BLOCK = 13                     // sprite data at 13 * 64 = $0340
+const SPRITE_POINTERS = c64.SCREEN + $03F8
+const ROW = 40
+
+var score: wide.U32
+var bonus: [u8; 3]                          // six decimal digits
+var bonus_step: [u8; 3]
+var angle: u8
+var frame: u8
+var note: u16                               // the SID registers can only be written
+
+data score_label = screen"SCORE"
+data bonus_label = screen"BONUS"
+data note_label = screen"NOTE"
+
+// Wait until the raster is past the bottom of the visible screen.
+fn next_frame() {
+    while c64.vic.raster == 250 { }
+    while c64.vic.raster != 250 { }
+}
+
+fn start_note() {
+    var pitch: u16 = random.next8() as u16
+    note = $0800 + (pitch << 5)
+    c64.sid.voice1.freq = note
+    c64.sid.voice1.control = $10            // gate off, then on: starts the envelope again
+    c64.sid.voice1.control = $11            // triangle wave, gate on
+}
+
+fn main() {
+    c64.vic.border = c64.BLACK
+    c64.vic.background = c64.BLUE
+    mem.fill(c64.SCREEN, ' ', 250)
+    mem.fill(c64.SCREEN + 250, ' ', 250)
+    mem.fill(c64.SCREEN + 500, ' ', 250)
+    mem.fill(c64.SCREEN + 750, ' ', 250)
+    mem.fill(c64.COLOR, c64.WHITE, 1000)
+    text.put(c64.SCREEN + 2 * ROW + 2, addr(score_label), len(score_label))
+    text.put(c64.SCREEN + 4 * ROW + 2, addr(bonus_label), len(bonus_label))
+    text.put(c64.SCREEN + 6 * ROW + 2, addr(note_label), len(note_label))
+
+    mem.fill(SPRITE_BLOCK * 64, $FF, 63)
+    var pointers: ptr u8 = SPRITE_POINTERS
+    pointers[0] = SPRITE_BLOCK
+    c64.vic.sprite_color[0] = c64.YELLOW
+    c64.vic.sprite_enable = 1
+
+    c64.sid.volume = 15
+    c64.sid.voice1.attack_decay = $09
+    c64.sid.voice1.sustain_release = $00
+
+    random.seed($BEEF)
+    bonus_step[0] = $25                     // 25 points a frame
+    wide.set32(addr(score), 0)
+    wide.add32_u16(addr(score), 65000)
+    wide.add32_u16(addr(score), 65000)      // already above 16 bits
+
+    while true {
+        next_frame()
+
+        // The sprite on a circle: sin8 and cos8 are -127 to 127; adding 128 makes them 1 to 255.
+        var sx: u8 = (math.sin8(angle) as u8) + 128
+        var sy: u8 = (math.cos8(angle) as u8) + 128
+        c64.vic.sprite0_x = (sx >> 1) + 100
+        c64.vic.sprite0_y = (sy >> 1) + 100
+        angle += 3
+
+        // Random points for the 32-bit score, and a bigger prize now and then.
+        wide.add32_u16(addr(score), (random.below(100) as u16) << 3)
+        if frame & 15 == 0 {
+            wide.add32_u16(addr(score), 60000)
+            start_note()
+        }
+        bcd.add(addr(bonus), addr(bonus_step), 3)
+        frame += 1
+
+        // The score changed: show it, 10 digits with leading zeros.
+        wide.dec32z(c64.SCREEN + 2 * ROW + 9, addr(score), 10)
+        bcd.digits(c64.SCREEN + 4 * ROW + 9, addr(bonus), 3)
+        text.hex16(c64.SCREEN + 6 * ROW + 9, note)
+    }
+}
