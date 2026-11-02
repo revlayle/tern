@@ -64,6 +64,7 @@ public sealed class Parser
         var globals = new List<VarDecl>();
         var functions = new List<FnDecl>();
         var imports = new List<ImportDecl>();
+        var structs = new List<StructDecl>();
 
         SkipTerminators();
         while (At(TokenKind.Import))
@@ -84,6 +85,8 @@ public sealed class Parser
                     throw new CompileError(Current.Pos, "'import' must be at the top of the file, before other declarations");
                 case TokenKind.Const: consts.Add(ParseConst()); break;
                 case TokenKind.Var: globals.Add(ParseVar()); break;
+                case TokenKind.Linear: globals.Add(ParseLinearVar()); break;
+                case TokenKind.Struct: structs.Add(ParseStruct()); break;
                 case TokenKind.Data: globals.Add(ParseData()); break;
                 case TokenKind.Fn: functions.Add(ParseFn()); break;
                 case TokenKind.Asm when PeekAt(1).Kind == TokenKind.Fn:
@@ -95,19 +98,52 @@ public sealed class Parser
                         "An asm block must be inside a function. Use 'asm fn name() { ... }' for a whole function in assembly");
                 default:
                     RejectUnsupported();
-                    throw new CompileError(Current.Pos, $"Expected 'const', 'var', 'data' or 'fn', found {Describe(Current)}");
+                    throw new CompileError(Current.Pos, $"Expected 'const', 'var', 'data', 'struct' or 'fn', found {Describe(Current)}");
             }
             SkipTerminators();
         }
-        return new ProgramSyntax(consts, globals, functions) { Imports = imports };
+        return new ProgramSyntax(consts, globals, functions) { Imports = imports, Structs = structs };
     }
 
     /// <summary>Keywords from the spec that this compiler version does not implement yet.</summary>
     private void RejectUnsupported()
     {
-        if (Current.Kind is TokenKind.Struct or TokenKind.Match or TokenKind.Inline
-            or TokenKind.Interrupt or TokenKind.Noinit or TokenKind.Linear)
+        if (Current.Kind is TokenKind.Match or TokenKind.Inline or TokenKind.Interrupt or TokenKind.Noinit)
             throw new CompileError(Current.Pos, $"'{Current.Text}' is not supported yet");
+    }
+
+    /// <summary><c>struct Name { field: type, field: type @ offset }</c>; fields are separated by ',' or line breaks.</summary>
+    private StructDecl ParseStruct()
+    {
+        var start = Expect(TokenKind.Struct, "'struct'");
+        var name = Expect(TokenKind.Identifier, "struct name");
+        Expect(TokenKind.LBrace, "'{' after the struct name");
+        var fields = new List<FieldSyntax>();
+        while (true)
+        {
+            while (Accept(TokenKind.Newline)) { }
+            if (Accept(TokenKind.RBrace)) break;
+            if (At(TokenKind.Eof)) throw new CompileError(start.Pos, $"Struct '{name.Text}' is not closed with '}}'");
+            var field = Expect(TokenKind.Identifier, "a field 'name: type'");
+            Expect(TokenKind.Colon, "':' and the field's type");
+            var type = ParseType();
+            Expr? offset = Accept(TokenKind.At) ? ParseExpr() : null;
+            fields.Add(new FieldSyntax(field.Pos, field.Text, type, offset));
+            if (Accept(TokenKind.Comma) || At(TokenKind.Newline) || At(TokenKind.RBrace)) continue;
+            throw new CompileError(Current.Pos, $"Expected ',' or a line break after the field, found {Describe(Current)}");
+        }
+        ExpectEndOfStatement();
+        return new StructDecl(start.Pos, name.Text, fields);
+    }
+
+    /// <summary><c>linear var name: [Struct; n]</c></summary>
+    private VarDecl ParseLinearVar()
+    {
+        var linear = Expect(TokenKind.Linear, "'linear'");
+        if (!At(TokenKind.Var))
+            throw new CompileError(Current.Pos, $"'linear' goes before 'var', e.g. 'linear var list: [Enemy; 8]'; found {Describe(Current)}");
+        var decl = ParseVar();
+        return new VarDecl(linear.Pos, decl.Name, decl.TypeSyntax, decl.Placement, decl.Init) { IsLinear = true };
     }
 
     private ConstDecl ParseConst()
@@ -246,6 +282,12 @@ public sealed class Parser
         var name = Expect(TokenKind.Identifier, "a type");
         if (name.Text == "ptr" && (At(TokenKind.Identifier) || At(TokenKind.LBracket)))
             return new PointerTypeSyntax(name.Pos, ParseType());
+        // A struct type in a module: c64.Vic (the checker reports a missing import).
+        if (At(TokenKind.Dot) && PeekAt(1).Kind == TokenKind.Identifier)
+        {
+            Advance();
+            return new NamedTypeSyntax(name.Pos, name.Text + "." + Expect(TokenKind.Identifier, $"a type name in module '{name.Text}' after '.'").Text);
+        }
         return new NamedTypeSyntax(name.Pos, name.Text);
     }
 
@@ -271,6 +313,8 @@ public sealed class Parser
         switch (Current.Kind)
         {
             case TokenKind.Var: return ParseVar();
+            case TokenKind.Linear: return ParseLinearVar();
+            case TokenKind.Struct: throw new CompileError(Current.Pos, "A struct must be declared outside functions");
             case TokenKind.If: return ParseIf();
             case TokenKind.While:
             {

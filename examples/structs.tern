@@ -1,0 +1,85 @@
+// Structs: the VIC-II registers as a struct at $D000, and a list of enemies
+// moved twice, once by index (one table per field) and once through a pointer
+// (whole records, stepped with sizeof). Both halves of the screen end up the same.
+import c64
+import mem
+import text
+
+struct Enemy { x: u8, row: u8, dx: u8, ch: u8 }
+
+const COUNT = 8
+const SPRITE_BLOCK = 13                     // sprite data at 13 * 64 = $0340
+const SPRITE_POINTERS = c64.SCREEN + $03F8
+
+var table: [Enemy; COUNT]                   // enemies by index: table[i].x is lda table,x
+linear var list: [Enemy; COUNT]             // the same enemies as records, for a pointer
+
+data title_table = screen"BY INDEX"
+data title_list = screen"THROUGH A POINTER"
+
+fn main() {
+    // The VIC-II through its register struct.
+    c64.vic.border = c64.BLACK
+    c64.vic.background = c64.BLUE
+    mem.fill(c64.SCREEN, ' ', 250)
+    mem.fill(c64.SCREEN + 250, ' ', 250)
+    mem.fill(c64.SCREEN + 500, ' ', 250)
+    mem.fill(c64.SCREEN + 750, ' ', 250)
+    mem.fill(c64.COLOR, c64.WHITE, 1000)
+
+    // A solid sprite in the middle of the screen.
+    mem.fill(SPRITE_BLOCK * 64, $FF, 63)
+    var pointers: ptr u8 = SPRITE_POINTERS
+    pointers[0] = SPRITE_BLOCK
+    c64.vic.sprite0_x = 172
+    c64.vic.sprite0_y = 140
+    c64.vic.sprite_color[0] = c64.YELLOW
+    c64.vic.sprite_enable = 1
+
+    text.put(c64.SCREEN, addr(title_table), len(title_table))
+    text.put(c64.SCREEN + 13 * 40, addr(title_list), len(title_list))
+
+    // The same start for both lists.
+    var e: ptr Enemy = addr(list)
+    for i in 0..COUNT {
+        table[i].x = (i << 2) + 1
+        table[i].row = i + 2
+        table[i].dx = 1
+        if i & 1 == 1 { table[i].dx = 255 }      // 255 moves left: x + 255 wraps to x - 1
+        table[i].ch = i + screen'A'
+        e.x = table[i].x
+        e.row = i + 15
+        e.dx = table[i].dx
+        e.ch = table[i].ch
+        e = e + sizeof(Enemy)
+    }
+
+    for _ in 0..100 {
+        // By index.
+        for i in 0..COUNT {
+            var at: ptr u8 = row_address(table[i].row) + table[i].x
+            at[0] = ' '
+            table[i].x += table[i].dx
+            if table[i].x == 0 || table[i].x == 39 { table[i].dx = 0 - table[i].dx }
+            at = row_address(table[i].row) + table[i].x
+            at[0] = table[i].ch
+        }
+        // Through a pointer.
+        e = addr(list)
+        for _ in 0..COUNT {
+            var at: ptr u8 = row_address(e.row) + e.x
+            at[0] = ' '
+            e.x += e.dx
+            if e.x == 0 || e.x == 39 { e.dx = 0 - e.dx }
+            at = row_address(e.row) + e.x
+            at[0] = e.ch
+            e += sizeof(Enemy)
+        }
+    }
+}
+
+// The screen address of a row: SCREEN + row * 40, as row * 32 + row * 8.
+fn row_address(row: u8) -> ptr u8 {
+    var r: u16 = row
+    return (c64.SCREEN + (r << 5) + (r << 3)) as ptr u8
+}

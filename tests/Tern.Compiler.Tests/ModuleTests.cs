@@ -315,4 +315,46 @@ public sealed class ModuleTests : IDisposable
         var e = Assert.Throws<CompileError>(() => CompileMain("import a\nimport c\nfn main() { }"));
         Assert.Equal("'b' is not declared. To use the module b, add 'import b' at the top of the file", e.Description);
     }
+
+    [Fact]
+    public void Structs_of_a_module_are_used_with_qualified_names()
+    {
+        Write(Lib, "shapes.tern", """
+            struct Point { x: u8, y: u8 }
+            struct Box { min: Point, max: Point }
+            var origin: Point
+            const BOX_SIZE = sizeof(Box)
+            fn width(b: ptr Box) -> u8 { return b.max.x - b.min.x }
+            """);
+        var r = RunMain("""
+            import shapes
+            var b: shapes.Box
+            var p: ptr shapes.Point
+            var out: [u8; 4]
+            fn main() {
+                b.min.x = 3
+                b.max.x = 10
+                shapes.origin.y = 7
+                p = addr(shapes.origin)
+                out[0] = shapes.width(addr(b))
+                out[1] = sizeof(shapes.Box)
+                out[2] = shapes.BOX_SIZE
+                out[3] = p.y
+            }
+            """);
+        Assert.Equal(new byte[] { 7, 4, 4, 7 }, r.Ram.Bytes[r.Address("out")..(r.Address("out") + 4)]);
+        Assert.Equal(7, r.U8("shapes.origin", 1));
+    }
+
+    [Fact]
+    public void Struct_type_errors_across_modules()
+    {
+        Write(Lib, "m.tern", "var v: u8\nstruct S { x: u8 }");
+        var e = Assert.Throws<CompileError>(() => CompileMain("import m\nstruct T { x: u8 @ m.v }\nfn main() { }"));
+        Assert.Equal("A field offset must be known at compile time", e.Description);
+        e = Assert.Throws<CompileError>(() => CompileMain("import m\nvar t: m.T\nfn main() { }"));
+        Assert.Equal("'m.T' is not declared", e.Description);
+        e = Assert.Throws<CompileError>(() => CompileMain("var t: m.S\nfn main() { }"));
+        Assert.Equal("'m' is not declared. To use the module m, add 'import m' at the top of the file", e.Description);
+    }
 }

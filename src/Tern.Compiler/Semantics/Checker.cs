@@ -44,7 +44,10 @@ public sealed partial class Checker
             var program = module.Syntax;
             if (!module.IsMain && program.Functions.FirstOrDefault(f => f.Name == "main") is { } wrongMain)
                 throw new CompileError(wrongMain.Pos, $"Only the program's main file has 'fn main()'; '{module.Name}' is a module");
+            // Struct names first, so that types can name structs declared further down.
+            foreach (var s in program.Structs) DeclareStruct(s);
             foreach (var c in program.Consts) DeclareConst(c);
+            foreach (var s in program.Structs) LayOut((StructSymbol)module.Scope[s.Name]);
             foreach (var f in program.Functions) DeclareFunction(f);
             foreach (var g in program.Globals) DeclareGlobal(g);
             // After the globals, so that a variable named as an address gets the right error.
@@ -65,6 +68,9 @@ public sealed partial class Checker
             _module = module;
             foreach (var f in module.Syntax.Functions.Where(f => f.Address is null)) CheckFunctionBody(f);
         }
+        // Struct fields become plain variables, arrays and pointers for the code generator.
+        foreach (var module in modules)
+            foreach (var f in module.Syntax.Functions) Lowering.Apply(f.Body);
 
         // Only what main can reach goes into the program, so unused parts of a module cost nothing.
         // The main file's globals are all kept.
@@ -105,6 +111,14 @@ public sealed partial class Checker
             return new CompileError(pos, $"'{name}' is a module; use the names in it as {name}.name");
         int dot = name.IndexOf('.');
         if (dot <= 0) return new CompileError(pos, $"'{name}' is not declared");
+        // s.a() where s is declared: a field or member, not a function in a module.
+        switch (Lookup(name[..dot]))
+        {
+            case VariableSymbol { Type: var t } when t.IsStruct || t is { IsPointer: true, Element.IsStruct: true }:
+                return new CompileError(pos, $"'{name}' is a field, not a function; only functions can be called");
+            case { } s:
+                return new CompileError(pos, $"'{name}' is not a function: '{name[..dot]}' is a {KindName(s)}, not a module");
+        }
         if (!_module.Imports.TryGetValue(name[..dot], out var other))
             return MissingImport(name[..dot], pos);
         // Modules that import each other are declared one after the other, so a declaration
@@ -118,6 +132,14 @@ public sealed partial class Checker
         }
         return new CompileError(pos, $"'{name}' is not declared");
     }
+
+    private static string KindName(Symbol s) => s switch
+    {
+        VariableSymbol => "variable",
+        ConstSymbol => "constant",
+        FunctionSymbol => "function",
+        _ => "struct type",
+    };
 
     /// <summary><c>text.put</c> where <c>text</c> is not declared: most likely a missing import.</summary>
     private static CompileError MissingImport(string module, SourcePos pos) =>
@@ -171,6 +193,8 @@ public sealed partial class Checker
                 continue;
             }
             var type = ResolveType(p.Type);
+            if (type.IsStruct)
+                throw new CompileError(p.Pos, $"A struct cannot be passed to a function, since structs are never copied. Pass a pointer (ptr {type}) or an index");
             if (!type.IsScalar) throw new CompileError(p.Pos, "Parameters must be numbers or bool");
             var param = new VariableSymbol(p.Name, p.Pos, type, VariableKind.Parameter, fn);
             if (fn.Parameters.Any(x => x.Name == p.Name))
@@ -195,6 +219,8 @@ public sealed partial class Checker
         if (decl.ReturnType is not null)
         {
             fn.ReturnType = ResolveType(decl.ReturnType);
+            if (fn.ReturnType.IsStruct)
+                throw new CompileError(decl.ReturnType.Pos, $"A function cannot return a struct, since structs are never copied. Return a pointer (ptr {fn.ReturnType}) or an index");
             if (!fn.ReturnType.IsScalar) throw new CompileError(decl.ReturnType.Pos, "Functions can only return numbers or bool");
             fn.ReturnRegister = decl.ReturnUsing ?? fn.ReturnType.Kind switch
             {
@@ -281,8 +307,12 @@ public sealed partial class Checker
         decl.Symbol = v;
         ApplyPlacement(decl, v, allowAddress: true);
 
+        if (decl.IsData && (type.IsStruct || type.IsStructArray))
+            throw new CompileError(decl.Pos, "Data cannot hold structs yet. Use a var, or data arrays of numbers");
         if (decl.IsData && !type.IsArray)
             throw new CompileError(decl.Pos, "Data must be an array or a string. For a single value, use 'const'");
+        if (decl.Init is not null && (type.IsStruct || type.IsStructArray))
+            throw new CompileError(decl.Init.Pos, "A struct cannot have an initial value. Assign its fields at the start of main");
         if (decl.Init is not null)
         {
             if (v.FixedAddress is not null)
@@ -355,6 +385,15 @@ public sealed partial class Checker
     /// <summary>The variable's type: written out, or taken from the initializer.</summary>
     private TernType DeclaredType(VarDecl decl)
     {
+        if (decl.IsLinear)
+        {
+            var t = decl.TypeSyntax is null ? null : ResolveType(decl.TypeSyntax);
+            if (t is null || !t.IsArray)
+                throw new CompileError(decl.Pos, "'linear' is for arrays of structs, e.g. 'linear var list: [Enemy; 8]'");
+            if (!t.Element!.IsStruct)
+                throw new CompileError(decl.Pos, "'linear' on an array of numbers is not supported yet");
+            return TernType.ArrayOf(t.Element, t.Length, linear: true);
+        }
         if (decl.TypeSyntax is not null) return ResolveType(decl.TypeSyntax);
         if (decl.Init is null) throw new CompileError(decl.Pos, $"'{decl.Name}' needs a type or an initial value");
         if (decl.Init is ArrayLiteralExpr)
@@ -362,6 +401,7 @@ public sealed partial class Checker
                 ? $"Data arrays need a written type, e.g. data {decl.Name}: [u8; 4] = [...]"
                 : "Array variables need a written type, e.g. [u8; 4]");
         CheckExpr(decl.Init);
+        if (decl.Init.Type.IsStruct) Coerce(decl.Init, decl.Init.Type); // "A struct cannot be used as a value"
         return DefaultType(decl.Init);
     }
 
@@ -417,25 +457,40 @@ public sealed partial class Checker
         _ => false,
     };
 
-    private TernType ResolveType(TypeSyntax syntax)
+    /// <param name="layOut">False for the target of a pointer, which may be a struct still being laid out (<c>next: ptr Enemy</c>).</param>
+    private TernType ResolveType(TypeSyntax syntax, bool layOut = true)
     {
         switch (syntax)
         {
             case NamedTypeSyntax n:
-                return n.Name switch
+                switch (n.Name)
                 {
-                    "u8" => TernType.U8, "i8" => TernType.I8, "u16" => TernType.U16, "i16" => TernType.I16,
-                    "bool" => TernType.Bool,
-                    "ptr" => throw new CompileError(n.Pos, "'ptr' needs the type it points to, e.g. 'ptr u8'"),
-                    _ => throw new CompileError(n.Pos, $"Unknown type '{n.Name}'"),
-                };
+                    case "u8": return TernType.U8;
+                    case "i8": return TernType.I8;
+                    case "u16": return TernType.U16;
+                    case "i16": return TernType.I16;
+                    case "bool": return TernType.Bool;
+                    case "ptr": throw new CompileError(n.Pos, "'ptr' needs the type it points to, e.g. 'ptr u8'");
+                }
+                switch (Lookup(n.Name))
+                {
+                    case StructSymbol s:
+                        if (layOut) LayOut(s);
+                        return s.Type;
+                    case null when n.Name.Contains('.'):
+                        throw NotDeclared(n.Name, n.Pos);
+                    case null:
+                        throw new CompileError(n.Pos, $"Unknown type '{n.Name}'");
+                    default:
+                        throw new CompileError(n.Pos, $"'{n.Name}' is not a type");
+                }
             case PointerTypeSyntax p:
-                var target = ResolveType(p.Target);
-                if (!target.IsScalar) throw new CompileError(p.Pos, "A pointer must point to a number, bool or pointer");
+                var target = ResolveType(p.Target, layOut: false);
+                if (!target.IsScalar && !target.IsStruct) throw new CompileError(p.Pos, "A pointer must point to a number, bool, pointer or struct");
                 return TernType.PointerTo(target);
             case ArrayTypeSyntax a:
                 var element = ResolveType(a.Element);
-                if (!element.IsScalar) throw new CompileError(a.Pos, "Array elements must be numbers or bool");
+                if (!element.IsScalar && !element.IsStruct) throw new CompileError(a.Pos, "Array elements must be numbers, bool, pointers or structs");
                 CheckExpr(a.Length);
                 if (a.Length.ConstValue is not long len)
                     throw new CompileError(a.Length.Pos, "Array length must be known at compile time");
@@ -526,11 +581,13 @@ public sealed partial class Checker
 
         if (decl.Init is null)
         {
-            if (!type.IsArray)
+            if (!type.IsArray && !type.IsStruct)
                 throw new CompileError(decl.Pos, $"Local variable '{decl.Name}' needs an initial value");
         }
         else
         {
+            if (type.IsStruct || type.IsStructArray)
+                throw new CompileError(decl.Init.Pos, "A struct cannot have an initial value. Assign its fields");
             if (type.IsArray) throw new CompileError(decl.Init.Pos, "Local arrays cannot have initial values yet");
             CheckExpr(decl.Init);
             Coerce(decl.Init, type);
@@ -544,8 +601,10 @@ public sealed partial class Checker
     {
         CheckExpr(a.Target);
         var target = a.Target;
+        if (target.Type.IsStruct)
+            throw new CompileError(target.Pos, "Structs are never copied, so a struct cannot be assigned. Assign its fields one by one, or copy the memory with mem.copy");
         if (!IsAssignable(target))
-            throw new CompileError(target.Pos, "The left side of an assignment must be a variable, an array element, or .lo/.hi of one");
+            throw new CompileError(target.Pos, "The left side of an assignment must be a variable, an array element, a field, or .lo/.hi of one");
         if (!target.Type.IsScalar)
             throw new CompileError(target.Pos, "Whole arrays cannot be assigned");
 
@@ -572,18 +631,18 @@ public sealed partial class Checker
 
     private bool IsAssignable(Expr e)
     {
-        switch (e)
+        switch (Unwrap(e))
         {
             case NameExpr { Symbol: VariableSymbol v }:
                 if (v.IsData) throw new CompileError(e.Pos, $"'{v.Name}' is data, which is read-only");
                 if (v.ReadOnly) throw new CompileError(e.Pos, $"Loop variable '{v.Name}' cannot be changed inside the loop");
                 return true;
             case IndexExpr ix:
-                if (ix.Target is NameExpr { Symbol: { IsData: true } d })
-                    throw new CompileError(e.Pos, $"'{d.Name}' is data, which is read-only");
+                if (Unwrap(ix.Target) is NameExpr { Symbol: { IsData: true } d })
+                    throw new CompileError(e.Pos, $"'{d.Storage.Name}' is data, which is read-only");
                 return true;
             case MemberExpr m:
-                return m.Target is NameExpr or IndexExpr && IsAssignable(m.Target);
+                return Unwrap(m.Target) is NameExpr or IndexExpr && IsAssignable(m.Target);
             default:
                 return false;
         }
@@ -740,9 +799,12 @@ public sealed partial class Checker
                         UseGlobal(v);
                         e.Type = v.Type;
                         v.Weight += Weight();
+                        if (v.Type.IsStruct) e.Place = new StructPlace(PlaceKind.Memory, 0, Base: v);
                         break;
                     case FunctionSymbol:
                         throw new CompileError(n.Pos, $"'{n.Name}' is a function; call it with ()");
+                    case StructSymbol:
+                        throw new CompileError(n.Pos, $"'{n.Name}' is a struct type, not a value");
                 }
                 break;
 
@@ -751,21 +813,32 @@ public sealed partial class Checker
             case CallExpr c: CheckCall(c); break;
 
             case IndexExpr ix:
+            {
                 CheckExpr(ix.Target);
                 CheckExpr(ix.Index);
                 Coerce(ix.Index, TernType.U8);
+                if (CheckArrayFieldIndex(ix)) break;
+                var indexed = Unwrap(ix.Target);
                 if (ix.Target.Type.IsPointer)
                 {
                     var element = ix.Target.Type.Element!;
+                    if (element.IsStruct)
+                        throw new CompileError(ix.Pos,
+                            $"A pointer to a struct cannot be indexed: p[i] would need a multiply by the struct size. Step the pointer instead: p = p + sizeof({element})");
                     if (element.Size == 2 && ix.Index.ConstValue is > 127)
                         throw new CompileError(ix.Index.Pos,
                             $"Index {ix.Index.ConstValue} is too large: p[i] reaches 256 bytes, which is 128 {element} values");
-                    if (ix.Target is NameExpr { Symbol: { } pv }) pv.Dereferenced = true;
+                    if (indexed is NameExpr { Symbol: { AliasOf: null } pv }) pv.Dereferenced = true;
                     e.Type = element;
                     break;
                 }
-                if (ix.Target is not NameExpr { Symbol: VariableSymbol arr } || !arr.Type.IsArray)
+                if (indexed is not NameExpr { Symbol: VariableSymbol arr } || !arr.Type.IsArray)
                     throw new CompileError(ix.Pos, "Only arrays and pointers can be indexed");
+                if (arr.Type.IsStructArray)
+                {
+                    CheckRecordIndex(ix, arr);
+                    break;
+                }
                 if (arr.Type.Length > 256)
                     throw new CompileError(ix.Pos,
                         $"'{arr.Name}' has {arr.Type.Length} elements, too many for a u8 index. Read it through a pointer: addr({arr.Name})");
@@ -773,10 +846,16 @@ public sealed partial class Checker
                     throw new CompileError(ix.Index.Pos, $"Index {idx} is past the end of '{arr.Name}' (length {arr.Type.Length})");
                 e.Type = arr.Type.Element!;
                 break;
+            }
 
             case MemberExpr m:
                 CheckMemberTarget(m);
                 CheckExpr(m.Target);
+                if (m.Target.Type.IsStruct || m.Target.Type is { IsPointer: true, Element.IsStruct: true })
+                {
+                    CheckField(m);
+                    break;
+                }
                 if (m.Member is not ("lo" or "hi"))
                     throw new CompileError(m.Pos, $"Unknown member '.{m.Member}'");
                 if (m.Target.Type.Kind == TypeKind.IntLiteral) Coerce(m.Target, DefaultType(m.Target));
@@ -859,6 +938,9 @@ public sealed partial class Checker
         CheckExpr(b.Left);
         CheckExpr(b.Right);
         long? l = b.Left.ConstValue, r = b.Right.ConstValue;
+        if ((b.Left.Type.IsStruct || b.Right.Type.IsStruct)
+            && b.Op is not (TokenKind.EqEq or TokenKind.NotEq or TokenKind.Less or TokenKind.LessEq or TokenKind.Greater or TokenKind.GreaterEq))
+            throw new CompileError(b.Pos, $"A struct is not a number; use one of its fields, e.g. s.x {OpText(b.Op)} 1");
 
         switch (b.Op)
         {
@@ -872,6 +954,8 @@ public sealed partial class Checker
 
             case TokenKind.EqEq or TokenKind.NotEq or TokenKind.Less or TokenKind.LessEq or TokenKind.Greater or TokenKind.GreaterEq:
             {
+                if (b.Left.Type.IsStruct || b.Right.Type.IsStruct)
+                    throw new CompileError(b.Pos, "Structs cannot be compared; compare their fields, e.g. a.x == b.x");
                 if (b.Left.Type.IsPointer || b.Right.Type.IsPointer)
                 {
                     if (b.Left.Type.Kind == TypeKind.IntLiteral) Coerce(b.Left, b.Right.Type);
@@ -1031,9 +1115,13 @@ public sealed partial class Checker
                         v.AddressTaken = true;
                         c.AddressOf = v;
                         UseGlobal(v);
+                        if (v.Type.IsStructArray && !v.Type.Linear)
+                            throw new CompileError(name.Pos,
+                                $"'{name.Name}' is stored as one table per field, so there is no record to point to. Declare it 'linear var' to store whole records");
                         // An array gives a pointer to its first element. A split array of 16-bit
                         // values gives a pointer to its table of low bytes.
                         c.Type = !v.Type.IsArray ? TernType.PointerTo(v.Type)
+                            : v.Type.Element!.IsStruct ? TernType.PointerTo(v.Type.Element)
                             : v.Type.Element!.Size == 1 ? TernType.PointerTo(v.Type.Element!)
                             : TernType.PointerTo(TernType.U8);
                         return;
@@ -1043,7 +1131,7 @@ public sealed partial class Checker
             case "sizeof":
             {
                 if (c.Args.Count != 1 || c.Args[0] is not NameExpr typeName)
-                    throw new CompileError(c.Pos, "sizeof() takes one type name");
+                    throw new CompileError(c.Pos, "sizeof() takes one type name, e.g. sizeof(Enemy)");
                 c.Type = TernType.IntLiteral;
                 c.ConstValue = ResolveType(new NamedTypeSyntax(typeName.Pos, typeName.Name)).Size;
                 return;
@@ -1109,6 +1197,8 @@ public sealed partial class Checker
         if (source.Kind == TypeKind.Error) return;
         if (source.Kind == TypeKind.Void)
             throw new CompileError(e.Pos, "This function call does not return a value");
+        if (source.IsStruct)
+            throw new CompileError(e.Pos, $"A struct cannot be used as a value, since structs are never copied. Use one of its fields, or a pointer: addr(...) gives a ptr {source}");
 
         if (source.Kind == TypeKind.IntLiteral)
         {
@@ -1146,6 +1236,7 @@ public sealed partial class Checker
         TokenKind.Percent => "%", TokenKind.PlusEq => "+=", TokenKind.MinusEq => "-=", TokenKind.AmpEq => "&=",
         TokenKind.PipeEq => "|=", TokenKind.CaretEq => "^=", TokenKind.ShlEq => "<<=", TokenKind.ShrEq => ">>=",
         TokenKind.Plus => "+", TokenKind.Minus => "-", TokenKind.Amp => "&", TokenKind.Pipe => "|", TokenKind.Caret => "^",
+        TokenKind.Shl => "<<", TokenKind.Shr => ">>",
         _ => op.ToString(),
     };
 

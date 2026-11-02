@@ -20,7 +20,7 @@ public class ErrorTests
     [InlineData("fn main() { var x: u8 }", "needs an initial value")]
     [InlineData("fn main() { x = 1 }", "'x' is not declared")]
     [InlineData("fn other() { }", "no 'fn main()'")]
-    [InlineData("struct S { x: u8 }\nfn main() { }", "'struct' is not supported yet")]
+    [InlineData("fn main() { match 1 { } }", "'match' is not supported yet")]
     [InlineData("fn main() { var b: bool = 1 as bool }", "cannot be converted to bool")]
     // Pointers
     [InlineData("var p: ptr\nfn main() { }", "'ptr' needs the type it points to")]
@@ -48,7 +48,7 @@ public class ErrorTests
     [InlineData("var p: ptr u8\nfn main() { p = addr(nothing) }", "'nothing' is not declared")]
     [InlineData("var p: ptr u8\nvar a: [u8; 2]\nfn main() { p = addr(a[1]) }", "addr() takes the name")]
     [InlineData("var p: ptr u8\nfn main() { for i in 0..4 using X { p = addr(i) } }", "lives in a register")]
-    [InlineData("var p: ptr [u8; 4]\nfn main() { }", "A pointer must point to a number, bool or pointer")]
+    [InlineData("var p: ptr [u8; 4]\nfn main() { }", "A pointer must point to a number, bool, pointer or struct")]
     [InlineData("var b: [u8; 2]\nvar p: ptr u8 = addr(b)\nfn main() { }", "addr() cannot be used in an initial value")]
     [InlineData("var b: [u8; 2]\nvar w: u16 = (addr(b) + 1) as u16\nfn main() { }", "addr() cannot be used in an initial value")]
     [InlineData("fn addr(x: u8) -> u8 { return x }\nfn main() { }", "'addr' is a built-in function; choose another name")]
