@@ -145,6 +145,33 @@ public class StructTests
     }
 
     [Fact]
+    public void Sixteen_bit_operations_between_fields_need_no_temporary()
+    {
+        // Review M5, finding 3: different fields of one struct do not overlap, so s.b is used directly.
+        var r = Run.Program("""
+            struct S { a: u16, b: u16, w: u16, t: [u16; 2] }
+            var s: S
+            fn main() {
+                s.a = $01FF
+                s.b = $0101
+                s.w = s.a + s.b
+                s.b = s.a + s.b          // the target is read on the right: still correct
+                s.t[1] = $0010
+                s.t[0] = s.w + s.t[1]
+            }
+            """);
+        int s = r.Address("s");
+        int Word(int lo, int hi) => r.Ram.Bytes[s + lo] | r.Ram.Bytes[s + hi] << 8;
+        Assert.Equal(0x0300, Word(4, 5));           // s.w
+        Assert.Equal(0x0300, Word(2, 3));           // s.b
+        Assert.Equal(0x0310, Word(6, 8));           // s.t[0]: [u16; 2] is split, low bytes at 6-7, high at 8-9
+
+        // The same shape as z = x + y with plain variables.
+        var shape = Run.Program("struct S { a: u16, b: u16, w: u16 }\nvar s: S\nfn main() { s.w = s.a + s.b }");
+        Assert.Equal("lda s|sta s+4|lda s+1|sta s+5|clc|lda s+4|adc s+2|sta s+4|lda s+5|adc s+3|sta s+5|rts", Code(shape));
+    }
+
+    [Fact]
     public void Struct_variables_are_zeroed_at_startup()
     {
         var r = Run.Program("""
@@ -575,6 +602,14 @@ public class StructTests
     [InlineData(P + "linear var ps: [Point; 4]\nfn main() { ps[0].x = 1 }", "'ps' is linear, so it cannot be indexed")]
     [InlineData(P + "var ps: [Point; 4]\nvar p: ptr Point\nfn main() { p = addr(ps) }", "Declare it 'linear var'")]
     [InlineData(E + "var p: ptr Enemy\nfn main() { for i in 0..4 using Y { p.name[i] = 0 } }", "p[i] needs the Y register, which holds a loop variable")]
+    // Review M5, findings 1 and 2.
+    [InlineData(P + "var s: Point\nfn main() { s.x() }", "'s.x' is a field, not a function; only functions can be called")]
+    [InlineData(P + "var p: ptr Point\nfn main() { p.x() }", "'p.x' is a field, not a function")]
+    [InlineData("var v: u8\nfn main() { v.x() }", "'v.x' is not a function: 'v' is a variable, not a module")]
+    [InlineData(P + "var s: Point\nvar n: u8\nfn main() { n = s + 1 }", "A struct is not a number; use one of its fields, e.g. s.x + 1")]
+    [InlineData(P + "var s: Point\nvar n: u8\nfn main() { n = s << 1 }", "A struct is not a number; use one of its fields, e.g. s.x << 1")]
+    [InlineData(P + "var s: Point\nfn main() { var x = s }", "A struct cannot be used as a value")]
+    [InlineData(P + "var s: Point\nvar x = s\nfn main() { }", "A struct cannot be used as a value")]
     public void Reports_errors(string source, string expected)
     {
         var e = Assert.Throws<CompileError>(() => TernCompiler.Compile(source));

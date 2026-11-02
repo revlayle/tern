@@ -111,6 +111,14 @@ public sealed partial class Checker
             return new CompileError(pos, $"'{name}' is a module; use the names in it as {name}.name");
         int dot = name.IndexOf('.');
         if (dot <= 0) return new CompileError(pos, $"'{name}' is not declared");
+        // s.a() where s is declared: a field or member, not a function in a module.
+        switch (Lookup(name[..dot]))
+        {
+            case VariableSymbol { Type: var t } when t.IsStruct || t is { IsPointer: true, Element.IsStruct: true }:
+                return new CompileError(pos, $"'{name}' is a field, not a function; only functions can be called");
+            case { } s:
+                return new CompileError(pos, $"'{name}' is not a function: '{name[..dot]}' is a {KindName(s)}, not a module");
+        }
         if (!_module.Imports.TryGetValue(name[..dot], out var other))
             return MissingImport(name[..dot], pos);
         // Modules that import each other are declared one after the other, so a declaration
@@ -124,6 +132,14 @@ public sealed partial class Checker
         }
         return new CompileError(pos, $"'{name}' is not declared");
     }
+
+    private static string KindName(Symbol s) => s switch
+    {
+        VariableSymbol => "variable",
+        ConstSymbol => "constant",
+        FunctionSymbol => "function",
+        _ => "struct type",
+    };
 
     /// <summary><c>text.put</c> where <c>text</c> is not declared: most likely a missing import.</summary>
     private static CompileError MissingImport(string module, SourcePos pos) =>
@@ -385,6 +401,7 @@ public sealed partial class Checker
                 ? $"Data arrays need a written type, e.g. data {decl.Name}: [u8; 4] = [...]"
                 : "Array variables need a written type, e.g. [u8; 4]");
         CheckExpr(decl.Init);
+        if (decl.Init.Type.IsStruct) Coerce(decl.Init, decl.Init.Type); // "A struct cannot be used as a value"
         return DefaultType(decl.Init);
     }
 
@@ -921,6 +938,9 @@ public sealed partial class Checker
         CheckExpr(b.Left);
         CheckExpr(b.Right);
         long? l = b.Left.ConstValue, r = b.Right.ConstValue;
+        if ((b.Left.Type.IsStruct || b.Right.Type.IsStruct)
+            && b.Op is not (TokenKind.EqEq or TokenKind.NotEq or TokenKind.Less or TokenKind.LessEq or TokenKind.Greater or TokenKind.GreaterEq))
+            throw new CompileError(b.Pos, $"A struct is not a number; use one of its fields, e.g. s.x {OpText(b.Op)} 1");
 
         switch (b.Op)
         {
@@ -1216,6 +1236,7 @@ public sealed partial class Checker
         TokenKind.Percent => "%", TokenKind.PlusEq => "+=", TokenKind.MinusEq => "-=", TokenKind.AmpEq => "&=",
         TokenKind.PipeEq => "|=", TokenKind.CaretEq => "^=", TokenKind.ShlEq => "<<=", TokenKind.ShrEq => ">>=",
         TokenKind.Plus => "+", TokenKind.Minus => "-", TokenKind.Amp => "&", TokenKind.Pipe => "|", TokenKind.Caret => "^",
+        TokenKind.Shl => "<<", TokenKind.Shr => ">>",
         _ => op.ToString(),
     };
 

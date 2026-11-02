@@ -1741,10 +1741,10 @@ public sealed class CodeGen
         _ => false,
     };
 
-    /// <summary>True if <paramref name="e"/> reads <paramref name="v"/>'s memory (views count as their whole variable).</summary>
+    /// <summary>True if <paramref name="e"/> reads any byte of <paramref name="v"/>'s memory.</summary>
     private static bool ReadsVar(Expr e, VariableSymbol v) => e switch
     {
-        NameExpr n => n.Symbol?.Storage == v.Storage,
+        NameExpr { Symbol: { } s } => Overlap(s, v),
         UnaryExpr u => ReadsVar(u.Operand, v),
         BinaryExpr b => ReadsVar(b.Left, v) || ReadsVar(b.Right, v),
         IndexExpr ix => ReadsVar(ix.Target, v) || ReadsVar(ix.Index, v),
@@ -1753,6 +1753,28 @@ public sealed class CodeGen
         CallExpr call => call.Args.Any(a => ReadsVar(a, v)),
         _ => false,
     };
+
+    /// <summary>True if two variables share a byte. Different fields of one struct (views) do not.</summary>
+    private static bool Overlap(VariableSymbol a, VariableSymbol b)
+    {
+        if (a.Storage != b.Storage) return false;
+        if (a.AliasOf is null || b.AliasOf is null) return true;
+        return ByteRanges(a).Any(x => ByteRanges(b).Any(y => x.Start < y.End && y.Start < x.End));
+    }
+
+    /// <summary>The bytes of a view inside its storage: one range, or the low and high tables of a split array.</summary>
+    private static IEnumerable<(int Start, int End)> ByteRanges(VariableSymbol view)
+    {
+        int at = view.AliasOffset;
+        if (view.Type.IsArray && view.Type.Element!.Size == 2)
+        {
+            int n = view.Type.Length;
+            yield return (at, at + n);
+            yield return (at + HighTable(view), at + HighTable(view) + n);
+        }
+        else
+            yield return (at, at + view.Type.Size);
+    }
 
     private static bool AssignsVar(Stmt s, VariableSymbol v) => s switch
     {

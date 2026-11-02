@@ -4,9 +4,9 @@ Owned by the coding session. Updated at the end of every coding session.
 
 ## Current
 
-- **Milestone:** M5 (structs). Complete; ready for review.
+- **Milestone:** M5 (structs). Complete; reviewed (`docs/reviews/m5.md`: ready to merge, no must-fix), and the three suggestions are fixed.
 - **Branch:** `m5-structs` (from `main` after the M4 merge).
-- **Next step:** `/review` of `m5-structs` against the roadmap's M5 "done when" and spec 3.3. After the merge, M6 (`match`, interrupts, function modifiers). The spec session should look at the M5 questions below (10-21); the provisional choices are easy to change.
+- **Next step:** `/merge m5-structs`. After the merge, M6 (`match`, interrupts, function modifiers). The spec session should look at the M5 questions below (10-21); the provisional choices are easy to change.
 
 ## Done
 
@@ -14,7 +14,7 @@ Owned by the coding session. Updated at the end of every coding session.
 - **M2 pointers, data and strings**, merged to `main` (2026-11-01).
 - **M3 assembly blocks and KERNAL calls**, with the M2 follow-up, merged to `main` (2026-11-01).
 - **M4 imports and the standard library**, with the M3 follow-up (fixed inputs), merged to `main` (2026-11-01). Details below.
-- **M5 structs** (branch `m5-structs`, 2026-11-01). 662 tests pass (34 CPU, 628 compiler).
+- **M5 structs** (branch `m5-structs`, 2026-11-01). 670 tests pass (34 CPU, 636 compiler).
   - `struct Name { field: type, field: type @ offset }`, fields separated by `,` or line breaks (`StructDecl`, `Parser.ParseStruct`). `Checker.Structs.cs` lays a struct out once (`StructSymbol.Fields`, `Size`): a field without `@` follows the previous one; nested structs are laid out first; a struct that contains itself, overlapping fields and duplicate names are errors. Struct names are declared before the file's constants, so types may name structs declared further down, and `ptr Enemy` inside `Enemy` works (pointer targets are not laid out). `sizeof(T)` works on structs, also qualified (`sizeof(c64.Vic)`); a type in a module is `shapes.Box` (`ParseType`).
   - **Lowering.** The checker turns every field access into plain variables, arrays and pointers (`Expr.Lowered`); `Lowering.Apply` puts the lowered forms into the tree before code generation, so the code generator has almost no struct code:
     - a field of a struct variable is a *view*: a `VariableSymbol` with `AliasOf` (the struct variable) and `AliasOffset`. `player.hp` is `lda player+2`, `player.name[i]` is `lda player+5,x`. `CodeGen.Var()` turns a view into a byte of its storage, so views need no memory and no allocation. Views are cached (`Checker._views`), so the same field is the same symbol. Fixed-address structs give views with a `FixedAddress`, so they are volatile like any `@ addr` variable.
@@ -28,6 +28,7 @@ Owned by the coding session. Updated at the end of every coding session.
   - Tests: `StructTests` (layout, struct variables, fixed addresses and volatility, pointers, linear arrays, arrays of structs, spec 3.3 code shapes, 46 error messages), `ModuleTests` (structs in modules, qualified types), `C64LibraryTests` (register addresses, fields in asm, the example), `AsmTests` (asm field errors).
   - `examples/structs.tern`: border and background colors and a sprite through `c64.vic`, and eight enemies moved 100 times both by index (`[Enemy; 8]`) and through a pointer (`linear var`). Checked in VICE (needs `-limitcycles 20000000`: loading takes most of 8 million cycles); `C64LibraryTests.Structs_example_moves_both_lists_the_same` checks the screen against the same moves in C#.
   - Roadmap "done when": the VIC-II struct at `$D000` works in VICE (example); a list of enemies updates through indexing and pointers (example, and `StructTests.A_list_of_enemies_updates_through_indexing_and_pointers`).
+  - Review suggestions (`docs/reviews/m5.md`), in "Fix the M5 review suggestions": 1. `s.a()` says the field is not a function (and `v.x()` on a plain variable says `v` is a variable), instead of suggesting `import s`; this also fixes M4 suggestion A. 2. Arithmetic on a struct says "A struct is not a number", and `var x = s` says a struct cannot be used as a value. 3. `ReadsVar` compares the bytes views cover (`CodeGen.Overlap`), so `s.w = s.a + s.b` uses `s.b` directly, as with plain variables.
 
 ## M4 details
 
