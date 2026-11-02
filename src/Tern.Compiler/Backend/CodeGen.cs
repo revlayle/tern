@@ -154,6 +154,7 @@ public sealed class CodeGen
             return;
         }
 
+        var kept = f.IsInterrupt ? null : KeptRegister(f);
         StoreRegisterParameters(f);
 
         if (f.IsInterrupt)
@@ -161,14 +162,67 @@ public sealed class CodeGen
             GenInterrupt(f);
             return;
         }
+        if (kept is { } k) _reserved.Add(k);
         GenBlock(f.Declaration!.Body);
+        if (kept is { } r) _reserved.Remove(r);
         if (!EndsWithJump()) Emit(Rts);
     }
 
-    /// <summary>Register parameters are stored into the frame, so the body can use A, X and Y freely.</summary>
+    /// <summary>Functions already decided by <see cref="KeptRegister"/>, with the register kept (or null).</summary>
+    private readonly Dictionary<FunctionSymbol, Register?> _keptRegisters = new();
+
+    /// <summary>
+    /// A parameter passed in X or Y stays there when the body allows it, like a <c>for ... using X</c>
+    /// counter: the body calls nothing, has no asm block and no loop held in a register, never assigns
+    /// the parameter or takes its address, and does not return a value in that register. One such
+    /// parameter per function, so that the other index register stays free. Returns its register.
+    /// </summary>
+    private Register? KeptRegister(FunctionSymbol f)
+    {
+        if (_keptRegisters.TryGetValue(f, out var decided)) return decided;
+        var body = f.Declaration!.Body;
+        var p = f.Parameters.FirstOrDefault(p => p.PassedIn is Register.X or Register.Y && p.Type.Size == 1
+            && !p.AddressTaken && !AssignsVar(body, p) && !(f.ReturnRegister is { } ret && ret.Uses(p.PassedIn!.Value)));
+        Register? kept = null;
+        if (p is not null && AllowsRegisterParameter(body))
+        {
+            kept = p.PassedIn!.Value;
+            p.Register = kept;
+            f.FrameVariables.Remove(p);
+        }
+        _keptRegisters[f] = kept;
+        return kept;
+    }
+
+    private static bool AllowsRegisterParameter(Node node) => node switch
+    {
+        CallExpr c => c.Function is null && c.Args.All(AllowsRegisterParameter),
+        AsmStmt => false,
+        ForStmt f => f.UsingRegister is null && AllowsRegisterParameter(f.From) && AllowsRegisterParameter(f.To)
+            && (f.Step is null || AllowsRegisterParameter(f.Step)) && AllowsRegisterParameter(f.Body),
+        BlockStmt b => b.Statements.All(AllowsRegisterParameter),
+        IfStmt i => AllowsRegisterParameter(i.Condition) && AllowsRegisterParameter(i.Then) && (i.Else is null || AllowsRegisterParameter(i.Else)),
+        WhileStmt w => AllowsRegisterParameter(w.Condition) && AllowsRegisterParameter(w.Body),
+        MatchStmt m => AllowsRegisterParameter(m.Subject) && m.Arms.All(a => AllowsRegisterParameter(a.Body)),
+        ReturnStmt r => r.Value is null || AllowsRegisterParameter(r.Value),
+        AssignStmt a => AllowsRegisterParameter(a.Target) && AllowsRegisterParameter(a.Value),
+        ExprStmt e => AllowsRegisterParameter(e.Expr),
+        VarDecl v => v.Init is null || AllowsRegisterParameter(v.Init),
+        UnaryExpr u => AllowsRegisterParameter(u.Operand),
+        BinaryExpr b => AllowsRegisterParameter(b.Left) && AllowsRegisterParameter(b.Right),
+        IndexExpr ix => AllowsRegisterParameter(ix.Target) && AllowsRegisterParameter(ix.Index),
+        MemberExpr m => AllowsRegisterParameter(m.Target),
+        CastExpr c => AllowsRegisterParameter(c.Operand),
+        _ => true,
+    };
+
+    /// <summary>
+    /// Register parameters are stored into the frame, so the body can use A, X and Y freely, except
+    /// one that stays in its register (<see cref="KeptRegister"/>).
+    /// </summary>
     private void StoreRegisterParameters(FunctionSymbol f)
     {
-        foreach (var p in f.Parameters)
+        foreach (var p in f.Parameters.Where(p => p.InMemory))
         {
             switch (p.PassedIn)
             {
@@ -213,8 +267,11 @@ public sealed class CodeGen
         var end = NewLabel("inline_end");
         _inlineExit = end;
         _out.Add(new Comment($"inline {f.Name}"));
+        var kept = KeptRegister(f);
         StoreRegisterParameters(f);
+        if (kept is { } k) _reserved.Add(k);
         GenBlock(f.Declaration!.Body);
+        if (kept is { } r) _reserved.Remove(r);
         if (_out[^1] is Instr { Mnemonic: Mnemonic.Jmp, Operand: LabelOperand { Label: var l } } && l == end)
             _out.RemoveAt(_out.Count - 1);
         Place(end);

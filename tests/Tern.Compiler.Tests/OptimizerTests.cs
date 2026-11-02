@@ -191,3 +191,129 @@ public class OptimizerTests
         Assert.Equal(3, r.U8("r"));
     }
 }
+
+/// <summary>A parameter passed in X or Y stays in its register when the body allows it (roadmap M7).</summary>
+public class RegisterParameterTests
+{
+    private static string Code(Run r, string function)
+    {
+        var listing = r.Result.Listing;
+        var start = listing.IndexOf($"\n{function}:", StringComparison.Ordinal);
+        var code = new List<string>();
+        foreach (var l in listing[(start + 1)..].Split('\n').Skip(1).Select(l => l.TrimEnd('\r')))
+        {
+            if (l.EndsWith(':') && !l.StartsWith(' ') && !l.StartsWith('$') && !l.StartsWith($"{function}.")) break;
+            if (l.StartsWith('$')) code.Add(l[17..].Split(';')[0].Trim());
+        }
+        return string.Join(" / ", code);
+    }
+
+    [Fact]
+    public void A_parameter_in_x_indexes_directly()
+    {
+        var r = Run.Program("""
+            var a: [u8; 8]
+            fn set(i: u8 using X, v: u8) { a[i] = v }
+            fn main() {
+                set(3, 7)
+                set(5, 9)
+            }
+            """);
+        Assert.Equal("lda set.v / sta a,x / rts", Code(r, "set"));
+        Assert.Equal(7, r.U8("a", 3));
+        Assert.Equal(9, r.U8("a", 5));
+        Assert.DoesNotContain("set.i", r.Result.Symbols.Keys);
+    }
+
+    [Fact]
+    public void A_parameter_in_y_indexes_a_pointer_directly()
+    {
+        var r = Run.Program("""
+            var p: ptr u8
+            var out: u8
+            fn get(n: u8 using Y) -> u8 { return p[n] }
+            fn main() {
+                p = $C000
+                out = get(2)
+            }
+            """, setup: ram => ram.Bytes[0xC002] = 42);
+        Assert.Equal("lda (p),y / rts", Code(r, "get"));
+        Assert.Equal(42, r.U8("out"));
+    }
+
+    [Fact]
+    public void A_loop_inside_uses_the_other_index_register()
+    {
+        var r = Run.Program("""
+            var a: [u8; 8]
+            var b: [u8; 8]
+            fn fill(i: u8 using X) {
+                for k in 0..8 { b[k] = a[i] + k }
+            }
+            fn main() {
+                a[6] = 10
+                fill(6)
+            }
+            """);
+        for (int k = 0; k < 8; k++) Assert.Equal(10 + k, r.U8("b", k));
+        Assert.DoesNotContain("stx fill.i", r.Result.Listing);
+    }
+
+    [Theory]
+    [InlineData("fn f(i: u8 using X) { g()\n a[i] = 1 }")]                   // a call
+    [InlineData("fn f(i: u8 using X) { i += 1\n a[i] = 1 }")]                // assigned
+    [InlineData("fn f(i: u8 using X) { asm {\n nop\n }\n a[i] = 1 }")]       // an asm block
+    [InlineData("fn f(i: u8 using X) { for k in 0..2 using Y { a[k] = i } }")] // a loop in a register
+    [InlineData("fn f(i: u8 using X) -> u16 { a[i] = 1\n return 300 }")]    // returns in AX
+    public void A_parameter_is_stored_when_the_body_needs_the_register(string f)
+    {
+        var r = Run.Program($$"""
+            var a: [u8; 8]
+            fn g() { }
+            {{f}}
+            fn main() { f(2) }
+            """);
+        Assert.Contains("stx f.i", r.Result.Listing);
+    }
+
+    [Fact]
+    public void An_inline_function_keeps_its_parameter_in_the_register()
+    {
+        var r = Run.Program("""
+            var a: [u8; 8]
+            inline fn put(i: u8 using X, v: u8) { a[i] = v }
+            fn main() {
+                put(1, 4)
+                put(2, 5)
+            }
+            """);
+        Assert.Equal([0, 4, 5], new[] { r.U8("a"), r.U8("a", 1), r.U8("a", 2) });
+        Assert.DoesNotContain("stx put.i", r.Result.Listing);
+    }
+
+    [Fact]
+    public void A_function_whose_only_parameter_stays_in_a_register_may_be_shared_with_a_handler()
+    {
+        // It has no memory of its own (spec 8.1).
+        var r = Run.Program("""
+            var a: [u8; 8]
+            fn bump(i: u8 using X) { a[i] += 1 }
+            interrupt fn handler() { bump(1) }
+            fn main() {
+                asm {
+                    lda #handler.lo
+                    sta $FFFE
+                    lda #handler.hi
+                    sta $FFFF
+                    cli
+                }
+                for _ in 0..100 { bump(0) }
+                asm {
+                    sei
+                }
+            }
+            """, irqEvery: 500);
+        Assert.Equal(100, r.U8("a"));
+        Assert.Equal(r.Interrupts, r.U8("a", 1));
+    }
+}
