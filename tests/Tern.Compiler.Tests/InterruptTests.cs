@@ -184,6 +184,41 @@ public class InterruptTests
     }
 
     [Fact]
+    public void Functions_with_no_memory_may_be_shared_with_a_handler()
+    {
+        // bump, ack and the routine at a fixed address have no memory of their own (spec 8.1).
+        var r = Run.Program($$"""
+            var count: u8
+            var acks: u8
+            var done: u8
+            fn store(v: u8 using A) @ $C000 keeps X, Y
+            fn bump() { count += 1 }
+            fn twice() { bump()
+                bump() }
+            inline fn ack() { acks += 1 }
+            interrupt fn handler() {
+                twice()
+                ack()
+                store(1)
+            }
+            fn main() {
+                {{Install}}
+                for _ in 0..100 { twice()
+                    ack() }
+                store(2)
+                asm {
+                    sei
+                }
+                done = 1
+            }
+            """, setup: ram => ram.Bytes[0xC000] = 0x60, irqEvery: 300); // rts
+        Assert.True(r.Interrupts > 0);
+        Assert.Equal(1, r.U8("done"));
+        Assert.Equal((byte)(200 + 2 * r.Interrupts), r.U8("count"));
+        Assert.Equal((byte)(100 + r.Interrupts), r.U8("acks"));
+    }
+
+    [Fact]
     public void Public_variables_and_private_data_may_be_shared_with_a_handler()
     {
         // math.remainder8 is public; text.DIGITS, used by hex8 and dec8, is private but read-only data.
@@ -216,11 +251,18 @@ public class InterruptTests
     [InlineData("interrupt fn h() -> u8 { return 1 }\nfn main() { }", "An interrupt handler takes no parameters and returns no value")]
     [InlineData("interrupt fn h() { }\nfn main() { h() }", "'h' is an interrupt handler, which only the CPU calls (it ends with rti). Install its address in the interrupt vector")]
     [InlineData("interrupt fn h() { }\nfn main() { asm {\n jsr h\n } }", "'h' is an interrupt handler: it ends with rti, so jsr cannot call it")]
-    [InlineData("var v: u8\nfn f() { v += 1 }\ninterrupt fn h() { f() }\nfn main() { f() }",
-        "'f' is called from main and from the interrupt handler 'h'. An interrupt can stop it halfway")]
-    [InlineData("var v: u8\nfn f() { v += 1 }\nfn g() { f() }\ninterrupt fn h() { g() }\nfn main() { f() }", "'f' is called from main and from the interrupt handler 'h'")]
-    [InlineData("var v: u8\nfn f() { v += 1 }\ninterrupt fn h1() { f() }\ninterrupt fn h2() { f() }\nfn main() { }",
+    [InlineData("var v: u8\nfn f() { var t = v\n v = t + 1 }\ninterrupt fn h() { f() }\nfn main() { f() }",
+        "'f' is called from main and from the interrupt handler 'h'. An interrupt can stop it halfway and run it again, which would overwrite its memory: the local variable 't'")]
+    [InlineData("var v: u8\nfn f() { var t = v\n v = t + 1 }\nfn g() { f() }\ninterrupt fn h() { g() }\nfn main() { f() }", "'f' is called from main and from the interrupt handler 'h'")]
+    [InlineData("var v: u8\nfn f() { var t = v\n v = t + 1 }\ninterrupt fn h1() { f() }\ninterrupt fn h2() { f() }\nfn main() { }",
         "'f' is called from the interrupt handler 'h1' and from the interrupt handler 'h2'")]
+    [InlineData("var v: u8\nfn f(n: u8) { v = n }\ninterrupt fn h() { f(1) }\nfn main() { f(2) }", "its memory: the parameter 'n' in memory")]
+    [InlineData("var v: u8\nfn f(n: u8 using A) { v = n }\ninterrupt fn h() { f(1) }\nfn main() { f(2) }", "its memory: the parameter 'n', which it keeps in memory (it arrives in A)")]
+    // The inner counter goes in X; the outer one stays in memory.
+    [InlineData("var v: u8\nfn f() {\n for _ in 0..v {\n for _ in 0..v { v += 1 }\n }\n}\ninterrupt fn h() { f() }\nfn main() { f() }", "its memory: the counter of the loop at line 3")]
+    [InlineData("var v: u16\nvar w: u16\nfn g() -> u8 { return 1 }\nfn f() {\n v = w + (g() as u16)\n}\ninterrupt fn h() { f() }\nfn main() { f() }",
+        "its memory: a hidden temporary for the code at line 5")]
+    [InlineData("var v: u8\nfn g() { var t = v\n v = t + 1 }\nfn f() { g() }\ninterrupt fn h() { f() }\nfn main() { f() }", "'g' is called from main and from the interrupt handler 'h'")]
     [InlineData("fn main() { interrupt fn h() { } }", "'interrupt fn' must be declared outside functions")]
     [InlineData("interrupt asm fn h() {\n rti\n }\nfn main() { }", "An interrupt handler in assembly is an 'asm fn' that saves what it changes and ends with rti")]
     [InlineData("interrupt var x: u8\nfn main() { }", "'interrupt' goes before 'fn'")]

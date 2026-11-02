@@ -262,7 +262,6 @@ public class RoutineTests
     [InlineData("fn f(v: u8 using X) @ $C000 keeps X\nfn main() { for i in 0..3 using X { f(1) } }", "'f' takes 'v' in X, which holds the loop variable")]
     [InlineData("fn f(v: u16 using XY) @ $C000 keeps X, Y\nfn main() { for i in 0..3 using Y { f(1) } }", "'f' takes 'v' in Y, which holds the loop variable")]
     [InlineData("fn f() @ $C000 keeps Y\nfn main() { for i in 0..3 using X { asm {\n jsr f\n } } }", "'jsr' calls a subroutine, which can change X")]
-    [InlineData("fn f() @ $C000\nvar p: ptr u8\nfn main() { p = addr(f) }", "addr() of a function is not supported yet")]
     [InlineData("fn f(true using carry) { }\nfn main() { }", "Fixed inputs are only for routines at a fixed address (fn name(...) @ $addr)")]
     [InlineData("asm fn f(1 using X) { }\nfn main() { }", "An asm fn sets up its inputs in its own code")]
     [InlineData("var m: u8\nfn f(m using X) @ $C000\nfn main() { }", "A fixed input must be a constant")]

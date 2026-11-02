@@ -1,0 +1,30 @@
+// Sixteen enemies move and bounce for 50 frames.
+struct Enemy { x: u8, y: u8, dx: i8, dy: i8, hits: u8 }
+var enemies: [Enemy; 16]
+var bounces: u16
+
+fn main() {
+    for i in 0..16 {
+        enemies[i].x = (i << 3) + i + 10
+        enemies[i].y = (i << 2) + i + 20
+        enemies[i].dx = 1
+        enemies[i].dy = -2
+    }
+    for _ in 0..50 {
+        for i in 0..16 {
+            var x: u8 = enemies[i].x + (enemies[i].dx as u8)
+            if x < 8 || x > 200 {
+                enemies[i].dx = -enemies[i].dx
+                enemies[i].hits += 1
+                bounces += 1
+            }
+            enemies[i].x = x
+            var y: u8 = enemies[i].y + (enemies[i].dy as u8)
+            if y < 16 || y > 180 {
+                enemies[i].dy = -enemies[i].dy
+                bounces += 1
+            }
+            enemies[i].y = y
+        }
+    }
+}

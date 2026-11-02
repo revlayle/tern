@@ -53,6 +53,8 @@ public sealed class CodeGen
         foreach (var f in _program.Functions.Where(f => f.FixedAddress is null && !f.IsInline))
         {
             GenFunction(f);
+            // An interrupt handler's body is optimized before its saving code is added.
+            if (!f.Declaration!.IsAsm && !f.IsInterrupt) Optimizer.Run(_out, f);
             all.AddRange(_out);
         }
         return all;
@@ -92,7 +94,7 @@ public sealed class CodeGen
         }
         else
         {
-            temp = new VariableSymbol($"_t{_tempCounter++}", default, size == 1 ? TernType.U8 : TernType.U16, VariableKind.Temp, _fn)
+            temp = new VariableSymbol($"_t{_tempCounter++}", _lastSource, size == 1 ? TernType.U8 : TernType.U16, VariableKind.Temp, _fn)
             {
                 Dereferenced = zeroPage,
             };
@@ -152,6 +154,7 @@ public sealed class CodeGen
             return;
         }
 
+        var kept = f.IsInterrupt ? null : KeptRegister(f);
         StoreRegisterParameters(f);
 
         if (f.IsInterrupt)
@@ -159,14 +162,92 @@ public sealed class CodeGen
             GenInterrupt(f);
             return;
         }
+        if (kept is { } k) _reserved.Add(k);
         GenBlock(f.Declaration!.Body);
+        if (kept is { } r) _reserved.Remove(r);
         if (!EndsWithJump()) Emit(Rts);
     }
 
-    /// <summary>Register parameters are stored into the frame, so the body can use A, X and Y freely.</summary>
+    /// <summary>Functions already decided by <see cref="KeptRegister"/>, with the register kept (or null).</summary>
+    private readonly Dictionary<FunctionSymbol, Register?> _keptRegisters = new();
+
+    /// <summary>
+    /// A parameter passed in X or Y stays there when the body allows it, like a <c>for ... using X</c>
+    /// counter: the body calls nothing, has no asm block and no loop held in a register, never assigns
+    /// the parameter or takes its address, and does not return a value in that register. One such
+    /// parameter per function, so that the other index register stays free. Returns its register.
+    /// </summary>
+    private Register? KeptRegister(FunctionSymbol f)
+    {
+        if (_keptRegisters.TryGetValue(f, out var decided)) return decided;
+        var body = f.Declaration!.Body;
+        var p = f.Parameters.FirstOrDefault(p => p.PassedIn is Register.X or Register.Y && p.Type.Size == 1
+            && !p.AddressTaken && !AssignsVar(body, p) && !(f.ReturnRegister is { } ret && ret.Uses(p.PassedIn!.Value)));
+        Register? kept = null;
+        // In Y, every pointer access must be exactly p[param]; others need to load Y.
+        if (p is not null && KeepsIndexRegistersFree(body) && (p.PassedIn != Register.Y || PointerIndexes(body, p).Other == 0))
+        {
+            kept = p.PassedIn!.Value;
+            p.Register = kept;
+            f.FrameVariables.Remove(p);
+        }
+        _keptRegisters[f] = kept;
+        return kept;
+    }
+
+    /// <summary>
+    /// True if the code leaves X and Y alone apart from its own use of them: it calls nothing and has
+    /// no asm block or loop held in a register. A parameter or counter may then stay in X or Y.
+    /// </summary>
+    private static bool KeepsIndexRegistersFree(Node node) => !Descendants(node).Any(n => n
+        is CallExpr { Function: not null } or AsmStmt or ForStmt { UsingRegister: not null });
+
+    /// <summary>The nodes directly inside a statement or expression.</summary>
+    private static IEnumerable<Node> Children(Node node)
+    {
+        switch (node)
+        {
+            case BlockStmt b: return b.Statements;
+            case IfStmt i: return i.Else is null ? [i.Condition, i.Then] : [i.Condition, i.Then, i.Else];
+            case WhileStmt w: return [w.Condition, w.Body];
+            case ForStmt f: return f.Step is null ? [f.From, f.To, f.Body] : [f.From, f.To, f.Step, f.Body];
+            case MatchStmt m: return m.Arms.Select(a => (Node)a.Body).Prepend(m.Subject);
+            case ReturnStmt { Value: { } v }: return [v];
+            case AssignStmt a: return [a.Target, a.Value];
+            case ExprStmt e: return [e.Expr];
+            case VarDecl { Init: { } init }: return [init];
+            case UnaryExpr u: return [u.Operand];
+            case BinaryExpr b: return [b.Left, b.Right];
+            case IndexExpr ix: return [ix.Target, ix.Index];
+            case MemberExpr m: return [m.Target];
+            case CastExpr c: return [c.Operand];
+            case CallExpr c: return c.Args;
+            case ArrayLiteralExpr l: return l.Elements;
+            default: return [];
+        }
+    }
+
+    /// <summary>A node and everything inside it.</summary>
+    private static IEnumerable<Node> Descendants(Node node) => Children(node).SelectMany(Descendants).Prepend(node);
+
+    /// <summary>
+    /// Pointer accesses in the code: those that are exactly <c>p[v]</c> (Y = v, no ldy needed) and
+    /// the others, which load Y themselves.
+    /// </summary>
+    private static (int Plain, int Other) PointerIndexes(Node node, VariableSymbol v)
+    {
+        var accesses = Descendants(node).OfType<IndexExpr>().Where(IsPointerIndex).ToList();
+        int plain = accesses.Count(ix => PlainPointerIndex(ix) && ix.Index is NameExpr { Symbol: var s } && s == v);
+        return (plain, accesses.Count - plain);
+    }
+
+    /// <summary>
+    /// Register parameters are stored into the frame, so the body can use A, X and Y freely, except
+    /// one that stays in its register (<see cref="KeptRegister"/>).
+    /// </summary>
     private void StoreRegisterParameters(FunctionSymbol f)
     {
-        foreach (var p in f.Parameters)
+        foreach (var p in f.Parameters.Where(p => p.InMemory))
         {
             switch (p.PassedIn)
             {
@@ -211,8 +292,11 @@ public sealed class CodeGen
         var end = NewLabel("inline_end");
         _inlineExit = end;
         _out.Add(new Comment($"inline {f.Name}"));
+        var kept = KeptRegister(f);
         StoreRegisterParameters(f);
+        if (kept is { } k) _reserved.Add(k);
         GenBlock(f.Declaration!.Body);
+        if (kept is { } r) _reserved.Remove(r);
         if (_out[^1] is Instr { Mnemonic: Mnemonic.Jmp, Operand: LabelOperand { Label: var l } } && l == end)
             _out.RemoveAt(_out.Count - 1);
         Place(end);
@@ -235,6 +319,10 @@ public sealed class CodeGen
         GenBlock(f.Declaration!.Body);
         if (_out[^1] is Instr { Mnemonic: Mnemonic.Jmp, Operand: LabelOperand { Label: var l } } && l == _interruptExit)
             _out.RemoveAt(_out.Count - 1);
+        var body = _out.GetRange(start, _out.Count - start);
+        Optimizer.Run(body, f);
+        _out.RemoveRange(start, _out.Count - start);
+        _out.AddRange(body);
 
         var changed = CpuState.None;
         foreach (var i in _out.Skip(start).OfType<Instr>())
@@ -697,7 +785,7 @@ public sealed class CodeGen
     private static VariableSymbol ArrayOf(IndexExpr ix) => (VariableSymbol)((NameExpr)ix.Target).Symbol!;
 
     /// <summary>An operand for a one-byte value that needs no code to reach, or null.</summary>
-    private static Operand? Simple1(Expr e)
+    private Operand? Simple1(Expr e)
     {
         if (e.ConstValue is long c) return Byte(c);
         switch (e)
@@ -722,7 +810,7 @@ public sealed class CodeGen
     }
 
     /// <summary>Loading this index into X or Y does not change A.</summary>
-    private static bool IndexIsCheap(Expr index) =>
+    private bool IndexIsCheap(Expr index) =>
         index is NameExpr { Symbol.Register: not null } || Simple1(index) is not null;
 
     /// <summary>Puts an array index into X or Y and returns which.</summary>
@@ -918,7 +1006,7 @@ public sealed class CodeGen
     // ---------- 16-bit expressions: result stored to memory ----------
 
     /// <summary>Operands for the two bytes of a value that needs no code to reach, or null.</summary>
-    private static (Operand Lo, Operand Hi)? Simple2(Expr e)
+    private (Operand Lo, Operand Hi)? Simple2(Expr e)
     {
         if (e.ConstValue is long c) return (Byte(c), Byte(c >> 8));
         if (e.Type.Size == 1)
@@ -927,6 +1015,8 @@ public sealed class CodeGen
         {
             case NameExpr { Symbol: { InMemory: true } v }:
                 return (Var(v), Var(v, 1));
+            case CallExpr { FunctionAddress: { } f }:
+                return (new ImmLabelByte(_functionLabels[f], false), new ImmLabelByte(_functionLabels[f], true));
             case CallExpr { AddressOf: { } av }:
             {
                 // A field of a struct variable is a view: its storage plus an offset.
@@ -999,7 +1089,7 @@ public sealed class CodeGen
                 return;
             }
 
-            case CallExpr { AddressOf: not null }:
+            case CallExpr { AddressOf: not null } or CallExpr { FunctionAddress: not null }:
             {
                 var (lo, hi) = Simple2(e)!.Value;
                 Op(Lda, lo); Op(Sta, d.Lo);
@@ -1300,7 +1390,7 @@ public sealed class CodeGen
     private static bool PlainPointerIndex(IndexExpr ix) => ix.Type.Size == 1 && Stride(ix) == 1 && ix.Offset == 0;
 
     /// <summary>Loading Y for this element does not change A.</summary>
-    private static bool PointerIndexIsCheap(IndexExpr ix) =>
+    private bool PointerIndexIsCheap(IndexExpr ix) =>
         ix.Index.ConstValue is not null
         || (PlainPointerIndex(ix) && (ix.Index is NameExpr { Symbol.Register: Register.Y } || Simple1(ix.Index) is not null));
 
@@ -1400,7 +1490,7 @@ public sealed class CodeGen
             IndexExpr ix when IsPointerIndex(ix) => true,
             // Arrays are indexed with X unless a loop holds X.
             IndexExpr ix => ix.Index.ConstValue is null && (_reserved.Contains(Register.X) || UsesY(ix.Index)),
-            CallExpr call => call.AddressOf is null,
+            CallExpr call => call.AddressOf is null && call.FunctionAddress is null,
             UnaryExpr u => UsesY(u.Operand),
             BinaryExpr b => UsesY(b.Left) || UsesY(b.Right),
             MemberExpr m => UsesY(m.Target),
@@ -1611,6 +1701,7 @@ public sealed class CodeGen
         int d = Math.Abs(step);
         long? from = f.From.ConstValue, to = f.To.ConstValue;
         bool inclusive = f.Inclusive;
+        if (c.Register is null) ChooseCounterRegister(f, c);
 
         var end = NewLabel("fend");
         var cont = NewLabel("fnext");
@@ -1692,6 +1783,24 @@ public sealed class CodeGen
         Place(end);
         if (c.Register is { } r) _reserved.Remove(r);
         if (boundTemp is not null) Release(boundTemp);
+    }
+
+    /// <summary>
+    /// Puts the counter of an innermost loop in X or Y, as if <c>using</c> were written, when the body
+    /// allows it: a u8 counter stepping by one, no calls, asm blocks or loops in the body, its address
+    /// not taken, no value returned in that register, and no register already held, so that the other
+    /// index register stays free. Y if every pointer access in the body is <c>p[counter]</c> (and
+    /// there is one), X otherwise: other pointer accesses compute Y themselves.
+    /// </summary>
+    private void ChooseCounterRegister(ForStmt f, VariableSymbol c)
+    {
+        if (c.Type.Size != 1 || Math.Abs(f.StepValue) != 1 || c.AddressTaken || _reserved.Count > 0
+            || Descendants(f.Body).Any(n => n is ForStmt or WhileStmt) || !KeepsIndexRegistersFree(f.Body)) return;
+        var (plain, other) = PointerIndexes(f.Body, c);
+        var reg = plain > 0 && other == 0 ? Register.Y : Register.X;
+        if (_fn.ReturnRegister is { } ret && ret.Uses(reg) && Descendants(f.Body).Any(n => n is ReturnStmt { Value: not null })) return;
+        c.Register = reg;
+        _fn.FrameVariables.Remove(c);
     }
 
     /// <summary><c>for _ in a..b</c> with constant bounds: count down to zero.</summary>

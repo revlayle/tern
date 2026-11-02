@@ -1,0 +1,13 @@
+// CRC-8 (polynomial $07) over 256 bytes, bit by bit.
+var crc: u8
+
+fn main() {
+    var b: u8 = 0
+    for i in 0..=255 {
+        b = b + 37
+        crc ^= b
+        for _ in 0..8 {
+            if crc & $80 != 0 { crc = (crc << 1) ^ $07 } else { crc = crc << 1 }
+        }
+    }
+}

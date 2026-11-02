@@ -151,7 +151,7 @@ public sealed class VariableSymbol(string name, SourcePos pos, TernType type, Va
     /// <summary>The function whose frame holds this variable; null for globals.</summary>
     public FunctionSymbol? Owner { get; } = owner;
 
-    /// <summary>Set for <c>@ $addr</c> variables. These are volatile.</summary>
+    /// <summary>Set for <c>@ $addr</c> variables.</summary>
     public int? FixedAddress { get; set; }
     public bool RequireZeroPage { get; set; }
     /// <summary>Set for loop variables that live in a register (<c>using X</c>). They have no memory.</summary>
@@ -177,6 +177,11 @@ public sealed class VariableSymbol(string name, SourcePos pos, TernType type, Va
     /// vector must not start at an address ending in $FF, so the variable is placed to avoid that.
     /// </summary>
     public HashSet<int> JumpVectorOffsets { get; } = [];
+    /// <summary>
+    /// Function addresses in the initial value (<c>data table: [u16; 2] = [addr(a), addr(b)]</c>): the
+    /// index of the low byte in <see cref="InitialBytes"/>, which hold zeros there until the program is placed.
+    /// </summary>
+    public List<(int Index, FunctionSymbol Function)> FunctionAddresses { get; } = [];
 
     /// <summary>Estimated access count, used to rank zero-page candidates.</summary>
     public long Weight { get; set; }
@@ -195,7 +200,18 @@ public sealed class VariableSymbol(string name, SourcePos pos, TernType type, Va
     /// <summary>The variable that owns the memory: itself, or the variable a view is part of.</summary>
     public VariableSymbol Storage => AliasOf ?? this;
 
-    public bool IsVolatile => FixedAddress.HasValue;
+    /// <summary>Declared <c>volatile var</c>.</summary>
+    public bool DeclaredVolatile { get; init; }
+    /// <summary>At a fixed address in one of the platform's volatile areas, e.g. I/O registers.</summary>
+    public bool InVolatileArea { get; set; }
+    /// <summary>A global used by functions reached from two roots (main and a handler, or two handlers).</summary>
+    public bool UsedFromTwoRoots { get; set; }
+
+    /// <summary>
+    /// Every read and write happens exactly once and in order; the optimizer never removes, merges
+    /// or reorders them (spec 4). For a view, the variable it is part of decides.
+    /// </summary>
+    public bool IsVolatile => Storage is var s && (s.DeclaredVolatile || s.InVolatileArea || s.UsedFromTwoRoots);
     /// <summary>Must be placed in zero page; compilation fails if it does not fit.</summary>
     public bool ForcedZeroPage => RequireZeroPage || Dereferenced || AsmZeroPage;
     public bool InMemory => Register is null;
@@ -224,6 +240,20 @@ public sealed class FunctionSymbol(string name, SourcePos pos) : Symbol(name, po
     public bool IsInline { get; set; }
     /// <summary>Interrupt handlers this function names in assembly (to install them); they are kept in the program.</summary>
     public HashSet<FunctionSymbol> UsedInterrupts { get; } = [];
+    /// <summary>Functions whose address this function takes (<c>addr(f)</c>, <c>#f.lo</c>); they are kept in the program as roots.</summary>
+    public HashSet<FunctionSymbol> UsedAddresses { get; } = [];
+    /// <summary>
+    /// Its address is taken. The compiler cannot see calls through an address, so this function and
+    /// everything it reaches get frames that overlap no other frame (spec 6.5).
+    /// </summary>
+    public bool AddressTaken { get; set; }
+    /// <summary>Reached from an address-taken function: its frame overlaps no other frame.</summary>
+    public bool Isolated { get; set; }
+    /// <summary>
+    /// The roots it is reached from: main and interrupt handlers (not address-taken functions, whose
+    /// callers are unknown). More than one is allowed only for a function with no memory (spec 8.1).
+    /// </summary>
+    public HashSet<FunctionSymbol> Roots { get; } = [];
     /// <summary>Set for a routine that already exists at this address (<c>fn f() @ $FFD2</c>). It has no body or frame.</summary>
     public int? FixedAddress { get; set; }
     /// <summary>Registers (A, X, Y) a routine at a fixed address promises to leave unchanged.</summary>

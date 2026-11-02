@@ -90,6 +90,8 @@ public sealed class CallExpr(SourcePos pos, string name, List<Expr> args) : Expr
     public FunctionSymbol? Function { get; set; }
     /// <summary>Set by the checker for <c>addr(name)</c>.</summary>
     public VariableSymbol? AddressOf { get; set; }
+    /// <summary>Set by the checker for <c>addr(f)</c> of a function: a <c>u16</c> known when the program is placed.</summary>
+    public FunctionSymbol? FunctionAddress { get; set; }
 }
 public sealed class IndexExpr(SourcePos pos, Expr target, Expr index) : Expr(pos)
 {
@@ -146,6 +148,8 @@ public sealed class VarDecl(SourcePos pos, string name, TypeSyntax? type, Placem
     public bool IsLinear { get; init; }
     /// <summary>Declared <c>noinit var</c>: a global that is not zeroed at startup.</summary>
     public bool IsNoinit { get; set; }
+    /// <summary>Declared <c>volatile var</c>: memory that something else changes (spec 4).</summary>
+    public bool IsVolatile { get; set; }
     public VariableSymbol? Symbol { get; set; }
 }
 public sealed class AssignStmt(SourcePos pos, Expr target, TokenKind op, Expr value) : Stmt(pos)

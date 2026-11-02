@@ -118,3 +118,66 @@ struct Cia {
 }
 var cia1: Cia @ $DC00               // keyboard, joysticks, timer interrupt
 var cia2: Cia @ $DD00               // serial bus, VIC bank, NMI
+
+// ---------- Interrupts ----------
+//
+// With the KERNAL switched off, the CPU takes interrupts through the vectors at $FFFE (IRQ) and
+// $FFFA (NMI), which are then RAM and can point at Tern interrupt handlers (they end with rti).
+//
+//     c64.kernal_off()
+//     c64.set_irq(addr(raster))
+//     ... set up the interrupt source, e.g. the VIC-II raster interrupt ...
+//     c64.interrupts_on()
+
+// Switch the KERNAL and BASIC ROMs off ($01 = $35; I/O stays), so that interrupts go through the
+// RAM vectors. Turns off the CIA interrupts the KERNAL used, and installs an NMI handler that does
+// nothing, so RESTORE is ignored. Leaves interrupts disabled. KERNAL routines (chrout, getin,
+// cursor) cannot be called afterwards.
+asm fn kernal_off() {
+    sei
+    lda #$7F
+    sta cia1.icr                    // no CIA 1 interrupts (the KERNAL's timer)
+    sta cia2.icr                    // no CIA 2 NMIs
+    lda cia1.icr                    // reading clears any that are pending
+    lda cia2.icr
+    lda #ignore_nmi.lo              // writes reach the RAM under the KERNAL ROM,
+    sta $FFFA                       // so the NMI vector is ready before the ROM goes
+    lda #ignore_nmi.hi              // (RESTORE is an NMI, which sei does not hold off)
+    sta $FFFB
+    lda #$35
+    sta $01
+    rts
+}
+
+private interrupt fn ignore_nmi() { }
+
+// Install an IRQ handler: c64.set_irq(addr(handler)). Needs kernal_off first. Interrupts are
+// held off while the vector changes.
+asm fn set_irq(handler: u16 using XY) {
+    php
+    sei
+    stx $FFFE
+    sty $FFFF
+    plp
+    rts
+}
+
+// Install an NMI handler: c64.set_nmi(addr(handler)). Needs kernal_off first. An NMI cannot be
+// held off, so install it before anything raises one (CIA 2, RESTORE).
+asm fn set_nmi(handler: u16 using XY) {
+    stx $FFFA
+    sty $FFFB
+    rts
+}
+
+// Allow IRQs (cli).
+asm fn interrupts_on() {
+    cli
+    rts
+}
+
+// Hold IRQs off (sei). NMIs still happen.
+asm fn interrupts_off() {
+    sei
+    rts
+}

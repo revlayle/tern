@@ -1,0 +1,22 @@
+// Fibonacci numbers below 65536, and a 16-bit multiply by shifting and adding.
+var fib: [u16; 24]
+var product: u16
+
+fn mul(a: u16, b: u16) -> u16 {
+    var r: u16 = 0
+    while b != 0 {
+        if b.lo & 1 != 0 { r += a }
+        a = a << 1
+        b = b >> 1
+    }
+    return r
+}
+
+fn main() {
+    fib[0] = 0
+    fib[1] = 1
+    for i in 2..24 {
+        fib[i] = fib[i - 1] + fib[i - 2]
+    }
+    product = mul(fib[20], 9) + mul(123, 45)
+}

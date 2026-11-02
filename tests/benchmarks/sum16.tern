@@ -1,0 +1,17 @@
+// Sum and maximum of 200 16-bit values.
+const N = 200
+var values: [u16; N]
+var total: u16
+var largest: u16
+
+fn main() {
+    var v: u16 = 1000
+    for i in 0..N {
+        v = v + (v >> 3) + 77
+        values[i] = v
+    }
+    for i in 0..N {
+        total += values[i]
+        if values[i] > largest { largest = values[i] }
+    }
+}

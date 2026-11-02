@@ -240,7 +240,7 @@ public class InlineTests
     [InlineData("inline fn f() @ $1000\nfn main() { }", "An inline function needs a body")]
     [InlineData("inline fn f() { }\nfn main() { asm {\n jsr f\n } }", "'f' is inline: it is copied into each Tern caller and has no address of its own")]
     [InlineData("inline fn f() { g() }\ninline fn g() { f() }\nfn main() { f() }", "Recursion is not allowed: f -> g -> f")]
-    [InlineData("var v: u8\ninline fn f() { v += 1 }\ninterrupt fn h() { f() }\nfn main() { f() }", "'f' is called from main and from the interrupt handler 'h'")]
+    [InlineData("var v: u8\ninline fn f() { var t = v\n v = t + 1 }\ninterrupt fn h() { f() }\nfn main() { f() }", "'f' is called from main and from the interrupt handler 'h'")]
     public void Reports_errors(string source, string expected)
     {
         var e = Assert.Throws<CompileError>(() => TernCompiler.Compile(source));

@@ -240,6 +240,13 @@ public sealed partial class Checker
         else if (v?.Function is { IsInline: true } inlined)
             throw new CompileError(ins.Operand!.Pos,
                 $"'{inlined.Name}' is inline: it is copied into each Tern caller and has no address of its own. Call it from Tern, or remove 'inline'");
+        else if (v?.Function is { FixedAddress: null } named && v.High is not null)
+        {
+            // #f.lo / #f.hi takes the function's address, as addr(f) does (spec 6.5). Assembly may
+            // take it even with memory parameters: it can set them itself before calling.
+            named.AddressTaken = true;
+            _function!.UsedAddresses.Add(named);
+        }
         else if (v?.Function is { } f && (f != _function || ins.Mnemonic == Mnemonic.Jsr))
             _function!.Callees.Add(f);
         // Assembly cannot write a function's memory parameters (they are not names outside it).

@@ -1,0 +1,36 @@
+// Copy 1000 bytes through pointers, then compare them.
+const SRC = $4000
+const DST = $5000
+var same: u8
+
+fn copy(to: ptr u8, from: ptr u8, n: u16) {
+    while n.hi > 0 {
+        for i in 0..=255 using Y { to[i] = from[i] }
+        to += 256
+        from += 256
+        n -= 256
+    }
+    for i in 0..n.lo using Y { to[i] = from[i] }
+}
+
+fn main() {
+    var p: ptr u8 = SRC
+    for k in 0..250 {
+        p[0] = k
+        p[1] = k ^ $FF
+        p[2] = k + 1
+        p[3] = k >> 1
+        p += 4
+    }
+    copy(DST, SRC, 1000)
+    var a: ptr u8 = SRC
+    var b: ptr u8 = DST
+    same = 1
+    for _ in 0..250 {
+        for j in 0..4 using Y {
+            if a[j] != b[j] { same = 0 }
+        }
+        a += 4
+        b += 4
+    }
+}

@@ -84,7 +84,7 @@ public sealed class Parser
             {
                 var p = Advance();
                 if (!(Current.Kind is TokenKind.Const or TokenKind.Var or TokenKind.Linear or TokenKind.Struct or TokenKind.Data or TokenKind.Fn
-                      or TokenKind.Interrupt or TokenKind.Noinit or TokenKind.Inline || (At(TokenKind.Asm) && PeekAt(1).Kind == TokenKind.Fn)))
+                      or TokenKind.Interrupt or TokenKind.Noinit or TokenKind.Volatile or TokenKind.Inline || (At(TokenKind.Asm) && PeekAt(1).Kind == TokenKind.Fn)))
                     throw new CompileError(p.Pos, $"'private' goes before a declaration (const, var, data, struct or fn); found {Describe(Current)}");
                 privateNames.Add(ParseDeclaration());
             }
@@ -124,13 +124,26 @@ public sealed class Parser
                 case TokenKind.Noinit:
                 {
                     var t = Advance();
-                    if (!At(TokenKind.Var) && !At(TokenKind.Linear))
+                    if (!(Current.Kind is TokenKind.Var or TokenKind.Linear or TokenKind.Volatile or TokenKind.Noinit))
                         throw new CompileError(t.Pos, $"'noinit' goes before 'var', e.g. 'noinit var buffer: [u8; 256]'; found {Describe(Current)}");
-                    var d = At(TokenKind.Linear) ? ParseLinearVar() : ParseVar();
+                    var name = ParseDeclaration();
+                    var d = globals[^1];
                     if (d.IsData) throw new CompileError(t.Pos, "'noinit' is for variables; data is never zeroed");
+                    if (d.IsNoinit) throw new CompileError(t.Pos, "'noinit' is written twice");
                     d.IsNoinit = true;
-                    globals.Add(d);
-                    return d.Name;
+                    return name;
+                }
+                case TokenKind.Volatile:
+                {
+                    var t = Advance();
+                    if (!(Current.Kind is TokenKind.Var or TokenKind.Linear or TokenKind.Noinit or TokenKind.Volatile))
+                        throw new CompileError(t.Pos, $"'volatile' goes before 'var', e.g. 'volatile var flags: u8 @ $C000'; found {Describe(Current)}");
+                    var name = ParseDeclaration();
+                    var d = globals[^1];
+                    if (d.IsData) throw new CompileError(t.Pos, "'volatile' is for variables; data is read-only, so nothing changes it");
+                    if (d.IsVolatile) throw new CompileError(t.Pos, "'volatile' is written twice");
+                    d.IsVolatile = true;
+                    return name;
                 }
                 case TokenKind.Interrupt:
                 {
@@ -405,6 +418,8 @@ public sealed class Parser
                 throw new CompileError(Current.Pos, "'interrupt fn' must be declared outside functions");
             case TokenKind.Noinit:
                 throw new CompileError(Current.Pos, "'noinit' is for global variables; local variables are never zeroed");
+            case TokenKind.Volatile:
+                throw new CompileError(Current.Pos, "'volatile' is for global variables; nothing else can change a local variable");
             case TokenKind.Inline:
                 throw new CompileError(Current.Pos, "'inline fn' must be declared outside functions");
             case TokenKind.Asm:

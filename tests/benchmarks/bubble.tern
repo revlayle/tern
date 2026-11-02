@@ -1,0 +1,23 @@
+// Bubble sort of 100 bytes made by a linear congruential generator.
+const N = 100
+var values: [u8; N]
+
+fn main() {
+    var x: u8 = 7
+    for i in 0..N {
+        x = (x << 2) + x + 17
+        values[i] = x
+    }
+    var last: u8 = N - 1
+    while last > 0 {
+        for i in 0..last {
+            var a: u8 = values[i]
+            var b: u8 = values[i + 1]
+            if a > b {
+                values[i] = b
+                values[i + 1] = a
+            }
+        }
+        last -= 1
+    }
+}
