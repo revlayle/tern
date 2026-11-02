@@ -449,6 +449,51 @@ public class OptimizerTests
             """);
         Assert.Equal(start, r.U8("count"));
     }
+
+    [Fact]
+    public void Nothing_but_the_branch_lies_between_a_bodys_last_asm_and_the_while_test()
+    {
+        var r = Run.Program("""
+            var n: u8 = 3
+            var count: u8
+            inline asm fn is_zero() -> bool using zero {}
+            fn main() {
+                asm { lda n }
+                while !is_zero() {
+                    count += 1
+                    asm {
+                        dec n
+                        lda n
+                    }
+                }
+            }
+            """);
+        var code = r.Result.Listing.Split((char)10).Where(l => l.StartsWith('$')).ToList();
+        int last = code.FindLastIndex(c => c.Contains(" lda n "));
+        Assert.Contains(" bne ", code[last + 1]);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(7)]
+    public void Code_patched_from_another_function_is_not_trusted(int v)
+    {
+        var r = Run.Program($$"""
+            var out: u8
+            fn g() {
+                asm { lda #0 }
+                out = 0
+            }
+            fn main() {
+                asm {
+                    lda #{{v}}
+                    sta g+1
+                }
+                g()
+            }
+            """);
+        Assert.Equal(0, r.U8("out"));
+    }
 }
 
 /// <summary>A parameter passed in X or Y stays in its register when the body allows it (roadmap M7).</summary>

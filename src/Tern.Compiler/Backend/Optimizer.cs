@@ -275,7 +275,7 @@ public static class Optimizer
     private static State?[] Analyse(List<AsmItem> code, FunctionSymbol function)
     {
         // An asm instruction that writes to a code label changes the code itself.
-        bool selfModifying = code.Any(item => item is Instr { AsmPos: not null, Operand: LabelOperand } w
+        bool selfModifying = function.CodePatched || code.Any(item => item is Instr { AsmPos: not null, Operand: LabelOperand } w
             && (AsmEffects.WritesMemory(w.Mnemonic, w.Mode) || Stored(w.Mnemonic) is not null));
         var positions = Positions(code);
         var unknown = UnknownEntries(code);
