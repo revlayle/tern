@@ -119,6 +119,8 @@ Then:
 
 ## Later (not yet ordered)
 
+- From the M8 comparison (decided 2026-11-02): variable `u8` step in up-counting `for` loops (spec 5.1); `inline asm fn` with flag returns (6.2, 7); optimizer work that needs no spec change: `x & $80 != 0` then `x << 1` as one `asl` and a carry test, constant offsets folded into `abs,x` (`stack[sp - 1]` as `stack-1,x`), reusing X across accesses, shorter `match` arm exits and range checks
+
 - Signed loop variables
 - `const fn` with compile-time `int` and `real`, array-building syntax (spec 4.1)
 - `using` on local variables (spec 14.6)

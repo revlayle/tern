@@ -342,7 +342,7 @@ inline fn wait_frame() { ... }
 
 ### 6.2 Inline functions
 
-`inline fn` bodies are copied into each caller. An inline function keeps its frame: its parameters and locals have fixed addresses, as for a call, so inlining saves the `jsr`/`rts` but no memory. Calling an inline function counts as a call (e.g. in a `for ... using X` loop, and between roots, 8.1). `inline asm fn` is not supported yet. The optimizer inlines small functions with a single caller automatically.
+`inline fn` bodies are copied into each caller. An inline function keeps its frame: its parameters and locals have fixed addresses, as for a call, so inlining saves the `jsr`/`rts` but no memory. Calling an inline function counts as a call (e.g. in a `for ... using X` loop, and between roots, 8.1). `inline asm fn` copies its assembly into each caller in place of the `jsr`; its parameters must all be registers (fixed inputs and memory parameters are errors) and the compiler adds no `rts`. With a flag return it is a cheap way to test a flag (section 7). The optimizer inlines small functions with a single caller automatically.
 
 ### 6.3 Interrupt handlers
 
@@ -422,6 +422,15 @@ if collides(n) { ... }             // jsr collides / bcc skip
 
 - Inside a function returning `bool using carry`, `return true` compiles to `sec`/`rts`, and `return cond` evaluates the condition straight into the carry where possible.
 - Comparisons evaluate into flags directly: `if a < b` (unsigned) is `lda a / cmp b / bcs skip`.
+- An `inline asm fn` with a flag return tests a flag set by its own instructions, with no `jsr`:
+  ```
+  inline asm fn fire_pressed() -> bool using zero {
+      lda #$10
+      bit $DC00          // joystick 2 fire, 0 when pressed
+  }
+  if fire_pressed() { shoot() }      // lda #$10 / bit $DC00 / bne skip
+  ```
+- With an empty body (`inline asm fn carry_set() -> bool using carry {}`) it reads the flag as the code before it left it, at no cost (`if carry_set()` is `bcc skip`). This is defined only right after an `asm` block: when the statement following the block is `if f()`, `while f()` or `v = f()` (also with `!`), the compiler puts nothing that changes flags between the block and the test. After compiled Tern code the flags are unspecified (generated code makes no promise about them, and the optimizer may change it), with no error or warning. Prefer putting the instructions that set the flag inside the function.
 
 ## 8. Memory model
 
