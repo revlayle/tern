@@ -1,3 +1,5 @@
+using Tern.Compiler.Syntax;
+
 namespace Tern.Compiler.Tests;
 
 public class StructTests
@@ -495,5 +497,80 @@ public class StructTests
             Assert.Equal(x, r.Ram.Bytes[l + 4 * i]);
             Assert.Equal(hp, r.Ram.Bytes[l + 4 * i + 3]);
         }
+    }
+
+    // ---------- Errors ----------
+
+    private const string P = "struct Point { x: u8, y: u8 }\n";
+    private const string E = "struct Enemy { pos: Point, hp: u8, name: [u8; 4], next: ptr Enemy }\n" + P;
+
+    [Theory]
+    // Declarations
+    [InlineData("fn main() { struct S { x: u8 } }", "A struct must be declared outside functions")]
+    [InlineData("struct S { x: u8 y: u8 }\nfn main() { }", "Expected ',' or a line break after the field")]
+    [InlineData("struct S { x: u8\nfn main() { }", "Expected a field 'name: type', found 'fn'")]
+    [InlineData("struct S {", "Struct 'S' is not closed with '}'")]
+    [InlineData("struct u8 { x: u8 }\nfn main() { }", "'u8' is a built-in type")]
+    [InlineData("struct S { }\nfn main() { }", "Struct 'S' has no fields")]
+    [InlineData("struct S { x: u8, x: u16 }\nfn main() { }", "Field 'x' is declared twice in 'S'")]
+    [InlineData("struct S { inner: S }\nfn main() { }", "Struct 'S' contains itself")]
+    [InlineData("struct A { b: B }\nstruct B { a: A }\nfn main() { }", "contains itself")]
+    [InlineData(P + "struct S { ps: [Point; 2] }\nfn main() { }", "A field cannot be an array of structs yet")]
+    [InlineData("struct S { x: u8 @ -1 }\nfn main() { }", "Field offset -1 is outside memory")]
+    [InlineData("struct S { a: u16 @ $FFFF }\nfn main() { }", "Struct 'S' is 65537 bytes, more than memory")]
+    [InlineData("struct S { a: u16, b: u8 @ 1 }\nfn main() { }", "Field 'b' (offset 1, 1 byte(s)) overlaps field 'a' (offset 0, 2 byte(s))")]
+    [InlineData("var x: foo\nfn main() { }", "Unknown type 'foo'")]
+    [InlineData("var y: u8\nvar x: y\nfn main() { }", "'y' is not a type")]
+    [InlineData(P + "fn main() { var n: u8 = sizeof(3) }", "sizeof() takes one type name")]
+    // Variables
+    [InlineData(P + "var p: Point = 3\nfn main() { }", "A struct cannot have an initial value")]
+    [InlineData(P + "fn main() { var p: Point = 3 }", "A struct cannot have an initial value")]
+    [InlineData(P + "var ps: [Point; 2] = [1, 2]\nfn main() { }", "A struct cannot have an initial value")]
+    [InlineData(P + "data ps: [Point; 2] = [1, 2]\nfn main() { }", "Data cannot hold structs yet")]
+    [InlineData("linear var a: u8\nfn main() { }", "'linear' is for arrays of structs")]
+    [InlineData("linear var a: [u16; 4]\nfn main() { }", "'linear' on an array of numbers is not supported yet")]
+    [InlineData("linear fn main() { }", "'linear' goes before 'var'")]
+    [InlineData(P + "fn main() { var n: u8 = Point }", "'Point' is a struct type, not a value")]
+    // Structs are never copied
+    [InlineData(P + "var a: Point\nvar b: Point\nfn main() { a = b }", "a struct cannot be assigned")]
+    [InlineData(P + "var a: Point\nvar b: Point\nfn main() { if a == b { } }", "Structs cannot be compared")]
+    [InlineData(P + "var a: Point\nvar n: u8\nfn main() { n = a }", "A struct cannot be used as a value")]
+    [InlineData(P + "fn f(p: Point) { }\nfn main() { }", "A struct cannot be passed to a function")]
+    [InlineData(P + "fn f() -> Point { }\nfn main() { }", "A function cannot return a struct")]
+    [InlineData(P + "var ps: [Point; 4]\nvar n: u8\nfn main() { n = ps[1] }", "A struct cannot be used as a value")]
+    // Fields
+    [InlineData(P + "var a: Point\nfn main() { a.z = 1 }", "Struct 'Point' has no field 'z'. Its fields: x, y")]
+    [InlineData(P + "var p: ptr Point\nfn main() { p.z = 1 }", "Struct 'Point' has no field 'z'")]
+    [InlineData(P + "var p: ptr u8\nfn main() { p.x = 1 }", "Unknown member '.x'")]
+    [InlineData(E + "var a: Enemy\nfn main() { a.name[4] = 1 }", "Index 4 is past the end of 'a.name'")]
+    [InlineData(E + "var p: ptr Enemy\nfn main() { p.name[4] = 1 }", "Index 4 is past the end of 'p.name'")]
+    [InlineData("struct Big { pad: [u8; 255], w: u16 }\nvar p: ptr Big\nvar n: u16\nfn main() { n = p.w }", "'p.w' is at offset 256 of the struct")]
+    [InlineData("struct Big { pad: [u8; 250], a: [u8; 8] }\nvar p: ptr Big\nvar n: u8\nvar i: u8\nfn main() { n = p.a[i] }", "'p.a' reaches offset 257 of the struct")]
+    // Pointers and arrays of structs
+    [InlineData(P + "var p: ptr Point\nvar n: u8\nfn main() { n = p[1].x }", "A pointer to a struct cannot be indexed")]
+    [InlineData(E + "var es: [Enemy; 4]\nvar i: u8\nvar n: u8\nfn main() { n = es[0].name[i] }", "An array field in an array of structs needs a constant index")]
+    [InlineData(E + "var es: [Enemy; 4]\nvar n: u8\nfn main() { n = es[0].name[4] }", "Index 4 is past the end of 'es.name'")]
+    [InlineData(P + "var ps: [Point; 4]\nfn main() { ps[4].x = 1 }", "Index 4 is past the end of 'ps'")]
+    [InlineData(P + "linear var ps: [Point; 4]\nfn main() { ps[0].x = 1 }", "'ps' is linear, so it cannot be indexed")]
+    [InlineData(P + "var ps: [Point; 4]\nvar p: ptr Point\nfn main() { p = addr(ps) }", "Declare it 'linear var'")]
+    [InlineData(E + "var p: ptr Enemy\nfn main() { for i in 0..4 using Y { p.name[i] = 0 } }", "p[i] needs the Y register, which holds a loop variable")]
+    public void Reports_errors(string source, string expected)
+    {
+        var e = Assert.Throws<CompileError>(() => TernCompiler.Compile(source));
+        Assert.Contains(expected, e.Description, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void A_field_at_offset_255_is_reached_through_a_pointer()
+    {
+        var r = Run.Program("""
+            struct Big { pad: [u8; 255], last: u8 }
+            var big: Big
+            fn main() {
+                var p: ptr Big = addr(big)
+                p.last = 9
+            }
+            """);
+        Assert.Equal(9, r.U8("big", 255));
     }
 }

@@ -282,8 +282,8 @@ public sealed class Parser
         var name = Expect(TokenKind.Identifier, "a type");
         if (name.Text == "ptr" && (At(TokenKind.Identifier) || At(TokenKind.LBracket)))
             return new PointerTypeSyntax(name.Pos, ParseType());
-        // A struct type in an imported module: c64.Vic
-        if (At(TokenKind.Dot) && _modules.Contains(name.Text))
+        // A struct type in a module: c64.Vic (the checker reports a missing import).
+        if (At(TokenKind.Dot) && PeekAt(1).Kind == TokenKind.Identifier)
         {
             Advance();
             return new NamedTypeSyntax(name.Pos, name.Text + "." + Expect(TokenKind.Identifier, $"a type name in module '{name.Text}' after '.'").Text);

@@ -98,15 +98,11 @@ public sealed partial class Checker
             if (target is NameExpr { Symbol: { AliasOf: null } pv }) pv.Dereferenced = true;
             place = new StructPlace(PlaceKind.Pointer, 0, Pointer: target);
         }
-        else if (targetType.IsStruct)
+        else
         {
             s = targetType.Struct!;
             place = m.Target.Place!;
         }
-        else if (targetType.IsPointer)
-            throw new CompileError(m.Pos, $"'.{m.Member}' needs a pointer to a struct, not {targetType}. To read the bytes of the address, write (p as u16).{m.Member}");
-        else
-            throw new CompileError(m.Pos, $"{targetType} has no fields");
 
         var field = s.Field(m.Member)
             ?? throw new CompileError(m.Pos, $"Struct '{s.Name}' has no field '{m.Member}'. Its fields: {string.Join(", ", s.Fields.Select(f => f.Name))}");
