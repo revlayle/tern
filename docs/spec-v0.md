@@ -689,7 +689,7 @@ Each item is decided when the feature it belongs to is built.
 5. **User-defined encodings,** e.g. for the NES, where each game decides which tile shows which character: a character-to-byte table declared in source. Built-in encodings are settled (2.1).
 6. **`using` on local variables** (`var count: u8 using Y`). Leave out until generated code shows a need. Deferred again 2026-11-02 (M8 question 40): `crc8` would keep `crc` in A, but A is needed by almost every expression, so the optimizer handles that case first (`x & $80 != 0` then `x << 1` as one `asl` and a carry test).
 7. **A general decorator syntax.** Only if modifier keywords grow past five or six.
-8. **Language name.** "Tern" is a placeholder.
+8. **Language name.** "Tern" is kept for now (2026-11-02). Rejected: "Moss"/"Mossy" (after MOS Technology), since "Moss" is already the name of several small languages and of Stanford's MOSS plagiarism checker.
 9. **`data` at a fixed address** (`data x @ $C000 = ...`). Not supported yet, since the program image is one block. Needed for fixed-address tables and for `@ bank(n)` (item 1).
 10. **Fixed-address RAM that is not volatile.** Settled 2026-11-02: platform volatile areas plus a `volatile` keyword (section 4).
 11. **Arrays of structs as struct fields** (`parts: [Point; 4]`, or the VIC's interleaved sprite x/y). Not supported yet; a limited form is wanted eventually. Discuss after a first complete version. Notes so far: a constant index is always a fixed offset; stored as tables inside the record, a variable index costs nothing extra; a `linear` field (needed for hardware layouts) could allow a variable index only when the element size is 2, 4 or 8 (a shift, as for 16-bit pointers).
