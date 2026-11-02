@@ -631,7 +631,7 @@ Each item is decided when the feature it belongs to is built.
 9. **`data` at a fixed address** (`data x @ $C000 = ...`). Not supported yet, since the program image is one block. Needed for fixed-address tables and for `@ bank(n)` (item 1).
 10. **Fixed-address RAM that is not volatile.** Settled 2026-11-02: platform volatile areas plus a `volatile` keyword (section 4).
 11. **Arrays of structs as struct fields** (`parts: [Point; 4]`, or the VIC's interleaved sprite x/y). Not supported yet; a limited form is wanted eventually. Discuss after a first complete version. Notes so far: a constant index is always a fixed offset; stored as tables inside the record, a variable index costs nothing extra; a `linear` field (needed for hardware layouts) could allow a variable index only when the element size is 2, 4 or 8 (a shift, as for 16-bit pointers).
-12. **Memory layout declaration.** A declaration in source that describes the machine's memory: areas for the program, reserved areas the compiler never fills (e.g. VIC graphics at `$2000–$3FFF`), volatile ranges, named regions for placement (`var map: [u8; 2048] @ buffers`, keeping `@` a location), and later banks. The platform gives the default map; a program declares what it changes. Sketch:
+12. **Memory layout declaration.** A declaration in source that describes the machine's memory: areas for the program, reserved areas the compiler never fills (e.g. VIC graphics at `$2000–$3FFF`), volatile ranges, named regions for placement (`var map: [u8; 2048] @ buffers`, keeping `@` a location), and later banks. The platform gives the default map; a program declares what it changes. Likely direction for the syntax (accepted 2026-11-02):
     ```
     memory {
         $0801..=$1FFF  program
