@@ -437,6 +437,21 @@ public class C64LibraryTests
     }
 
     [Fact]
+    public void Interrupts_on_and_off_are_inline_without_a_call()
+    {
+        var r = Run.Program("""
+            import c64
+            fn main() {
+                c64.interrupts_off()
+                c64.interrupts_on()
+            }
+            """);
+        Assert.Contains("sei", r.Result.Listing);
+        Assert.Contains("cli", r.Result.Listing);
+        Assert.DoesNotContain("jsr c64.interrupts", r.Result.Listing);
+    }
+
+    [Fact]
     public void Interrupt_handlers_are_installed_with_the_kernal_off()
     {
         var r = Run.Program("""
