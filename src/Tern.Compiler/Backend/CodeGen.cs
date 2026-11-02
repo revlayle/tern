@@ -1707,7 +1707,7 @@ public sealed class CodeGen
         var cont = NewLabel("fnext");
         var top = NewLabel("for");
 
-        if (from is not null && to is not null)
+        if (from is not null && to is not null && !f.VariableStep)
         {
             long span = up ? to.Value - from.Value : from.Value - to.Value;
             long count = inclusive ? (span < 0 ? 0 : span / d + 1) : (span <= 0 ? 0 : (span + d - 1) / d);
@@ -1732,6 +1732,12 @@ public sealed class CodeGen
             }
         }
 
+        if (f.VariableStep && from is not null && to is not null && (inclusive ? from > to : from >= to))
+        {
+            _out.Add(new Comment("empty loop: no code"));
+            return;
+        }
+
         // The end bound is evaluated once, before the loop.
         VariableSymbol? boundTemp = null;
         (Operand Lo, Operand Hi) bound;
@@ -1746,6 +1752,22 @@ public sealed class CodeGen
             if (type.Size == 1) { GenA(f.To); Op(Sta, Var(boundTemp)); }
             else Gen16(f.To, new Loc(boundTemp));
             bound = (Var(boundTemp), Var(boundTemp, 1));
+        }
+
+        // A variable step is evaluated once too: used in place if it is a local the body does not change.
+        VariableSymbol? stepTemp = null;
+        Operand? stepOperand = null;
+        if (f.VariableStep)
+        {
+            if (f.Step is NameExpr { Symbol: { InMemory: true, AliasOf: null, Kind: VariableKind.Local or VariableKind.Parameter } sv }
+                && sv.Type.Size == 1 && sv != c && !sv.AddressTaken && !AssignsVar(f.Body, sv))
+                stepOperand = Var(sv);
+            else
+            {
+                stepTemp = AcquireTemp(1);
+                GenA(f.Step!); Op(Sta, Var(stepTemp));
+                stepOperand = Var(stepTemp);
+            }
         }
 
         SetCounter(c, f.From);
@@ -1775,13 +1797,14 @@ public sealed class CodeGen
         _loops.RemoveAt(_loops.Count - 1);
         Place(cont);
 
-        if (type.Size == 1 && d == 1)
+        if (type.Size == 1 && d == 1 && !f.VariableStep)
             StepByOne(c, up, inclusive, from, to, bound, top, end);
         else
-            StepGeneral(c, up, d, inclusive, bound, top, end);
+            StepGeneral(c, up, stepOperand ?? Byte(d), inclusive, to, bound, top, end);
 
         Place(end);
         if (c.Register is { } r) _reserved.Remove(r);
+        if (stepTemp is not null) Release(stepTemp);
         if (boundTemp is not null) Release(boundTemp);
     }
 
@@ -2011,18 +2034,18 @@ public sealed class CodeGen
     }
 
     /// <summary>The end of a loop with a larger step or a 16-bit counter.</summary>
-    private void StepGeneral(VariableSymbol c, bool up, int d, bool inclusive, (Operand Lo, Operand Hi) bound, Label top, Label end)
+    private void StepGeneral(VariableSymbol c, bool up, Operand step, bool inclusive, long? to, (Operand Lo, Operand Hi) bound, Label top, Label end)
     {
         if (c.Register is { } reg)
         {
             Emit(reg == Register.X ? Txa : Tya);
-            if (up) { Emit(Clc); Op(Adc, Byte(d)); } else { Emit(Sec); Op(Sbc, Byte(d)); }
+            if (up) { Emit(Clc); Op(Adc, step); } else { Emit(Sec); Op(Sbc, step); }
             Emit(reg == Register.X ? Tax : Tay);
         }
         else
         {
             Op(Lda, Var(c));
-            if (up) { Emit(Clc); Op(Adc, Byte(d)); } else { Emit(Sec); Op(Sbc, Byte(d)); }
+            if (up) { Emit(Clc); Op(Adc, step); } else { Emit(Sec); Op(Sbc, step); }
             Op(Sta, Var(c));
             if (c.Type.Size == 2)
             {
@@ -2031,6 +2054,13 @@ public sealed class CodeGen
                 Op(Sta, Var(c, 1));
             }
         }
+        // Up to 255 inclusive: the carry is the whole test, so the loop goes on while there is none.
+        if (up && inclusive && c.Type.Size == 1 && to == 255)
+        {
+            Branch(Bcc, top);
+            return;
+        }
+
         // Leave if the counter went past the end of its type.
         Branch(up ? Bcs : Bcc, end);
 

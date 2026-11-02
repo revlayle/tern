@@ -720,11 +720,13 @@ public sealed partial class Checker
         Coerce(f.To, type);
 
         long? from = f.From.ConstValue, to = f.To.ConstValue;
-        if (f.Step is not null)
+        if (f.Step is not null) CheckExpr(f.Step);
+        if (f.Step is { ConstValue: null, Type.IsInteger: true })
+            CheckVariableStep(f, type, from, to);
+        else if (f.Step is not null)
         {
-            CheckExpr(f.Step);
             if (f.Step.ConstValue is not long step || step == 0)
-                throw new CompileError(f.Step.Pos, "'step' must be a non-zero constant");
+                throw new CompileError(f.Step.Pos, "'step' must be a non-zero constant, or a u8 variable in a loop that counts up with a u8 counter");
             if (Math.Abs(step) > 127)
                 throw new CompileError(f.Step.Pos, "'step' must be between -127 and 127");
             if (from is not null && to is not null && from != to && (to > from) != (step > 0))
@@ -769,6 +771,22 @@ public sealed partial class Checker
         _scopes.RemoveAt(_scopes.Count - 1);
 
         if (f.UsingRegister is { } r) _loopRegisters.Remove(r);
+    }
+
+    /// <summary>A step that is not a constant (spec 5.1): a u8 value, in a loop that counts up with a u8 counter.</summary>
+    private static void CheckVariableStep(ForStmt f, TernType counter, long? from, long? to)
+    {
+        var step = f.Step!;
+        if (step.Type.IsSigned)
+            throw new CompileError(step.Pos, $"A variable step must be a u8, but this is {step.Type}: a variable step cannot be negative");
+        if (step.Type.Size != 1)
+            throw new CompileError(step.Pos, $"A variable step must be a u8, but this is {step.Type}. Convert with 'as u8' if it always fits");
+        if (counter.Size != 1 || counter.IsSigned)
+            throw new CompileError(step.Pos, $"A variable step needs a u8 loop counter, but the bounds are {counter}. Use a constant step, or u8 bounds");
+        if ((from is not null && to is not null && to < from) || (from is null && to == 0))
+            throw new CompileError(step.Pos, "A variable step cannot be used in a loop that counts down. Count up, or use a constant negative step");
+        f.VariableStep = true;
+        f.StepValue = 1;
     }
 
     /// <summary>An index that is the counter of a constant-bounds loop must stay inside the array (spec 3.2).</summary>
