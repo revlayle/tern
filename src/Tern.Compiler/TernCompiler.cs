@@ -100,9 +100,10 @@ public static class TernCompiler
                 symbols[v.QualifiedName] = v.Address;
         }
 
+        // VICE accepts dots inside labels, so names stay as in the listing and cannot clash (util.bump, util_bump).
         var vice = new StringBuilder();
         foreach (var (name, address) in symbols.OrderBy(s => s.Value))
-            vice.AppendLine($"al C:{address:x4} .{name.Replace('.', '_')}");
+            vice.AppendLine($"al C:{address:x4} .{name}");
 
         var report = new StringBuilder();
         report.AppendLine($"Code and data: ${platform.LoadAddress:X4}-${platform.CodeStart + code.Bytes.Length - 1:X4} ({image.Length} bytes)");
