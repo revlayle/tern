@@ -177,6 +177,11 @@ public sealed class VariableSymbol(string name, SourcePos pos, TernType type, Va
     /// vector must not start at an address ending in $FF, so the variable is placed to avoid that.
     /// </summary>
     public HashSet<int> JumpVectorOffsets { get; } = [];
+    /// <summary>
+    /// Function addresses in the initial value (<c>data table: [u16; 2] = [addr(a), addr(b)]</c>): the
+    /// index of the low byte in <see cref="InitialBytes"/>, which hold zeros there until the program is placed.
+    /// </summary>
+    public List<(int Index, FunctionSymbol Function)> FunctionAddresses { get; } = [];
 
     /// <summary>Estimated access count, used to rank zero-page candidates.</summary>
     public long Weight { get; set; }
@@ -224,6 +229,20 @@ public sealed class FunctionSymbol(string name, SourcePos pos) : Symbol(name, po
     public bool IsInline { get; set; }
     /// <summary>Interrupt handlers this function names in assembly (to install them); they are kept in the program.</summary>
     public HashSet<FunctionSymbol> UsedInterrupts { get; } = [];
+    /// <summary>Functions whose address this function takes (<c>addr(f)</c>, <c>#f.lo</c>); they are kept in the program as roots.</summary>
+    public HashSet<FunctionSymbol> UsedAddresses { get; } = [];
+    /// <summary>
+    /// Its address is taken. The compiler cannot see calls through an address, so this function and
+    /// everything it reaches get frames that overlap no other frame (spec 6.5).
+    /// </summary>
+    public bool AddressTaken { get; set; }
+    /// <summary>Reached from an address-taken function: its frame overlaps no other frame.</summary>
+    public bool Isolated { get; set; }
+    /// <summary>
+    /// The roots it is reached from: main and interrupt handlers (not address-taken functions, whose
+    /// callers are unknown). More than one is allowed only for a function with no memory (spec 8.1).
+    /// </summary>
+    public HashSet<FunctionSymbol> Roots { get; } = [];
     /// <summary>Set for a routine that already exists at this address (<c>fn f() @ $FFD2</c>). It has no body or frame.</summary>
     public int? FixedAddress { get; set; }
     /// <summary>Registers (A, X, Y) a routine at a fixed address promises to leave unchanged.</summary>

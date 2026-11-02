@@ -41,6 +41,7 @@ public static class TernCompiler
 
         var gen = new CodeGen(program);
         var functionCode = gen.GenerateFunctions();
+        Checker.CheckSharedFunctions(program);
         var plan = Allocator.Allocate(program, platform);
         foreach (var v in program.Globals.Concat(program.Functions.SelectMany(f => f.FrameVariables)))
             if (v.Address is >= 0 and < 0x100 && v.FixedAddress is null)
@@ -52,7 +53,7 @@ public static class TernCompiler
         var halt = new Label("halt");
         var bss = new Label("bss");
         var items = new List<AsmItem> { new LabelDef(start), new Comment("startup") };
-        items.AddRange(Startup(plan, bss));
+        items.AddRange(Startup(plan, bss, gen.LabelOf));
         items.Add(new Instr(Jsr, Absolute, new LabelOperand(gen.LabelOf(program.Main))));
         items.Add(new LabelDef(halt));
         items.Add(new Instr(Jmp, Absolute, new LabelOperand(halt)));
@@ -66,7 +67,7 @@ public static class TernCompiler
             if (g.JumpVectorOffsets.Count > 0)
                 items.Add(new Padding(pc => AvoidPageEnd(pc, g.JumpVectorOffsets), $"jmp ({g.Name}) must not read a vector at $xxFF"));
             items.Add(new LabelDef(label));
-            items.Add(new DataBytes(MemoryLayout(g, g.InitialBytes!)));
+            items.AddRange(ImageBytes(g, gen.LabelOf));
         }
         // Variables after the program start at bss. Move them all, if needed, so that no jmp (...)
         // vector among them starts at an address ending in $FF.
@@ -137,7 +138,7 @@ public static class TernCompiler
     }
 
     /// <summary>Startup code: set up zero-page globals and clear the uninitialized ones in RAM (except noinit ones).</summary>
-    private static List<AsmItem> Startup(RamPlan plan, Label bss)
+    private static List<AsmItem> Startup(RamPlan plan, Label bss, Func<FunctionSymbol, Label> labelOf)
     {
         var items = new List<AsmItem> { new Instr(Cld) };
 
@@ -145,10 +146,19 @@ public static class TernCompiler
         foreach (var g in plan.ZeroPageGlobals.Where(g => !g.NoInit))
         {
             var bytes = MemoryLayout(g, g.InitialBytes ?? new byte[g.Type.Size]);
+            var functions = FunctionBytes(g);
             for (int i = 0; i < bytes.Length; i++)
             {
-                if (a != bytes[i]) items.Add(new Instr(Lda, Immediate, new Imm(bytes[i])));
-                a = bytes[i];
+                if (functions.TryGetValue(i, out var f))
+                {
+                    items.Add(new Instr(Lda, Immediate, new ImmLabelByte(labelOf(f.Function), f.High)));
+                    a = null;
+                }
+                else if (a != bytes[i])
+                {
+                    items.Add(new Instr(Lda, Immediate, new Imm(bytes[i])));
+                    a = bytes[i];
+                }
                 items.Add(new Instr(Sta, Absolute, new VarOperand(g, i)));
             }
         }
@@ -180,6 +190,41 @@ public static class TernCompiler
         }
         return items;
     }
+
+    /// <summary>
+    /// The initial value of a global in the program image. Function addresses in it are bytes of
+    /// the functions' labels.
+    /// </summary>
+    private static IEnumerable<AsmItem> ImageBytes(VariableSymbol g, Func<FunctionSymbol, Label> labelOf)
+    {
+        var bytes = MemoryLayout(g, g.InitialBytes!);
+        var functions = FunctionBytes(g);
+        int start = 0;
+        foreach (var (at, (function, high)) in functions.OrderBy(f => f.Key))
+        {
+            if (at > start) yield return new DataBytes(bytes[start..at]);
+            yield return new LabelTable([labelOf(function)], high);
+            start = at + 1;
+        }
+        if (start < bytes.Length) yield return new DataBytes(bytes[start..]);
+    }
+
+    /// <summary>Where the bytes of function addresses are in a global's memory layout.</summary>
+    private static Dictionary<int, (FunctionSymbol Function, bool High)> FunctionBytes(VariableSymbol g)
+    {
+        var bytes = new Dictionary<int, (FunctionSymbol, bool)>();
+        foreach (var (index, f) in g.FunctionAddresses)
+        {
+            bytes[LayoutIndex(g, index)] = (f, false);
+            bytes[LayoutIndex(g, index + 1)] = (f, true);
+        }
+        return bytes;
+    }
+
+    /// <summary>Where byte <paramref name="i"/> of a value is in its memory layout (see <see cref="MemoryLayout"/>).</summary>
+    private static int LayoutIndex(VariableSymbol v, int i) =>
+        !v.Type.IsArray || v.Type.Element!.Size == 1 || v.Type.Linear ? i
+        : i % 2 == 0 ? i / 2 : v.Type.Length + i / 2;
 
     /// <summary>
     /// Converts a value's bytes (little endian, elements in order) to its layout in memory:

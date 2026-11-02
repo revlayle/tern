@@ -92,7 +92,7 @@ public sealed class CodeGen
         }
         else
         {
-            temp = new VariableSymbol($"_t{_tempCounter++}", default, size == 1 ? TernType.U8 : TernType.U16, VariableKind.Temp, _fn)
+            temp = new VariableSymbol($"_t{_tempCounter++}", _lastSource, size == 1 ? TernType.U8 : TernType.U16, VariableKind.Temp, _fn)
             {
                 Dereferenced = zeroPage,
             };
@@ -697,7 +697,7 @@ public sealed class CodeGen
     private static VariableSymbol ArrayOf(IndexExpr ix) => (VariableSymbol)((NameExpr)ix.Target).Symbol!;
 
     /// <summary>An operand for a one-byte value that needs no code to reach, or null.</summary>
-    private static Operand? Simple1(Expr e)
+    private Operand? Simple1(Expr e)
     {
         if (e.ConstValue is long c) return Byte(c);
         switch (e)
@@ -722,7 +722,7 @@ public sealed class CodeGen
     }
 
     /// <summary>Loading this index into X or Y does not change A.</summary>
-    private static bool IndexIsCheap(Expr index) =>
+    private bool IndexIsCheap(Expr index) =>
         index is NameExpr { Symbol.Register: not null } || Simple1(index) is not null;
 
     /// <summary>Puts an array index into X or Y and returns which.</summary>
@@ -918,7 +918,7 @@ public sealed class CodeGen
     // ---------- 16-bit expressions: result stored to memory ----------
 
     /// <summary>Operands for the two bytes of a value that needs no code to reach, or null.</summary>
-    private static (Operand Lo, Operand Hi)? Simple2(Expr e)
+    private (Operand Lo, Operand Hi)? Simple2(Expr e)
     {
         if (e.ConstValue is long c) return (Byte(c), Byte(c >> 8));
         if (e.Type.Size == 1)
@@ -927,6 +927,8 @@ public sealed class CodeGen
         {
             case NameExpr { Symbol: { InMemory: true } v }:
                 return (Var(v), Var(v, 1));
+            case CallExpr { FunctionAddress: { } f }:
+                return (new ImmLabelByte(_functionLabels[f], false), new ImmLabelByte(_functionLabels[f], true));
             case CallExpr { AddressOf: { } av }:
             {
                 // A field of a struct variable is a view: its storage plus an offset.
@@ -999,7 +1001,7 @@ public sealed class CodeGen
                 return;
             }
 
-            case CallExpr { AddressOf: not null }:
+            case CallExpr { AddressOf: not null } or CallExpr { FunctionAddress: not null }:
             {
                 var (lo, hi) = Simple2(e)!.Value;
                 Op(Lda, lo); Op(Sta, d.Lo);
@@ -1300,7 +1302,7 @@ public sealed class CodeGen
     private static bool PlainPointerIndex(IndexExpr ix) => ix.Type.Size == 1 && Stride(ix) == 1 && ix.Offset == 0;
 
     /// <summary>Loading Y for this element does not change A.</summary>
-    private static bool PointerIndexIsCheap(IndexExpr ix) =>
+    private bool PointerIndexIsCheap(IndexExpr ix) =>
         ix.Index.ConstValue is not null
         || (PlainPointerIndex(ix) && (ix.Index is NameExpr { Symbol.Register: Register.Y } || Simple1(ix.Index) is not null));
 
@@ -1400,7 +1402,7 @@ public sealed class CodeGen
             IndexExpr ix when IsPointerIndex(ix) => true,
             // Arrays are indexed with X unless a loop holds X.
             IndexExpr ix => ix.Index.ConstValue is null && (_reserved.Contains(Register.X) || UsesY(ix.Index)),
-            CallExpr call => call.AddressOf is null,
+            CallExpr call => call.AddressOf is null && call.FunctionAddress is null,
             UnaryExpr u => UsesY(u.Operand),
             BinaryExpr b => UsesY(b.Left) || UsesY(b.Right),
             MemberExpr m => UsesY(m.Target),

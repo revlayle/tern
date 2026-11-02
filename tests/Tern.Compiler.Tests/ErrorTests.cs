@@ -43,7 +43,6 @@ public class ErrorTests
     [InlineData("var b: u8\nvar c: u8\nfn main() { c = b[0] }", "Only arrays and pointers can be indexed")]
     [InlineData("var p: ptr u8\nfn main() { for i in 0..4 using Y { p[0] = i } }", "needs the Y register")]
     [InlineData("const C = 5\nvar p: ptr u8\nfn main() { p = addr(C) }", "is a constant, which has no address")]
-    [InlineData("var p: ptr u8\nfn main() { p = addr(main) }", "addr() of a function is not supported yet")]
     [InlineData("var p: ptr u8\nfn main() { p = addr(nothing) }", "'nothing' is not declared")]
     [InlineData("var p: ptr u8\nvar a: [u8; 2]\nfn main() { p = addr(a[1]) }", "addr() takes the name")]
     [InlineData("var p: ptr u8\nfn main() { for i in 0..4 using X { p = addr(i) } }", "lives in a register")]

@@ -79,7 +79,7 @@ public sealed partial class Checker
         // Only what main and the interrupt handlers can reach goes into the program, so unused parts
         // of a module cost nothing. The main file's globals are all kept.
         var reachable = OrderRoots(main, mainModule);
-        CheckPrivateGlobalsPerRoot(modules, reachable, main);
+        CheckPrivateGlobalsPerRoot(modules, reachable);
         var used = reachable.SelectMany(f => f.UsedGlobals).Concat(mainModule.Scope.Values.OfType<VariableSymbol>()).ToHashSet();
         return new CheckedProgram(modules, _globals.Where(used.Contains).ToList(), reachable, main);
     }
@@ -169,7 +169,10 @@ public sealed partial class Checker
     /// <summary>Records that the function being checked uses a global, so it is kept in the program.</summary>
     private void UseGlobal(VariableSymbol v)
     {
-        if (v.Kind == VariableKind.Global) _function?.UsedGlobals.Add(v);
+        if (v.Kind != VariableKind.Global || _function is null) return;
+        _function.UsedGlobals.Add(v);
+        // A table of function addresses keeps those functions in the program.
+        foreach (var (_, f) in v.Storage.FunctionAddresses) _function.UsedAddresses.Add(f);
     }
 
     private void DeclareConst(ConstDecl decl)
@@ -346,7 +349,7 @@ public sealed partial class Checker
                 v.InitialBytes = bytes;
             }
             else
-                v.InitialBytes = ConstantBytes(decl.Init, type);
+                v.InitialBytes = ConstantBytes(decl.Init, type, v);
         }
         Declare(v, decl.Name);
         _globals.Add(v);
@@ -449,7 +452,8 @@ public sealed partial class Checker
         }
     }
 
-    private byte[] ConstantBytes(Expr init, TernType type)
+    /// <param name="target">Collects the function addresses (<c>addr(f)</c>) in the value.</param>
+    private byte[] ConstantBytes(Expr init, TernType type, VariableSymbol target, int at = 0)
     {
         if (type.IsArray)
         {
@@ -458,14 +462,22 @@ public sealed partial class Checker
             if (list.Elements.Count != type.Length)
                 throw new CompileError(init.Pos, $"Expected {type.Length} values, found {list.Elements.Count}");
             var bytes = new List<byte>();
-            foreach (var e in list.Elements) bytes.AddRange(ConstantBytes(e, type.Element!));
+            foreach (var e in list.Elements) bytes.AddRange(ConstantBytes(e, type.Element!, target, at + bytes.Count));
             return bytes.ToArray();
         }
 
         CheckExpr(init);
         Coerce(init, type);
+        if (init is CallExpr { FunctionAddress: { } f })
+        {
+            // Filled in when the program is placed.
+            target.FunctionAddresses.Add((at, f));
+            return [0, 0];
+        }
         if (init.ConstValue is not long value)
-            throw new CompileError(init.Pos, UsesAddr(init)
+            throw new CompileError(init.Pos, UsesFunctionAddress(init)
+                ? "addr() of a function can be an initial value only on its own, not in a calculation"
+                : UsesAddr(init)
                 ? "addr() cannot be used in an initial value, since addresses are known only after compiling. Assign it at the start of main"
                 : "A global's initial value must be known at compile time");
         return type.Size == 1 ? [(byte)value] : [(byte)value, (byte)(value >> 8)];
@@ -478,6 +490,16 @@ public sealed partial class Checker
         BinaryExpr b => UsesAddr(b.Left) || UsesAddr(b.Right),
         CastExpr c => UsesAddr(c.Operand),
         MemberExpr m => UsesAddr(m.Target),
+        _ => false,
+    };
+
+    private static bool UsesFunctionAddress(Expr e) => e switch
+    {
+        CallExpr c => c.FunctionAddress is not null,
+        UnaryExpr u => UsesFunctionAddress(u.Operand),
+        BinaryExpr b => UsesFunctionAddress(b.Left) || UsesFunctionAddress(b.Right),
+        CastExpr c => UsesFunctionAddress(c.Operand),
+        MemberExpr m => UsesFunctionAddress(m.Target),
         _ => false,
     };
 
@@ -1186,6 +1208,21 @@ public sealed partial class Checker
             : TernType.PointerTo(TernType.U8);
     }
 
+    /// <summary><c>addr(f)</c>: a <c>u16</c> known when the program is placed (spec 6.5).</summary>
+    private void TakeFunctionAddress(CallExpr c, FunctionSymbol f, SourcePos pos)
+    {
+        if (f.IsInline)
+            throw new CompileError(pos, $"'{f.Name}' is inline: it is copied into each caller and has no address of its own. Remove 'inline'");
+        if (f.Parameters.FirstOrDefault(p => p.PassedIn is null) is { } memoryParam)
+            throw new CompileError(pos,
+                $"'{f.Name}' takes '{memoryParam.Name}' in memory, which a call through an address cannot set. " +
+                $"Pass it in a register ({memoryParam.Name}: {memoryParam.Type} using A)");
+        f.AddressTaken = true;
+        c.FunctionAddress = f;
+        c.Type = TernType.U16;
+        _function?.UsedAddresses.Add(f);
+    }
+
     /// <summary><c>addr(player.name)</c>: a field of a struct variable or of a struct at a fixed address.</summary>
     private void CheckAddrOfField(CallExpr c, MemberExpr field)
     {
@@ -1238,9 +1275,15 @@ public sealed partial class Checker
                     throw new CompileError(c.Pos, "addr() takes the name of a variable, array or data, or a field of a struct variable");
                 switch (Lookup(name.Name))
                 {
+                    // Constants are declared before the file's functions.
+                    case null when _module.Syntax.Functions.Any(f => f.Name == name.Name):
+                        throw new CompileError(name.Pos,
+                            $"addr({name.Name}) is known only when the program is placed, so it cannot be part of a constant. Use it in a var, data or code");
                     case null: throw NotDeclared(name.Name, name.Pos);
                     case ConstSymbol: throw new CompileError(name.Pos, $"'{name.Name}' is a constant, which has no address");
-                    case FunctionSymbol: throw new CompileError(name.Pos, "addr() of a function is not supported yet");
+                    case FunctionSymbol f:
+                        TakeFunctionAddress(c, f, name.Pos);
+                        return;
                     case VariableSymbol v:
                         if (!v.InMemory) throw new CompileError(name.Pos, $"'{name.Name}' lives in a register and has no address");
                         name.Symbol = v;
@@ -1372,41 +1415,77 @@ public sealed partial class Checker
     // ---------- Call graph ----------
 
     /// <summary>
-    /// The functions reachable from main, then from each interrupt handler, callers first. Handlers
-    /// are roots: those of the main file, and those a compiled function names (to install them).
-    /// A function with a body may belong to only one root, since a handler can run in the middle of it
-    /// and its frame would be overwritten (spec 8.1).
+    /// The functions reachable from main, then from each interrupt handler, then from each function
+    /// whose address is taken; callers first. Handlers are roots: those of the main file, and those
+    /// a compiled function names (to install them). Each function records the roots it is reached
+    /// from (<see cref="FunctionSymbol.Roots"/>); whether it may be shared between them is checked
+    /// after code generation, when its temporaries are known (<see cref="CheckSharedFunctions"/>).
     /// </summary>
     private static List<FunctionSymbol> OrderRoots(FunctionSymbol main, Module mainModule)
     {
         var all = new List<FunctionSymbol>();
-        var rootOf = new Dictionary<FunctionSymbol, FunctionSymbol>();
+        var seen = new HashSet<FunctionSymbol>();
         var roots = new List<FunctionSymbol> { main };
         roots.AddRange(mainModule.Scope.Values.OfType<FunctionSymbol>().Where(f => f.IsInterrupt).OrderBy(f => f.Pos.Line));
-        for (int r = 0; r < roots.Count; r++)
+        var addressTaken = new List<FunctionSymbol>();
+
+        void Named(FunctionSymbol f)
         {
-            foreach (var f in OrderReachable(roots[r]))
+            if (f.IsInterrupt) { if (!roots.Contains(f)) roots.Add(f); }
+            else if (!addressTaken.Contains(f)) addressTaken.Add(f);
+        }
+        // The main file's globals are all kept, so the functions in their initial values are too.
+        foreach (var g in mainModule.Scope.Values.OfType<VariableSymbol>())
+            foreach (var (_, f) in g.FunctionAddresses) Named(f);
+
+        void Add(FunctionSymbol root, bool isRoot)
+        {
+            foreach (var f in OrderReachable(root))
             {
-                if (f.FixedAddress is not null)
-                {
-                    // A routine at a fixed address has no frame; it may be called from anywhere.
-                    if (rootOf.TryAdd(f, roots[r])) all.Add(f);
-                    continue;
-                }
-                if (rootOf.TryGetValue(f, out var other))
-                {
-                    string Describe(FunctionSymbol root) => root == main ? "main" : $"the interrupt handler '{root.Name}'";
-                    throw new CompileError(f.Pos,
-                        $"'{f.Name}' is called from {Describe(other)} and from {Describe(roots[r])}. An interrupt can stop it halfway and run it again, " +
-                        "which would overwrite its variables, so a function cannot be shared between main and interrupt handlers. Use a copy for each");
-                }
-                rootOf[f] = roots[r];
-                all.Add(f);
-                foreach (var h in f.UsedInterrupts)
-                    if (!roots.Contains(h)) roots.Add(h);
+                if (seen.Add(f)) all.Add(f);
+                if (f.FixedAddress is not null) continue; // no frame; may be called from anywhere
+                if (isRoot) f.Roots.Add(root);
+                else f.Isolated = true;
+                foreach (var h in f.UsedInterrupts) Named(h);
+                foreach (var a in f.UsedAddresses) Named(a);
             }
         }
+        // Main and the handlers first, then the address-taken functions, whose callers are unknown.
+        for (int r = 0, a = 0; r < roots.Count || a < addressTaken.Count;)
+        {
+            if (r < roots.Count) Add(roots[r++], isRoot: true);
+            else Add(addressTaken[a++], isRoot: false);
+        }
         return all;
+    }
+
+    private static string DescribeRoot(FunctionSymbol root) => root.IsInterrupt ? $"the interrupt handler '{root.Name}'" : "main";
+
+    /// <summary>
+    /// A function reached from two roots (main and a handler, or two handlers) may run again while
+    /// it is stopped halfway by an interrupt, so it must have no memory of its own: no memory
+    /// parameters, locals or temporaries (spec 8.1). Its callees are reached from both roots too,
+    /// so they are checked the same way. Runs after code generation, which creates the temporaries.
+    /// </summary>
+    public static void CheckSharedFunctions(CheckedProgram program)
+    {
+        foreach (var f in program.Functions)
+        {
+            if (f.Roots.Count < 2 || f.FrameVariables.Count == 0) continue;
+            var roots = f.Roots.OrderBy(r => r.IsInterrupt).ThenBy(r => r.Pos.File).ThenBy(r => r.Pos.Line).ToList();
+            var v = f.FrameVariables[0];
+            string memory = v.Kind switch
+            {
+                VariableKind.Temp => $"a hidden temporary for the code at line {v.Pos.Line} (e.g. for 16-bit arithmetic or an argument)",
+                VariableKind.Parameter when v.PassedIn is { } reg => $"the parameter '{v.Name}', which it keeps in memory (it arrives in {reg})",
+                VariableKind.Parameter => $"the parameter '{v.Name}' in memory",
+                _ when v.Name.StartsWith("_loop") => $"the counter of the loop at line {v.Pos.Line}",
+                _ => $"the local variable '{v.Name}'",
+            };
+            throw new CompileError(f.Pos,
+                $"'{f.Name}' is called from {DescribeRoot(roots[0])} and from {DescribeRoot(roots[1])}. An interrupt can stop it halfway and run it again, " +
+                $"which would overwrite its memory: {memory}. Only a function with no memory of its own can be shared between main and interrupt handlers. Use a copy for each");
+        }
     }
 
     /// <summary>
@@ -1415,7 +1494,7 @@ public sealed partial class Checker
     /// see it (review M6, finding 1). The library's work bytes are such globals. Public globals are
     /// how main and handlers talk to each other, and data is read-only, so both stay allowed.
     /// </summary>
-    private static void CheckPrivateGlobalsPerRoot(List<Module> modules, List<FunctionSymbol> ordered, FunctionSymbol main)
+    private static void CheckPrivateGlobalsPerRoot(List<Module> modules, List<FunctionSymbol> ordered)
     {
         var privateGlobals = modules.Where(m => !m.IsMain)
             .SelectMany(m => m.Syntax.PrivateNames.Select(n => m.Scope.GetValueOrDefault(n)).OfType<VariableSymbol>())
@@ -1423,29 +1502,25 @@ public sealed partial class Checker
             .ToHashSet();
         if (privateGlobals.Count == 0) return;
 
-        // ordered is main's tree, then each handler's tree; a function belongs to the root that starts its tree.
         var firstUser = new Dictionary<VariableSymbol, (FunctionSymbol Function, FunctionSymbol Root)>();
-        FunctionSymbol root = main;
         foreach (var f in ordered.Where(f => f.FixedAddress is null))
-        {
-            if (f.IsInterrupt) root = f;
-            foreach (var used in f.UsedGlobals)
-            {
-                var g = used.AliasOf ?? used;
-                if (!privateGlobals.Contains(g)) continue;
-                if (!firstUser.TryGetValue(g, out var first))
-                    firstUser[g] = (f, root);
-                else if (first.Root != root)
+            foreach (var root in f.Roots.OrderBy(r => r.IsInterrupt))
+                foreach (var used in f.UsedGlobals)
                 {
-                    string Describe(FunctionSymbol r) => r == main ? "main" : $"the interrupt handler '{r.Name}'";
-                    // Reported at the handler, which is in the program's own code.
-                    throw new CompileError(root.Pos,
-                        $"'{first.Function.Name}' (called from {Describe(first.Root)}) and '{f.Name}' (called from {Describe(root)}) both use '{g.Name}', " +
-                        $"a private variable of its module. An interrupt could change it while the other is using it. " +
-                        $"Call functions of this module from only main or only one interrupt handler");
+                    var g = used.AliasOf ?? used;
+                    if (!privateGlobals.Contains(g)) continue;
+                    if (!firstUser.TryGetValue(g, out var first))
+                        firstUser[g] = (f, root);
+                    else if (first.Root != root)
+                    {
+                        // Reported at the handler, which is in the program's own code.
+                        var handler = root.IsInterrupt ? root : first.Root;
+                        throw new CompileError(handler.Pos,
+                            $"'{first.Function.Name}' (called from {DescribeRoot(first.Root)}) and '{f.Name}' (called from {DescribeRoot(root)}) both use '{g.Name}', " +
+                            $"a private variable of its module. An interrupt could change it while the other is using it. " +
+                            $"Call functions of this module from only main or only one interrupt handler");
+                    }
                 }
-            }
-        }
     }
 
     /// <summary>Functions reachable from main, callers before callees. Reports recursion.</summary>

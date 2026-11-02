@@ -136,18 +136,21 @@ public static class Allocator
     /// <summary>
     /// Each function's frame starts after the frames of all its callers. An interrupt handler can
     /// run at any moment, so its frame starts after every frame placed before it (main's, and
-    /// earlier handlers'); the functions it calls follow it.
+    /// earlier handlers'); the functions it calls follow it. Functions reached from an address-taken
+    /// function may be called from anywhere, so their frames come last and overlap nothing.
     /// </summary>
     private static Dictionary<FunctionSymbol, int> FrameOffsets(
         List<FunctionSymbol> callersFirst, Dictionary<FunctionSymbol, List<FunctionSymbol>> callers, Func<FunctionSymbol, int> size)
     {
         var offsets = new Dictionary<FunctionSymbol, int>();
         int end = 0;
-        foreach (var f in callersFirst)
+        foreach (var f in callersFirst.Where(f => !f.Isolated).Concat(callersFirst.Where(f => f.Isolated)))
         {
             // A routine at a fixed address has no frame; it may be called from main and from handlers.
-            offsets[f] = f.IsInterrupt ? end
-                : f.FixedAddress is not null || callers[f].Count == 0 ? 0
+            // So may a function with no memory (checked by Checker.CheckSharedFunctions), whose callers
+            // in a later root are not placed yet.
+            offsets[f] = f.IsInterrupt || f.Isolated ? end
+                : f.FixedAddress is not null || f.Roots.Count > 1 || callers[f].Count == 0 ? 0
                 : callers[f].Max(c => offsets[c] + size(c));
             end = Math.Max(end, offsets[f] + size(f));
         }

@@ -90,6 +90,8 @@ public sealed class CallExpr(SourcePos pos, string name, List<Expr> args) : Expr
     public FunctionSymbol? Function { get; set; }
     /// <summary>Set by the checker for <c>addr(name)</c>.</summary>
     public VariableSymbol? AddressOf { get; set; }
+    /// <summary>Set by the checker for <c>addr(f)</c> of a function: a <c>u16</c> known when the program is placed.</summary>
+    public FunctionSymbol? FunctionAddress { get; set; }
 }
 public sealed class IndexExpr(SourcePos pos, Expr target, Expr index) : Expr(pos)
 {
