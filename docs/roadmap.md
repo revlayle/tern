@@ -178,6 +178,13 @@ Done when: an example scrolls a character map in eight directions with at least 
 - `using` on local variables (spec 14.6)
 - Overflow checking and array index checking in the emulator for test runs (spec 14.4, 3.2)
 - Doc comments (`///` before a declaration) and a Tern language server (LSP) that shows them, e.g. that `set_irq` needs an `interrupt fn`
+- **Developer guide**: user documentation that explains how the language behaves on the machine, with examples; it informs and does not forbid. It must cover each behavior below. The spec session adds to this list whenever a decision leaves a behavior that the programmer may rely on, or that may surprise them:
+  - all arithmetic wraps, including index expressions: `buf[head + 1]` with `head = 255` is `buf[0]` (3.1, 3.2); when the optimizer folds a constant offset into the address
+  - an index outside the array is not checked, and the optimizer assumes it does not happen (3.2)
+  - flags after an `asm` block: `if f()`, `while f()` (first test, and each later test when the body ends with an `asm` block) and `v = f()` with an empty-body flag function; after compiled Tern code the flags are unspecified (7)
+  - a variable `for` step of 0 never ends the loop; stepped loops stop when the step carries past the end of the type (5.1)
+  - signed `>>` rounds down, not toward zero (3.1)
+  - `keeps` on a fixed routine is a promise the compiler does not check (6.6); a function reached only through `addr()` has no known root (6.5, 8.1)
 - Memory layout declaration: reserved areas, volatile ranges, named regions (spec 14.12), with `data` at a fixed address (14.9) and banks
 
 New platforms, last:
