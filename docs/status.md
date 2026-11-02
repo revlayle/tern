@@ -4,14 +4,13 @@ Owned by the coding session. Updated at the end of every coding session.
 
 ## Current
 
-- **Milestone:** M7 (optimizer, first pass), with the M6 follow-up. In progress.
+- **Milestone:** M7 (optimizer, first pass), with the M6 follow-up. Complete: every roadmap item is done.
 - **Branch:** `m7-optimizer` (from `main` after the M6 merge and the spec commits that settled volatile memory and the M6 questions).
-- **Done so far:** the M6 follow-up (all three items), volatile memory, the benchmark set, unreachable code and redundant-load removal. See "M7" below.
-- **Next step:** the two remaining roadmap items: keep register parameters in registers when the function does not need the register, and put loop variables in X/Y automatically when the body allows it. Measure each with the benchmarks (`TERN_UPDATE_BENCHMARKS=1` records new numbers). Then `/review`.
+- **Next step:** `/review` of `m7-optimizer`. The spec session should look at questions 32-37 below. After the merge, M8 (benchmarks against other compilers); `tests/benchmarks` is a starting point for its task set.
 
 ## Done
 
-- **M7 optimizer, first pass** (branch `m7-optimizer`, 2026-11-02, in progress). 885 tests pass (36 CPU, 849 compiler).
+- **M7 optimizer, first pass** (branch `m7-optimizer`, 2026-11-02). 904 tests pass (36 CPU, 868 compiler). Examples checked in VICE (`structs`, `library` and `raster`; use `-limitcycles 30000000`, with 20 million VICE sometimes exits before writing the screenshot).
   - **M6 follow-up: `addr(f)`** (spec 6.5). `Checker.TakeFunctionAddress`: a `u16` (`CallExpr.FunctionAddress`), loaded as `#f.lo` / `#f.hi` (`CodeGen.Simple2`). In initial values (`data` jump tables, initialized `var`s, `@ zp` vars) the checker records `VariableSymbol.FunctionAddresses` (byte index, function) and leaves zeros; `TernCompiler.ImageBytes` emits those bytes as `LabelTable` items, the startup code as `lda #f.lo` (`LayoutIndex` follows the split layout of `[u16; n]`). Errors: `inline fn`, memory parameters, `addr(f)` inside a calculation in an initial value, in a `const`.
     - Taking an address (`addr(f)`, or `#f.lo` in assembly) adds the function to `FunctionSymbol.UsedAddresses` (not a call edge; `jsr f` in asm still is one). `Checker.OrderRoots` keeps such functions as extra roots after main and the handlers, and marks them and everything they reach `Isolated`. `Allocator.FrameOffsets` places isolated frames last, after every other frame, so they overlap nothing. A table in a module keeps its functions only when a compiled function uses the table (`UseGlobal`); the main file's tables always do. Assembly may still take the address of a function with memory parameters (an earlier decision, `AsmTests.Address_of_a_function_with_memory_parameters_is_allowed`).
     - Tests: `FunctionAddressTests` (jump tables in data, var, linear data and zero page dispatching through `jmp (vec)`; module tables; fixed routines; frames of address-taken functions and their callees overlap nothing, with a control case; 7 errors).
@@ -20,12 +19,15 @@ Owned by the coding session. Updated at the end of every coding session.
   - **Volatile memory** (spec 4). `VariableSymbol.IsVolatile` (on the storage of a view) is `DeclaredVolatile` (`volatile var`), `InVolatileArea` (a fixed address in `Platform.VolatileAreas`; C64: `$00-$01`, `$91`, `$A0-$A2`, `$C5-$C6`, `$CB-$CF`, `$F5-$F6`, `$0277-$0280`, `$028D-$028E`, `$D000-$DFFF`) or `UsedFromTwoRoots` (`Checker.MarkGlobalsUsedFromTwoRoots`; functions reached from an address-taken function also count as reached from one unknown root). Fixed-address RAM elsewhere is ordinary memory. `volatile` is a prefix like `noinit` (combinable with `noinit`, `linear`, `private`); errors on data, locals, twice.
     - `TernCompiler.CheckFixedAddresses`: a fixed-address variable overlapping the program and its variables, or a zero-page variable the compiler placed, is an error naming both ranges. Fixed-address variables may overlap each other.
     - Tests: `VolatileTests`.
-  - **Benchmarks** (`tests/benchmarks/*.tern`, `BenchmarkTests`): sieve, bubble sort, 16-bit sums, pointer copy, small calls, struct arrays, a `match` interpreter, CRC-8, Fibonacci with a shift-add multiply. Each result is checked against C#; image bytes and cycles until main returns must equal `tests/benchmarks/baseline.txt`, so any change (worse or better) fails with a table. `TERN_UPDATE_BENCHMARKS=1 dotnet test` rewrites the baseline. Totals: 1802 bytes / 667366 cycles before the optimizer, 1728 / 623013 now.
+  - **Benchmarks** (`tests/benchmarks/*.tern`, `BenchmarkTests`): sieve, bubble sort, 16-bit sums, pointer copy, small calls, struct arrays, a `match` interpreter, CRC-8, Fibonacci with a shift-add multiply. Each result is checked against C#; image bytes and cycles until main returns must equal `tests/benchmarks/baseline.txt`, so any change (worse or better) fails with a table. `TERN_UPDATE_BENCHMARKS=1 dotnet test` rewrites the baseline. Totals: 1802 bytes / 667366 cycles before the optimizer; 1728 / 623013 after redundant loads; 1664 / 535295 after loop registers (now).
   - **Optimizer** (`Backend/Optimizer.cs`, run per function from `CodeGen.GenerateFunctions`; an interrupt handler's body is optimized before its saving code is added; asm fns are skipped):
     - removes unreachable instructions (the `rts` after an endless loop);
     - a forward dataflow over the function's items (`Analyse`; states meet at labels; labels named other than by a jump or branch, e.g. `match` table targets, start unknown) tracks, per register, the set of operands it equals (immediates, `#x.lo`, bytes of non-volatile variables), and which register N/Z came from. `RemoveOneRedundant` removes one redundant `lda`/`ldx`/`ldy`, `sta`/`stx`/`sty` or transfer at a time, then re-analyses. A load is removed only if N/Z already match its value or are dead (`NzLiveAfter`; `rts` reads them only for `-> bool using zero/negative`).
     - forgetting: `jsr` and any asm instruction forget everything; a write through a pointer or to a numeric address forgets all memory; a write to a callee's frame forgets all callee frames (siblings share memory); a write to a fixed-address variable forgets all fixed-address variables (they may overlap); an indexed write forgets only its array (provisional, question 32). Instructions from asm blocks are never changed.
     - Tests: `OptimizerTests`; code shapes elsewhere still hold (one got shorter: `enemies[i].hp += 1` loads X once).
+  - **Register parameters** (`CodeGen.KeptRegister`): one u8 parameter passed in X or Y stays in its register (not stored, no frame byte) when the body calls nothing, has no asm block or register loop, never assigns it or takes its address, and returns nothing in that register. Also for inline functions. A parameter in A is still stored (almost every expression needs A); the redundant-load pass removes its first reload when A still holds it. Tests: `RegisterParameterTests`.
+  - **Loop counters in registers** (`CodeGen.ChooseCounterRegister`): the u8 counter of an innermost loop (no loops, calls or asm in the body, step 1, address not taken) goes in a register when none is held yet: Y if every pointer access in the body is exactly `p[counter]`, else X. Not when the function returns a value in that register from inside the loop. Tests: `LoopRegisterTests`.
+  - Not done (not in the M7 roadmap list): automatic inlining of small single-caller functions (spec 6.2).
 
 - **M1 core compiler**, merged to `main` (2026-11-01).
 - **M2 pointers, data and strings**, merged to `main` (2026-11-01).
@@ -118,10 +120,12 @@ Including `jsr` and `rts`; from the tests.
 
 Not bugs; things to improve, mostly in M7 (optimizer).
 
-- Register parameters are stored to memory on function entry, then reloaded on each use.
+- Register parameters in A, register pairs, and X/Y parameters of bodies that need the register are stored on entry and reloaded where A was changed.
 - After the step of a memory loop counter, the counter is reloaded with `lda` right after it was stored.
 - A `for` bound that is a global variable is copied to a temporary (only locals and parameters are used directly, since calls could change a global).
-- Loop variables live in memory unless `using X`/`using Y` is written.
+- Only innermost loops get a register automatically, and only when no other register is held (a kept parameter or an outer `using` loop), so nested loops keep the outer counter in memory.
+- The optimizer forgets everything at labels reached from a jump table or by address, at every `jsr` and every asm instruction; it does not track values across calls to functions it could see into.
+- The register analysis tracks only equality with immediates and memory bytes; it does not fold constants (`lda #3` / `clc` / `adc #1` stays).
 - Evaluation order: in `a + b` where `b` needs a temporary, `b` is evaluated before `a`. Matters only if both call functions with side effects.
 - Only one zero-page range per platform is used (C64: `$02-$8F`; `$FB-$FE` is unused unless a variable is placed there with `@`).
 - `Y` is reloaded for every pointer access in an expression, even with the same index: `x = p[i] + q[i]` loads Y twice. (`dst[i] = src[i]` and `p[i] += 1` load it once.)
