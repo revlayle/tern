@@ -4,9 +4,9 @@ Owned by the coding session. Updated at the end of every coding session.
 
 ## Current
 
-- **Milestone:** M5 (structs). Complete; reviewed (`docs/reviews/m5.md`: ready to merge, no must-fix), and the three suggestions are fixed.
-- **Branch:** `m5-structs` (from `main` after the M4 merge).
-- **Next step:** `/merge m5-structs`. After the merge, M6 (`match`, interrupts, function modifiers). The spec session should look at the M5 questions below (10-21); the provisional choices are easy to change.
+- **Milestone:** M6 (`match`, interrupts, function modifiers). The M5 follow-up is done; M6 itself is in progress.
+- **Branch:** `m6-match` (from `main` after the M5 merge and the spec commits that settled the M4/M5 questions).
+- **Next step:** `match` (spec 5, 11), then `interrupt fn` and its frame root (6.3, 8.1), `inline fn`, `noinit`, and the raster interrupt example.
 
 ## Done
 
@@ -14,7 +14,11 @@ Owned by the coding session. Updated at the end of every coding session.
 - **M2 pointers, data and strings**, merged to `main` (2026-11-01).
 - **M3 assembly blocks and KERNAL calls**, with the M2 follow-up, merged to `main` (2026-11-01).
 - **M4 imports and the standard library**, with the M3 follow-up (fixed inputs), merged to `main` (2026-11-01). Details below.
-- **M5 structs** (branch `m5-structs`, 2026-11-01). 670 tests pass (34 CPU, 636 compiler).
+- **M5 follow-up** (branch `m6-match`, 2026-11-01). 726 tests pass (34 CPU, 692 compiler).
+  - `private` before a top-level `const`, `var`, `linear var`, `data`, `struct`, `fn` or `asm fn` (spec 2.2). The parser records the names (`ProgramSyntax.PrivateNames`); `Checker.Lookup` does not find another module's private names, and `NotDeclared` then says "'m.x' is private to the module m". This one lookup serves Tern code, types, `sizeof`, `addr` and assembly operands. `private` inside a function, twice, or before `import` is an error. In the main file it is allowed and changes nothing. `lib/math` (`w0`-`w2`, `SQUARE_*`) and `lib/text` (`DIGITS`, `POWERS`) mark their work bytes and tables private. Tests: `ModuleTests` (`Private_*`), `MathLibraryTests.Library_work_variables_and_tables_are_private`.
+  - `addr(player.name)` (spec 3.4): `Checker.CheckAddrOfField` takes the field's view (a scalar or array field is already one; a nested struct field gets one) and `CodeGen.Simple2` loads the storage's address plus the offset as two immediates. Works in zero page, at fixed addresses and across modules (`addr(c64.vic.border)` is `$D020`). Fields through a pointer or in an array of structs are errors. Tests: `StructTests` (`Addr_of_a_field_*`).
+  - `linear` arrays of `u16`/`i16`/pointers (spec 3.2), `linear var` and `linear data`. The checker lowers `pts[i]` to `pts[i << 1]` and `pts[c]` to `pts[2c]` (`Checker.LinearIndex`); `CodeGen.HighTable` is 1 for a linear array, so all array code works unchanged and gives the spec 11 shape (`lda i` / `asl a` / `tax` / `lda pts,x` / `lda pts+1,x`). Initial values stay interleaved (`TernCompiler.MemoryLayout`). `addr(pts)` is a `ptr u16` (or the element type). At most 128 elements; one-byte elements are an error. Tests: `LinearArrayTests`.
+- **M5 structs** (branch `m5-structs`, merged to `main` 2026-11-01). 670 tests pass (34 CPU, 636 compiler).
   - `struct Name { field: type, field: type @ offset }`, fields separated by `,` or line breaks (`StructDecl`, `Parser.ParseStruct`). `Checker.Structs.cs` lays a struct out once (`StructSymbol.Fields`, `Size`): a field without `@` follows the previous one; nested structs are laid out first; a struct that contains itself, overlapping fields and duplicate names are errors. Struct names are declared before the file's constants, so types may name structs declared further down, and `ptr Enemy` inside `Enemy` works (pointer targets are not laid out). `sizeof(T)` works on structs, also qualified (`sizeof(c64.Vic)`); a type in a module is `shapes.Box` (`ParseType`).
   - **Lowering.** The checker turns every field access into plain variables, arrays and pointers (`Expr.Lowered`); `Lowering.Apply` puts the lowered forms into the tree before code generation, so the code generator has almost no struct code:
     - a field of a struct variable is a *view*: a `VariableSymbol` with `AliasOf` (the struct variable) and `AliasOffset`. `player.hp` is `lda player+2`, `player.name[i]` is `lda player+5,x`. `CodeGen.Var()` turns a view into a byte of its storage, so views need no memory and no allocation. Views are cached (`Checker._views`), so the same field is the same symbol. Fixed-address structs give views with a `FixedAddress`, so they are volatile like any `@ addr` variable.
