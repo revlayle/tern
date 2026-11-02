@@ -27,6 +27,8 @@ public sealed partial class Checker
     private FunctionSymbol? _function;
     private int _loopDepth;
     private readonly HashSet<Register> _loopRegisters = [];
+    /// <summary>The largest value of each enclosing loop counter whose bounds are constants (for index checks).</summary>
+    private readonly Dictionary<VariableSymbol, long> _loopMax = [];
     private int _hiddenCounter;
     private readonly Platform _platform;
 
@@ -759,11 +761,26 @@ public sealed partial class Checker
         if (f.Variable is not null) Declare(counter);
         _loopDepth++;
         counter.Weight += Weight() * 3;   // load, step and compare on every pass
+        if (from is not null && to is not null && LargestLoopValue(from.Value, to.Value, f.Inclusive, f.StepValue) is long largest)
+            _loopMax[counter] = largest;
         CheckBlock(f.Body, newScope: false);
+        _loopMax.Remove(counter);
         _loopDepth--;
         _scopes.RemoveAt(_scopes.Count - 1);
 
         if (f.UsingRegister is { } r) _loopRegisters.Remove(r);
+    }
+
+    /// <summary>The largest value a loop with constant bounds reaches, or null if it runs no passes.</summary>
+    private static long? LargestLoopValue(long from, long to, bool inclusive, int step)
+    {
+        if (step > 0)
+        {
+            long limit = inclusive ? to : to - 1;
+            return from > limit ? null : from + (limit - from) / step * step;
+        }
+        long floor = inclusive ? to : to + 1;
+        return from < floor ? null : from;
     }
 
     private void CheckMatch(MatchStmt m)
@@ -945,6 +962,9 @@ public sealed partial class Checker
                         $"'{arr.Name}' has {arr.Type.Length} elements, too many for a u8 index. Read it through a pointer: addr({arr.Name})");
                 if (ix.Index.ConstValue is long idx && idx >= arr.Type.Length)
                     throw new CompileError(ix.Index.Pos, $"Index {idx} is past the end of '{arr.Name}' (length {arr.Type.Length})");
+                if (Unwrap(ix.Index) is NameExpr { Symbol: VariableSymbol counter } && _loopMax.TryGetValue(counter, out var last) && last >= arr.Type.Length)
+                    throw new CompileError(ix.Index.Pos,
+                        $"The loop reaches {last}, past the end of '{arr.Name}' (length {arr.Type.Length}). Make the loop stop before {arr.Type.Length}");
                 e.Type = arr.Type.Element!;
                 if (arr.Type.Linear) ix.Lowered = LinearIndex(ix);
                 break;
