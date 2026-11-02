@@ -17,7 +17,7 @@ public static class Optimizer
     public static void Run(List<AsmItem> code, FunctionSymbol function)
     {
         RemoveUnreachable(code);
-        while (RemoveOneRedundant(code, function)) { }
+        while (RemoveRedundant(code, function)) { }
     }
 
     private static bool FromAsm(Instr i) => i.AsmPos is not null;
@@ -277,28 +277,44 @@ public static class Optimizer
     }
 
     /// <summary>
-    /// Removes the first load, store or transfer that changes nothing: the register (or the memory)
-    /// already holds the value. N and Z must already match the value, or not be needed.
+    /// Removes loads, stores and transfers that change nothing: the register (or the memory) already
+    /// holds the value. N and Z must already match the value, or not be needed. Returns true if
+    /// anything was removed; the caller analyses again until nothing is.
     /// </summary>
-    private static bool RemoveOneRedundant(List<AsmItem> code, FunctionSymbol function)
+    /// <remarks>
+    /// One analysis serves many removals: a removed instruction changed no register or memory value,
+    /// so the register contents stay right. Only N and Z can differ, after a removed load or transfer,
+    /// so from then on in this pass "N and Z already match" is not trusted, while "N and Z are not
+    /// needed" is still checked on the code itself. (Review M7, finding 2: one removal per analysis
+    /// made the time grow with the cube of the function's size.)
+    /// </remarks>
+    private static bool RemoveRedundant(List<AsmItem> code, FunctionSymbol function)
     {
         var before = Analyse(code, function);
+        var kept = new List<AsmItem>(code.Count);
+        bool flagsChanged = false;
         for (int k = 0; k < code.Count; k++)
         {
-            if (code[k] is not Instr i || FromAsm(i) || before[k] is not { } s) continue;
+            if (code[k] is not Instr i || FromAsm(i) || before[k] is not { } s)
+            {
+                kept.Add(code[k]);
+                continue;
+            }
             bool FlagsMatch(HashSet<Operand> value) =>
-                s.Flags is Reg f && s.Regs[(int)f].Overlaps(value) || !NzLiveAfter(code, k, function);
-            bool redundant = false;
+                (!flagsChanged && s.Flags is Reg f && s.Regs[(int)f].Overlaps(value)) || !NzLiveAfter(code, k, function);
+            bool redundant = false, setsFlags = true;
             if (Loaded(i.Mnemonic) is Reg load && Trackable(i))
                 redundant = s.Regs[(int)load].Contains(i.Operand!) && FlagsMatch([i.Operand!]);
             else if (Stored(i.Mnemonic) is Reg st && Trackable(i))
-                redundant = s.Regs[(int)st].Contains(i.Operand!);
+                (redundant, setsFlags) = (s.Regs[(int)st].Contains(i.Operand!), false);
             else if (Transfer(i.Mnemonic) is var (from, to))
                 redundant = s.Regs[(int)from].Overlaps(s.Regs[(int)to]) && FlagsMatch(s.Regs[(int)from]);
-            if (!redundant) continue;
-            code.RemoveAt(k);
-            return true;
+            if (redundant) flagsChanged |= setsFlags;
+            else kept.Add(i);
         }
-        return false;
+        if (kept.Count == code.Count) return false;
+        code.Clear();
+        code.AddRange(kept);
+        return true;
     }
 }

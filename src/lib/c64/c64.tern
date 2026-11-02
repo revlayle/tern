@@ -140,12 +140,12 @@ asm fn kernal_off() {
     sta cia2.icr                    // no CIA 2 NMIs
     lda cia1.icr                    // reading clears any that are pending
     lda cia2.icr
+    lda #ignore_nmi.lo              // writes reach the RAM under the KERNAL ROM,
+    sta $FFFA                       // so the NMI vector is ready before the ROM goes
+    lda #ignore_nmi.hi              // (RESTORE is an NMI, which sei does not hold off)
+    sta $FFFB
     lda #$35
     sta $01
-    lda #ignore_nmi.lo
-    sta $FFFA
-    lda #ignore_nmi.hi
-    sta $FFFB
     rts
 }
 

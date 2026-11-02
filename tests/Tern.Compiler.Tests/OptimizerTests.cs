@@ -143,6 +143,21 @@ public class OptimizerTests
     }
 
     [Fact]
+    public void A_long_function_is_optimized_quickly()
+    {
+        // Review M7, finding 2: 4500 statements took 228 seconds when each removal was followed by
+        // a new analysis of the whole function.
+        var body = new System.Text.StringBuilder();
+        for (int k = 0; k < 1500; k++)
+            body.Append($"    x = {k & 0xFF}\n    y = x\n    z[x & 3] = y\n");
+        var source = $"var x: u8\nvar y: u8\nvar z: [u8; 4]\nfn main() {{\n{body}}}\n";
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        var r = TernCompiler.Compile(source);
+        Assert.True(clock.Elapsed < TimeSpan.FromSeconds(5), $"took {clock.Elapsed}");
+        Assert.DoesNotContain("lda x ", r.Listing);   // every y = x uses the A that was just stored
+    }
+
+    [Fact]
     public void An_endless_loop_has_no_rts_after_it()
     {
         var r = TernCompiler.Compile("""
