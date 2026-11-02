@@ -357,4 +357,83 @@ public sealed class ModuleTests : IDisposable
         e = Assert.Throws<CompileError>(() => CompileMain("var t: m.S\nfn main() { }"));
         Assert.Equal("'m' is not declared. To use the module m, add 'import m' at the top of the file", e.Description);
     }
+
+    private const string Secret = """
+        private const STEP = 3
+        private var count: u8
+        private data TABLE: [u8; 3] = [7, 8, 9]
+        private struct Pair { a: u8, b: u8 }
+        private var pair: Pair
+        private fn helper() { count += STEP }
+        private asm fn twice(v: u8 using A) -> u8 {
+            asl
+        }
+
+        // Public functions use the private names freely, also in assembly.
+        fn bump() -> u8 {
+            helper()
+            pair.b = TABLE[2]
+            asm {
+                inc count
+            }
+            return twice(count) + pair.b
+        }
+        """;
+
+    [Fact]
+    public void Private_names_are_usable_inside_their_module()
+    {
+        Write(Src, "secret.tern", Secret);
+        var r = RunMain("""
+            import secret
+            var v: u8
+            private var w: u8
+            fn main() {
+                v = secret.bump()
+                w = 1
+            }
+            """);
+        Assert.Equal((3 + 1) * 2 + 9, r.U8("v"));
+        Assert.Equal(1, r.U8("w"));
+    }
+
+    [Theory]
+    [InlineData("fn main() { secret.helper() }", "'secret.helper' is private to the module secret; only code in secret can use it")]
+    [InlineData("fn main() { var x = secret.twice(1) }", "'secret.twice' is private to the module secret")]
+    [InlineData("var x: u8\nfn main() { x = secret.count }", "'secret.count' is private to the module secret")]
+    [InlineData("var x: u8\nfn main() { x = secret.TABLE[0] }", "'secret.TABLE' is private to the module secret")]
+    [InlineData("var x: u8\nfn main() { x = secret.STEP }", "'secret.STEP' is private to the module secret")]
+    [InlineData("var x: u8\nfn main() { x = secret.pair.a }", "'secret.pair' is private to the module secret")]
+    [InlineData("var x: secret.Pair\nfn main() { }", "'secret.Pair' is private to the module secret")]
+    [InlineData("var x: u8\nfn main() { x = sizeof(secret.Pair) }", "'secret.Pair' is private to the module secret")]
+    [InlineData("var p: ptr u8\nfn main() { p = addr(secret.count) }", "'secret.count' is private to the module secret")]
+    [InlineData("fn main() { asm {\n inc secret.count\n } }", "'secret.count' is private to the module secret")]
+    [InlineData("fn main() { asm {\n jsr secret.helper\n } }", "'secret.helper' is private to the module secret")]
+    [InlineData("fn main() { asm {\n lda #secret.TABLE.lo\n } }", "'secret.TABLE' is private to the module secret")]
+    [InlineData("fn main() { private var x: u8 }", "'private' is only for top-level declarations")]
+    [InlineData("private private var x: u8\nfn main() { }", "'private' goes before a declaration (const, var, data, struct or fn); found 'private'")]
+    [InlineData("var private: u8\nfn main() { }", "Expected variable name, found 'private'")]
+    public void Private_names_are_errors_outside_their_module(string body, string expected)
+    {
+        Write(Src, "secret.tern", Secret);
+        var e = Assert.Throws<CompileError>(() => CompileMain("import secret\n" + body));
+        Assert.Contains(expected, e.Description);
+    }
+
+    [Fact]
+    public void Private_goes_before_a_declaration()
+    {
+        var e = Assert.Throws<CompileError>(() => CompileMain("private import util\nfn main() { }"));
+        Assert.Equal("'private' goes before a declaration (const, var, data, struct or fn); found 'import'", e.Description);
+    }
+
+    [Fact]
+    public void Private_names_are_private_between_modules_too()
+    {
+        Write(Src, "secret.tern", Secret);
+        Write(Src, "other.tern", "import secret\nfn go() { secret.helper() }");
+        var e = Assert.Throws<CompileError>(() => CompileMain("import other\nfn main() { other.go() }"));
+        Assert.Equal("'secret.helper' is private to the module secret; only code in secret can use it", e.Description);
+        Assert.Equal("other.tern", Path.GetFileName(e.Pos.File));
+    }
 }

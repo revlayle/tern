@@ -327,6 +327,8 @@ public sealed class ProgramSyntax(List<ConstDecl> consts, List<VarDecl> globals,
 {
     public List<ImportDecl> Imports { get; init; } = [];
     public List<StructDecl> Structs { get; init; } = [];
+    /// <summary>Top-level names declared <c>private</c>: usable only inside this file.</summary>
+    public HashSet<string> PrivateNames { get; init; } = [];
     public List<ConstDecl> Consts { get; } = consts;
     public List<VarDecl> Globals { get; } = globals;
     public List<FnDecl> Functions { get; } = functions;

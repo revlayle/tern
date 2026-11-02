@@ -93,12 +93,19 @@ public sealed partial class Checker
         scope[name] = symbol;
     }
 
-    /// <summary>Finds a name in the enclosing scopes and the current file, or <c>module.name</c> in an imported module.</summary>
+    /// <summary>
+    /// Finds a name in the enclosing scopes and the current file, or <c>module.name</c> in an imported module.
+    /// A <c>private</c> name of another module is not found.
+    /// </summary>
     private Symbol? Lookup(string name)
     {
         int dot = name.IndexOf('.');
         if (dot > 0)
-            return _module.Imports.TryGetValue(name[..dot], out var module) ? module.Scope.GetValueOrDefault(name[(dot + 1)..]) : null;
+        {
+            if (!_module.Imports.TryGetValue(name[..dot], out var module)) return null;
+            string member = name[(dot + 1)..];
+            return module.Syntax.PrivateNames.Contains(member) ? null : module.Scope.GetValueOrDefault(member);
+        }
         for (int i = _scopes.Count - 1; i >= 0; i--)
             if (_scopes[i].TryGetValue(name, out var s)) return s;
         return _module.Scope.GetValueOrDefault(name);
@@ -121,6 +128,8 @@ public sealed partial class Checker
         }
         if (!_module.Imports.TryGetValue(name[..dot], out var other))
             return MissingImport(name[..dot], pos);
+        if (other.Syntax.PrivateNames.Contains(name[(dot + 1)..]))
+            return new CompileError(pos, $"'{name}' is private to the module {other.Name}; only code in {other.Name} can use it");
         // Modules that import each other are declared one after the other, so a declaration
         // in the first one cannot use the second one's names yet.
         if (!other.Declared)

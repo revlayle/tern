@@ -77,22 +77,43 @@ public sealed class Parser
             ExpectEndOfStatement();
             SkipTerminators();
         }
+        var privateNames = new HashSet<string>();
         while (!At(TokenKind.Eof))
+        {
+            if (At(TokenKind.Private))
+            {
+                var p = Advance();
+                if (!(Current.Kind is TokenKind.Const or TokenKind.Var or TokenKind.Linear or TokenKind.Struct or TokenKind.Data or TokenKind.Fn
+                      || (At(TokenKind.Asm) && PeekAt(1).Kind == TokenKind.Fn)))
+                    throw new CompileError(p.Pos, $"'private' goes before a declaration (const, var, data, struct or fn); found {Describe(Current)}");
+                privateNames.Add(ParseDeclaration());
+            }
+            else
+                ParseDeclaration();
+            SkipTerminators();
+        }
+        return new ProgramSyntax(consts, globals, functions) { Imports = imports, Structs = structs, PrivateNames = privateNames };
+
+        // Parses one top-level declaration and returns its name.
+        string ParseDeclaration()
         {
             switch (Current.Kind)
             {
                 case TokenKind.Import:
                     throw new CompileError(Current.Pos, "'import' must be at the top of the file, before other declarations");
-                case TokenKind.Const: consts.Add(ParseConst()); break;
-                case TokenKind.Var: globals.Add(ParseVar()); break;
-                case TokenKind.Linear: globals.Add(ParseLinearVar()); break;
-                case TokenKind.Struct: structs.Add(ParseStruct()); break;
-                case TokenKind.Data: globals.Add(ParseData()); break;
-                case TokenKind.Fn: functions.Add(ParseFn()); break;
+                case TokenKind.Const: { var d = ParseConst(); consts.Add(d); return d.Name; }
+                case TokenKind.Var: { var d = ParseVar(); globals.Add(d); return d.Name; }
+                case TokenKind.Linear: { var d = ParseLinearVar(); globals.Add(d); return d.Name; }
+                case TokenKind.Struct: { var d = ParseStruct(); structs.Add(d); return d.Name; }
+                case TokenKind.Data: { var d = ParseData(); globals.Add(d); return d.Name; }
+                case TokenKind.Fn: { var d = ParseFn(); functions.Add(d); return d.Name; }
                 case TokenKind.Asm when PeekAt(1).Kind == TokenKind.Fn:
+                {
                     Advance();
-                    functions.Add(ParseFn(isAsm: true));
-                    break;
+                    var d = ParseFn(isAsm: true);
+                    functions.Add(d);
+                    return d.Name;
+                }
                 case TokenKind.Asm:
                     throw new CompileError(Current.Pos,
                         "An asm block must be inside a function. Use 'asm fn name() { ... }' for a whole function in assembly");
@@ -100,9 +121,7 @@ public sealed class Parser
                     RejectUnsupported();
                     throw new CompileError(Current.Pos, $"Expected 'const', 'var', 'data', 'struct' or 'fn', found {Describe(Current)}");
             }
-            SkipTerminators();
         }
-        return new ProgramSyntax(consts, globals, functions) { Imports = imports, Structs = structs };
     }
 
     /// <summary>Keywords from the spec that this compiler version does not implement yet.</summary>
@@ -315,6 +334,8 @@ public sealed class Parser
             case TokenKind.Var: return ParseVar();
             case TokenKind.Linear: return ParseLinearVar();
             case TokenKind.Struct: throw new CompileError(Current.Pos, "A struct must be declared outside functions");
+            case TokenKind.Private:
+                throw new CompileError(Current.Pos, "'private' is only for top-level declarations; names inside a function are always private to it");
             case TokenKind.If: return ParseIf();
             case TokenKind.While:
             {

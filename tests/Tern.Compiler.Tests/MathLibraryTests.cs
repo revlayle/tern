@@ -172,4 +172,15 @@ public class MathLibraryTests
         Assert.DoesNotContain("math.remainder16", r.Symbols.Keys);
         Assert.True(r.Image.Length < 100, $"{r.Image.Length} bytes");
     }
+
+    [Theory]
+    [InlineData("import math\nvar x: u8\nfn main() { x = math.w0 }", "'math.w0' is private to the module math")]
+    [InlineData("import math\nvar x: u8\nfn main() { x = math.SQUARE_LO[3] }", "'math.SQUARE_LO' is private to the module math")]
+    [InlineData("import text\nvar x: u8\nfn main() { x = text.DIGITS[3] }", "'text.DIGITS' is private to the module text")]
+    [InlineData("import text\nvar x: u16\nfn main() { x = text.POWERS[0] }", "'text.POWERS' is private to the module text")]
+    public void Library_work_variables_and_tables_are_private(string source, string expected)
+    {
+        var e = Assert.Throws<Syntax.CompileError>(() => TernCompiler.Compile(source));
+        Assert.StartsWith(expected, e.Description);
+    }
 }
