@@ -174,7 +174,7 @@ e.pos.y = 5                        // ldy #1 / sta (e),y
 
 ### 3.4 Pointers
 
-- `ptr T` is a 16-bit address. `addr(name)` gives a pointer to a variable or array: `ptr T` for a variable of type `T`, a pointer to the first element for an array of one-byte elements, `ptr u8` to the low-byte table for a split array of 16-bit values, and `ptr u16` (or the element type) for a `linear` array of 16-bit values (3.2). A field of a struct variable or of a struct at a fixed address works too: `addr(player.name)` (no code beyond loading the constant address). Fields through a pointer and in an array of structs are errors. Use `as u16` for the address as a number. `addr()` of a function is not supported yet.
+- `ptr T` is a 16-bit address. `addr(name)` gives a pointer to a variable or array: `ptr T` for a variable of type `T`, a pointer to the first element for an array of one-byte elements, `ptr u8` to the low-byte table for a split array of 16-bit values, and `ptr u16` (or the element type) for a `linear` array of 16-bit values (3.2). A field of a struct variable or of a struct at a fixed address works too: `addr(player.name)` (no code beyond loading the constant address). Fields through a pointer and in an array of structs are errors. Use `as u16` for the address as a number. `addr(f)` of a function is a `u16` constant: its address, e.g. for a vector or a jump table (6.5).
 - A number literal (or an untyped `const`) converts to a pointer without `as`, since literals take their type from context: `var p: ptr u8 = $0400`, `p == 0`. A typed `u16` value needs `as`.
 - `p[i]` with `i: u8` compiles to `(zp),Y` addressing. There is no separate dereference operator: use `p[0]`.
 - On a pointer to a 16-bit type, the index counts elements: `p[i]` reads the bytes at offsets `2*i` and `2*i+1`. The byte offset must fit in the 256 bytes `(zp),Y` reaches: a constant index above 127 is an error, and a variable index of 128 or more wraps within those 256 bytes.
@@ -236,7 +236,7 @@ data msg = "GAME OVER"
 
   All other memory is ordinary: its values may be kept in registers, and redundant reads and writes removed. An asm block, and a call to a routine at a fixed address, make the optimizer forget the values it holds for ordinary memory. There is no way to mark memory inside a volatile area as ordinary; a memory layout declaration may add one later (14.12).
 - **A fixed-address variable must not overlap the program**, its data, or the variables the compiler places. That is a compile error that names the variable and both address ranges. Fixed-address variables are often graphics data that the VIC must find in a given 16 KB bank; move the data or make the program smaller. Fixed-address variables may overlap each other.
-- Global variables without an initializer are zeroed at startup. A variable can be marked `noinit` to skip that.
+- Global variables without an initializer are zeroed at startup. A global variable can be marked `noinit` to skip that. It is a prefix like `linear`: `noinit var buf: [u8; 256]`. It is an error with an initial value, at a fixed address (never zeroed anyway), on `data` and on locals.
 - Local variables (other than arrays) must have an initial value. Their memory is shared with other functions (8.1), so it holds no useful value on entry.
 
 ### 4.1 Compile-time evaluation
@@ -306,6 +306,15 @@ break; continue; return value
 - **Variable bounds:** if the range can be empty at runtime, the compiler adds one check before the loop. This costs a few cycles per loop, not per pass, and is left out when the compiler can prove the range is not empty.
 - `_` as the loop variable means the value is not needed. The compiler may then count in either direction, e.g. `dex` / `bne`.
 - The loop variable is `u8` unless the range needs more. `using X` or `using Y` keeps it in that register.
+
+### 5.2 `match`
+
+- The value is a `u8` or `i8`. A 16-bit value is not supported yet (match on `.lo` or `.hi`, or use `if`); `bool`, pointers and structs are errors.
+- One arm per line: `patterns => body`, where the body is a block or one statement.
+- Patterns are constant expressions (numbers, characters, `const`s), alternatives separated by `,`, and inclusive ranges `lo..=hi`. `lo..hi` is an error: a range in a match includes its end.
+- `_` matches every other value. It must be alone in the last arm. Without `_`, a value that matches no pattern skips the match.
+- A value in two patterns, or an empty range, is an error. There is no fall-through.
+- Code shapes, including when a jump table is used: section 11.
 - Unary `-x` negates (two's complement, wrapping like all arithmetic). Unary `+x` has no effect.
 - `&&`, `||` and `!` are logical operators on `bool`, with short-circuit evaluation. `&`, `|`, `^`, `~` are bitwise operators on integers. Each is a separate operator with one meaning (`!` and `!=` are different tokens).
 - Assignment operators: `=`, `+=`, `-=`, `&=`, `|=`, `^=`, `<<=`, `>>=`. `x += 1` on memory compiles to `inc`.
@@ -331,15 +340,30 @@ inline fn wait_frame() { ... }
 
 ### 6.2 Inline functions
 
-`inline fn` bodies are copied into each caller. Small non-recursive functions with a single caller are inlined automatically.
+`inline fn` bodies are copied into each caller. An inline function keeps its frame: its parameters and locals have fixed addresses, as for a call, so inlining saves the `jsr`/`rts` but no memory. Calling an inline function counts as a call (e.g. in a `for ... using X` loop, and between roots, 8.1). `inline asm fn` is not supported yet. The optimizer inlines small functions with a single caller automatically.
 
 ### 6.3 Interrupt handlers
 
-`interrupt fn raster() { ... }` saves and restores the registers it uses and ends with `rti`. How a handler is installed is platform specific.
+`interrupt fn raster() { ... }` saves and restores the registers it changes and ends with `rti`; the CPU saves the flags.
+
+- A register is saved if any instruction in the handler changes it, including instructions in asm blocks. Any `jsr` counts as changing A, X and Y. X and Y are saved through A, so A is saved whenever X or Y is. The order is A, X, Y.
+- The handler does not execute `cld`. Tern code never sets decimal mode.
+- Code the compiler cannot follow, such as an asm `jmp` out of the handler, saves and restores registers itself.
+- A handler cannot be called, neither from Tern nor with `jsr`. Naming it in assembly (`lda #raster.lo`) or with `addr(raster)` is not a call.
+- Every `interrupt fn` in the main file is compiled, even if nothing installs it. A module's handler is compiled only when a compiled function names it.
+- **Installing a handler is platform specific**, done by platform library functions (e.g. in `c64`) or an asm block, using `addr()` (6.5).
 
 ### 6.4 No recursion
 
 The compiler builds the full call graph. A cycle in the call graph (recursion) is a compile error. This is a permanent design decision, not a v0 limit: it is what allows every local variable to have a fixed address (section 8.1). Supporting recursion would need a software stack, which makes every local variable access slower, in every function.
+
+### 6.5 Function addresses
+
+`addr(f)` is the address of function `f`, a `u16` constant that costs nothing: `irq_vector = addr(raster)`, or a jump table in `data`.
+
+- Allowed for functions without memory parameters (register parameters are fine), since a call through the address cannot set them. An error for `inline fn`, which has no single body.
+- The compiler cannot see calls through an address, so a function whose address is taken, and every function it reaches, get frames that overlap no other frame (8.1). For an `interrupt fn` or a routine at a fixed address nothing changes.
+- A handler that the CPU calls must be an `interrupt fn`; an ordinary function ends with `rts`.
 
 Algorithms that are naturally recursive (flood fill, tree walks) use an explicit stack: an array plus an index, in a loop. The cost is then visible in the code.
 
@@ -378,7 +402,7 @@ chrout('A')                        // lda #$41 / jsr $FFD2
   A fixed register value is loaded with `lda`/`ldx`/`ldy #n`, and a fixed carry is one `sec` or `clc` right before the `jsr`, after all other arguments. The carry is the only flag allowed, since it is the only one with both a set and a clear instruction. Fixed inputs are only for routines at a fixed address: an `asm fn` sets them up in its own code.
 - **Registers:** the compiler cannot see inside the routine, so it assumes that a call changes A, X, Y and the flags. `keeps` after the address lists registers the routine leaves unchanged (`A`, `X`, `Y`; flags always count as changed). This is a promise taken from the routine's documentation; the compiler does not check it. A `for ... using X` loop may call a routine that keeps X (likewise Y); calls to other functions in such a loop are still an error.
 - The routine is a leaf in the call graph: it has no frame and calls nothing the compiler knows about.
-- In assembly the name stands for the address, as for any function: `jsr chrout`, `lda #chrout.lo`. For a routine with fixed inputs, `jsr get_cursor` is a plain `jsr $FFF0`: the block sets the carry or registers itself. `addr()` of a function is not supported yet (3.4).
+- In assembly the name stands for the address, as for any function: `jsr chrout`, `lda #chrout.lo`. For a routine with fixed inputs, `jsr get_cursor` is a plain `jsr $FFF0`: the block sets the carry or registers itself. `addr(chrout)` is the routine's address.
 - A routine that returns values in more than the return registers of 6.1, or needs other setup, is wrapped in an `asm fn` (section 9).
 - A function with a body and `@ $addr` (compiled code placed at a fixed address) is not supported yet.
 
@@ -401,7 +425,9 @@ if collides(n) { ... }             // jsr collides / bcc skip
 
 - Every function has a static frame: its parameters, locals and compiler temporaries, at fixed addresses.
 - **Two frames may share memory if the functions can never be active at the same time**, that is, neither is reachable from the other in the call graph. This is computed from the call graph, so total RAM use is the deepest call path, similar to a stack, but with absolute addressing.
-- Interrupt handlers are separate roots. Their frames never overlap with frames reachable from the main program. A function reachable from both main and an interrupt handler is a compile error unless marked `reentrant` (not in v0).
+- Interrupt handlers are separate roots. Their frames never overlap with frames reachable from the main program.
+- **A function reachable from two roots** (main and a handler, or two handlers) is a compile error, unless it has no memory of its own: no memory parameters, no locals and no compiler temporaries, and it calls only such functions. Its only state is registers, which the handler saves. When the reason is a hidden temporary (e.g. for a 16-bit addition), the error says so. Routines at a fixed address may be called from any root.
+- **A module's `private` variable used from two roots** is a compile error, e.g. the library's work bytes (`math.w0`-`w2`): the two sides would overwrite each other's values. Public variables and `data` may be shared.
 - A global variable used from two roots is volatile (4), so a main loop that waits for a flag set by a handler reads it on every pass.
 
 ### 8.2 Zero page allocation
@@ -457,7 +483,7 @@ asm fn fill(value: u8 using A, count: u8 using X) {
 
 | Built-in | Meaning |
 |---|---|
-| `addr(name)` | Pointer to a variable, array, or field of a struct variable (3.4) |
+| `addr(name)` | Pointer to a variable, array, or field of a struct variable; address of a function (3.4) |
 | `sizeof(T)` | Size of a type in bytes |
 | `len(a)` | Number of elements in an array (compile-time) |
 
@@ -545,7 +571,8 @@ These are the intended translations. The optimizer may produce something shorter
 | `for i in 5..=5` | the body once, with `i` = 5 |
 | `if a == 0 { }` | `lda a` / `bne skip` |
 | `if a < b { }` unsigned | `lda a` / `cmp b` / `bcs skip` |
-| `match` with dense constant cases | jump table: low/high address tables indexed by the value |
+| `match` (compare chain) | the value is loaded into A once (`i8`: `eor #$80`, so signed order becomes unsigned order); per value `cmp #v` / `beq arm`; a range takes two compares, or one at either end of the byte; tests in source order, the last one inverted to branch to the default |
+| `match` with a jump table | used when the chain would need at least 8 compares (a range counts 2) and the values span at most twice that: `sec` / `sbc #low` (if low > 0), `cmp #span` / `bcs default`, `tax` (`tay` if X holds a loop variable), `lda hi,x` / `pha` / `lda lo,x` / `pha` / `rts`; the tables hold each target minus 1 |
 | `f(x)` with parameter `using A` | `lda x` / `jsr f` |
 | `chrout(x)` with `fn chrout(...) @ $FFD2` | `lda x` / `jsr $FFD2` |
 | `get_cursor()` with `fn get_cursor(true using carry) ... @ $FFF0` | `sec` / `jsr $FFF0` |
@@ -621,7 +648,7 @@ source → lexer → parser → AST
 Each item is decided when the feature it belongs to is built.
 
 1. **Bank switching** (NES mappers, C64 cartridges). Placement is `@ bank(n)`. Open: how calls between banks work. Likely direction: the compiler generates a small stub for each call into another bank, and direct access to another bank's data is an error.
-2. **Functions called from both main and interrupts.** v0: a compile error. Likely direction: the compiler makes a second copy of the function for the interrupt side, which costs ROM but no speed and needs no stack.
+2. **Functions called from both main and interrupts.** v0: a compile error, except for functions with no memory of their own (8.1). Likely direction: the compiler makes a second copy of the function for the interrupt side, which costs ROM but no speed and needs no stack.
 3. **`pha`/`pla` for temporaries.** `pha`/`pla` is 2 bytes and 7 cycles, against 4 bytes and 6 cycles for a zero-page temporary. Likely direction: the optimizer chooses, but never across a function call. Settle with benchmarks.
 4. **Overflow checks in debug builds.** Likely direction: no extra code in the program. The built-in emulator checks for overflow while running tests, using the compiler's debug information.
 5. **User-defined encodings,** e.g. for the NES, where each game decides which tile shows which character: a character-to-byte table declared in source. Built-in encodings are settled (2.1).

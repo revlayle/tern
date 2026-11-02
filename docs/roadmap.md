@@ -86,6 +86,14 @@ Done when: the raster example runs in VICE and `match` code shapes are checked i
 
 ## M7: Optimizer, first pass
 
+M6 follow-up first (spec 6.3, 6.5, 8.1; settled in `docs/decisions.md`):
+
+- `addr(f)` of functions without memory parameters; frames of address-taken functions and what they reach overlap nothing
+- Functions with no memory of their own may be reached from two roots; the error names a hidden temporary when that is the reason
+- `lib/c64` functions to install an interrupt handler (e.g. `set_irq`); the coding session proposes the exact set, and the raster example uses them
+
+Then:
+
 - Volatile memory (spec 4): platform volatile areas, the `volatile` keyword, variables shared between roots, pointer accesses; the error for a fixed-address variable overlapping the program
 - Keep register parameters in registers when the function does not need the register
 - Track register contents to remove redundant loads (e.g. `lda` after `sta` of the same value)
