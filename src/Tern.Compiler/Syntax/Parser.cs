@@ -110,11 +110,11 @@ public sealed class Parser
                 case TokenKind.Inline:
                 {
                     var t = Advance();
-                    if (At(TokenKind.Asm) && PeekAt(1).Kind == TokenKind.Fn)
-                        throw new CompileError(t.Pos, "'inline asm fn' is not supported yet. Use an asm block in an inline fn");
+                    bool isAsm = At(TokenKind.Asm) && PeekAt(1).Kind == TokenKind.Fn;
+                    if (isAsm) Advance();
                     if (!At(TokenKind.Fn))
                         throw new CompileError(t.Pos, $"'inline' goes before 'fn', e.g. 'inline fn wait_frame() {{ ... }}'; found {Describe(Current)}");
-                    var d = ParseFn();
+                    var d = ParseFn(isAsm);
                     if (d.Address is not null)
                         throw new CompileError(d.Pos, "An inline function needs a body; '@ $addr' declares a routine that is already there");
                     d.IsInline = true;

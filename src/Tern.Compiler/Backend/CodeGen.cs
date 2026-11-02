@@ -292,8 +292,10 @@ public sealed class CodeGen
         var end = NewLabel("inline_end");
         _inlineExit = end;
         _out.Add(new Comment($"inline {f.Name}"));
-        var kept = KeptRegister(f);
-        StoreRegisterParameters(f);
+        // An inline asm fn keeps its register parameters where they arrive, as an asm fn does.
+        bool isAsm = f.Declaration!.IsAsm;
+        var kept = isAsm ? null : KeptRegister(f);
+        if (!isAsm) StoreRegisterParameters(f);
         if (kept is { } k) _reserved.Add(k);
         GenBlock(f.Declaration!.Body);
         if (kept is { } r) _reserved.Remove(r);

@@ -231,6 +231,9 @@ public sealed partial class Checker
                 // An asm fn or a fixed-address routine uses register parameters where they arrive; they have no memory.
                 if (decl.IsAsm || decl.Address is not null) param.Register = reg;
             }
+            else if (decl.IsAsm && decl.IsInline)
+                throw new CompileError(p.Pos,
+                    $"Parameter '{p.Name}' of an inline asm fn must be passed in a register (using A, X, Y, AX, AY or XY): it is copied into each caller, which has no memory for it");
             else if (decl.Address is not null)
                 throw new CompileError(p.Pos,
                     $"Parameter '{p.Name}' must be passed in a register (using A, X, Y, AX, AY or XY): a routine at a fixed address has no memory for parameters");
@@ -564,6 +567,13 @@ public sealed partial class Checker
         foreach (var p in _function.Parameters) Declare(p);
 
         CheckBlock(decl.Body, newScope: false);
+
+        // Copied into the caller, an rts or rti would end the caller too.
+        if (decl is { IsAsm: true, IsInline: true })
+            foreach (var ins in ((AsmStmt)decl.Body.Statements[0]).Lines.OfType<AsmInstruction>())
+                if (ins.Mnemonic is Tern.Cpu.Mnemonic.Rts or Tern.Cpu.Mnemonic.Rti)
+                    throw new CompileError(ins.Pos,
+                        $"'{ins.Mnemonic.ToString().ToLowerInvariant()}' in an inline asm fn would end the function that calls it, since the code is copied there. Remove it: the code simply runs on after the copy");
 
         if (_function.ReturnType.Kind != TypeKind.Void && !decl.IsAsm && !AlwaysReturns(decl.Body))
             throw new CompileError(decl.Pos, $"'{decl.Name}' can reach its end without returning a value");
