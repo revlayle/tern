@@ -346,4 +346,154 @@ public class StructTests
             """);
         Assert.Equal(9, r.U8("out"));
     }
+
+    [Fact]
+    public void A_pointer_field_of_a_struct_variable_is_followed()
+    {
+        var r = Run.Program("""
+            struct Node { value: u8, next: ptr Node }
+            var first: Node
+            var second: Node
+            var out: u8
+            fn main() {
+                first.next = addr(second)
+                first.next.value = 42
+                out = first.next.value + 1
+            }
+            """);
+        Assert.Equal(42, r.U8("second"));
+        Assert.Equal(43, r.U8("out"));
+    }
+
+    // ---------- Arrays of structs: one table per field ----------
+
+    [Fact]
+    public void Each_field_of_an_array_of_structs_is_its_own_table()
+    {
+        var r = Run.Program("""
+            struct Point { x: u8, y: u8 }
+            struct Enemy { pos: Point, hp: u8, vel: i16, name: [u8; 2], pts: [u16; 2] }
+            var enemies: [Enemy; 4]
+            fn main() {
+                for i in 0..len(enemies) {
+                    enemies[i].pos.x = i
+                    enemies[i].pos.y = i + 10
+                    enemies[i].hp = 100
+                    enemies[i].hp -= i
+                    enemies[i].vel = -1 - (i as i8 as i16)
+                    enemies[i].name[0] = 'A'
+                    enemies[i].name[1] = i + 48
+                    enemies[i].pts[1] = $1000 + (i as u16)
+                }
+                enemies[2].pts[0] = $ABCD
+            }
+            """);
+        int a = r.Address("enemies");
+        byte[] m = r.Ram.Bytes;
+        // Byte k of record i is at enemies + k * 4 + i.
+        byte At(int k, int i) => m[a + k * 4 + i];
+        for (int i = 0; i < 4; i++)
+        {
+            Assert.Equal(i, At(0, i));
+            Assert.Equal(i + 10, At(1, i));
+            Assert.Equal(100 - i, At(2, i));
+            Assert.Equal(-1 - i, (short)(At(3, i) | At(4, i) << 8));
+            Assert.Equal((byte)'A', At(5, i));
+            Assert.Equal(i + 48, At(6, i));
+            // pts: [u16; 2] is split in the record (low bytes at 7-8, high bytes at 9-10).
+            Assert.Equal(0x1000 + i, At(8, i) | At(10, i) << 8);
+        }
+        Assert.Equal(0xABCD, At(7, 2) | At(9, 2) << 8);
+        Assert.Contains("Variables after the program: 44 bytes", r.Result.Report); // 4 records of 11 bytes
+    }
+
+    [Theory]
+    // Spec 3.3: enemies[i].x is a single lda enemies_x,x. Byte k of the record is the table at k * 8.
+    [InlineData("x = enemies[i].x", "ldx i|lda enemies,x|sta x|rts")]
+    [InlineData("x = enemies[i].pos.y", "ldx i|lda enemies+32,x|sta x|rts")]
+    [InlineData("enemies[i].hp += 1", "ldx i|lda enemies+40,x|clc|adc #$01|ldx i|sta enemies+40,x|rts")]
+    [InlineData("x = enemies[3].hp", "lda enemies+43|sta x|rts")]
+    [InlineData("x = enemies[i].name[2]", "ldx i|lda enemies+80,x|sta x|rts")]
+    [InlineData("w = enemies[i].vel", "ldx i|lda enemies+48,x|sta w|lda enemies+56,x|sta w+1|rts")]
+    public void Struct_array_code_shapes(string statement, string expected)
+    {
+        var r = Run.Program($$"""
+            struct Point { x: u8, y: u8 }
+            struct Enemy { x: u8, y: u8, z: u8, pos: Point, hp: u8, vel: i16, name: [u8; 4] }
+            var enemies: [Enemy; 8]
+            var x: u8
+            var w: i16
+            var i: u8
+            fn main() { {{statement}} }
+            """);
+        Assert.Equal(expected, Code(r));
+    }
+
+    [Fact]
+    public void A_pointer_field_in_an_array_of_structs_is_followed()
+    {
+        var r = Run.Program("""
+            struct Node { value: u8, next: ptr Node }
+            var nodes: [Node; 3]
+            var target: Node
+            var out: u8
+            fn main() {
+                for i in 0..3 { nodes[i].next = addr(target) }
+                var k: u8 = 2
+                nodes[k].next.value = 5
+                out = nodes[1].next.value
+            }
+            """);
+        Assert.Equal(5, r.U8("target"));
+        Assert.Equal(5, r.U8("out"));
+    }
+
+    [Fact]
+    public void A_list_of_enemies_updates_through_indexing_and_pointers()
+    {
+        // The roadmap example: the same update, once by index and once through a pointer.
+        var r = Run.Program("""
+            struct Enemy { x: u8, y: u8, dx: u8, hp: u8 }
+            var table: [Enemy; 6]
+            linear var list: [Enemy; 6]
+            fn main() {
+                var e: ptr Enemy = addr(list)
+                for i in 0..6 {
+                    table[i].x = i << 2
+                    table[i].dx = i + 1
+                    table[i].hp = 3
+                    e.x = i << 2
+                    e.dx = i + 1
+                    e.hp = 3
+                    e += sizeof(Enemy)
+                }
+                for _ in 0..10 {
+                    for i in 0..6 using X {
+                        table[i].x += table[i].dx
+                        if table[i].x >= 40 { table[i].hp -= 1 }
+                    }
+                    e = addr(list)
+                    for _ in 0..6 {
+                        e.x += e.dx
+                        if e.x >= 40 { e.hp -= 1 }
+                        e += sizeof(Enemy)
+                    }
+                }
+            }
+            """);
+        int t = r.Address("table"), l = r.Address("list");
+        for (int i = 0; i < 6; i++)
+        {
+            int x = i << 2, hp = 3;
+            for (int f = 0; f < 10; f++)
+            {
+                x = (x + i + 1) & 0xFF;
+                if (x >= 40) hp = (hp - 1) & 0xFF;
+            }
+            Assert.Equal(x, r.Ram.Bytes[t + i]);
+            Assert.Equal(hp, r.Ram.Bytes[t + 3 * 6 + i]);
+            Assert.Equal(x, r.Ram.Bytes[l + 4 * i]);
+            Assert.Equal(hp, r.Ram.Bytes[l + 4 * i + 3]);
+        }
+    }
 }
