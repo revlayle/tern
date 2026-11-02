@@ -237,6 +237,9 @@ public sealed partial class Checker
             // Naming a handler (to install it) keeps it in the program, as a root of its own.
             _function!.UsedInterrupts.Add(handler);
         }
+        else if (v?.Function is { IsInline: true } inlined)
+            throw new CompileError(ins.Operand!.Pos,
+                $"'{inlined.Name}' is inline: it is copied into each Tern caller and has no address of its own. Call it from Tern, or remove 'inline'");
         else if (v?.Function is { } f && (f != _function || ins.Mnemonic == Mnemonic.Jsr))
             _function!.Callees.Add(f);
         // Assembly cannot write a function's memory parameters (they are not names outside it).

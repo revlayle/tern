@@ -84,7 +84,7 @@ public sealed class Parser
             {
                 var p = Advance();
                 if (!(Current.Kind is TokenKind.Const or TokenKind.Var or TokenKind.Linear or TokenKind.Struct or TokenKind.Data or TokenKind.Fn
-                      or TokenKind.Interrupt or TokenKind.Noinit || (At(TokenKind.Asm) && PeekAt(1).Kind == TokenKind.Fn)))
+                      or TokenKind.Interrupt or TokenKind.Noinit or TokenKind.Inline || (At(TokenKind.Asm) && PeekAt(1).Kind == TokenKind.Fn)))
                     throw new CompileError(p.Pos, $"'private' goes before a declaration (const, var, data, struct or fn); found {Describe(Current)}");
                 privateNames.Add(ParseDeclaration());
             }
@@ -107,6 +107,20 @@ public sealed class Parser
                 case TokenKind.Struct: { var d = ParseStruct(); structs.Add(d); return d.Name; }
                 case TokenKind.Data: { var d = ParseData(); globals.Add(d); return d.Name; }
                 case TokenKind.Fn: { var d = ParseFn(); functions.Add(d); return d.Name; }
+                case TokenKind.Inline:
+                {
+                    var t = Advance();
+                    if (At(TokenKind.Asm) && PeekAt(1).Kind == TokenKind.Fn)
+                        throw new CompileError(t.Pos, "'inline asm fn' is not supported yet. Use an asm block in an inline fn");
+                    if (!At(TokenKind.Fn))
+                        throw new CompileError(t.Pos, $"'inline' goes before 'fn', e.g. 'inline fn wait_frame() {{ ... }}'; found {Describe(Current)}");
+                    var d = ParseFn();
+                    if (d.Address is not null)
+                        throw new CompileError(d.Pos, "An inline function needs a body; '@ $addr' declares a routine that is already there");
+                    d.IsInline = true;
+                    functions.Add(d);
+                    return d.Name;
+                }
                 case TokenKind.Noinit:
                 {
                     var t = Advance();
@@ -143,17 +157,9 @@ public sealed class Parser
                     throw new CompileError(Current.Pos,
                         "An asm block must be inside a function. Use 'asm fn name() { ... }' for a whole function in assembly");
                 default:
-                    RejectUnsupported();
                     throw new CompileError(Current.Pos, $"Expected 'const', 'var', 'data', 'struct' or 'fn', found {Describe(Current)}");
             }
         }
-    }
-
-    /// <summary>Keywords from the spec that this compiler version does not implement yet.</summary>
-    private void RejectUnsupported()
-    {
-        if (Current.Kind is TokenKind.Inline)
-            throw new CompileError(Current.Pos, $"'{Current.Text}' is not supported yet");
     }
 
     /// <summary><c>struct Name { field: type, field: type @ offset }</c>; fields are separated by ',' or line breaks.</summary>
@@ -399,12 +405,12 @@ public sealed class Parser
                 throw new CompileError(Current.Pos, "'interrupt fn' must be declared outside functions");
             case TokenKind.Noinit:
                 throw new CompileError(Current.Pos, "'noinit' is for global variables; local variables are never zeroed");
+            case TokenKind.Inline:
+                throw new CompileError(Current.Pos, "'inline fn' must be declared outside functions");
             case TokenKind.Asm:
                 Advance();
                 return ParseAsmBody();
         }
-        RejectUnsupported();
-
         var expr = ParseExpr();
         if (Current.Kind is TokenKind.Eq or TokenKind.PlusEq or TokenKind.MinusEq or TokenKind.AmpEq
             or TokenKind.PipeEq or TokenKind.CaretEq or TokenKind.ShlEq or TokenKind.ShrEq)

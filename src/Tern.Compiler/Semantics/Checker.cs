@@ -64,6 +64,8 @@ public sealed partial class Checker
             throw new CompileError(main.Pos, "'main' must have a body");
         if (main.IsInterrupt)
             throw new CompileError(main.Pos, "'main' cannot be an interrupt handler; give the handler another name");
+        if (main.IsInline)
+            throw new CompileError(main.Pos, "'main' cannot be inline: nothing calls it");
 
         foreach (var module in modules)
         {
@@ -188,7 +190,7 @@ public sealed partial class Checker
     {
         if (decl.Name is "addr" or "len" or "sizeof" or "include_bytes")
             throw new CompileError(decl.Pos, $"'{decl.Name}' is a built-in function; choose another name");
-        var fn = new FunctionSymbol(_module.Qualify(decl.Name), decl.Pos) { Declaration = decl, IsInterrupt = decl.IsInterrupt };
+        var fn = new FunctionSymbol(_module.Qualify(decl.Name), decl.Pos) { Declaration = decl, IsInterrupt = decl.IsInterrupt, IsInline = decl.IsInline };
         decl.Symbol = fn;
         if (decl.IsInterrupt && (decl.Parameters.Count > 0 || decl.ReturnType is not null))
             throw new CompileError(decl.Pos, "An interrupt handler takes no parameters and returns no value: the CPU calls it, not your code");

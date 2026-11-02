@@ -331,6 +331,8 @@ public sealed class FnDecl(
     public bool IsAsm { get; init; }
     /// <summary>An <c>interrupt fn</c>: saves the registers it changes and ends with <c>rti</c>.</summary>
     public bool IsInterrupt { get; set; }
+    /// <summary>An <c>inline fn</c>: its body is copied into each caller instead of a <c>jsr</c>.</summary>
+    public bool IsInline { get; set; }
     /// <summary>For a routine at a fixed address (<c>fn f() @ $FFD2</c>): the address. Such a function has no body.</summary>
     public Expr? Address { get; init; }
     /// <summary>Registers named after <c>keeps</c>, with their positions.</summary>

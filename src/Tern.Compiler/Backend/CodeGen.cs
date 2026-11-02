@@ -50,7 +50,7 @@ public sealed class CodeGen
     public List<AsmItem> GenerateFunctions()
     {
         var all = new List<AsmItem>();
-        foreach (var f in _program.Functions.Where(f => f.FixedAddress is null))
+        foreach (var f in _program.Functions.Where(f => f.FixedAddress is null && !f.IsInline))
         {
             GenFunction(f);
             all.AddRange(_out);
@@ -152,7 +152,20 @@ public sealed class CodeGen
             return;
         }
 
-        // Register parameters are stored into the frame, so the body can use A, X and Y freely.
+        StoreRegisterParameters(f);
+
+        if (f.IsInterrupt)
+        {
+            GenInterrupt(f);
+            return;
+        }
+        GenBlock(f.Declaration!.Body);
+        if (!EndsWithJump()) Emit(Rts);
+    }
+
+    /// <summary>Register parameters are stored into the frame, so the body can use A, X and Y freely.</summary>
+    private void StoreRegisterParameters(FunctionSymbol f)
+    {
         foreach (var p in f.Parameters)
         {
             switch (p.PassedIn)
@@ -165,18 +178,46 @@ public sealed class CodeGen
                 case Register.XY: Op(Stx, Var(p)); Op(Sty, Var(p, 1)); break;
             }
         }
-
-        if (f.IsInterrupt)
-        {
-            GenInterrupt(f);
-            return;
-        }
-        GenBlock(f.Declaration!.Body);
-        if (!EndsWithJump()) Emit(Rts);
     }
 
     /// <summary>Where a <c>return</c> in an interrupt handler goes: the code that restores the registers.</summary>
     private Label? _interruptExit;
+    /// <summary>Where a <c>return</c> goes in the copy of an inline function being generated: its end.</summary>
+    private Label? _inlineExit;
+
+    /// <summary>Leaves the function: <c>rts</c>, or a jump to the end of an inline copy or of an interrupt handler.</summary>
+    private void ReturnJump()
+    {
+        if (_inlineExit is { } end) Jmp(end);
+        else if (_interruptExit is { } exit) Jmp(exit);
+        else Emit(Rts);
+    }
+
+    /// <summary>
+    /// The body of an inline function in place of <c>jsr</c>; the arguments are already in its
+    /// parameters or registers, as for a call. Its parameters, locals and temporaries stay in its
+    /// own frame, so the call graph and memory sharing are the same as for a call. Its temporaries
+    /// are kept apart from the caller's, since they are in its frame.
+    /// </summary>
+    private void GenInline(FunctionSymbol f)
+    {
+        var (caller, callerExit, interruptExit, callerTemps) = (_fn, _inlineExit, _interruptExit, _freeTemps.ToList());
+        _fn = f;
+        _interruptExit = null;
+        _freeTemps.Clear();
+        var end = NewLabel("inline_end");
+        _inlineExit = end;
+        _out.Add(new Comment($"inline {f.Name}"));
+        StoreRegisterParameters(f);
+        GenBlock(f.Declaration!.Body);
+        if (_out[^1] is Instr { Mnemonic: Mnemonic.Jmp, Operand: LabelOperand { Label: var l } } && l == end)
+            _out.RemoveAt(_out.Count - 1);
+        Place(end);
+        (_fn, _inlineExit, _interruptExit) = (caller, callerExit, interruptExit);
+        _freeTemps.Clear();
+        _freeTemps.AddRange(callerTemps);
+        _lastSource = default;
+    }
 
     /// <summary>
     /// An interrupt handler: the body, between code that saves and restores the registers it
@@ -405,8 +446,7 @@ public sealed class CodeGen
     {
         if (r.Value is null)
         {
-            if (_interruptExit is { } exit) Jmp(exit);
-            else Emit(Rts);
+            ReturnJump();
             return;
         }
         var value = r.Value;
@@ -454,14 +494,14 @@ public sealed class CodeGen
                     var isTrue = NewLabel("rtrue");
                     GenCond(value, isTrue, true);
                     Set(setFalse, falseOp);
-                    Emit(Rts);
+                    ReturnJump();
                     Place(isTrue);
                     Set(setTrue, trueOp);
                 }
                 break;
             }
         }
-        Emit(Rts);
+        ReturnJump();
     }
 
     // ---------- Assignment ----------
@@ -1504,7 +1544,8 @@ public sealed class CodeGen
         foreach (var (reg, value) in fn.FixedInputs)
             if (reg == Register.Carry) Emit(value != 0 ? Sec : Clc);
 
-        Emit(Jsr, Absolute, fn.FixedAddress is int at ? new AddrOperand(at) : new LabelOperand(_functionLabels[fn]));
+        if (fn.IsInline) GenInline(fn);
+        else Emit(Jsr, Absolute, fn.FixedAddress is int at ? new AddrOperand(at) : new LabelOperand(_functionLabels[fn]));
         foreach (var t in temps) Release(t);
     }
 

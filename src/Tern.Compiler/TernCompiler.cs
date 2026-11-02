@@ -95,7 +95,8 @@ public static class TernCompiler
         foreach (var g in program.Globals) symbols[g.Name] = g.Address;
         foreach (var f in program.Functions)
         {
-            symbols[f.Name] = gen.LabelOf(f).Address;
+            // An inline function has no code of its own, only a frame.
+            if (!f.IsInline) symbols[f.Name] = gen.LabelOf(f).Address;
             foreach (var v in f.FrameVariables.Where(v => v.Kind != VariableKind.Temp))
                 symbols[v.QualifiedName] = v.Address;
         }
