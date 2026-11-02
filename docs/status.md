@@ -6,7 +6,7 @@ Owned by the coding session. Updated at the end of every coding session.
 
 - **Milestone:** M4 (imports and the first standard library), including the M3 follow-up (fixed inputs). Complete; ready for review.
 - **Branch:** `m4-imports` (from `main` after the M3 merge).
-- **Next step:** review of `m4-imports` against the roadmap's M4 "done when" list, then merge. After the merge, M5 (structs). The spec session should look at the questions below; the provisional choices are easy to change.
+- **Next step:** re-review of `m4-imports` against `docs/reviews/m4.md` (both must-fix findings and suggestions 3 and 4 addressed), then merge. After the merge, M5 (structs). The spec session should look at the questions below; the provisional choices are easy to change.
 
 ## Done
 
@@ -14,12 +14,12 @@ Owned by the coding session. Updated at the end of every coding session.
 - **M2 pointers, data and strings**, merged to `main` (2026-11-01).
 - **M3 assembly blocks and KERNAL calls**, with the M2 follow-up, merged to `main` (2026-11-01).
 - **M3 follow-up: fixed inputs** (branch `m4-imports`, 2026-11-01). `fn get_cursor(true using carry) -> u16 using XY @ $FFF0`: a constant in place of a parameter name. Parsed into `ParamSyntax.FixedValue`, checked in `DeclareRoutine` (after the globals, so a variable gets "must be a constant"), stored in `FunctionSymbol.FixedInputs`. A, X, Y take a `u8` constant, the carry `true`/`false`; pairs and other flags are errors. Calls load fixed registers with the other register arguments (A last) and put `sec`/`clc` right before the `jsr` (spec 11 shape tested). Fixed inputs are not in `Parameters`, so callers pass only the other arguments. `-> u16 using XY`/`AY` already worked. Tests: `RoutineTests` (stand-in PLOT at `$C060`), 13 error messages.
-- **M4 imports and the standard library** (branch `m4-imports`, 2026-11-01). 568 tests pass (34 CPU, 534 compiler).
+- **M4 imports and the standard library** (branch `m4-imports`, 2026-11-01). 575 tests pass (34 CPU, 541 compiler).
   - `import name` at the top of a file (`ImportDecl`; after another declaration it is an error). `ModuleLoader` (`Semantics/Module.cs`) loads every file once, by module name, and returns them with each module before its importers (main last). Modules may import each other. Lookup: `lib/<platform>/name.tern`, `lib/name.tern`, then the importing file's folder. A module found only in another platform's folder (`lib/nes/x.tern` when compiling for the C64) is an error naming the platform.
   - The library directory is `TernCompiler.DefaultLibraryDirectory` (`lib/` next to the compiler); `Compile(..., libraryDirectory:)` overrides it. The source is in `src/lib/` (platform modules in `src/lib/c64/`); `Tern.Compiler.csproj` copies it to the output folders of the compiler, CLI and tests.
   - Qualified names: the parser knows the file's imports and joins `text.put` into one name (`NameExpr`/`CallExpr` with a dotted name), so assembly works too (`jsr util.bump`, `#c64.SCREEN.lo`). Each `Module` has its own `Scope`; `Checker.Lookup` finds `m.name` in the imported module's scope. Declaring a name equal to an imported module is an error; a module name alone gets "use the names in it as util.name".
   - The checker declares file by file (dependencies first), so a file can use imported constants in its declarations (`var buf: [u8; sizes.N]`), then checks all bodies. A module with `fn main` is an error.
-  - Top-level symbols of a module are named `module.name` (`FunctionSymbol.Name`, `VariableSymbol.Name`): listing labels, symbol table, VICE labels (`.text_put`). Main-file names are unchanged.
+  - Top-level symbols of a module are named `module.name` (`FunctionSymbol.Name`, `VariableSymbol.Name`): listing labels, symbol table, VICE labels (`.text.put`; VICE accepts dots in labels). Main-file names are unchanged.
   - Unused imports cost nothing: only reachable functions are compiled (as before), and a module's globals are kept only if a reachable function names them (`FunctionSymbol.UsedGlobals`, filled by names, `addr()` and asm operands). The main file's globals are all kept, as before.
   - `SourcePos.File`: errors in a module report its file (`bad.tern:2:5`); the CLI prints it. The listing shows module lines as `; text.tern:12: ...`.
   - Line breaks inside `( )` and `[ ]` no longer end a statement (lexer), so tables and argument lists can span lines (provisional, question 1).
@@ -28,6 +28,7 @@ Owned by the coding session. Updated at the end of every coding session.
   - Tests: `ModuleTests` (temporary folders with their own library folder), `MathLibraryTests`, `LibraryTests.cs` (mem, text, c64). `tests/Library.cs` compiles a program that imports the modules and then calls a routine directly in the emulator (registers in, memory parameters set by name), so the 8-bit routines are tested for every input in well under a second. Best and worst cycle counts are asserted in the tests.
   - `examples/library.tern`: prints a message and a number through the KERNAL, writes a label, `6 X 7 = 42` and a row of color to screen memory. Checked in VICE; `C64LibraryTests.Library_example_prints_and_writes_to_the_screen` runs it with KERNAL stand-ins.
   - Roadmap "done when": the example imports `text` and `c64` (and `math`, `mem`), verified in VICE; an unused import adds no bytes (`C64LibraryTests.An_unused_import_adds_no_bytes`, `ModuleTests.An_unused_import_adds_no_bytes`: same image and report).
+  - Review fixes (`docs/reviews/m4.md`): 1 and 2 (must fix) and 3 in "Report missing imports and module name case; clearer cycle error": a missing import says to add `import x` (calls, names and asm operands); `import Util` for `util.tern` is an error, so a module cannot load twice on Windows; constants across an import cycle get an error that explains it. 4 in "Keep dots in VICE labels". 5 is question 9 below.
 
 ### Library cycle counts
 
@@ -70,7 +71,7 @@ Not bugs; things to improve, mostly in M7 (optimizer).
 - Inside a `for ... using X` loop, only routines that declare `keeps X` may be called. An `asm fn` that never touches X is still rejected; `AsmEffects` would make allowing it easy (spec 6.1: the compiler may use each function's actual register use).
 - `mem.fill` reloads `value` on every byte (`lda value` / `sta (dst),y`): 13 cycles per byte instead of 11. Loop-invariant loads are for the optimizer.
 - A `for` bound such as `count.hi` (not a plain variable) is copied to a temporary before the loop.
-- Import cycles: declarations are processed module by module, so in a cycle (a imports b, b imports a) a constant of `a` used in a declaration of `b` gives "'a.X' is not declared". Function bodies are not affected.
+- Import cycles: declarations are processed module by module, so in a cycle (a imports b, b imports a) a constant of the later module cannot be used in a declaration of the earlier one. The error says so and suggests moving the constant. Function bodies are not affected.
 
 ## Questions for the spec session
 
@@ -84,9 +85,10 @@ The M3 questions were settled on 2026-11-01. New ones from M4; each is implement
 6. **`math` differs slightly from spec 10.1:** `mul16(m, n)` and `div16(n, d)` instead of `(a, b)`, since in assembly `asl a` means the accumulator, so a memory parameter named `a` cannot be shifted by name. Callers are not affected (arguments are positional). `mul8_fast` uses 1 KB of tables (f(x) for x = 0-511 as four 256-byte tables), not 2 KB. Signed versions (`muls8`, `divs8`, ...) are not written yet: needed now, or when a program asks?
 7. **Calling a routine with fixed inputs from assembly.** `jsr c64.cursor` in an asm block is a plain `jsr $FFF0`; the block must set the carry itself. Allowed, since in assembly a name is only an address. OK?
 8. **`c64.get_cursor`** (PLOT read, `-> u16 using XY`) is added to the table in 10.1, from the 6.6 example.
+9. **Spec 11 shape of `math.mul8(a, b)`** (review M4, finding 5): the table shows `lda a` / `ldx b` / `jsr`; the compiler gives `ldx b` / `lda a` / `jsr`, since A is loaded last (M3). Same bytes and cycles; the table could show the compiler's order.
 
-Still open from M3 (review finding 4): new error tests live in per-feature files (`AsmTests`, `RoutineTests`, `DataTests`, `ModuleTests`) as well as `ErrorTests.cs`. `CLAUDE.md` says `ErrorTests.cs`; the spec session should decide which convention to keep.
+The M3 item about where error tests live was settled on 2026-11-01: in each feature's test file.
 
 ## Provisional choices made while coding
 
-Listed as questions 1-8 above. Also: `import` is a reserved word.
+Listed as questions 1-9 above. Also: `import` is a reserved word.
