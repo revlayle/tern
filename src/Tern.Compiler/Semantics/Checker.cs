@@ -398,9 +398,13 @@ public sealed partial class Checker
         {
             var t = decl.TypeSyntax is null ? null : ResolveType(decl.TypeSyntax);
             if (t is null || !t.IsArray)
-                throw new CompileError(decl.Pos, "'linear' is for arrays of structs, e.g. 'linear var list: [Enemy; 8]'");
-            if (!t.Element!.IsStruct)
-                throw new CompileError(decl.Pos, "'linear' on an array of numbers is not supported yet");
+                throw new CompileError(decl.Pos,
+                    "'linear' is for arrays of 16-bit values or structs, e.g. 'linear var pts: [u16; 32]' or 'linear var list: [Enemy; 8]'");
+            if (t.Element!.Size == 1)
+                throw new CompileError(decl.Pos, $"'linear' is only for arrays of 16-bit values or structs: the elements of a {t} are one byte each, so they are already stored in order");
+            if (!t.Element.IsStruct && t.Length > 128)
+                throw new CompileError(decl.Pos,
+                    $"A linear array of 16-bit values has at most 128 elements, so that the doubled index fits in a register; '{decl.Name}' has {t.Length}. Leave out 'linear' to store it split");
             return TernType.ArrayOf(t.Element, t.Length, linear: true);
         }
         if (decl.TypeSyntax is not null) return ResolveType(decl.TypeSyntax);
@@ -854,6 +858,7 @@ public sealed partial class Checker
                 if (ix.Index.ConstValue is long idx && idx >= arr.Type.Length)
                     throw new CompileError(ix.Index.Pos, $"Index {idx} is past the end of '{arr.Name}' (length {arr.Type.Length})");
                 e.Type = arr.Type.Element!;
+                if (arr.Type.Linear) ix.Lowered = LinearIndex(ix);
                 break;
             }
 
@@ -1093,6 +1098,19 @@ public sealed partial class Checker
         if (count.Type.Kind == TypeKind.IntLiteral) Coerce(count, TernType.U8);
     }
 
+    /// <summary>
+    /// <c>pts[i]</c> on a linear array of 16-bit values: the index counts elements, so it is doubled.
+    /// A variable index is <c>i &lt;&lt; 1</c> (one <c>asl</c>), a constant one a fixed offset.
+    /// </summary>
+    private static IndexExpr LinearIndex(IndexExpr ix)
+    {
+        var u8 = TernType.U8;
+        Expr index = ix.Index.ConstValue is long c
+            ? new NumberExpr(ix.Index.Pos, 2 * c) { Type = u8, ConstValue = 2 * c }
+            : new BinaryExpr(ix.Index.Pos, TokenKind.Shl, ix.Index, new NumberExpr(ix.Index.Pos, 1) { Type = u8, ConstValue = 1 }) { Type = u8 };
+        return new IndexExpr(ix.Pos, ix.Target, index) { Type = ix.Type };
+    }
+
     /// <summary>Makes <c>addr(...)</c> a constant address: the variable's, or a view's (its storage plus an offset).</summary>
     private static void TakeAddress(CallExpr c, VariableSymbol v)
     {
@@ -1100,10 +1118,10 @@ public sealed partial class Checker
         if (v.AliasOf is { } storage) storage.AddressTaken = true;
         c.AddressOf = v;
         // An array gives a pointer to its first element. A split array of 16-bit
-        // values gives a pointer to its table of low bytes.
+        // values gives a pointer to its table of low bytes; a linear one, a pointer to its first value.
         c.Type = !v.Type.IsArray ? TernType.PointerTo(v.Type)
             : v.Type.Element!.IsStruct ? TernType.PointerTo(v.Type.Element)
-            : v.Type.Element!.Size == 1 ? TernType.PointerTo(v.Type.Element!)
+            : v.Type.Element!.Size == 1 || v.Type.Linear ? TernType.PointerTo(v.Type.Element!)
             : TernType.PointerTo(TernType.U8);
     }
 

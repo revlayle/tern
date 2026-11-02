@@ -575,9 +575,8 @@ public class StructTests
     [InlineData(P + "fn main() { var p: Point = 3 }", "A struct cannot have an initial value")]
     [InlineData(P + "var ps: [Point; 2] = [1, 2]\nfn main() { }", "A struct cannot have an initial value")]
     [InlineData(P + "data ps: [Point; 2] = [1, 2]\nfn main() { }", "Data cannot hold structs yet")]
-    [InlineData("linear var a: u8\nfn main() { }", "'linear' is for arrays of structs")]
-    [InlineData("linear var a: [u16; 4]\nfn main() { }", "'linear' on an array of numbers is not supported yet")]
-    [InlineData("linear fn main() { }", "'linear' goes before 'var'")]
+    [InlineData("linear var a: u8\nfn main() { }", "'linear' is for arrays of 16-bit values or structs")]
+    [InlineData("linear fn main() { }", "'linear' goes before 'var' or 'data'")]
     [InlineData(P + "fn main() { var n: u8 = Point }", "'Point' is a struct type, not a value")]
     // Structs are never copied
     [InlineData(P + "var a: Point\nvar b: Point\nfn main() { a = b }", "a struct cannot be assigned")]

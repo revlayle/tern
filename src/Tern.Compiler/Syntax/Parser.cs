@@ -155,14 +155,14 @@ public sealed class Parser
         return new StructDecl(start.Pos, name.Text, fields);
     }
 
-    /// <summary><c>linear var name: [Struct; n]</c></summary>
+    /// <summary><c>linear var name: [T; n]</c> or <c>linear data name: [T; n] = ...</c></summary>
     private VarDecl ParseLinearVar()
     {
         var linear = Expect(TokenKind.Linear, "'linear'");
-        if (!At(TokenKind.Var))
-            throw new CompileError(Current.Pos, $"'linear' goes before 'var', e.g. 'linear var list: [Enemy; 8]'; found {Describe(Current)}");
-        var decl = ParseVar();
-        return new VarDecl(linear.Pos, decl.Name, decl.TypeSyntax, decl.Placement, decl.Init) { IsLinear = true };
+        if (!At(TokenKind.Var) && !At(TokenKind.Data))
+            throw new CompileError(Current.Pos, $"'linear' goes before 'var' or 'data', e.g. 'linear var list: [Enemy; 8]'; found {Describe(Current)}");
+        var decl = At(TokenKind.Data) ? ParseData() : ParseVar();
+        return new VarDecl(linear.Pos, decl.Name, decl.TypeSyntax, decl.Placement, decl.Init) { IsLinear = true, IsData = decl.IsData };
     }
 
     private ConstDecl ParseConst()
@@ -332,6 +332,8 @@ public sealed class Parser
         switch (Current.Kind)
         {
             case TokenKind.Var: return ParseVar();
+            case TokenKind.Linear when PeekAt(1).Kind == TokenKind.Data:
+                throw new CompileError(PeekAt(1).Pos, "'data' must be declared outside functions");
             case TokenKind.Linear: return ParseLinearVar();
             case TokenKind.Struct: throw new CompileError(Current.Pos, "A struct must be declared outside functions");
             case TokenKind.Private:

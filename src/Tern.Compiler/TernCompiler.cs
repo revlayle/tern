@@ -186,7 +186,7 @@ public static class TernCompiler
     /// </summary>
     private static byte[] MemoryLayout(VariableSymbol v, byte[] bytes)
     {
-        if (!v.Type.IsArray || v.Type.Element!.Size == 1) return bytes;
+        if (!v.Type.IsArray || v.Type.Element!.Size == 1 || v.Type.Linear) return bytes;
         int n = v.Type.Length;
         var split = new byte[bytes.Length];
         for (int i = 0; i < n; i++)
