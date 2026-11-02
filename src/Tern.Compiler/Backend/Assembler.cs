@@ -171,7 +171,7 @@ public static class Assembler
     {
         if (v.Variable.Address < 0)
             throw new InvalidOperationException($"Variable {v.Variable.QualifiedName} has no address");
-        return v.Variable.Address + v.Offset;
+        return (v.Variable.Address + v.Offset) & 0xFFFF;   // an array folded with 'i - c' may start below its variable
     }
 
     private static int Resolve(Label label) =>

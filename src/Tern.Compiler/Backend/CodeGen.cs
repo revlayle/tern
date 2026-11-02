@@ -721,10 +721,11 @@ public sealed class CodeGen
                 }
                 else
                 {
-                    var reg = LoadIndex(ix.Index);
+                    var (index, shift) = FoldIndexOffset(ix.Index, arr);
+                    var reg = LoadIndex(index);
                     var mode = reg == Register.X ? AbsoluteX : AbsoluteY;
-                    Op(Lda, lo); Emit(Sta, mode, Var(arr));
-                    Op(Lda, hi); Emit(Sta, mode, Var(arr, HighTable(arr)));
+                    Op(Lda, lo); Emit(Sta, mode, Var(arr, shift));
+                    Op(Lda, hi); Emit(Sta, mode, Var(arr, HighTable(arr) + shift));
                 }
                 if (temp is not null) Release(temp);
                 break;
@@ -767,19 +768,20 @@ public sealed class CodeGen
             Op(Sta, Var(arr, table + (int)ci));
             return;
         }
+        var (index, shift) = FoldIndexOffset(ix.Index, arr);
         VariableSymbol? saved = null;
-        if (!IndexIsCheap(ix.Index))
+        if (!IndexIsCheap(index))
         {
             saved = AcquireTemp(1);
             Op(Sta, Var(saved));
         }
-        var reg = LoadIndex(ix.Index);
+        var reg = LoadIndex(index);
         if (saved is not null)
         {
             Op(Lda, Var(saved));
             Release(saved);
         }
-        Emit(Sta, reg == Register.X ? AbsoluteX : AbsoluteY, Var(arr, table));
+        Emit(Sta, reg == Register.X ? AbsoluteX : AbsoluteY, Var(arr, table + shift));
     }
 
     // ---------- 8-bit expressions: result in A ----------
@@ -815,6 +817,18 @@ public sealed class CodeGen
     private bool IndexIsCheap(Expr index) =>
         index is NameExpr { Symbol.Register: not null } || Simple1(index) is not null;
 
+    /// <summary>
+    /// <c>a[i - c]</c> is addressed as <c>a-c,x</c> with i in the index register, so the subtraction
+    /// costs nothing (spec 11). Only where the wrap-around of the u8 index cannot matter: i - c wraps to
+    /// 256 - c + i, which is past the end of an array shorter than 257 - c elements.
+    /// </summary>
+    private static (Expr Index, int Offset) FoldIndexOffset(Expr index, VariableSymbol array) =>
+        index is BinaryExpr { Op: TokenKind.Minus, Type.Kind: TypeKind.U8 } b
+            && b.Left.Type is { Size: 1, IsSigned: false } && b.Right.ConstValue is long c && c > 0
+            && array.Type.Length + c <= 256
+            ? (b.Left, -(int)c)
+            : (index, 0);
+
     /// <summary>Puts an array index into X or Y and returns which.</summary>
     private Register LoadIndex(Expr index)
     {
@@ -839,8 +853,9 @@ public sealed class CodeGen
             Op(Lda, Var(arr, table + (int)ci));
             return;
         }
-        var reg = LoadIndex(ix.Index);
-        Emit(Lda, reg == Register.X ? AbsoluteX : AbsoluteY, Var(arr, table));
+        var (index, shift) = FoldIndexOffset(ix.Index, arr);
+        var reg = LoadIndex(index);
+        Emit(Lda, reg == Register.X ? AbsoluteX : AbsoluteY, Var(arr, table + shift));
     }
 
     private void GenA(Expr e)
@@ -1084,10 +1099,11 @@ public sealed class CodeGen
                     Op(Lda, Var(arr, HighTable(arr) + (int)ci)); Op(Sta, d.Hi);
                     return;
                 }
-                var reg = LoadIndex(ix.Index);
+                var (index, shift) = FoldIndexOffset(ix.Index, arr);
+                var reg = LoadIndex(index);
                 var mode = reg == Register.X ? AbsoluteX : AbsoluteY;
-                Emit(Lda, mode, Var(arr)); Op(Sta, d.Lo);
-                Emit(Lda, mode, Var(arr, HighTable(arr))); Op(Sta, d.Hi);
+                Emit(Lda, mode, Var(arr, shift)); Op(Sta, d.Lo);
+                Emit(Lda, mode, Var(arr, HighTable(arr) + shift)); Op(Sta, d.Hi);
                 return;
             }
 

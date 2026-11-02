@@ -6,8 +6,8 @@ calls           134     31773
 copy            250     68294
 crc8             64     37962
 enemies         196     70895
-fib16           228      3117
-interp          368      7891
+fib16           218      2745
+interp          288      6481
 sieve            81     11321
 sum16           177     38680
-total          1614    511104
+total          1524    509322
