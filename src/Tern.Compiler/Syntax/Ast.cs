@@ -144,6 +144,8 @@ public sealed class VarDecl(SourcePos pos, string name, TypeSyntax? type, Placem
     public bool IsData { get; init; }
     /// <summary>Declared <c>linear var</c>: an array of structs stored as whole records.</summary>
     public bool IsLinear { get; init; }
+    /// <summary>Declared <c>noinit var</c>: a global that is not zeroed at startup.</summary>
+    public bool IsNoinit { get; set; }
     public VariableSymbol? Symbol { get; set; }
 }
 public sealed class AssignStmt(SourcePos pos, Expr target, TokenKind op, Expr value) : Stmt(pos)
@@ -191,6 +193,37 @@ public sealed class ForStmt(
     public int StepValue { get; set; }
 }
 public sealed class BreakStmt(SourcePos pos) : Stmt(pos);
+
+/// <summary><c>match subject { 0 => a()  1, 2 => b()  3..=7 => { ... }  _ => c() }</c></summary>
+public sealed class MatchStmt(SourcePos pos, Expr subject, List<MatchArm> arms) : Stmt(pos)
+{
+    public Expr Subject { get; set; } = subject;
+    public List<MatchArm> Arms { get; } = arms;
+}
+
+/// <summary>One arm: its patterns (empty for <c>_</c>) and its body.</summary>
+public sealed class MatchArm(SourcePos pos, List<MatchPattern> patterns, BlockStmt body)
+{
+    public SourcePos Pos { get; } = pos;
+    /// <summary>Empty for the default arm <c>_</c>.</summary>
+    public List<MatchPattern> Patterns { get; } = patterns;
+    public bool IsDefault => Patterns.Count == 0;
+    public BlockStmt Body { get; } = body;
+}
+
+/// <summary>A value <c>3</c>, or a range <c>3..=7</c> when <see cref="High"/> is set.</summary>
+public sealed class MatchPattern(SourcePos pos, Expr low, Expr? high)
+{
+    public SourcePos Pos { get; } = pos;
+    public Expr Low { get; } = low;
+    public Expr? High { get; } = high;
+    /// <summary>
+    /// Set by the checker: the values matched, 0-255 in unsigned order. For an <c>i8</c> subject,
+    /// 128 is added (the code compares after <c>eor #$80</c>), so -128 is 0 and 127 is 255.
+    /// </summary>
+    public int From { get; set; }
+    public int To { get; set; }
+}
 
 // ---------- Assembly ----------
 
@@ -296,6 +329,10 @@ public sealed class FnDecl(
     public BlockStmt Body { get; } = body;
     /// <summary>An <c>asm fn</c>: the body holds one <see cref="AsmStmt"/>.</summary>
     public bool IsAsm { get; init; }
+    /// <summary>An <c>interrupt fn</c>: saves the registers it changes and ends with <c>rti</c>.</summary>
+    public bool IsInterrupt { get; set; }
+    /// <summary>An <c>inline fn</c>: its body is copied into each caller instead of a <c>jsr</c>.</summary>
+    public bool IsInline { get; set; }
     /// <summary>For a routine at a fixed address (<c>fn f() @ $FFD2</c>): the address. Such a function has no body.</summary>
     public Expr? Address { get; init; }
     /// <summary>Registers named after <c>keeps</c>, with their positions.</summary>
@@ -327,6 +364,8 @@ public sealed class ProgramSyntax(List<ConstDecl> consts, List<VarDecl> globals,
 {
     public List<ImportDecl> Imports { get; init; } = [];
     public List<StructDecl> Structs { get; init; } = [];
+    /// <summary>Top-level names declared <c>private</c>: usable only inside this file.</summary>
+    public HashSet<string> PrivateNames { get; init; } = [];
     public List<ConstDecl> Consts { get; } = consts;
     public List<VarDecl> Globals { get; } = globals;
     public List<FnDecl> Functions { get; } = functions;

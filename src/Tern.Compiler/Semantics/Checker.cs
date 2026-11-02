@@ -9,7 +9,7 @@ public sealed class CheckedProgram(
     public List<Module> Modules { get; } = modules;
     /// <summary>The main file's globals, and the globals of modules used by the functions in <see cref="Functions"/>.</summary>
     public List<VariableSymbol> Globals { get; } = globals;
-    /// <summary>Functions reachable from <c>main</c>, callers before callees.</summary>
+    /// <summary>Functions reachable from <c>main</c>, then from each interrupt handler; callers before callees.</summary>
     public List<FunctionSymbol> Functions { get; } = functions;
     public FunctionSymbol Main { get; } = main;
 }
@@ -62,6 +62,10 @@ public sealed partial class Checker
             throw new CompileError(main.Pos, "'main' must have no parameters and no return value");
         if (main.FixedAddress is not null)
             throw new CompileError(main.Pos, "'main' must have a body");
+        if (main.IsInterrupt)
+            throw new CompileError(main.Pos, "'main' cannot be an interrupt handler; give the handler another name");
+        if (main.IsInline)
+            throw new CompileError(main.Pos, "'main' cannot be inline: nothing calls it");
 
         foreach (var module in modules)
         {
@@ -72,9 +76,10 @@ public sealed partial class Checker
         foreach (var module in modules)
             foreach (var f in module.Syntax.Functions) Lowering.Apply(f.Body);
 
-        // Only what main can reach goes into the program, so unused parts of a module cost nothing.
-        // The main file's globals are all kept.
-        var reachable = OrderReachable(main);
+        // Only what main and the interrupt handlers can reach goes into the program, so unused parts
+        // of a module cost nothing. The main file's globals are all kept.
+        var reachable = OrderRoots(main, mainModule);
+        CheckPrivateGlobalsPerRoot(modules, reachable, main);
         var used = reachable.SelectMany(f => f.UsedGlobals).Concat(mainModule.Scope.Values.OfType<VariableSymbol>()).ToHashSet();
         return new CheckedProgram(modules, _globals.Where(used.Contains).ToList(), reachable, main);
     }
@@ -93,12 +98,19 @@ public sealed partial class Checker
         scope[name] = symbol;
     }
 
-    /// <summary>Finds a name in the enclosing scopes and the current file, or <c>module.name</c> in an imported module.</summary>
+    /// <summary>
+    /// Finds a name in the enclosing scopes and the current file, or <c>module.name</c> in an imported module.
+    /// A <c>private</c> name of another module is not found.
+    /// </summary>
     private Symbol? Lookup(string name)
     {
         int dot = name.IndexOf('.');
         if (dot > 0)
-            return _module.Imports.TryGetValue(name[..dot], out var module) ? module.Scope.GetValueOrDefault(name[(dot + 1)..]) : null;
+        {
+            if (!_module.Imports.TryGetValue(name[..dot], out var module)) return null;
+            string member = name[(dot + 1)..];
+            return module.Syntax.PrivateNames.Contains(member) ? null : module.Scope.GetValueOrDefault(member);
+        }
         for (int i = _scopes.Count - 1; i >= 0; i--)
             if (_scopes[i].TryGetValue(name, out var s)) return s;
         return _module.Scope.GetValueOrDefault(name);
@@ -121,6 +133,8 @@ public sealed partial class Checker
         }
         if (!_module.Imports.TryGetValue(name[..dot], out var other))
             return MissingImport(name[..dot], pos);
+        if (other.Syntax.PrivateNames.Contains(name[(dot + 1)..]))
+            return new CompileError(pos, $"'{name}' is private to the module {other.Name}; only code in {other.Name} can use it");
         // Modules that import each other are declared one after the other, so a declaration
         // in the first one cannot use the second one's names yet.
         if (!other.Declared)
@@ -177,8 +191,10 @@ public sealed partial class Checker
     {
         if (decl.Name is "addr" or "len" or "sizeof" or "include_bytes")
             throw new CompileError(decl.Pos, $"'{decl.Name}' is a built-in function; choose another name");
-        var fn = new FunctionSymbol(_module.Qualify(decl.Name), decl.Pos) { Declaration = decl };
+        var fn = new FunctionSymbol(_module.Qualify(decl.Name), decl.Pos) { Declaration = decl, IsInterrupt = decl.IsInterrupt, IsInline = decl.IsInline };
         decl.Symbol = fn;
+        if (decl.IsInterrupt && (decl.Parameters.Count > 0 || decl.ReturnType is not null))
+            throw new CompileError(decl.Pos, "An interrupt handler takes no parameters and returns no value: the CPU calls it, not your code");
 
         var usedRegisters = new HashSet<char>();
         foreach (var p in decl.Parameters)
@@ -303,9 +319,13 @@ public sealed partial class Checker
         // A string or include_bytes() gives a [u8; N] array, which may be longer than 256 bytes.
         var bytes = decl.Init is null ? null : ByteSource(decl.Init);
         var type = bytes is not null && decl.TypeSyntax is null ? TernType.ArrayOf(TernType.U8, bytes.Length) : DeclaredType(decl);
-        var v = new VariableSymbol(_module.Qualify(decl.Name), decl.Pos, type, VariableKind.Global, null) { IsData = decl.IsData };
+        var v = new VariableSymbol(_module.Qualify(decl.Name), decl.Pos, type, VariableKind.Global, null) { IsData = decl.IsData, NoInit = decl.IsNoinit };
         decl.Symbol = v;
         ApplyPlacement(decl, v, allowAddress: true);
+        if (decl.IsNoinit && decl.Init is not null)
+            throw new CompileError(decl.Init.Pos, $"'{decl.Name}' is noinit, so it cannot have an initial value. Leave out one or the other");
+        if (decl.IsNoinit && v.FixedAddress is not null)
+            throw new CompileError(decl.Pos, $"'{decl.Name}' is at a fixed address, which is never zeroed; leave out 'noinit'");
 
         if (decl.IsData && (type.IsStruct || type.IsStructArray))
             throw new CompileError(decl.Pos, "Data cannot hold structs yet. Use a var, or data arrays of numbers");
@@ -389,9 +409,13 @@ public sealed partial class Checker
         {
             var t = decl.TypeSyntax is null ? null : ResolveType(decl.TypeSyntax);
             if (t is null || !t.IsArray)
-                throw new CompileError(decl.Pos, "'linear' is for arrays of structs, e.g. 'linear var list: [Enemy; 8]'");
-            if (!t.Element!.IsStruct)
-                throw new CompileError(decl.Pos, "'linear' on an array of numbers is not supported yet");
+                throw new CompileError(decl.Pos,
+                    "'linear' is for arrays of 16-bit values or structs, e.g. 'linear var pts: [u16; 32]' or 'linear var list: [Enemy; 8]'");
+            if (t.Element!.Size == 1)
+                throw new CompileError(decl.Pos, $"'linear' is only for arrays of 16-bit values or structs: the elements of a {t} are one byte each, so they are already stored in order");
+            if (!t.Element.IsStruct && t.Length > 128)
+                throw new CompileError(decl.Pos,
+                    $"A linear array of 16-bit values has at most 128 elements, so that the doubled index fits in a register; '{decl.Name}' has {t.Length}. Leave out 'linear' to store it split");
             return TernType.ArrayOf(t.Element, t.Length, linear: true);
         }
         if (decl.TypeSyntax is not null) return ResolveType(decl.TypeSyntax);
@@ -550,6 +574,7 @@ public sealed partial class Checker
                 _loopDepth--;
                 break;
             case ForStmt f: CheckFor(f); break;
+            case MatchStmt m: CheckMatch(m); break;
             case AsmStmt a: CheckAsm(a); break;
             case BreakStmt or ContinueStmt:
                 if (_loopDepth == 0) throw new CompileError(stmt.Pos, "'break' and 'continue' must be inside a loop");
@@ -714,6 +739,52 @@ public sealed partial class Checker
         if (f.UsingRegister is { } r) _loopRegisters.Remove(r);
     }
 
+    private void CheckMatch(MatchStmt m)
+    {
+        CheckExpr(m.Subject);
+        if (m.Subject.Type.Kind == TypeKind.IntLiteral) Coerce(m.Subject, DefaultType(m.Subject));
+        var type = m.Subject.Type;
+        if (type.Kind is TypeKind.U16 or TypeKind.I16)
+            throw new CompileError(m.Subject.Pos, "'match' on a 16-bit value is not supported yet. Match on .lo or .hi, or use if / else if");
+        if (type.Kind is not (TypeKind.U8 or TypeKind.I8))
+            throw new CompileError(m.Subject.Pos, $"'match' needs a u8 or i8 value, not {type}");
+        int bias = type.IsSigned ? 128 : 0;
+
+        // Which arm matches each value, to find values matched twice.
+        var owner = new MatchPattern?[256];
+        for (int a = 0; a < m.Arms.Count; a++)
+        {
+            var arm = m.Arms[a];
+            if (arm.IsDefault && a != m.Arms.Count - 1)
+                throw new CompileError(m.Arms[a + 1].Pos, "This arm can never run: '_' above it matches every value. Put '_' last");
+            foreach (var p in arm.Patterns)
+            {
+                long low = PatternValue(p.Low, type), high = p.High is null ? low : PatternValue(p.High, type);
+                if (high < low)
+                    throw new CompileError(p.Pos, $"The range {low}..={high} is empty; write the smaller value first");
+                p.From = (int)low + bias;
+                p.To = (int)high + bias;
+                for (int v = p.From; v <= p.To; v++)
+                {
+                    if (owner[v] is { } first)
+                        throw new CompileError(p.Pos, $"{v - bias} is already matched at {first.Pos}; each value may appear in one pattern only");
+                    owner[v] = p;
+                }
+            }
+            CheckBlock(arm.Body);
+        }
+    }
+
+    /// <summary>A constant in a match pattern, as a value of the subject's type.</summary>
+    private long PatternValue(Expr e, TernType type)
+    {
+        CheckExpr(e);
+        if (e.ConstValue is not long v)
+            throw new CompileError(e.Pos, "A match pattern must be a constant: a number, a character or a const");
+        Coerce(e, type);
+        return v;
+    }
+
     /// <summary>True if the code calls a function that may change <paramref name="reg"/>: any function except a routine that keeps it.</summary>
     private bool ContainsCall(Node node, Register reg) => node switch
     {
@@ -723,6 +794,7 @@ public sealed partial class Checker
         IfStmt i => ContainsCall(i.Condition, reg) || ContainsCall(i.Then, reg) || (i.Else is not null && ContainsCall(i.Else, reg)),
         WhileStmt w => ContainsCall(w.Condition, reg) || ContainsCall(w.Body, reg),
         ForStmt f => ContainsCall(f.From, reg) || ContainsCall(f.To, reg) || ContainsCall(f.Body, reg),
+        MatchStmt m => ContainsCall(m.Subject, reg) || m.Arms.Any(a => ContainsCall(a.Body, reg)),
         ReturnStmt r => r.Value is not null && ContainsCall(r.Value, reg),
         AssignStmt a => ContainsCall(a.Target, reg) || ContainsCall(a.Value, reg),
         ExprStmt e => ContainsCall(e.Expr, reg),
@@ -741,6 +813,7 @@ public sealed partial class Checker
         BlockStmt b => b.Statements.Count > 0 && AlwaysReturns(b.Statements[^1]),
         IfStmt i => i.Else is not null && AlwaysReturns(i.Then) && AlwaysReturns(i.Else),
         WhileStmt w => w.Condition.ConstValue == 1 && !ContainsBreak(w.Body),
+        MatchStmt m => m.Arms.Count > 0 && m.Arms[^1].IsDefault && m.Arms.All(a => AlwaysReturns(a.Body)),
         _ => false,
     };
 
@@ -750,6 +823,7 @@ public sealed partial class Checker
         BreakStmt => true,
         BlockStmt b => b.Statements.Any(ContainsBreak),
         IfStmt i => ContainsBreak(i.Then) || (i.Else is not null && ContainsBreak(i.Else)),
+        MatchStmt m => m.Arms.Any(a => ContainsBreak(a.Body)),
         _ => false,
     };
 
@@ -845,6 +919,7 @@ public sealed partial class Checker
                 if (ix.Index.ConstValue is long idx && idx >= arr.Type.Length)
                     throw new CompileError(ix.Index.Pos, $"Index {idx} is past the end of '{arr.Name}' (length {arr.Type.Length})");
                 e.Type = arr.Type.Element!;
+                if (arr.Type.Linear) ix.Lowered = LinearIndex(ix);
                 break;
             }
 
@@ -1084,6 +1159,59 @@ public sealed partial class Checker
         if (count.Type.Kind == TypeKind.IntLiteral) Coerce(count, TernType.U8);
     }
 
+    /// <summary>
+    /// <c>pts[i]</c> on a linear array of 16-bit values: the index counts elements, so it is doubled.
+    /// A variable index is <c>i &lt;&lt; 1</c> (one <c>asl</c>), a constant one a fixed offset.
+    /// </summary>
+    private static IndexExpr LinearIndex(IndexExpr ix)
+    {
+        var u8 = TernType.U8;
+        Expr index = ix.Index.ConstValue is long c
+            ? new NumberExpr(ix.Index.Pos, 2 * c) { Type = u8, ConstValue = 2 * c }
+            : new BinaryExpr(ix.Index.Pos, TokenKind.Shl, ix.Index, new NumberExpr(ix.Index.Pos, 1) { Type = u8, ConstValue = 1 }) { Type = u8 };
+        return new IndexExpr(ix.Pos, ix.Target, index) { Type = ix.Type };
+    }
+
+    /// <summary>Makes <c>addr(...)</c> a constant address: the variable's, or a view's (its storage plus an offset).</summary>
+    private static void TakeAddress(CallExpr c, VariableSymbol v)
+    {
+        v.AddressTaken = true;
+        if (v.AliasOf is { } storage) storage.AddressTaken = true;
+        c.AddressOf = v;
+        // An array gives a pointer to its first element. A split array of 16-bit
+        // values gives a pointer to its table of low bytes; a linear one, a pointer to its first value.
+        c.Type = !v.Type.IsArray ? TernType.PointerTo(v.Type)
+            : v.Type.Element!.IsStruct ? TernType.PointerTo(v.Type.Element)
+            : v.Type.Element!.Size == 1 || v.Type.Linear ? TernType.PointerTo(v.Type.Element!)
+            : TernType.PointerTo(TernType.U8);
+    }
+
+    /// <summary><c>addr(player.name)</c>: a field of a struct variable or of a struct at a fixed address.</summary>
+    private void CheckAddrOfField(CallExpr c, MemberExpr field)
+    {
+        CheckExpr(field);
+        string name = DescribePlace(field);
+        var place = field.Place ?? Unwrap(field) switch
+        {
+            NameExpr { Symbol: { AliasOf: not null } } => null,
+            IndexExpr { Target.Type.IsArray: true } => new StructPlace(PlaceKind.Table, 0),
+            _ => new StructPlace(PlaceKind.Pointer, 0),
+        };
+        switch (place?.Kind)
+        {
+            case PlaceKind.Pointer:
+                throw new CompileError(field.Pos,
+                    $"'{name}' is reached through a pointer, so it has no fixed address. addr() works on fields of struct variables; through a pointer, add the field's offset to the pointer");
+            case PlaceKind.Table:
+                throw new CompileError(field.Pos,
+                    $"'{name}' is in an array of structs, which is stored as one table per field, so the record has no address. addr() works on fields of struct variables");
+        }
+        var view = place is { Kind: PlaceKind.Memory } at
+            ? View(at.Base!, at.Offset, field.Type, name)
+            : ((NameExpr)Unwrap(field)).Symbol!;
+        TakeAddress(c, (VariableSymbol)view);
+    }
+
     private void CheckCall(CallExpr c)
     {
         switch (c.Name)
@@ -1101,8 +1229,13 @@ public sealed partial class Checker
                 throw new CompileError(c.Pos, "include_bytes() can only be the value of data or a global array");
             case "addr":
             {
+                if (c.Args.Count == 1 && c.Args[0] is MemberExpr { Member: not ("lo" or "hi") } field)
+                {
+                    CheckAddrOfField(c, field);
+                    return;
+                }
                 if (c.Args.Count != 1 || c.Args[0] is not NameExpr name)
-                    throw new CompileError(c.Pos, "addr() takes the name of a variable, array or data");
+                    throw new CompileError(c.Pos, "addr() takes the name of a variable, array or data, or a field of a struct variable");
                 switch (Lookup(name.Name))
                 {
                     case null: throw NotDeclared(name.Name, name.Pos);
@@ -1112,18 +1245,11 @@ public sealed partial class Checker
                         if (!v.InMemory) throw new CompileError(name.Pos, $"'{name.Name}' lives in a register and has no address");
                         name.Symbol = v;
                         name.Type = v.Type;
-                        v.AddressTaken = true;
-                        c.AddressOf = v;
                         UseGlobal(v);
                         if (v.Type.IsStructArray && !v.Type.Linear)
                             throw new CompileError(name.Pos,
                                 $"'{name.Name}' is stored as one table per field, so there is no record to point to. Declare it 'linear var' to store whole records");
-                        // An array gives a pointer to its first element. A split array of 16-bit
-                        // values gives a pointer to its table of low bytes.
-                        c.Type = !v.Type.IsArray ? TernType.PointerTo(v.Type)
-                            : v.Type.Element!.IsStruct ? TernType.PointerTo(v.Type.Element)
-                            : v.Type.Element!.Size == 1 ? TernType.PointerTo(v.Type.Element!)
-                            : TernType.PointerTo(TernType.U8);
+                        TakeAddress(c, v);
                         return;
                 }
                 throw new InvalidOperationException();
@@ -1142,6 +1268,9 @@ public sealed partial class Checker
         if (symbol is null && c.Name.Contains('.')) throw NotDeclared(c.Name, c.Pos);
         if (symbol is not FunctionSymbol fn)
             throw new CompileError(c.Pos, $"'{c.Name}' is not a function");
+        if (fn.IsInterrupt)
+            throw new CompileError(c.Pos,
+                $"'{c.Name}' is an interrupt handler, which only the CPU calls (it ends with rti). Install its address in the interrupt vector");
         if (c.Args.Count != fn.Parameters.Count)
             throw new CompileError(c.Pos, $"'{fn.Name}' takes {fn.Parameters.Count} argument(s), not {c.Args.Count}");
         for (int i = 0; i < c.Args.Count; i++)
@@ -1241,6 +1370,83 @@ public sealed partial class Checker
     };
 
     // ---------- Call graph ----------
+
+    /// <summary>
+    /// The functions reachable from main, then from each interrupt handler, callers first. Handlers
+    /// are roots: those of the main file, and those a compiled function names (to install them).
+    /// A function with a body may belong to only one root, since a handler can run in the middle of it
+    /// and its frame would be overwritten (spec 8.1).
+    /// </summary>
+    private static List<FunctionSymbol> OrderRoots(FunctionSymbol main, Module mainModule)
+    {
+        var all = new List<FunctionSymbol>();
+        var rootOf = new Dictionary<FunctionSymbol, FunctionSymbol>();
+        var roots = new List<FunctionSymbol> { main };
+        roots.AddRange(mainModule.Scope.Values.OfType<FunctionSymbol>().Where(f => f.IsInterrupt).OrderBy(f => f.Pos.Line));
+        for (int r = 0; r < roots.Count; r++)
+        {
+            foreach (var f in OrderReachable(roots[r]))
+            {
+                if (f.FixedAddress is not null)
+                {
+                    // A routine at a fixed address has no frame; it may be called from anywhere.
+                    if (rootOf.TryAdd(f, roots[r])) all.Add(f);
+                    continue;
+                }
+                if (rootOf.TryGetValue(f, out var other))
+                {
+                    string Describe(FunctionSymbol root) => root == main ? "main" : $"the interrupt handler '{root.Name}'";
+                    throw new CompileError(f.Pos,
+                        $"'{f.Name}' is called from {Describe(other)} and from {Describe(roots[r])}. An interrupt can stop it halfway and run it again, " +
+                        "which would overwrite its variables, so a function cannot be shared between main and interrupt handlers. Use a copy for each");
+                }
+                rootOf[f] = roots[r];
+                all.Add(f);
+                foreach (var h in f.UsedInterrupts)
+                    if (!roots.Contains(h)) roots.Add(h);
+            }
+        }
+        return all;
+    }
+
+    /// <summary>
+    /// A module's private global used from two roots (main and a handler, or two handlers) is an
+    /// error: an interrupt could change it while the other root is using it, and the caller cannot
+    /// see it (review M6, finding 1). The library's work bytes are such globals. Public globals are
+    /// how main and handlers talk to each other, and data is read-only, so both stay allowed.
+    /// </summary>
+    private static void CheckPrivateGlobalsPerRoot(List<Module> modules, List<FunctionSymbol> ordered, FunctionSymbol main)
+    {
+        var privateGlobals = modules.Where(m => !m.IsMain)
+            .SelectMany(m => m.Syntax.PrivateNames.Select(n => m.Scope.GetValueOrDefault(n)).OfType<VariableSymbol>())
+            .Where(v => !v.IsData) // read-only tables are safe to share
+            .ToHashSet();
+        if (privateGlobals.Count == 0) return;
+
+        // ordered is main's tree, then each handler's tree; a function belongs to the root that starts its tree.
+        var firstUser = new Dictionary<VariableSymbol, (FunctionSymbol Function, FunctionSymbol Root)>();
+        FunctionSymbol root = main;
+        foreach (var f in ordered.Where(f => f.FixedAddress is null))
+        {
+            if (f.IsInterrupt) root = f;
+            foreach (var used in f.UsedGlobals)
+            {
+                var g = used.AliasOf ?? used;
+                if (!privateGlobals.Contains(g)) continue;
+                if (!firstUser.TryGetValue(g, out var first))
+                    firstUser[g] = (f, root);
+                else if (first.Root != root)
+                {
+                    string Describe(FunctionSymbol r) => r == main ? "main" : $"the interrupt handler '{r.Name}'";
+                    // Reported at the handler, which is in the program's own code.
+                    throw new CompileError(root.Pos,
+                        $"'{first.Function.Name}' (called from {Describe(first.Root)}) and '{f.Name}' (called from {Describe(root)}) both use '{g.Name}', " +
+                        $"a private variable of its module. An interrupt could change it while the other is using it. " +
+                        $"Call functions of this module from only main or only one interrupt handler");
+                }
+            }
+        }
+    }
 
     /// <summary>Functions reachable from main, callers before callees. Reports recursion.</summary>
     private static List<FunctionSymbol> OrderReachable(FunctionSymbol main)

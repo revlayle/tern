@@ -77,39 +77,89 @@ public sealed class Parser
             ExpectEndOfStatement();
             SkipTerminators();
         }
+        var privateNames = new HashSet<string>();
         while (!At(TokenKind.Eof))
+        {
+            if (At(TokenKind.Private))
+            {
+                var p = Advance();
+                if (!(Current.Kind is TokenKind.Const or TokenKind.Var or TokenKind.Linear or TokenKind.Struct or TokenKind.Data or TokenKind.Fn
+                      or TokenKind.Interrupt or TokenKind.Noinit or TokenKind.Inline || (At(TokenKind.Asm) && PeekAt(1).Kind == TokenKind.Fn)))
+                    throw new CompileError(p.Pos, $"'private' goes before a declaration (const, var, data, struct or fn); found {Describe(Current)}");
+                privateNames.Add(ParseDeclaration());
+            }
+            else
+                ParseDeclaration();
+            SkipTerminators();
+        }
+        return new ProgramSyntax(consts, globals, functions) { Imports = imports, Structs = structs, PrivateNames = privateNames };
+
+        // Parses one top-level declaration and returns its name.
+        string ParseDeclaration()
         {
             switch (Current.Kind)
             {
                 case TokenKind.Import:
                     throw new CompileError(Current.Pos, "'import' must be at the top of the file, before other declarations");
-                case TokenKind.Const: consts.Add(ParseConst()); break;
-                case TokenKind.Var: globals.Add(ParseVar()); break;
-                case TokenKind.Linear: globals.Add(ParseLinearVar()); break;
-                case TokenKind.Struct: structs.Add(ParseStruct()); break;
-                case TokenKind.Data: globals.Add(ParseData()); break;
-                case TokenKind.Fn: functions.Add(ParseFn()); break;
+                case TokenKind.Const: { var d = ParseConst(); consts.Add(d); return d.Name; }
+                case TokenKind.Var: { var d = ParseVar(); globals.Add(d); return d.Name; }
+                case TokenKind.Linear: { var d = ParseLinearVar(); globals.Add(d); return d.Name; }
+                case TokenKind.Struct: { var d = ParseStruct(); structs.Add(d); return d.Name; }
+                case TokenKind.Data: { var d = ParseData(); globals.Add(d); return d.Name; }
+                case TokenKind.Fn: { var d = ParseFn(); functions.Add(d); return d.Name; }
+                case TokenKind.Inline:
+                {
+                    var t = Advance();
+                    if (At(TokenKind.Asm) && PeekAt(1).Kind == TokenKind.Fn)
+                        throw new CompileError(t.Pos, "'inline asm fn' is not supported yet. Use an asm block in an inline fn");
+                    if (!At(TokenKind.Fn))
+                        throw new CompileError(t.Pos, $"'inline' goes before 'fn', e.g. 'inline fn wait_frame() {{ ... }}'; found {Describe(Current)}");
+                    var d = ParseFn();
+                    if (d.Address is not null)
+                        throw new CompileError(d.Pos, "An inline function needs a body; '@ $addr' declares a routine that is already there");
+                    d.IsInline = true;
+                    functions.Add(d);
+                    return d.Name;
+                }
+                case TokenKind.Noinit:
+                {
+                    var t = Advance();
+                    if (!At(TokenKind.Var) && !At(TokenKind.Linear))
+                        throw new CompileError(t.Pos, $"'noinit' goes before 'var', e.g. 'noinit var buffer: [u8; 256]'; found {Describe(Current)}");
+                    var d = At(TokenKind.Linear) ? ParseLinearVar() : ParseVar();
+                    if (d.IsData) throw new CompileError(t.Pos, "'noinit' is for variables; data is never zeroed");
+                    d.IsNoinit = true;
+                    globals.Add(d);
+                    return d.Name;
+                }
+                case TokenKind.Interrupt:
+                {
+                    var t = Advance();
+                    if (!At(TokenKind.Fn))
+                        throw new CompileError(t.Pos, At(TokenKind.Asm)
+                            ? "An interrupt handler in assembly is an 'asm fn' that saves what it changes and ends with rti; 'interrupt' is for handlers in Tern"
+                            : $"'interrupt' goes before 'fn', e.g. 'interrupt fn raster() {{ ... }}'; found {Describe(Current)}");
+                    var d = ParseFn();
+                    if (d.Address is not null)
+                        throw new CompileError(d.Pos, "An interrupt handler needs a body; '@ $addr' declares a routine that is already there");
+                    d.IsInterrupt = true;
+                    functions.Add(d);
+                    return d.Name;
+                }
                 case TokenKind.Asm when PeekAt(1).Kind == TokenKind.Fn:
+                {
                     Advance();
-                    functions.Add(ParseFn(isAsm: true));
-                    break;
+                    var d = ParseFn(isAsm: true);
+                    functions.Add(d);
+                    return d.Name;
+                }
                 case TokenKind.Asm:
                     throw new CompileError(Current.Pos,
                         "An asm block must be inside a function. Use 'asm fn name() { ... }' for a whole function in assembly");
                 default:
-                    RejectUnsupported();
                     throw new CompileError(Current.Pos, $"Expected 'const', 'var', 'data', 'struct' or 'fn', found {Describe(Current)}");
             }
-            SkipTerminators();
         }
-        return new ProgramSyntax(consts, globals, functions) { Imports = imports, Structs = structs };
-    }
-
-    /// <summary>Keywords from the spec that this compiler version does not implement yet.</summary>
-    private void RejectUnsupported()
-    {
-        if (Current.Kind is TokenKind.Match or TokenKind.Inline or TokenKind.Interrupt or TokenKind.Noinit)
-            throw new CompileError(Current.Pos, $"'{Current.Text}' is not supported yet");
     }
 
     /// <summary><c>struct Name { field: type, field: type @ offset }</c>; fields are separated by ',' or line breaks.</summary>
@@ -136,14 +186,14 @@ public sealed class Parser
         return new StructDecl(start.Pos, name.Text, fields);
     }
 
-    /// <summary><c>linear var name: [Struct; n]</c></summary>
+    /// <summary><c>linear var name: [T; n]</c> or <c>linear data name: [T; n] = ...</c></summary>
     private VarDecl ParseLinearVar()
     {
         var linear = Expect(TokenKind.Linear, "'linear'");
-        if (!At(TokenKind.Var))
-            throw new CompileError(Current.Pos, $"'linear' goes before 'var', e.g. 'linear var list: [Enemy; 8]'; found {Describe(Current)}");
-        var decl = ParseVar();
-        return new VarDecl(linear.Pos, decl.Name, decl.TypeSyntax, decl.Placement, decl.Init) { IsLinear = true };
+        if (!At(TokenKind.Var) && !At(TokenKind.Data))
+            throw new CompileError(Current.Pos, $"'linear' goes before 'var' or 'data', e.g. 'linear var list: [Enemy; 8]'; found {Describe(Current)}");
+        var decl = At(TokenKind.Data) ? ParseData() : ParseVar();
+        return new VarDecl(linear.Pos, decl.Name, decl.TypeSyntax, decl.Placement, decl.Init) { IsLinear = true, IsData = decl.IsData };
     }
 
     private ConstDecl ParseConst()
@@ -313,8 +363,12 @@ public sealed class Parser
         switch (Current.Kind)
         {
             case TokenKind.Var: return ParseVar();
+            case TokenKind.Linear when PeekAt(1).Kind == TokenKind.Data:
+                throw new CompileError(PeekAt(1).Pos, "'data' must be declared outside functions");
             case TokenKind.Linear: return ParseLinearVar();
             case TokenKind.Struct: throw new CompileError(Current.Pos, "A struct must be declared outside functions");
+            case TokenKind.Private:
+                throw new CompileError(Current.Pos, "'private' is only for top-level declarations; names inside a function are always private to it");
             case TokenKind.If: return ParseIf();
             case TokenKind.While:
             {
@@ -323,6 +377,7 @@ public sealed class Parser
                 return new WhileStmt(start.Pos, cond, ParseBlock());
             }
             case TokenKind.For: return ParseFor();
+            case TokenKind.Match: return ParseMatch();
             case TokenKind.Break:
             {
                 var t = Advance();
@@ -346,12 +401,16 @@ public sealed class Parser
             case TokenKind.Data: throw new CompileError(Current.Pos, "'data' must be declared outside functions");
             case TokenKind.Asm when PeekAt(1).Kind == TokenKind.Fn:
                 throw new CompileError(Current.Pos, "'asm fn' must be declared outside functions");
+            case TokenKind.Interrupt:
+                throw new CompileError(Current.Pos, "'interrupt fn' must be declared outside functions");
+            case TokenKind.Noinit:
+                throw new CompileError(Current.Pos, "'noinit' is for global variables; local variables are never zeroed");
+            case TokenKind.Inline:
+                throw new CompileError(Current.Pos, "'inline fn' must be declared outside functions");
             case TokenKind.Asm:
                 Advance();
                 return ParseAsmBody();
         }
-        RejectUnsupported();
-
         var expr = ParseExpr();
         if (Current.Kind is TokenKind.Eq or TokenKind.PlusEq or TokenKind.MinusEq or TokenKind.AmpEq
             or TokenKind.PipeEq or TokenKind.CaretEq or TokenKind.ShlEq or TokenKind.ShrEq)
@@ -381,6 +440,60 @@ public sealed class Parser
         }
         Stmt elseStmt = At(TokenKind.If) ? ParseIf() : ParseBlock();
         return new IfStmt(start.Pos, cond, then, elseStmt);
+    }
+
+    /// <summary>
+    /// <c>match x { arm... }</c>; one arm per line: patterns separated by ',', then '=>' and a block
+    /// or a single statement.
+    /// </summary>
+    private MatchStmt ParseMatch()
+    {
+        var start = Expect(TokenKind.Match, "'match'");
+        var subject = ParseExpr();
+        var open = Expect(TokenKind.LBrace, "'{' after the match value");
+        var arms = new List<MatchArm>();
+        SkipTerminators();
+        while (!Accept(TokenKind.RBrace))
+        {
+            if (At(TokenKind.Eof)) throw new CompileError(open.Pos, "'match' is not closed with '}'");
+            var armPos = Current.Pos;
+            var patterns = new List<MatchPattern>();
+            bool isDefault = false;
+            do
+            {
+                if (At(TokenKind.Identifier) && Current.Text == "_")
+                {
+                    var underscore = Advance();
+                    if (patterns.Count > 0 || At(TokenKind.Comma))
+                        throw new CompileError(underscore.Pos, "'_' matches every value, so it must be alone in its arm: '_ => ...'");
+                    isDefault = true;
+                    break;
+                }
+                var low = ParseExpr();
+                Expr? high = null;
+                if (Accept(TokenKind.DotDotEq)) high = ParseExpr();
+                else if (At(TokenKind.DotDot))
+                    throw new CompileError(Current.Pos, "A range in a match includes its end: write 'low..=high'");
+                patterns.Add(new MatchPattern(low.Pos, low, high));
+            } while (Accept(TokenKind.Comma));
+            Expect(TokenKind.FatArrow, "'=>' after the match pattern");
+            BlockStmt body;
+            if (At(TokenKind.LBrace))
+            {
+                body = ParseBlock();
+                ExpectEndOfStatement();
+            }
+            else
+            {
+                if (At(TokenKind.Newline) || At(TokenKind.RBrace))
+                    throw new CompileError(Current.Pos, "Expected a statement or '{ }' after '=>'");
+                var stmt = ParseStatement();
+                body = new BlockStmt(stmt.Pos, [stmt]);
+            }
+            arms.Add(new MatchArm(armPos, isDefault ? [] : patterns, body));
+            SkipTerminators();
+        }
+        return new MatchStmt(start.Pos, subject, arms);
     }
 
     private ForStmt ParseFor()

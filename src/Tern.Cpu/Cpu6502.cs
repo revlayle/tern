@@ -58,6 +58,29 @@ public sealed class Cpu6502(IBus bus, CpuVariant variant = CpuVariant.Nmos6502)
         Cycles += 7;
     }
 
+    /// <summary>
+    /// Raises the IRQ line between instructions: if interrupts are enabled (I clear), pushes the
+    /// return address and the flags (B clear), sets I and jumps through $FFFE. Returns true if taken.
+    /// </summary>
+    public bool Irq()
+    {
+        if (I) return false;
+        Interrupt(0xFFFE);
+        return true;
+    }
+
+    /// <summary>A non-maskable interrupt: as <see cref="Irq"/>, through $FFFA, whatever I is.</summary>
+    public void Nmi() => Interrupt(0xFFFA);
+
+    private void Interrupt(ushort vector)
+    {
+        PushWord(PC);
+        Push((byte)(P & ~0x10));
+        I = true;
+        PC = ReadWord(vector);
+        Cycles += 7;
+    }
+
     /// <summary>Executes one instruction and returns the cycles it took.</summary>
     public int Step()
     {

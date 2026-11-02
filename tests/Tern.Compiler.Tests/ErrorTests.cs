@@ -20,7 +20,6 @@ public class ErrorTests
     [InlineData("fn main() { var x: u8 }", "needs an initial value")]
     [InlineData("fn main() { x = 1 }", "'x' is not declared")]
     [InlineData("fn other() { }", "no 'fn main()'")]
-    [InlineData("fn main() { match 1 { } }", "'match' is not supported yet")]
     [InlineData("fn main() { var b: bool = 1 as bool }", "cannot be converted to bool")]
     // Pointers
     [InlineData("var p: ptr\nfn main() { }", "'ptr' needs the type it points to")]

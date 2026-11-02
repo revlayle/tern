@@ -575,9 +575,8 @@ public class StructTests
     [InlineData(P + "fn main() { var p: Point = 3 }", "A struct cannot have an initial value")]
     [InlineData(P + "var ps: [Point; 2] = [1, 2]\nfn main() { }", "A struct cannot have an initial value")]
     [InlineData(P + "data ps: [Point; 2] = [1, 2]\nfn main() { }", "Data cannot hold structs yet")]
-    [InlineData("linear var a: u8\nfn main() { }", "'linear' is for arrays of structs")]
-    [InlineData("linear var a: [u16; 4]\nfn main() { }", "'linear' on an array of numbers is not supported yet")]
-    [InlineData("linear fn main() { }", "'linear' goes before 'var'")]
+    [InlineData("linear var a: u8\nfn main() { }", "'linear' is for arrays of 16-bit values or structs")]
+    [InlineData("linear fn main() { }", "'linear' goes before 'var' or 'data'")]
     [InlineData(P + "fn main() { var n: u8 = Point }", "'Point' is a struct type, not a value")]
     // Structs are never copied
     [InlineData(P + "var a: Point\nvar b: Point\nfn main() { a = b }", "a struct cannot be assigned")]
@@ -614,6 +613,119 @@ public class StructTests
     {
         var e = Assert.Throws<CompileError>(() => TernCompiler.Compile(source));
         Assert.Contains(expected, e.Description, StringComparison.OrdinalIgnoreCase);
+    }
+
+    // ---------- addr() of fields ----------
+
+    [Fact]
+    public void Addr_of_a_field_points_into_the_struct_variable()
+    {
+        var r = Run.Program("""
+            struct Point { x: u8, y: u8 }
+            struct Player { pos: Point, hp: u8, score: u16, name: [u8; 4], pts: [u16; 2] }
+            struct Regs { a: u8, b: u8, w: u16 }
+            var player: Player
+            var zpp: Player @ zp
+            var regs: Regs @ $C000
+            var at: [u16; 6]
+            fn set(p: ptr u8, v: u8) { p[0] = v }
+            fn main() {
+                var pn: ptr u8 = addr(player.name)
+                for i in 0..4 { pn[i] = 10 + i }
+                set(addr(player.hp), 77)
+                var ps: ptr u16 = addr(player.score)
+                ps[0] = 1234
+                var pp: ptr Point = addr(player.pos)
+                pp.y = 5
+                set(addr(zpp.hp), 66)
+                set(addr(regs.b), 99)
+                at[0] = addr(player.name) as u16
+                at[1] = addr(player) as u16
+                at[2] = addr(regs.w) as u16
+                at[3] = addr(zpp.name) as u16
+                at[4] = addr(player.pts) as u16
+                at[5] = addr(player.pos.y) as u16
+            }
+            """);
+        int player = r.Address("player");
+        Assert.Equal(new byte[] { 10, 11, 12, 13 }, r.Ram.Bytes[(player + 5)..(player + 9)]);
+        Assert.Equal(77, r.U8("player", 2));
+        Assert.Equal(1234, r.U8("player", 3) | r.U8("player", 4) << 8);
+        Assert.Equal(5, r.U8("player", 1));
+        Assert.Equal(66, r.U8("zpp", 2));
+        Assert.Equal(99, r.Ram.Bytes[0xC001]);
+        Assert.Equal(player + 5, r.U16At("at", 0, 6));
+        Assert.Equal(player, r.U16At("at", 1, 6));
+        Assert.Equal(0xC002, r.U16At("at", 2, 6));
+        Assert.Equal(r.Address("zpp") + 5, r.U16At("at", 3, 6));
+        Assert.True(r.Address("zpp") < 0x100);
+        Assert.Equal(player + 9, r.U16At("at", 4, 6)); // the low bytes of the split array field
+        Assert.Equal(player + 1, r.U16At("at", 5, 6));
+    }
+
+    [Fact]
+    public void Addr_of_a_field_is_a_constant_address()
+    {
+        var r = Run.Program("""
+            struct Player { hp: u8, name: [u8; 8] }
+            var player: Player
+            var p: ptr u8
+            fn main() { p = addr(player.name) }
+            """);
+        Assert.Equal("lda #(player+1).lo|sta p|lda #(player+1).hi|sta p+1|rts", Code(r));
+    }
+
+    [Fact]
+    public void Addr_of_a_field_passes_it_to_the_library()
+    {
+        // The reason for addr() of fields (decisions 2026-11-01): text.put(dst, addr(player.name), n).
+        var r = Run.Program("""
+            import text
+            struct Player { hp: u8, name: [u8; 3] }
+            var player: Player
+            var out: [u8; 3]
+            fn main() {
+                player.name[0] = 1
+                player.name[1] = 2
+                player.name[2] = 3
+                text.put(addr(out), addr(player.name), len(player.name))
+            }
+            """);
+        Assert.Equal(new byte[] { 1, 2, 3 }, r.Ram.Bytes[r.Address("out")..(r.Address("out") + 3)]);
+    }
+
+    [Fact]
+    public void Addr_of_a_field_in_a_module()
+    {
+        var r = Run.Program("""
+            import c64
+            var p: ptr u8
+            var q: ptr u8
+            fn main() {
+                p = addr(c64.vic.border)
+                q = addr(c64.sid.voice2.control)
+            }
+            """);
+        Assert.Equal(0xD020, r.U16("p"));
+        Assert.Equal(0xD40B, r.U16("q"));
+    }
+
+    [Theory]
+    [InlineData(E + "var p: ptr Enemy\nvar q: ptr u8\nfn main() { q = addr(p.hp) }", "'p.hp' is reached through a pointer, so it has no fixed address")]
+    [InlineData(E + "var p: ptr Enemy\nvar q: ptr u8\nfn main() { q = addr(p.name) }", "'p.name' is reached through a pointer")]
+    [InlineData(E + "var p: ptr Enemy\nvar q: ptr Point\nfn main() { q = addr(p.pos) }", "'p.pos' is reached through a pointer")]
+    [InlineData(E + "var a: Enemy\nvar q: ptr u8\nfn main() { q = addr(a.next.hp) }", "'a.next.hp' is reached through a pointer")]
+    [InlineData(E + "var es: [Enemy; 4]\nvar q: ptr u8\nfn main() { q = addr(es[1].hp) }", "'es.hp' is in an array of structs, which is stored as one table per field")]
+    [InlineData(E + "var es: [Enemy; 4]\nvar q: ptr u8\nfn main() { q = addr(es[1].name) }", "'es.name' is in an array of structs")]
+    [InlineData(E + "var es: [Enemy; 4]\nvar q: ptr Point\nfn main() { q = addr(es[1].pos) }", "'es.pos' is in an array of structs")]
+    [InlineData(E + "var a: Enemy\nvar q: ptr u8\nfn main() { q = addr(a.nope) }", "Struct 'Enemy' has no field 'nope'")]
+    [InlineData("var w: u16\nvar q: ptr u8\nfn main() { q = addr(w.lo) }", "addr() takes the name of a variable, array or data, or a field of a struct variable")]
+    [InlineData(E + "var a: Enemy\nvar q: ptr u8\nfn main() { q = addr(a.name[1]) }", "addr() takes the name of a variable, array or data, or a field of a struct variable")]
+    [InlineData(E + "var a: Enemy\nvar q: ptr u8\nfn main() { q = addr(a.pos) }", "Expected ptr u8, found ptr Point")]
+    public void Addr_of_a_field_reports_errors(string source, string expected)
+    {
+        var e = Assert.Throws<CompileError>(() => TernCompiler.Compile(source));
+        Assert.Contains(expected, e.Description);
     }
 
     [Fact]

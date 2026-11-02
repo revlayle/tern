@@ -162,6 +162,8 @@ public sealed class VariableSymbol(string name, SourcePos pos, TernType type, Va
     public bool ReadOnly { get; set; }
     /// <summary>Initial bytes for globals (null means zero).</summary>
     public byte[]? InitialBytes { get; set; }
+    /// <summary>A global declared <c>noinit</c>: not zeroed at startup.</summary>
+    public bool NoInit { get; init; }
     /// <summary>Declared with <c>data</c>: read-only, stored in the program image.</summary>
     public bool IsData { get; set; }
     /// <summary>A pointer read or written through with <c>p[i]</c>. It must be in zero page.</summary>
@@ -216,6 +218,12 @@ public sealed class FunctionSymbol(string name, SourcePos pos) : Symbol(name, po
     /// <summary>Global variables this function names; only globals used by reachable functions go into the program.</summary>
     public HashSet<VariableSymbol> UsedGlobals { get; } = [];
     public FnDecl? Declaration { get; set; }
+    /// <summary>An <c>interrupt fn</c>: a root of the call graph, with frames of its own.</summary>
+    public bool IsInterrupt { get; set; }
+    /// <summary>An <c>inline fn</c>: copied into each caller. It keeps its frame, but has no code of its own.</summary>
+    public bool IsInline { get; set; }
+    /// <summary>Interrupt handlers this function names in assembly (to install them); they are kept in the program.</summary>
+    public HashSet<FunctionSymbol> UsedInterrupts { get; } = [];
     /// <summary>Set for a routine that already exists at this address (<c>fn f() @ $FFD2</c>). It has no body or frame.</summary>
     public int? FixedAddress { get; set; }
     /// <summary>Registers (A, X, Y) a routine at a fixed address promises to leave unchanged.</summary>

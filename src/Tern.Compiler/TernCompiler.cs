@@ -70,7 +70,7 @@ public static class TernCompiler
         }
         // Variables after the program start at bss. Move them all, if needed, so that no jmp (...)
         // vector among them starts at an address ending in $FF.
-        var ramVectors = plan.ZeroedGlobals.Concat(plan.FrameVariables)
+        var ramVectors = plan.ZeroedGlobals.Concat(plan.NoinitGlobals).Concat(plan.FrameVariables)
             .SelectMany(e => e.Var.JumpVectorOffsets.Select(o => e.Offset + o)).ToList();
         if (ramVectors.Count > 0)
             items.Add(new Padding(pc => AvoidPageEnd(pc, ramVectors), "no jmp (...) vector may start at $xxFF"));
@@ -80,7 +80,7 @@ public static class TernCompiler
         var code = Assembler.Assemble(items, platform.CodeStart, end =>
         {
             foreach (var (g, label) in imageLabels) g.Address = label.Address;
-            foreach (var (v, offset) in plan.ZeroedGlobals) v.Address = end + offset;
+            foreach (var (v, offset) in plan.ZeroedGlobals.Concat(plan.NoinitGlobals)) v.Address = end + offset;
             foreach (var (v, offset) in plan.FrameVariables) v.Address = end + offset;
             ramEnd = end + plan.TotalSize - 1;
             if (ramEnd > platform.RamEnd)
@@ -95,7 +95,8 @@ public static class TernCompiler
         foreach (var g in program.Globals) symbols[g.Name] = g.Address;
         foreach (var f in program.Functions)
         {
-            symbols[f.Name] = gen.LabelOf(f).Address;
+            // An inline function has no code of its own, only a frame.
+            if (!f.IsInline) symbols[f.Name] = gen.LabelOf(f).Address;
             foreach (var v in f.FrameVariables.Where(v => v.Kind != VariableKind.Temp))
                 symbols[v.QualifiedName] = v.Address;
         }
@@ -135,13 +136,13 @@ public static class TernCompiler
             if (offsets.All(o => ((pc + skip + o) & 0xFF) != 0xFF)) return skip;
     }
 
-    /// <summary>Startup code: set up zero-page globals and clear the uninitialized ones in RAM.</summary>
+    /// <summary>Startup code: set up zero-page globals and clear the uninitialized ones in RAM (except noinit ones).</summary>
     private static List<AsmItem> Startup(RamPlan plan, Label bss)
     {
         var items = new List<AsmItem> { new Instr(Cld) };
 
         int? a = null;
-        foreach (var g in plan.ZeroPageGlobals)
+        foreach (var g in plan.ZeroPageGlobals.Where(g => !g.NoInit))
         {
             var bytes = MemoryLayout(g, g.InitialBytes ?? new byte[g.Type.Size]);
             for (int i = 0; i < bytes.Length; i++)
@@ -186,7 +187,7 @@ public static class TernCompiler
     /// </summary>
     private static byte[] MemoryLayout(VariableSymbol v, byte[] bytes)
     {
-        if (!v.Type.IsArray || v.Type.Element!.Size == 1) return bytes;
+        if (!v.Type.IsArray || v.Type.Element!.Size == 1 || v.Type.Linear) return bytes;
         int n = v.Type.Length;
         var split = new byte[bytes.Length];
         for (int i = 0; i < n; i++)

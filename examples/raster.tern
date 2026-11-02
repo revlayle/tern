@@ -1,0 +1,83 @@
+// Raster interrupt: eight color bars in the border, one per band of 24 raster
+// lines. The VIC-II interrupts at the start of each band; the handler picks the
+// color with a match (a jump table, since the cases are dense) and sets up the
+// next band. Main keeps running and shows the frame count.
+//
+// The KERNAL is switched off ($01 = $35), so the CPU takes interrupts through
+// the vectors at $FFFA (NMI) and $FFFE (IRQ) in RAM, and handlers end with rti.
+//
+// The bars are not stabilized: the color changes about 60 cycles after the
+// interrupt, near the end of the line, and that edge jitters by a few cycles
+// depending on which instruction main was running when the interrupt came.
+// A stable raster needs a double-IRQ or timer trick, beyond this example.
+import c64
+import text
+
+const FIRST_LINE = 50
+const BAND = 24
+
+var cpu_port: u8 @ $01
+var band: u8
+var frames: u8
+var ack: u8
+
+data title = screen"RASTER BARS   FRAME $"
+
+// Tells the VIC-II the raster interrupt was handled. Only the handler calls it:
+// a function may not be shared between main and a handler.
+inline fn acknowledge() { c64.vic.irq_status = 1 }
+
+interrupt fn raster() {
+    acknowledge()
+    match band {
+        0 => c64.vic.border = c64.RED
+        1 => c64.vic.border = c64.ORANGE
+        2 => c64.vic.border = c64.YELLOW
+        3 => c64.vic.border = c64.GREEN
+        4 => c64.vic.border = c64.CYAN
+        5 => c64.vic.border = c64.BLUE
+        6 => c64.vic.border = c64.PURPLE
+        7 => c64.vic.border = c64.LIGHT_GREY
+    }
+    band += 1
+    if band == 8 {
+        band = 0
+        frames += 1
+    }
+    c64.vic.raster = FIRST_LINE + (band << 4) + (band << 3)   // band * 24
+}
+
+// RESTORE raises an NMI; with the KERNAL off, it must have a handler too.
+interrupt fn ignore() { }
+
+fn main() {
+    asm {
+        sei
+    }
+    c64.cia1.icr = $7F                  // no CIA timer interrupts
+    ack = c64.cia1.icr                  // reading clears a pending one
+    cpu_port = $35                      // RAM at $A000-$BFFF and $E000-$FFFF, I/O stays
+    asm {
+        lda #raster.lo
+        sta $FFFE
+        lda #raster.hi
+        sta $FFFF
+        lda #ignore.lo
+        sta $FFFA
+        lda #ignore.hi
+        sta $FFFB
+    }
+    c64.vic.control1 = c64.vic.control1 & $7F   // raster line bit 8 = 0
+    c64.vic.raster = FIRST_LINE
+    c64.vic.irq_enable = 1              // raster interrupt on
+    c64.vic.irq_status = 1              // clear one that is already pending
+    asm {
+        cli
+    }
+
+    c64.vic.background = c64.BLACK
+    text.put(c64.SCREEN + 12 * 40 + 8, addr(title), len(title))
+    while true {
+        text.hex8(c64.SCREEN + 12 * 40 + 29, frames)
+    }
+}

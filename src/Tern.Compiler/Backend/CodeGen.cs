@@ -50,7 +50,7 @@ public sealed class CodeGen
     public List<AsmItem> GenerateFunctions()
     {
         var all = new List<AsmItem>();
-        foreach (var f in _program.Functions.Where(f => f.FixedAddress is null))
+        foreach (var f in _program.Functions.Where(f => f.FixedAddress is null && !f.IsInline))
         {
             GenFunction(f);
             all.AddRange(_out);
@@ -73,8 +73,11 @@ public sealed class CodeGen
     private static VarOperand Var(VariableSymbol v, int offset = 0) =>
         v.AliasOf is { } storage ? new(storage, v.AliasOffset + offset) : new(v, offset);
 
-    /// <summary>The distance from the low-byte table of a split array to its high-byte table.</summary>
-    private static int HighTable(VariableSymbol arr) => arr.HighTable ?? arr.Type.Length;
+    /// <summary>
+    /// The distance from the low-byte table of a split array to its high-byte table; 1 for a linear
+    /// array, whose index the checker has already doubled.
+    /// </summary>
+    private static int HighTable(VariableSymbol arr) => arr.HighTable ?? (arr.Type.Linear ? 1 : arr.Type.Length);
     private static Imm Byte(long v) => new((int)(v & 0xFF));
 
     /// <param name="zeroPage">The temporary must be in zero page, e.g. to hold a pointer for (zp),y.</param>
@@ -149,7 +152,20 @@ public sealed class CodeGen
             return;
         }
 
-        // Register parameters are stored into the frame, so the body can use A, X and Y freely.
+        StoreRegisterParameters(f);
+
+        if (f.IsInterrupt)
+        {
+            GenInterrupt(f);
+            return;
+        }
+        GenBlock(f.Declaration!.Body);
+        if (!EndsWithJump()) Emit(Rts);
+    }
+
+    /// <summary>Register parameters are stored into the frame, so the body can use A, X and Y freely.</summary>
+    private void StoreRegisterParameters(FunctionSymbol f)
+    {
         foreach (var p in f.Parameters)
         {
             switch (p.PassedIn)
@@ -162,9 +178,83 @@ public sealed class CodeGen
                 case Register.XY: Op(Stx, Var(p)); Op(Sty, Var(p, 1)); break;
             }
         }
+    }
 
+    /// <summary>Where a <c>return</c> in an interrupt handler goes: the code that restores the registers.</summary>
+    private Label? _interruptExit;
+    /// <summary>Where a <c>return</c> goes in the copy of an inline function being generated: its end.</summary>
+    private Label? _inlineExit;
+    /// <summary>Free temporaries of each inline function, kept between its copies, which never run at the same time.</summary>
+    private readonly Dictionary<FunctionSymbol, List<VariableSymbol>> _inlineTemps = new();
+
+    /// <summary>Leaves the function: <c>rts</c>, or a jump to the end of an inline copy or of an interrupt handler.</summary>
+    private void ReturnJump()
+    {
+        if (_inlineExit is { } end) Jmp(end);
+        else if (_interruptExit is { } exit) Jmp(exit);
+        else Emit(Rts);
+    }
+
+    /// <summary>
+    /// The body of an inline function in place of <c>jsr</c>; the arguments are already in its
+    /// parameters or registers, as for a call. Its parameters, locals and temporaries stay in its
+    /// own frame, so the call graph and memory sharing are the same as for a call. Its temporaries
+    /// are kept apart from the caller's, since they are in its frame.
+    /// </summary>
+    private void GenInline(FunctionSymbol f)
+    {
+        var (caller, callerExit, interruptExit, callerTemps) = (_fn, _inlineExit, _interruptExit, _freeTemps.ToList());
+        _fn = f;
+        _interruptExit = null;
+        _freeTemps.Clear();
+        if (_inlineTemps.TryGetValue(f, out var pool)) _freeTemps.AddRange(pool);
+        var end = NewLabel("inline_end");
+        _inlineExit = end;
+        _out.Add(new Comment($"inline {f.Name}"));
+        StoreRegisterParameters(f);
         GenBlock(f.Declaration!.Body);
-        if (!EndsWithJump()) Emit(Rts);
+        if (_out[^1] is Instr { Mnemonic: Mnemonic.Jmp, Operand: LabelOperand { Label: var l } } && l == end)
+            _out.RemoveAt(_out.Count - 1);
+        Place(end);
+        (_fn, _inlineExit, _interruptExit) = (caller, callerExit, interruptExit);
+        _inlineTemps[f] = _freeTemps.ToList();
+        _freeTemps.Clear();
+        _freeTemps.AddRange(callerTemps);
+        _lastSource = default;
+    }
+
+    /// <summary>
+    /// An interrupt handler: the body, between code that saves and restores the registers it
+    /// changes, then <c>rti</c> (the CPU saved the flags). A call may change every register. Saving
+    /// X or Y goes through A, so A is saved whenever X or Y is.
+    /// </summary>
+    private void GenInterrupt(FunctionSymbol f)
+    {
+        int start = _out.Count;
+        _interruptExit = NewLabel("exit");
+        GenBlock(f.Declaration!.Body);
+        if (_out[^1] is Instr { Mnemonic: Mnemonic.Jmp, Operand: LabelOperand { Label: var l } } && l == _interruptExit)
+            _out.RemoveAt(_out.Count - 1);
+
+        var changed = CpuState.None;
+        foreach (var i in _out.Skip(start).OfType<Instr>())
+            changed |= AsmEffects.Of(i.Mnemonic, i.Mode).Writes;
+        bool x = changed.HasFlag(CpuState.X), y = changed.HasFlag(CpuState.Y);
+        bool a = x || y || changed.HasFlag(CpuState.A);
+
+        var save = new List<AsmItem>();
+        if (a) save.Add(new Instr(Pha));
+        if (x) { save.Add(new Instr(Txa)); save.Add(new Instr(Pha)); }
+        if (y) { save.Add(new Instr(Tya)); save.Add(new Instr(Pha)); }
+        if (save.Count > 0) save.Insert(0, new Comment($"save {string.Join(", ", new[] { a ? "A" : null, x ? "X" : null, y ? "Y" : null }.OfType<string>())}"));
+        _out.InsertRange(start, save);
+
+        Place(_interruptExit);
+        if (y) { Emit(Pla); Emit(Tay); }
+        if (x) { Emit(Pla); Emit(Tax); }
+        if (a) Emit(Pla);
+        Emit(Rti);
+        _interruptExit = null;
     }
 
     // ---------- Statements ----------
@@ -188,6 +278,7 @@ public sealed class CodeGen
             case IfStmt i: GenIf(i); break;
             case WhileStmt w: GenWhile(w); break;
             case ForStmt f: GenFor(f); break;
+            case MatchStmt m: GenMatch(m); break;
             case BreakStmt: Jmp(_loops[^1].Break); break;
             case ContinueStmt: Jmp(_loops[^1].Continue); break;
             case ReturnStmt r: GenReturn(r); break;
@@ -246,11 +337,122 @@ public sealed class CodeGen
         Place(end);
     }
 
+    /// <summary>
+    /// A match uses a jump table when a compare chain would need at least this many compares (a
+    /// range needs two) and the values span at most twice that many. Below that, the chain is
+    /// about as fast (5 cycles per compare against about 30 for the table) and shorter.
+    /// </summary>
+    private const int JumpTableTests = 8;
+
+    /// <summary>
+    /// <c>match</c>: the value is loaded into A once (for an <c>i8</c>, with <c>eor #$80</c>, so that
+    /// signed order becomes unsigned order). Dense cases use a jump table, others a chain of
+    /// <c>cmp</c> and branches. Arm bodies follow, each ending with a jump to the end; the default
+    /// arm (or the end) is where values that match nothing go.
+    /// </summary>
+    private void GenMatch(MatchStmt m)
+    {
+        var arms = m.Arms.Where(a => !a.IsDefault).ToList();
+        var fallback = m.Arms.FirstOrDefault(a => a.IsDefault);
+        var end = NewLabel("mend");
+        if (arms.Count == 0)
+        {
+            GenA(m.Subject); // it may call a function or read a volatile register
+            if (fallback is not null) GenBlock(fallback.Body);
+            return;
+        }
+        var labels = arms.ToDictionary(a => a, _ => NewLabel("case"));
+        var otherwise = fallback is null ? end : NewLabel("default");
+
+        GenA(m.Subject);
+        if (m.Subject.Type.IsSigned) Op(Eor, Byte(0x80));
+
+        var patterns = arms.SelectMany(a => a.Patterns.Select(p => (Arm: a, p.From, p.To))).ToList();
+        int tests = patterns.Sum(p => p.From == p.To ? 1 : 2);
+        int low = patterns.Min(p => p.From), high = patterns.Max(p => p.To);
+        int span = high - low + 1;
+        List<MatchArm> order;
+        // A jump table needs X or Y; inside loops using both, the compare chain needs neither.
+        bool indexFree = !_reserved.Contains(Register.X) || !_reserved.Contains(Register.Y);
+        if (tests >= JumpTableTests && span <= 2 * tests && indexFree)
+        {
+            // Jump table: push the target address minus 1, high byte first, and rts to it.
+            if (low > 0) { Emit(Sec); Op(Sbc, Byte(low)); }
+            if (span < 256) { Op(Cmp, Byte(span)); Branch(Bcs, otherwise); }
+            var reg = FreeIndexRegister(m.Pos);
+            Emit(reg == Register.X ? Tax : Tay);
+            var targets = new Label[span];
+            for (int v = 0; v < span; v++)
+                targets[v] = patterns.FirstOrDefault(p => p.From <= v + low && v + low <= p.To).Arm is { } arm ? labels[arm] : otherwise;
+            var hiTable = NewLabel("jumphi");
+            var loTable = NewLabel("jumplo");
+            var mode = reg == Register.X ? AbsoluteX : AbsoluteY;
+            Emit(Lda, mode, new LabelOperand(hiTable)); Emit(Pha);
+            Emit(Lda, mode, new LabelOperand(loTable)); Emit(Pha);
+            Emit(Rts);
+            Place(hiTable); _out.Add(new LabelTable(targets, High: true, Offset: -1));
+            Place(loTable); _out.Add(new LabelTable(targets, High: false, Offset: -1));
+            order = arms;
+        }
+        else
+        {
+            // Compare chain, in source order. The last test is inverted to go to the default, so the
+            // last arm's body follows it directly.
+            for (int i = 0; i < patterns.Count; i++)
+            {
+                var (arm, from, to) = patterns[i];
+                if (i < patterns.Count - 1) Test(from, to, labels[arm]);
+                else TestInverted(from, to, otherwise);
+            }
+            order = [arms[^1], .. arms.Take(arms.Count - 1)];
+        }
+
+        var bodies = order.Select(a => (labels[a], a.Body)).ToList();
+        if (fallback is not null) bodies.Add((otherwise, fallback.Body));
+        for (int i = 0; i < bodies.Count; i++)
+        {
+            Place(bodies[i].Item1);
+            GenBlock(bodies[i].Body);
+            if (i < bodies.Count - 1 && !EndsWithJump()) Jmp(end);
+        }
+        Place(end);
+
+        // Branches to target when A (unsigned) is in from..to.
+        void Test(int from, int to, Label target)
+        {
+            if (from == to) { Op(Cmp, Byte(from)); Branch(Beq, target); }
+            else if (from == 0 && to == 255) Jmp(target);
+            else if (from == 0) { Op(Cmp, Byte(to + 1)); Branch(Bcc, target); }
+            else if (to == 255) { Op(Cmp, Byte(from)); Branch(Bcs, target); }
+            else
+            {
+                var skip = NewLabel("next");
+                Op(Cmp, Byte(from)); Branch(Bcc, skip);
+                Op(Cmp, Byte(to + 1)); Branch(Bcc, target);
+                Place(skip);
+            }
+        }
+
+        // Branches to target when A is not in from..to, and falls through when it is.
+        void TestInverted(int from, int to, Label target)
+        {
+            if (from == to) { Op(Cmp, Byte(from)); Branch(Bne, target); }
+            else if (from == 0 && to == 255) { }
+            else if (from == 0) { Op(Cmp, Byte(to + 1)); Branch(Bcs, target); }
+            else if (to == 255) { Op(Cmp, Byte(from)); Branch(Bcc, target); }
+            else
+            {
+                Op(Cmp, Byte(from)); Branch(Bcc, target);
+                Op(Cmp, Byte(to + 1)); Branch(Bcs, target);
+            }
+        }
+    }
+
     private void GenReturn(ReturnStmt r)
     {
         if (r.Value is null)
         {
-            Emit(Rts);
+            ReturnJump();
             return;
         }
         var value = r.Value;
@@ -298,14 +500,14 @@ public sealed class CodeGen
                     var isTrue = NewLabel("rtrue");
                     GenCond(value, isTrue, true);
                     Set(setFalse, falseOp);
-                    Emit(Rts);
+                    ReturnJump();
                     Place(isTrue);
                     Set(setTrue, trueOp);
                 }
                 break;
             }
         }
-        Emit(Rts);
+        ReturnJump();
     }
 
     // ---------- Assignment ----------
@@ -726,7 +928,11 @@ public sealed class CodeGen
             case NameExpr { Symbol: { InMemory: true } v }:
                 return (Var(v), Var(v, 1));
             case CallExpr { AddressOf: { } av }:
-                return (new ImmVarByte(av, false), new ImmVarByte(av, true));
+            {
+                // A field of a struct variable is a view: its storage plus an offset.
+                var (v, offset) = av.AliasOf is { } storage ? (storage, av.AliasOffset) : (av, 0);
+                return (new ImmVarByte(v, false, offset), new ImmVarByte(v, true, offset));
+            }
             case IndexExpr ix when !IsPointerIndex(ix) && ix.Index.ConstValue is long i:
                 var arr = ArrayOf(ix);
                 return (Var(arr, (int)i), Var(arr, HighTable(arr) + (int)i));
@@ -1344,7 +1550,8 @@ public sealed class CodeGen
         foreach (var (reg, value) in fn.FixedInputs)
             if (reg == Register.Carry) Emit(value != 0 ? Sec : Clc);
 
-        Emit(Jsr, Absolute, fn.FixedAddress is int at ? new AddrOperand(at) : new LabelOperand(_functionLabels[fn]));
+        if (fn.IsInline) GenInline(fn);
+        else Emit(Jsr, Absolute, fn.FixedAddress is int at ? new AddrOperand(at) : new LabelOperand(_functionLabels[fn]));
         foreach (var t in temps) Release(t);
     }
 
@@ -1783,6 +1990,7 @@ public sealed class CodeGen
         IfStmt i => AssignsVar(i.Then, v) || (i.Else is not null && AssignsVar(i.Else, v)),
         WhileStmt w => AssignsVar(w.Body, v),
         ForStmt f => AssignsVar(f.Body, v),
+        MatchStmt m => m.Arms.Any(a => AssignsVar(a.Body, v)),
         AsmStmt asm => asm.Effects!.VariablesWritten.Contains(v),
         _ => false,
     };

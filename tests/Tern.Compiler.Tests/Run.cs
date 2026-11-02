@@ -10,14 +10,27 @@ public sealed class Run
     public Ram Ram { get; } = new();
     public Cpu6502 Cpu { get; }
 
-    private Run(string source, long maxCycles, string? sourcePath, Action<Ram>? setup, string? libraryDirectory)
+    /// <summary>The number of IRQs the CPU took.</summary>
+    public int Interrupts { get; }
+
+    private Run(string source, long maxCycles, string? sourcePath, Action<Ram>? setup, string? libraryDirectory, long irqEvery)
     {
         Result = TernCompiler.Compile(source, sourcePath: sourcePath, libraryDirectory: libraryDirectory);
         Ram.Load((ushort)Result.LoadAddress, Result.Image);
         setup?.Invoke(Ram);
-        Cpu = new Cpu6502(Ram) { PC = (ushort)Result.Entry, SP = 0xFF };
+        Cpu = new Cpu6502(Ram) { PC = (ushort)Result.Entry, SP = 0xFF, I = true }; // as after reset: no IRQ until the program enables it
+        long nextIrq = irqEvery;
         while (Cpu.PC != Result.HaltAddress)
         {
+            if (irqEvery > 0 && Cpu.Cycles >= nextIrq)
+            {
+                // The IRQ line stays raised until the CPU takes it, as a VIC-II raster interrupt does.
+                if (Cpu.Irq())
+                {
+                    Interrupts++;
+                    nextIrq = Cpu.Cycles + irqEvery;
+                }
+            }
             Cpu.Step();
             if (Cpu.Cycles > maxCycles)
                 throw new Xunit.Sdk.XunitException($"Program did not finish within {maxCycles} cycles (PC=${Cpu.PC:X4})\n{Result.Listing}");
@@ -25,8 +38,10 @@ public sealed class Run
     }
 
     /// <param name="setup">Prepares memory after loading the program, e.g. with stand-ins for ROM routines.</param>
-    public static Run Program(string source, long maxCycles = 5_000_000, string? sourcePath = null, Action<Ram>? setup = null, string? libraryDirectory = null) =>
-        new(source, maxCycles, sourcePath, setup, libraryDirectory);
+    /// <param name="irqEvery">If set, raises an IRQ this many cycles after the last one was taken (taken once interrupts are enabled).</param>
+    public static Run Program(string source, long maxCycles = 5_000_000, string? sourcePath = null, Action<Ram>? setup = null,
+        string? libraryDirectory = null, long irqEvery = 0) =>
+        new(source, maxCycles, sourcePath, setup, libraryDirectory, irqEvery);
 
     public int Address(string name) =>
         Result.Symbols.TryGetValue(name, out var a) ? a : throw new KeyNotFoundException($"No symbol '{name}'");
