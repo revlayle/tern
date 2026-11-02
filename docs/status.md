@@ -5,12 +5,12 @@ Owned by the coding session. Updated at the end of every coding session.
 ## Current
 
 - **Milestone:** M9 (closing the gap with assembly). Everything on the roadmap list is done except two small parts of "shorter `match` exits" (below); the done-when criteria are met. Ready for `/review`.
-- **Branch:** `m9-close-gap` (from `main` after the M8 merge). 975 tests pass (36 CPU, 939 compiler).
+- **Branch:** `m9-close-gap` (from `main` after the M8 merge). 1011 tests pass (36 CPU, 975 compiler).
 - **Next step:** review of M9, then merge. After that, M10 (cross-platform standard library) in `docs/roadmap.md`. Largest remaining gaps to hand-written assembly (`tests/benchmarks/comparison.md`): `bubble` (240,160 vs 130,784 cycles), `copy`, `crc8` (the accumulator is stored to memory after every bit), `sum16`.
 
 ## Done
 
-- **M9, closing the gap with assembly** (2026-11-02). 975 tests pass (36 CPU, 939 compiler). Tern totals in `tests/benchmarks/comparison.md` (bytes / cycles, measured from `main` on): 1373 / 526134 -> **1225 / 500041** (assembly 947 / 324419). `sieve` 88 / 22030 -> 48 / 8745 (assembly 47 / 8489); `crc8` 48 / 48189 -> 41 / 37949; `interp` 329 / 7706 -> 241 / 6176. `tests/benchmarks/baseline.txt` (whole program, startup included): 1664 / 535295 -> 1516 / 509175.
+- **M9, closing the gap with assembly** (2026-11-02). 1011 tests pass (36 CPU, 975 compiler). Tern totals in `tests/benchmarks/comparison.md` (bytes / cycles, measured from `main` on): 1373 / 526134 -> **1225 / 500014** (assembly 947 / 324419). `sieve` 88 / 22030 -> 48 / 8745 (assembly 47 / 8489); `crc8` 48 / 48189 -> 41 / 37949; `interp` 329 / 7706 -> 241 / 6149. `tests/benchmarks/baseline.txt` (whole program, startup included): 1664 / 535295 -> 1516 / 509175.
   - **Variable `u8` step** (`for m in a..=255 step n`): `ForStmt.VariableStep`, `Checker.CheckVariableStep`, `CodeGen.GenFor` / `StepGeneral`. The step is evaluated once (used in place if it is a local the body does not change, else copied to a temporary). With `..=255` the loop ends on the carry: `adc` / `bcc loop` (also for constant steps now). Otherwise: add, `bcs end`, compare with the bound. Errors: signed or 16-bit step, counter not `u8`, counting down. A constant empty range with a variable step emits no code. Tests: `VariableStepTests`.
   - **`inline asm fn`**: parsed as `inline` + `asm fn`; register parameters only (a memory parameter is an error; fixed inputs and `@ addr` were already errors for asm fns); `rts`/`rti` in the body is an error; `GenInline` skips the register-parameter handling for asm functions. Flag returns and the empty body need no extra code: the call is the copied instructions and the existing branch/store of the flag. `c64.interrupts_on()` / `interrupts_off()` are `inline asm fn`. Tests: `InlineAsmTests` (also the `while` form of the empty body, which only holds for the first test).
   - **Optimizer** (`Backend/Optimizer.cs`):

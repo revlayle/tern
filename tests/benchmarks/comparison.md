@@ -19,13 +19,13 @@ its results are checked against the same C# computation. Lower is better.
 | fib16 | bytes | 183 | 141 | 271 | 366 |
 | | cycles | 2,246 | 1,397 | 3,891 | 6,601 |
 | interp | bytes | 241 | 186 | 385 | 545 |
-| | cycles | 6,176 | 4,713 | 7,777 | 11,022 |
+| | cycles | 6,149 | 4,713 | 7,777 | 11,022 |
 | sieve | bytes | 48 | 47 | 147 | 104 |
 | | cycles | 8,745 | 8,489 | 19,232 | 22,437 |
 | sum16 | bytes | 130 | 113 | 202 | 239 |
 | | cycles | 34,654 | 27,430 | 39,100 | 58,830 |
 | **total** | bytes | 1225 | 947 | 2102 | 2822 |
-| | cycles | 500,041 | 324,419 | 698,705 | 1,453,115 |
+| | cycles | 500,014 | 324,419 | 698,705 | 1,453,115 |
 
 Relative to the Tern version (total, Tern = 100%):
 
