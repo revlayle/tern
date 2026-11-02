@@ -123,7 +123,7 @@ public class OptimizerTests
     [Theory]
     [InlineData("f()")]
     [InlineData("p[0] = 9")]
-    [InlineData("asm {\n nop\n }")]
+    [InlineData("asm {\n lda #7\n sta $C100\n }")]
     public void Calls_pointer_writes_and_assembly_make_the_optimizer_forget(string between)
     {
         var r = Run.Program($$"""
@@ -139,7 +139,56 @@ public class OptimizerTests
             }
             """);
         Assert.Contains("lda x / sta v", Main(r));
-        Assert.Equal(between == "asm {\n nop\n }" ? 4 : 9, r.U8("v"));
+        Assert.Equal(between.StartsWith("asm") ? 7 : 9, r.U8("v"));
+    }
+
+    [Theory]
+    [InlineData("nop", true)]
+    [InlineData("cli", true)]
+    [InlineData("sei", true)]
+    [InlineData("ldy $D012", true)]     // changes Y and the flags, not A or memory
+    [InlineData("lda #1", false)]       // changes A
+    [InlineData("sta $D020", false)]    // a write to a fixed address may change any variable
+    [InlineData("inc $D020", false)]
+    public void Assembly_forgets_only_what_it_changes(string instruction, bool kept)
+    {
+        var r = Run.Program($$"""
+            var x: u8
+            var y: u8
+            fn main() {
+                x = 5
+                asm {
+                    {{instruction}}
+                }
+                y = x
+            }
+            """);
+        // A held 5 (the value just stored in x). Kept: "sta y" follows the block with no reload.
+        Assert.Equal(kept, !Main(r).Contains("lda x"));
+        Assert.Equal(5, r.U8("y"));
+    }
+
+    [Fact]
+    public void Assembly_that_writes_a_variable_makes_the_optimizer_forget_only_that_one()
+    {
+        var r = Run.Program("""
+            var x: u8
+            var y: u8
+            var z: u8
+            fn main() {
+                x = 5
+                y = 6
+                asm {
+                    inc x
+                }
+                z = y
+                y = x
+            }
+            """);
+        Assert.Equal(6, r.U8("y"));
+        Assert.Equal(6, r.U8("z"));
+        // A held 6 and the block did not change it, so "sta z" needs no load; x was changed, so it is loaded again.
+        Assert.Contains("inc x / sta z / lda x / sta y", Main(r));
     }
 
     [Fact]

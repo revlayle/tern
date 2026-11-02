@@ -8,7 +8,8 @@ namespace Tern.Compiler.Backend;
 /// <summary>
 /// Improves the generated code of one function without changing what it does (roadmap M7):
 /// removes unreachable instructions, and loads and stores of values a register already holds.
-/// Instructions from assembly blocks are never changed, and volatile memory (spec 4) is never
+/// Instructions from assembly blocks are never changed, but what they change is tracked like the
+/// compiler's own (a call, or a write to a fixed address, forgets memory); volatile memory (spec 4) is never
 /// cached. Labels in a function's code are only used inside it (assembly labels are local to their
 /// block), so the whole function can be analysed at once.
 /// </summary>
@@ -166,9 +167,10 @@ public static class Optimizer
     /// <summary>The state after <paramref name="i"/>, given the state before it.</summary>
     private static void Step(State s, Instr i, FunctionSymbol function)
     {
-        if (FromAsm(i) || i.Mnemonic == Jsr)
+        if (i.Mnemonic is Jsr or Brk)
         {
-            // An asm block or a call may change any register and any ordinary memory.
+            // A call may change any register and any ordinary memory. Other instructions of an asm
+            // block are followed like compiler-generated ones: they change what AsmEffects says.
             s.Clear();
             return;
         }
