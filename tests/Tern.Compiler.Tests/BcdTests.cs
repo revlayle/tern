@@ -182,6 +182,52 @@ public class BcdTests
     }
 
     [Fact]
+    public void A_bcd_add_in_main_survives_an_interrupt_handler_that_adds_in_binary()
+    {
+        var r = Run.Program("""
+            import bcd
+            var score: [u8; 3]
+            var seven: [u8; 3]
+            var acc: u8
+            var diff: u8
+            var ticks: u16
+            interrupt fn frame() {
+                acc += 57
+                diff = diff - 3
+                ticks += 1
+            }
+            fn main() {
+                seven[0] = $07
+                asm {
+                    sei
+                    lda #frame.lo
+                    sta $FFFE
+                    lda #frame.hi
+                    sta $FFFF
+                    cli
+                }
+                for _ in 0..200 {
+                    for _ in 0..10 {
+                        bcd.add(addr(score), addr(seven), 3)
+                    }
+                    bcd.inc(addr(score), 3)
+                }
+                asm { sei }
+            }
+            """, maxCycles: 5_000_000, irqEvery: 61);
+        Assert.True(r.Interrupts > 500, $"{r.Interrupts} interrupts");
+        // 2000 additions of 7 and 200 increments, each a whole number of decimal additions despite the interrupts.
+        Assert.Equal(2000 * 7 + 200, r.U8("score") / 16 * 10 + r.U8("score") % 16 + 100 * (r.U8("score", 1) / 16 * 10 + r.U8("score", 1) % 16)
+            + 10000 * (r.U8("score", 2) / 16 * 10 + r.U8("score", 2) % 16));
+        // The handler's additions and subtractions were binary: it cleared decimal mode.
+        Assert.Equal(r.U16("ticks") * 57 & 0xFF, r.U8("acc"));
+        Assert.Equal(-r.U16("ticks") * 3 & 0xFF, r.U8("diff"));
+        var listing = r.Result.Listing;
+        var handler = listing[listing.IndexOf("\nframe:", StringComparison.Ordinal)..];
+        Assert.Contains("cld", handler[..handler.IndexOf("rti", StringComparison.Ordinal)]);
+    }
+
+    [Fact]
     public void An_unused_bcd_module_adds_no_bytes()
     {
         Assert.Equal(TernCompiler.Compile("fn main() { }").Image.Length, TernCompiler.Compile("import bcd\nfn main() { }").Image.Length);

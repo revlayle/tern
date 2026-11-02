@@ -1,0 +1,638 @@
+// Numbers wider than 16 bits: unsigned 24-bit (U24) and 32-bit (U32), as structs of 16-bit halves,
+// little-endian, so `score.hi` is a plain u16 and `score.lo.hi` a single byte. Every function takes
+// pointers (structs are never passed), and the result goes into the first operand:
+//     wide.add32(addr(score), addr(bonus))
+// The loops are simple; converting to decimal costs thousands of cycles, so convert when the value
+// changes, or keep a score that is only displayed in a bcd counter.
+//
+// The work bytes are private, so use the routines from main only, or from one interrupt handler only.
+import text
+
+struct U32 { lo: u16, hi: u16 }
+struct U24 { lo: u16, hi: u8 }
+
+// The remainders of div24 and div32. Read them right after the call.
+var remainder24: U24
+var remainder32: U32
+
+private var wm: [u8; 4]
+private var wr: [u8; 4]
+private var wp: [u8; 4]
+private var digits: [u8; 5]
+private data DIGIT_SCREEN = screen"0123456789"
+
+// The packed decimal digits in `digits`, written at dst from position `top` (0 = ones) down to 0.
+// With skip set, leading zeros are not written. Returns the number of digits written.
+private fn put_digits(dst: ptr u8, top: u8, skip: bool) -> u8 {
+    var count: u8 = 0
+    for k in 0..=top {
+        var pos: u8 = top - k
+        var b: u8 = digits[pos >> 1]
+        var d: u8 = b & 15
+        if (pos & 1) != 0 { d = b >> 4 }
+        if skip && d == 0 && pos != 0 && count == 0 { continue }
+        dst[count] = DIGIT_SCREEN[d]
+        count += 1
+    }
+    return count
+}
+
+// ---- 24-bit ----
+
+// p = v.
+fn set24(p: ptr U24, v: u16) {
+    p.lo = v
+    p.hi = 0
+}
+
+// dst = src.
+asm fn copy24(dst: ptr U24, src: ptr U24) {
+    ldy #2
+.loop:
+    lda (src),y
+    sta (dst),y
+    dey
+    bpl .loop
+}
+
+// p += q.
+asm fn add24(p: ptr U24, q: ptr U24) {
+    ldy #0
+    ldx #3
+    clc
+.loop:
+    lda (p),y
+    adc (q),y
+    sta (p),y
+    iny
+    dex
+    bne .loop
+}
+
+// p -= q.
+asm fn sub24(p: ptr U24, q: ptr U24) {
+    ldy #0
+    ldx #3
+    sec
+.loop:
+    lda (p),y
+    sbc (q),y
+    sta (p),y
+    iny
+    dex
+    bne .loop
+}
+
+// p += v.
+asm fn add24_u16(p: ptr U24, v: u16) {
+    ldy #0
+    clc
+    lda (p),y
+    adc v
+    sta (p),y
+    iny
+    lda (p),y
+    adc v+1
+    sta (p),y
+    iny
+    lda (p),y
+    adc #0
+    sta (p),y
+}
+
+// p -= v.
+asm fn sub24_u16(p: ptr U24, v: u16) {
+    ldy #0
+    sec
+    lda (p),y
+    sbc v
+    sta (p),y
+    iny
+    lda (p),y
+    sbc v+1
+    sta (p),y
+    iny
+    lda (p),y
+    sbc #0
+    sta (p),y
+}
+
+// p += 1.
+asm fn inc24(p: ptr U24) {
+    ldy #0
+.loop:
+    lda (p),y
+    clc
+    adc #1
+    sta (p),y
+    bcc .done
+    iny
+    cpy #3
+    bcc .loop
+.done:
+}
+
+// True if p < q.
+asm fn less24(p: ptr U24, q: ptr U24) -> bool using carry {
+    ldy #0
+    ldx #3
+    clc
+.loop:
+    lda (q),y
+    sbc (p),y           // q - p - 1: no borrow if q > p
+    iny
+    dex
+    bne .loop
+}
+
+// True if p == q.
+asm fn equal24(p: ptr U24, q: ptr U24) -> bool using carry {
+    ldy #2
+.loop:
+    lda (p),y
+    cmp (q),y
+    bne .no
+    dey
+    bpl .loop
+    sec
+    rts
+.no:
+    clc
+}
+
+// True if p == 0.
+asm fn is_zero24(p: ptr U24) -> bool using zero {
+    ldy #0
+    lda (p),y
+    iny
+    ora (p),y
+    iny
+    ora (p),y
+}
+
+// p *= q, the low 24 bits of the product. Shift-and-add.
+asm fn mul24(p: ptr U24, q: ptr U24) {
+    ldy #2
+.copy:
+    lda (p),y
+    sta wm,y
+    lda (q),y
+    sta wr,y
+    lda #0
+    sta wp,y
+    dey
+    bpl .copy
+    ldx #24
+.loop:
+    lsr wr+2
+    ror wr+1
+    ror wr+0
+    bcc .skip
+    clc
+    lda wp+0
+    adc wm+0
+    sta wp+0
+    lda wp+1
+    adc wm+1
+    sta wp+1
+    lda wp+2
+    adc wm+2
+    sta wp+2
+.skip:
+    asl wm
+    rol wm+1
+    rol wm+2
+    dex
+    bne .loop
+    ldy #2
+.out:
+    lda wp,y
+    sta (p),y
+    dey
+    bpl .out
+}
+
+// p = p / q, and p % q in remainder24. Shift-and-subtract. Division by zero gives no error.
+asm fn div24(p: ptr U24, q: ptr U24) {
+    ldy #2
+.copy:
+    lda (p),y
+    sta wm,y
+    lda (q),y
+    sta wr,y
+    lda #0
+    sta wp,y
+    dey
+    bpl .copy
+    ldx #24
+.loop:
+    asl wm
+    rol wm+1
+    rol wm+2
+    rol wp
+    rol wp+1
+    rol wp+2
+    bcs .subtract       // 25 bits: larger than q
+    sec
+    lda wp+0
+    sbc wr+0
+    lda wp+1
+    sbc wr+1
+    lda wp+2
+    sbc wr+2
+    bcc .next
+.subtract:
+    sec
+    lda wp+0
+    sbc wr+0
+    sta wp+0
+    lda wp+1
+    sbc wr+1
+    sta wp+1
+    lda wp+2
+    sbc wr+2
+    sta wp+2
+    inc wm
+.next:
+    dex
+    bne .loop
+    ldy #2
+.out:
+    lda wm,y
+    sta (p),y
+    lda wp,y
+    sta remainder24,y
+    dey
+    bpl .out
+}
+
+// Write the decimal digits of p at dst, without leading zeros. Returns the number of digits (1 to 8).
+// dst needs room for 8.
+fn dec24(dst: ptr u8, p: ptr U24) -> u8 {
+    to_bcd24(p)
+    return put_digits(dst, 7, true)
+}
+
+// Write p as exactly `width` decimal digits at dst (width 1 to 8), with leading zeros.
+// The value must fit in that many digits; if it does not, the upper digits are lost.
+fn dec24z(dst: ptr u8, p: ptr U24, width: u8) {
+    to_bcd24(p)
+    put_digits(dst, width - 1, false)
+}
+
+// Write p as 6 hex digits at dst.
+fn hex24(dst: ptr u8, p: ptr U24) {
+    text.hex8(dst, p.hi)
+    text.hex16(dst + 2, p.lo)
+}
+
+// Convert p to packed decimal in the private bytes `digits`: shift the bits out of a copy, doubling
+// the decimal number and adding each bit.
+private asm fn to_bcd24(p: ptr U24) {
+    ldy #2
+.copy:
+    lda (p),y
+    sta wm,y
+    dey
+    bpl .copy
+    lda #0
+    sta digits
+    sta digits+1
+    sta digits+2
+    sta digits+3
+    sta digits+4
+    ldx #24
+.loop:
+    asl wm
+    rol wm+1
+    rol wm+2
+    sed
+    lda digits
+    adc digits
+    sta digits
+    lda digits+1
+    adc digits+1
+    sta digits+1
+    lda digits+2
+    adc digits+2
+    sta digits+2
+    lda digits+3
+    adc digits+3
+    sta digits+3
+    cld
+    dex
+    bne .loop
+}
+
+// ---- 32-bit ----
+
+// p = v.
+fn set32(p: ptr U32, v: u16) {
+    p.lo = v
+    p.hi = 0
+}
+
+// dst = src.
+asm fn copy32(dst: ptr U32, src: ptr U32) {
+    ldy #3
+.loop:
+    lda (src),y
+    sta (dst),y
+    dey
+    bpl .loop
+}
+
+// p += q.
+asm fn add32(p: ptr U32, q: ptr U32) {
+    ldy #0
+    ldx #4
+    clc
+.loop:
+    lda (p),y
+    adc (q),y
+    sta (p),y
+    iny
+    dex
+    bne .loop
+}
+
+// p -= q.
+asm fn sub32(p: ptr U32, q: ptr U32) {
+    ldy #0
+    ldx #4
+    sec
+.loop:
+    lda (p),y
+    sbc (q),y
+    sta (p),y
+    iny
+    dex
+    bne .loop
+}
+
+// p += v.
+asm fn add32_u16(p: ptr U32, v: u16) {
+    ldy #0
+    clc
+    lda (p),y
+    adc v
+    sta (p),y
+    iny
+    lda (p),y
+    adc v+1
+    sta (p),y
+    iny
+    lda (p),y
+    adc #0
+    sta (p),y
+    iny
+    lda (p),y
+    adc #0
+    sta (p),y
+}
+
+// p -= v.
+asm fn sub32_u16(p: ptr U32, v: u16) {
+    ldy #0
+    sec
+    lda (p),y
+    sbc v
+    sta (p),y
+    iny
+    lda (p),y
+    sbc v+1
+    sta (p),y
+    iny
+    lda (p),y
+    sbc #0
+    sta (p),y
+    iny
+    lda (p),y
+    sbc #0
+    sta (p),y
+}
+
+// p += 1.
+asm fn inc32(p: ptr U32) {
+    ldy #0
+.loop:
+    lda (p),y
+    clc
+    adc #1
+    sta (p),y
+    bcc .done
+    iny
+    cpy #4
+    bcc .loop
+.done:
+}
+
+// True if p < q.
+asm fn less32(p: ptr U32, q: ptr U32) -> bool using carry {
+    ldy #0
+    ldx #4
+    clc
+.loop:
+    lda (q),y
+    sbc (p),y           // q - p - 1: no borrow if q > p
+    iny
+    dex
+    bne .loop
+}
+
+// True if p == q.
+asm fn equal32(p: ptr U32, q: ptr U32) -> bool using carry {
+    ldy #3
+.loop:
+    lda (p),y
+    cmp (q),y
+    bne .no
+    dey
+    bpl .loop
+    sec
+    rts
+.no:
+    clc
+}
+
+// True if p == 0.
+asm fn is_zero32(p: ptr U32) -> bool using zero {
+    ldy #0
+    lda (p),y
+    iny
+    ora (p),y
+    iny
+    ora (p),y
+    iny
+    ora (p),y
+}
+
+// p *= q, the low 32 bits of the product. Shift-and-add.
+asm fn mul32(p: ptr U32, q: ptr U32) {
+    ldy #3
+.copy:
+    lda (p),y
+    sta wm,y
+    lda (q),y
+    sta wr,y
+    lda #0
+    sta wp,y
+    dey
+    bpl .copy
+    ldx #32
+.loop:
+    lsr wr+3
+    ror wr+2
+    ror wr+1
+    ror wr+0
+    bcc .skip
+    clc
+    lda wp+0
+    adc wm+0
+    sta wp+0
+    lda wp+1
+    adc wm+1
+    sta wp+1
+    lda wp+2
+    adc wm+2
+    sta wp+2
+    lda wp+3
+    adc wm+3
+    sta wp+3
+.skip:
+    asl wm
+    rol wm+1
+    rol wm+2
+    rol wm+3
+    dex
+    bne .loop
+    ldy #3
+.out:
+    lda wp,y
+    sta (p),y
+    dey
+    bpl .out
+}
+
+// p = p / q, and p % q in remainder32. Shift-and-subtract. Division by zero gives no error.
+asm fn div32(p: ptr U32, q: ptr U32) {
+    ldy #3
+.copy:
+    lda (p),y
+    sta wm,y
+    lda (q),y
+    sta wr,y
+    lda #0
+    sta wp,y
+    dey
+    bpl .copy
+    ldx #32
+.loop:
+    asl wm
+    rol wm+1
+    rol wm+2
+    rol wm+3
+    rol wp
+    rol wp+1
+    rol wp+2
+    rol wp+3
+    bcs .subtract       // 33 bits: larger than q
+    sec
+    lda wp+0
+    sbc wr+0
+    lda wp+1
+    sbc wr+1
+    lda wp+2
+    sbc wr+2
+    lda wp+3
+    sbc wr+3
+    bcc .next
+.subtract:
+    sec
+    lda wp+0
+    sbc wr+0
+    sta wp+0
+    lda wp+1
+    sbc wr+1
+    sta wp+1
+    lda wp+2
+    sbc wr+2
+    sta wp+2
+    lda wp+3
+    sbc wr+3
+    sta wp+3
+    inc wm
+.next:
+    dex
+    bne .loop
+    ldy #3
+.out:
+    lda wm,y
+    sta (p),y
+    lda wp,y
+    sta remainder32,y
+    dey
+    bpl .out
+}
+
+// Write the decimal digits of p at dst, without leading zeros. Returns the number of digits (1 to 10).
+// dst needs room for 10.
+fn dec32(dst: ptr u8, p: ptr U32) -> u8 {
+    to_bcd32(p)
+    return put_digits(dst, 9, true)
+}
+
+// Write p as exactly `width` decimal digits at dst (width 1 to 10), with leading zeros.
+// The value must fit in that many digits; if it does not, the upper digits are lost.
+fn dec32z(dst: ptr u8, p: ptr U32, width: u8) {
+    to_bcd32(p)
+    put_digits(dst, width - 1, false)
+}
+
+// Write p as 8 hex digits at dst.
+fn hex32(dst: ptr u8, p: ptr U32) {
+    text.hex16(dst, p.hi)
+    text.hex16(dst + 4, p.lo)
+}
+
+// Convert p to packed decimal in the private bytes `digits`: shift the bits out of a copy, doubling
+// the decimal number and adding each bit.
+private asm fn to_bcd32(p: ptr U32) {
+    ldy #3
+.copy:
+    lda (p),y
+    sta wm,y
+    dey
+    bpl .copy
+    lda #0
+    sta digits
+    sta digits+1
+    sta digits+2
+    sta digits+3
+    sta digits+4
+    ldx #32
+.loop:
+    asl wm
+    rol wm+1
+    rol wm+2
+    rol wm+3
+    sed
+    lda digits
+    adc digits
+    sta digits
+    lda digits+1
+    adc digits+1
+    sta digits+1
+    lda digits+2
+    adc digits+2
+    sta digits+2
+    lda digits+3
+    adc digits+3
+    sta digits+3
+    lda digits+4
+    adc digits+4
+    sta digits+4
+    cld
+    dex
+    bne .loop
+}
