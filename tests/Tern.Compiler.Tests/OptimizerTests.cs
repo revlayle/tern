@@ -370,6 +370,85 @@ public class OptimizerTests
         var code = Main(r);
         Assert.DoesNotContain("jmp main.endif", code);
     }
+
+    [Fact]
+    public void The_bit_7_fold_needs_a_plain_load_not_an_indexed_one()
+    {
+        // A holds a[0]; the arms load a[i], which is a different byte.
+        var r = Run.Program("""
+            var a: [u8; 4]
+            var b: [u8; 4]
+            fn main() {
+                a[0] = $80
+                a[1] = 1
+                a[2] = 2
+                a[3] = 3
+                for i in 0..4 {
+                    var t: u8 = a[0]
+                    if t & $80 != 0 { b[i] = a[i] << 1 } else { b[i] = a[i] << 1 }
+                }
+            }
+            """);
+        Assert.Equal([0, 2, 4, 6], r.Ram.Bytes.AsSpan(r.Address("b"), 4).ToArray());
+    }
+
+    [Fact]
+    public void Assembly_that_patches_its_own_code_makes_the_optimizer_forget()
+    {
+        var r = Run.Program("""
+            var out: u8
+            fn main() {
+                var v: u8 = 7
+                asm {
+                    lda v
+                    sta .smc+1
+                .smc:
+                    lda #0
+                }
+                out = 0
+            }
+            """);
+        Assert.Equal(0, r.U8("out"));
+    }
+
+    [Fact]
+    public void An_index_register_is_loaded_once_for_several_arrays_with_the_same_index()
+    {
+        var r = Run.Program("""
+            var a: [u8; 4] = [1, 2, 3, 4]
+            var c: [u8; 4] = [10, 20, 30, 40]
+            var b: [u8; 4]
+            fn main() {
+                var i: u8 = 2
+                b[i] = a[i] + c[i]
+            }
+            """);
+        Assert.Equal(33, r.U8("b", 2));
+        Assert.Equal(1, Main(r).Split("ldx main.i").Length - 1);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(3)]
+    public void A_while_test_after_a_body_ending_in_asm_reads_that_blocks_flag(int start)
+    {
+        var r = Run.Program($$"""
+            var n: u8 = {{start}}
+            var count: u8
+            inline asm fn is_zero() -> bool using zero {}
+            fn main() {
+                asm { lda n }
+                while !is_zero() {
+                    count += 1
+                    asm {
+                        dec n
+                        lda n
+                    }
+                }
+            }
+            """);
+        Assert.Equal(start, r.U8("count"));
+    }
 }
 
 /// <summary>A parameter passed in X or Y stays in its register when the body allows it (roadmap M7).</summary>

@@ -5,12 +5,12 @@ Owned by the coding session. Updated at the end of every coding session.
 ## Current
 
 - **Milestone:** M9 (closing the gap with assembly). Everything on the roadmap list is done except two small parts of "shorter `match` exits" (below); the done-when criteria are met. Ready for `/review`.
-- **Branch:** `m9-close-gap` (from `main` after the M8 merge). 1011 tests pass (36 CPU, 975 compiler).
+- **Branch:** `m9-close-gap` (from `main` after the M8 merge). 1016 tests pass (36 CPU, 980 compiler).
 - **Next step:** review of M9, then merge. After that, M10 (cross-platform standard library) in `docs/roadmap.md`. Largest remaining gaps to hand-written assembly (`tests/benchmarks/comparison.md`): `bubble` (240,160 vs 130,784 cycles), `copy`, `crc8` (the accumulator is stored to memory after every bit), `sum16`.
 
 ## Done
 
-- **M9, closing the gap with assembly** (2026-11-02). 1011 tests pass (36 CPU, 975 compiler). Tern totals in `tests/benchmarks/comparison.md` (bytes / cycles, measured from `main` on): 1373 / 526134 -> **1225 / 500014** (assembly 947 / 324419). `sieve` 88 / 22030 -> 48 / 8745 (assembly 47 / 8489); `crc8` 48 / 48189 -> 41 / 37949; `interp` 329 / 7706 -> 241 / 6149. `tests/benchmarks/baseline.txt` (whole program, startup included): 1664 / 535295 -> 1516 / 509175.
+- **M9, closing the gap with assembly** (2026-11-02). 1016 tests pass (36 CPU, 980 compiler). Tern totals in `tests/benchmarks/comparison.md` (bytes / cycles, measured from `main` on): 1373 / 526134 -> **1225 / 500014** (assembly 947 / 324419). `sieve` 88 / 22030 -> 48 / 8745 (assembly 47 / 8489); `crc8` 48 / 48189 -> 41 / 37949; `interp` 329 / 7706 -> 241 / 6149. `tests/benchmarks/baseline.txt` (whole program, startup included): 1664 / 535295 -> 1516 / 509175.
   - **Variable `u8` step** (`for m in a..=255 step n`): `ForStmt.VariableStep`, `Checker.CheckVariableStep`, `CodeGen.GenFor` / `StepGeneral`. The step is evaluated once (used in place if it is a local the body does not change, else copied to a temporary). With `..=255` the loop ends on the carry: `adc` / `bcc loop` (also for constant steps now). Otherwise: add, `bcs end`, compare with the bound. Errors: signed or 16-bit step, counter not `u8`, counting down. A constant empty range with a variable step emits no code. Tests: `VariableStepTests`.
   - **`inline asm fn`**: parsed as `inline` + `asm fn`; register parameters only (a memory parameter is an error; fixed inputs and `@ addr` were already errors for asm fns); `rts`/`rti` in the body is an error; `GenInline` skips the register-parameter handling for asm functions. Flag returns and the empty body need no extra code: the call is the copied instructions and the existing branch/store of the flag. `c64.interrupts_on()` / `interrupts_off()` are `inline asm fn`. Tests: `InlineAsmTests` (also the `while` form of the empty body, which only holds for the first test).
   - **Optimizer** (`Backend/Optimizer.cs`):
@@ -20,6 +20,7 @@ Owned by the coding session. Updated at the end of every coding session.
     - *N/Z liveness* (`NzLiveAfter`) follows `jmp` and both ways of a branch (only `beq`/`bne`/`bmi`/`bpl` read N/Z; gives up after 200 steps), so a repeated `ldx sp` before a `jmp` is removed.
     - *Asm instructions* (M8 part 1 review finding 2): they are followed like compiler-generated ones; only `jsr` and `brk` forget everything. A write to a fixed address or through a pointer still forgets all variables.
     - *Jump threading* (`ThreadJumps`): a jump or branch to a label whose code is just a `jmp` goes to that target (an `if` at the end of a `match` arm).
+  - **Review fixes** (`docs/reviews/m9.md`, first review). Finding 1: `FoldShiftTests` accepts only a plain (absolute or zero-page) `lda`, not `lda a,x`. Finding 2: in a function where an asm instruction writes to a code label (`sta .smc+1`), every asm instruction forgets everything again (`Analyse`'s `selfModifying`), so self-modifying code works. Finding 3 kept: `a[i - c]` in a zero-page array below `c` is absolute-indexed (one extra cycle per access, still cheaper than `sec`/`sbc`). Finding 4: "X reused across array accesses with the same index" needed no change; listing test `An_index_register_is_loaded_once_for_several_arrays_with_the_same_index`. Finding 5: `Positions(code)` helper. The `while f()` rule of decision 43 has a test (`A_while_test_after_a_body_ending_in_asm_reads_that_blocks_flag`); questions 42 and 43 are settled.
   - **Not done** from "shorter `match` exits": (1) an arm that ends the loop body jumping straight to the loop test: the `match` end label is already followed directly by the test, so the jump already goes there; there is nothing to shorten. (2) A short branch for the jump table's range check: the assembler already uses one when the default arm is in range; in `interp` it is 190 bytes away. Placing the default arm first would cost a `jmp` to the end of the `match` elsewhere (net +3 bytes), so I left it. "Other benchmarks where the new features fit": none of the others has a variable step or a flag test, so only `sieve` was rewritten.
 
 - **M8 part 2, the comparison** (2026-11-02). 921 tests pass (36 CPU, 885 compiler); `ComparisonTests` is included in that count but only does work with `TERN_COMPARE=1`.
@@ -180,10 +181,7 @@ Not bugs; things to improve, mostly in M7 (optimizer).
 
 Questions 1-37 are settled (decisions.md, 2026-11-01 and 2026-11-02). 
 
-Questions 38-41 (from the M8 comparison) are settled (decisions.md, 2026-11-02) and implemented in M9.
-
-42. **`a[i + c]` and wrapping indexes.** The roadmap asks for a constant offset folded into the `abs,x` address. For `a[i - c]` I fold it where `length + c <= 256`, since the u8 subtraction wraps to `256 - c + i`, past the end of such an array. I do not fold `a[i + c]`, nor `a[i - c]` in a longer array: `i + c` wraps to the *start* of a 256-element array (a ring buffer), and `abs,x` would not. Should `a[i + c]` be folded when the compiler knows `i + c < 256` (a loop counter with constant bounds, as `CheckLoopIndex` does)? Or should the language say that an index must not wrap, so that `+ c` can always be folded? As it is, `stack[sp + 1]` costs `lda sp` / `clc` / `adc #1` / `tax`.
-43. **`while f()` with an empty-body `inline asm fn`.** The flag is the one the `asm` block left, but a `while` tests again after the body, where the flag is whatever the body left. Spec 7 defines the form for `while f()`; I only guarantee the first test (the test is emitted directly after the block). Should `while` with an empty-body flag function be an error, or is the first-test-only rule what was meant?
+Questions 38-43 (from the M8 comparison and M9) are settled (decisions.md, 2026-11-02) and implemented in M9.
 
 
 ## Provisional choices made while coding

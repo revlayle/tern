@@ -22,6 +22,15 @@ public static class Optimizer
         while (RemoveRedundant(code, function) | FoldShiftTests(code, function)) { }
     }
 
+    /// <summary>The index of each label's definition.</summary>
+    private static Dictionary<Label, int> Positions(List<AsmItem> code)
+    {
+        var positions = new Dictionary<Label, int>();
+        for (int k = 0; k < code.Count; k++)
+            if (code[k] is LabelDef d) positions[d.Label] = k;
+        return positions;
+    }
+
     private static bool FromAsm(Instr i) => i.AsmPos is not null;
 
     /// <summary>
@@ -31,9 +40,7 @@ public static class Optimizer
     /// </summary>
     private static void ThreadJumps(List<AsmItem> code)
     {
-        var positions = new Dictionary<Label, int>();
-        for (int k = 0; k < code.Count; k++)
-            if (code[k] is LabelDef d) positions[d.Label] = k;
+        var positions = Positions(code);
 
         // The label a jump to this one leads to, if its code is only a jmp.
         Label? Onward(Label label)
@@ -91,9 +98,7 @@ public static class Optimizer
     /// <summary>Removes instructions that no path reaches, e.g. the <c>rts</c> after an endless loop.</summary>
     private static void RemoveUnreachable(List<AsmItem> code)
     {
-        var positions = new Dictionary<Label, int>();
-        for (int k = 0; k < code.Count; k++)
-            if (code[k] is LabelDef d) positions[d.Label] = k;
+        var positions = Positions(code);
         var reached = new bool[code.Count];
         var work = new Stack<int>();
         work.Push(0);
@@ -195,8 +200,14 @@ public static class Optimizer
     }
 
     /// <summary>The state after <paramref name="i"/>, given the state before it.</summary>
-    private static void Step(State s, Instr i, FunctionSymbol function)
+    private static void Step(State s, Instr i, FunctionSymbol function, bool selfModifying)
     {
+        if (selfModifying && FromAsm(i))
+        {
+            // Assembly that patches its own code (sta .label+1): a later instruction may not be what it says.
+            s.Clear();
+            return;
+        }
         if (i.Mnemonic is Jsr or Brk)
         {
             // A call may change any register and any ordinary memory. Other instructions of an asm
@@ -263,9 +274,10 @@ public static class Optimizer
     /// <summary>The state before each item, from the start of the function and every jump into a label.</summary>
     private static State?[] Analyse(List<AsmItem> code, FunctionSymbol function)
     {
-        var positions = new Dictionary<Label, int>();
-        for (int k = 0; k < code.Count; k++)
-            if (code[k] is LabelDef d) positions[d.Label] = k;
+        // An asm instruction that writes to a code label changes the code itself.
+        bool selfModifying = code.Any(item => item is Instr { AsmPos: not null, Operand: LabelOperand } w
+            && (AsmEffects.WritesMemory(w.Mnemonic, w.Mode) || Stored(w.Mnemonic) is not null));
+        var positions = Positions(code);
         var unknown = UnknownEntries(code);
         var before = new State?[code.Count + 1];
         before[0] = new State();
@@ -287,7 +299,7 @@ public static class Optimizer
             if (code[k] is LabelDef d && unknown.Contains(d.Label)) s.Clear();
             if (code[k] is Instr i)
             {
-                Step(s, i, function);
+                Step(s, i, function, selfModifying);
                 if (Target(i) is { } t && positions.TryGetValue(t, out int tp)) Join(tp, s);
             }
             if (FallsThrough(code[k])) Join(k + 1, s);
@@ -350,9 +362,7 @@ public static class Optimizer
     /// </remarks>
     private static bool RemoveRedundant(List<AsmItem> code, FunctionSymbol function)
     {
-        var positions = new Dictionary<Label, int>();
-        for (int k = 0; k < code.Count; k++)
-            if (code[k] is LabelDef d) positions[d.Label] = k;
+        var positions = Positions(code);
         var before = Analyse(code, function);
         var kept = new List<AsmItem>(code.Count);
         bool flagsChanged = false;
@@ -422,7 +432,7 @@ public static class Optimizer
             if (Target(branch) is not { } label || references[label] != 1 || unknown.Contains(label) || !positions.TryGetValue(label, out int p)) continue;
 
             int l1 = NextReal(code, b + 1);
-            if (l1 >= code.Count || code[l1] is not Instr { Mnemonic: Lda, Operand: VarOperand { Variable.IsVolatile: false } x } load1 || FromAsm(load1)) continue;
+            if (l1 >= code.Count || code[l1] is not Instr { Mnemonic: Lda, Mode: Absolute or ZeroPage, Operand: VarOperand { Variable.IsVolatile: false } x } load1 || FromAsm(load1)) continue;
             int a1 = NextReal(code, l1 + 1);
             if (a1 >= code.Count || code[a1] is not Instr { Mnemonic: Asl, Mode: Accumulator, AsmPos: null }) continue;
 
