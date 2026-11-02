@@ -17,11 +17,41 @@ public static class Optimizer
 {
     public static void Run(List<AsmItem> code, FunctionSymbol function)
     {
+        ThreadJumps(code);
         RemoveUnreachable(code);
         while (RemoveRedundant(code, function) | FoldShiftTests(code, function)) { }
     }
 
     private static bool FromAsm(Instr i) => i.AsmPos is not null;
+
+    /// <summary>
+    /// A jump or branch to a label whose code is just another <c>jmp</c> goes to that jump's target
+    /// instead (<c>jmp endif</c> where <c>endif:</c> is followed by <c>jmp end</c>: an if at the end of a
+    /// match arm). The skipped jump may become unreachable and is removed.
+    /// </summary>
+    private static void ThreadJumps(List<AsmItem> code)
+    {
+        var positions = new Dictionary<Label, int>();
+        for (int k = 0; k < code.Count; k++)
+            if (code[k] is LabelDef d) positions[d.Label] = k;
+
+        // The label a jump to this one leads to, if its code is only a jmp.
+        Label? Onward(Label label)
+        {
+            if (!positions.TryGetValue(label, out int p)) return null;
+            while (p < code.Count && code[p] is LabelDef or Comment or SourceLine) p++;
+            return p < code.Count && code[p] is Instr { Mnemonic: Mnemonic.Jmp, Mode: Absolute, Operand: LabelOperand { Offset: 0 } to } jump && !FromAsm(jump)
+                ? to.Label : null;
+        }
+
+        for (int k = 0; k < code.Count; k++)
+        {
+            if (code[k] is not Instr i || FromAsm(i) || Target(i) is not { } target) continue;
+            var final = target;
+            for (int hops = 0; hops < 8 && Onward(final) is { } next && next != target; hops++) final = next;
+            if (final != target) code[k] = i with { Operand = new LabelOperand(final) };
+        }
+    }
 
     private static bool IsBranch(Mnemonic m) => m is Bcc or Bcs or Beq or Bne or Bmi or Bpl or Bvc or Bvs;
 

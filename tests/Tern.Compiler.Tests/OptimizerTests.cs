@@ -345,6 +345,31 @@ public class OptimizerTests
         Assert.Equal(c == 1 ? 2 : 7, r.U8("sp"));
         Assert.Equal(1, Main(r).Split("ldx sp").Length - 1);
     }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1)]
+    [InlineData(2)]
+    [InlineData(9)]
+    public void A_jump_to_a_jump_goes_to_the_final_target(int op)
+    {
+        // The if at the end of the first arm ends in "jmp endif", where endif: is only "jmp mend".
+        var r = Run.Program($$"""
+            var out: u8
+            var n: u8 = {{op}}
+            var f: u8 = 1
+            fn main() {
+                match n {
+                    0 => { if f != 0 { out = 10 } else { out = 11 } }
+                    1 => out = 20
+                    _ => out = 30
+                }
+            }
+            """);
+        Assert.Equal(op == 0 ? 10 : op == 1 ? 20 : 30, r.U8("out"));
+        var code = Main(r);
+        Assert.DoesNotContain("jmp main.endif", code);
+    }
 }
 
 /// <summary>A parameter passed in X or Y stays in its register when the body allows it (roadmap M7).</summary>
