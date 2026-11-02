@@ -53,6 +53,8 @@ public sealed class CodeGen
         foreach (var f in _program.Functions.Where(f => f.FixedAddress is null && !f.IsInline))
         {
             GenFunction(f);
+            // An interrupt handler's body is optimized before its saving code is added.
+            if (!f.Declaration!.IsAsm && !f.IsInterrupt) Optimizer.Run(_out, f);
             all.AddRange(_out);
         }
         return all;
@@ -235,6 +237,10 @@ public sealed class CodeGen
         GenBlock(f.Declaration!.Body);
         if (_out[^1] is Instr { Mnemonic: Mnemonic.Jmp, Operand: LabelOperand { Label: var l } } && l == _interruptExit)
             _out.RemoveAt(_out.Count - 1);
+        var body = _out.GetRange(start, _out.Count - start);
+        Optimizer.Run(body, f);
+        _out.RemoveRange(start, _out.Count - start);
+        _out.AddRange(body);
 
         var changed = CpuState.None;
         foreach (var i in _out.Skip(start).OfType<Instr>())

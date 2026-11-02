@@ -79,7 +79,7 @@ public class MemLibraryTests
             Mem.Set16("mem.copy.count", 1000);
             long copy = Mem.Call("mem.copy");
             // About 15 cycles per byte for fill and 17 for copy (13 and 16 inside whole pages).
-            Assert.Equal((14837, 16891), (fill, copy));
+            Assert.Equal((14834, 16888), (fill, copy));
         }
     }
 }
@@ -126,7 +126,7 @@ public class TextLibraryTests
         var cycles = new List<long>();
         lock (Text)
             for (int v = 0; v < 256; v++) cycles.Add(Digits("dec8", v, v.ToString(), returnsCount: true));
-        Assert.Equal((63, 354), Range(cycles));
+        Assert.Equal((63, 324), Range(cycles));
     }
 
     [Fact]
@@ -137,7 +137,7 @@ public class TextLibraryTests
         lock (Text)
             foreach (int v in values.Concat(Enumerable.Range(0, 1772).Select(i => i * 37)))
                 cycles.Add(Digits("dec16", v, v.ToString(), returnsCount: true));
-        Assert.Equal((296, 1640), Range(cycles));
+        Assert.Equal((297, 1641), Range(cycles));
     }
 
     [Fact]
@@ -146,7 +146,7 @@ public class TextLibraryTests
         var cycles = new List<long>();
         lock (Text)
             for (int v = 0; v < 256; v++) cycles.Add(Digits("hex8", v, v.ToString("X2"), returnsCount: false));
-        Assert.Equal((56, 58), Range(cycles));
+        Assert.Equal((56, 56), Range(cycles));
     }
 
     [Fact]
@@ -156,7 +156,7 @@ public class TextLibraryTests
         lock (Text)
             foreach (int v in new[] { 0, 1, 0x0F, 0x10, 0xFF, 0x100, 0x1234, 0xABCD, 0x7FFF, 0x8000, 0xFFFF })
                 cycles.Add(Digits("hex16", v, v.ToString("X4"), returnsCount: false));
-        Assert.Equal((100, 104), Range(cycles));
+        Assert.Equal((100, 100), Range(cycles));
     }
 
     [Theory]
