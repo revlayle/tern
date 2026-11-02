@@ -6,3 +6,6 @@ TestResults/
 examples/*.prg
 examples/*.lst
 examples/*.vs
+tests/benchmarks/*.prg
+tests/benchmarks/*.lst
+tests/benchmarks/*.vs
