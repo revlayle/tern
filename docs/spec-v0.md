@@ -111,6 +111,11 @@ fn main() {
 - Exception: `data` from a string literal or `include_bytes` may be longer than 256 bytes (e.g. a 2 KB character set). It cannot be indexed; use it through a pointer (`addr(name)`).
 - Array indexes are always `u8` and produce `abs,X`/`abs,Y` addressing. For memory larger than 256 bytes, use a `ptr`.
 - **Arrays with multi-byte elements are split.** `[u16; 32]` is stored as two 32-byte tables, low bytes and high bytes. `a[i]` becomes `lda a_lo,x` / `lda a_hi,x`. Declare it `linear` to get a normal interleaved layout, e.g. for data shared with hardware or assembly: `linear var pts: [u16; 32]`.
+- **`linear` arrays of 16-bit elements** (`u16`, `i16`, `ptr T`) store each value whole, low byte first, as in C. `linear` goes before `var` or `data`. Costs and rules:
+  - A variable index is doubled first: `pts[i]` is `lda i` / `asl` / `tax` / `lda pts,x` / `lda pts+1,x` (section 11). A constant index is a fixed offset, with no extra code.
+  - A linear 16-bit array has at most 128 elements, so the doubled index fits in a register.
+  - `addr(pts)` gives a `ptr u16` (or `ptr i16`, ...) to the first element, which `p[i]` and `p + 2` use as usual (3.4).
+  - `linear` on an array of one-byte elements is an error, since they are already stored in order. `linear` arrays of structs are described in 3.3.
 
 ### 3.3 Structs
 
@@ -169,7 +174,7 @@ e.pos.y = 5                        // ldy #1 / sta (e),y
 
 ### 3.4 Pointers
 
-- `ptr T` is a 16-bit address. `addr(name)` gives a pointer to a variable or array: `ptr T` for a variable of type `T`, a pointer to the first element for an array of one-byte elements, and `ptr u8` to the low-byte table for a split array of 16-bit values. A field of a struct variable or of a struct at a fixed address works too: `addr(player.name)` (no code beyond loading the constant address). Fields through a pointer and in an array of structs are errors. Use `as u16` for the address as a number. `addr()` of a function is not supported yet.
+- `ptr T` is a 16-bit address. `addr(name)` gives a pointer to a variable or array: `ptr T` for a variable of type `T`, a pointer to the first element for an array of one-byte elements, `ptr u8` to the low-byte table for a split array of 16-bit values, and `ptr u16` (or the element type) for a `linear` array of 16-bit values (3.2). A field of a struct variable or of a struct at a fixed address works too: `addr(player.name)` (no code beyond loading the constant address). Fields through a pointer and in an array of structs are errors. Use `as u16` for the address as a number. `addr()` of a function is not supported yet.
 - A number literal (or an untyped `const`) converts to a pointer without `as`, since literals take their type from context: `var p: ptr u8 = $0400`, `p == 0`. A typed `u16` value needs `as`.
 - `p[i]` with `i: u8` compiles to `(zp),Y` addressing. There is no separate dereference operator: use `p[0]`.
 - On a pointer to a 16-bit type, the index counts elements: `p[i]` reads the bytes at offsets `2*i` and `2*i+1`. The byte offset must fit in the 256 bytes `(zp),Y` reaches: a constant index above 127 is an error, and a variable index of 128 or more wraps within those 256 bytes.
@@ -522,6 +527,7 @@ These are the intended translations. The optimizer may produce something shorter
 | `w += 1` (u16) | `inc w` / `bne +` / `inc w+1` |
 | `a[i] = v` | `ldx i` / `lda v` / `sta a,x` |
 | `p[i] = v` | `ldy i` / `lda v` / `sta (p),y` |
+| `w = pts[i]` (`linear [u16; n]`) | `lda i` / `asl` / `tax` / `lda pts,x` / `sta w` / `lda pts+1,x` / `sta w+1` |
 | `for i in 9..=0 using X` | `ldx #9` … `dex` / `bpl loop` (start ≤ 127; otherwise one extra `cpx #$FF`) |
 | `for i in n..0 using X` | `ldx n` / `beq done` / … `dex` / `bne loop` |
 | `for i in 0..n using X` | `ldx #0` / `cpx n` / `beq done` / … `inx` / `cpx n` / `bne loop` |

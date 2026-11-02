@@ -67,10 +67,11 @@ Done when: a VIC-II register struct at `$D000` works in VICE, and a list of enem
 
 ## M5 follow-up (small, at the start of M6)
 
-Spec: 2.2 (`private`), 3.4 (`addr()` of fields). From the M4/M5 questions settled in `docs/decisions.md`.
+Spec: 2.2 (`private`), 3.2 (`linear` number arrays), 3.4 (`addr()` of fields). From the M4/M5 questions settled in `docs/decisions.md`.
 
 - `private` on top-level declarations, enforced in Tern code and assembly; mark the library's work variables and tables `private`
 - `addr(player.name)` for fields of struct variables and fixed-address structs
+- `linear` arrays of `u16`/`i16`/pointers: interleaved layout, `pts[i]` with `asl` (spec 11 shape), at most 128 elements, `addr()` gives `ptr u16`; error on one-byte elements
 
 ## M6: match, interrupts and function modifiers
 
