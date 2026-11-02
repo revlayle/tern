@@ -437,6 +437,44 @@ public class C64LibraryTests
     }
 
     [Fact]
+    public void Interrupt_handlers_are_installed_with_the_kernal_off()
+    {
+        var r = Run.Program("""
+            import c64
+            var ticks: u8
+            var nmis: u8
+            var held: u8
+            var after: u8
+            interrupt fn tick() { ticks += 1 }
+            interrupt fn nmi() { nmis += 1 }
+            fn main() {
+                c64.kernal_off()
+                c64.set_nmi(addr(nmi))
+                c64.set_irq(addr(tick))
+                c64.interrupts_on()
+                for _ in 0..200 { after += 1 }
+                c64.interrupts_off()
+                held = ticks
+                for _ in 0..200 { after += 1 }
+                c64.set_irq(addr(tick))         // keeps interrupts held off
+                for _ in 0..200 { after += 1 }
+            }
+            """, irqEvery: 500);
+        byte[] m = r.Ram.Bytes;
+        Assert.Equal(0x35, m[0x01]);
+        Assert.Equal(0x7F, m[0xDC0D]);
+        Assert.Equal(0x7F, m[0xDD0D]);
+        Assert.Equal(r.Address("tick"), m[0xFFFE] | m[0xFFFF] << 8);
+        Assert.Equal(r.Address("nmi"), m[0xFFFA] | m[0xFFFB] << 8);
+        Assert.True(r.Interrupts > 2);
+        Assert.Equal(r.Interrupts, r.U8("ticks"));
+        Assert.Equal(r.U8("held"), r.U8("ticks"));   // none after interrupts_off, nor after set_irq
+        Assert.True(r.Cpu.I);
+        Assert.Equal(0, r.U8("nmis"));
+        Assert.Equal(0x40, m[r.Address("c64.ignore_nmi")]);   // kernal_off's NMI handler: just rti
+    }
+
+    [Fact]
     public void Raster_example_cycles_the_border_colors_from_its_interrupt()
     {
         // The example never returns, so it is run for a fixed time, with an IRQ every 1000 cycles
@@ -468,10 +506,11 @@ public class C64LibraryTests
         byte[] m = ram.Bytes;
         Assert.Equal(0x35, m[0x01]);
         Assert.Equal(result.Symbols["raster"], m[0xFFFE] | m[0xFFFF] << 8);
-        Assert.Equal(result.Symbols["ignore"], m[0xFFFA] | m[0xFFFB] << 8);
-        Assert.Equal(0x40, m[result.Symbols["ignore"]]);   // just rti
+        Assert.Equal(result.Symbols["c64.ignore_nmi"], m[0xFFFA] | m[0xFFFB] << 8);
+        Assert.Equal(0x40, m[result.Symbols["c64.ignore_nmi"]]);   // just rti
         Assert.Equal(1, m[0xD01A]);
         Assert.Equal(0x7F, m[0xDC0D]);
+        Assert.Equal(0x7F, m[0xDD0D]);
         int frames = taken / 8;
         Assert.Equal(frames & 0xFF, m[result.Symbols["frames"]]);
         // Main keeps running between interrupts: the counter on screen is at most one frame behind.
