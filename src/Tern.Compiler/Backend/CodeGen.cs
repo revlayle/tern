@@ -1676,6 +1676,7 @@ public sealed class CodeGen
         int d = Math.Abs(step);
         long? from = f.From.ConstValue, to = f.To.ConstValue;
         bool inclusive = f.Inclusive;
+        if (c.Register is null) ChooseCounterRegister(f, c);
 
         var end = NewLabel("fend");
         var cont = NewLabel("fnext");
@@ -1757,6 +1758,85 @@ public sealed class CodeGen
         Place(end);
         if (c.Register is { } r) _reserved.Remove(r);
         if (boundTemp is not null) Release(boundTemp);
+    }
+
+    /// <summary>
+    /// Puts the counter of an innermost loop in X or Y, as if <c>using</c> were written, when the body
+    /// allows it: a u8 counter stepping by one, no calls, asm blocks or loops in the body, its address
+    /// not taken, no value returned in that register, and no register already held, so that the other
+    /// index register stays free. Y if every pointer access in the body is <c>p[counter]</c> (and
+    /// there is one), X otherwise: other pointer accesses compute Y themselves.
+    /// </summary>
+    private void ChooseCounterRegister(ForStmt f, VariableSymbol c)
+    {
+        if (c.Type.Size != 1 || Math.Abs(f.StepValue) != 1 || c.AddressTaken || _reserved.Count > 0
+            || ContainsLoop(f.Body) || !AllowsRegisterParameter(f.Body)) return;
+        var (plain, other) = (0, 0);
+        CountPointerIndexes(f.Body, c, ref plain, ref other);
+        var reg = plain > 0 && other == 0 ? Register.Y : Register.X;
+        if (_fn.ReturnRegister is { } ret && ret.Uses(reg) && ContainsReturnValue(f.Body)) return;
+        c.Register = reg;
+        _fn.FrameVariables.Remove(c);
+    }
+
+    private static bool ContainsLoop(Stmt s) => s switch
+    {
+        ForStmt or WhileStmt => true,
+        BlockStmt b => b.Statements.Any(ContainsLoop),
+        IfStmt i => ContainsLoop(i.Then) || (i.Else is not null && ContainsLoop(i.Else)),
+        MatchStmt m => m.Arms.Any(a => ContainsLoop(a.Body)),
+        _ => false,
+    };
+
+    private static bool ContainsReturnValue(Stmt s) => s switch
+    {
+        ReturnStmt r => r.Value is not null,
+        BlockStmt b => b.Statements.Any(ContainsReturnValue),
+        IfStmt i => ContainsReturnValue(i.Then) || (i.Else is not null && ContainsReturnValue(i.Else)),
+        MatchStmt m => m.Arms.Any(a => ContainsReturnValue(a.Body)),
+        _ => false,
+    };
+
+    /// <summary>Counts pointer accesses: those that are exactly <c>p[c]</c> (Y = c), and the others.</summary>
+    private static void CountPointerIndexes(Node? node, VariableSymbol c, ref int plain, ref int other)
+    {
+        switch (node)
+        {
+            case IndexExpr ix:
+                if (IsPointerIndex(ix))
+                {
+                    if (PlainPointerIndex(ix) && ix.Index is NameExpr { Symbol: var s } && s == c) plain++;
+                    else other++;
+                }
+                CountPointerIndexes(ix.Target, c, ref plain, ref other);
+                CountPointerIndexes(ix.Index, c, ref plain, ref other);
+                break;
+            case BlockStmt b: foreach (var x in b.Statements) CountPointerIndexes(x, c, ref plain, ref other); break;
+            case IfStmt i:
+                CountPointerIndexes(i.Condition, c, ref plain, ref other);
+                CountPointerIndexes(i.Then, c, ref plain, ref other);
+                CountPointerIndexes(i.Else, c, ref plain, ref other);
+                break;
+            case MatchStmt m:
+                CountPointerIndexes(m.Subject, c, ref plain, ref other);
+                foreach (var a in m.Arms) CountPointerIndexes(a.Body, c, ref plain, ref other);
+                break;
+            case ReturnStmt r: CountPointerIndexes(r.Value, c, ref plain, ref other); break;
+            case AssignStmt a:
+                CountPointerIndexes(a.Target, c, ref plain, ref other);
+                CountPointerIndexes(a.Value, c, ref plain, ref other);
+                break;
+            case ExprStmt e: CountPointerIndexes(e.Expr, c, ref plain, ref other); break;
+            case VarDecl v: CountPointerIndexes(v.Init, c, ref plain, ref other); break;
+            case UnaryExpr u: CountPointerIndexes(u.Operand, c, ref plain, ref other); break;
+            case BinaryExpr b:
+                CountPointerIndexes(b.Left, c, ref plain, ref other);
+                CountPointerIndexes(b.Right, c, ref plain, ref other);
+                break;
+            case MemberExpr m: CountPointerIndexes(m.Target, c, ref plain, ref other); break;
+            case CastExpr cast: CountPointerIndexes(cast.Operand, c, ref plain, ref other); break;
+            case CallExpr call: foreach (var a in call.Args) CountPointerIndexes(a, c, ref plain, ref other); break;
+        }
     }
 
     /// <summary><c>for _ in a..b</c> with constant bounds: count down to zero.</summary>

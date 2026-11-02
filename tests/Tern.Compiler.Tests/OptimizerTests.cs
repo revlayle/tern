@@ -317,3 +317,108 @@ public class RegisterParameterTests
         Assert.Equal(r.Interrupts, r.U8("a", 1));
     }
 }
+
+/// <summary>The counter of an innermost loop goes in X or Y when the body allows it (roadmap M7).</summary>
+public class LoopRegisterTests
+{
+    [Fact]
+    public void An_innermost_loop_counts_in_x()
+    {
+        var r = Run.Program("""
+            var a: [u8; 8]
+            fn main() {
+                for i in 0..8 { a[i] = i + 1 }
+            }
+            """);
+        Assert.Contains("inx", r.Result.Listing);
+        Assert.DoesNotContain("main.i", r.Result.Symbols.Keys);
+        for (int i = 0; i < 8; i++) Assert.Equal(i + 1, r.U8("a", i));
+    }
+
+    [Fact]
+    public void A_loop_that_only_indexes_a_pointer_by_its_counter_counts_in_y()
+    {
+        var r = Run.Program("""
+            var p: ptr u8
+            var q: ptr u8
+            fn main() {
+                p = $C000
+                q = $C100
+                for i in 0..=255 { q[i] = p[i] }
+            }
+            """, setup: ram => { for (int i = 0; i < 256; i++) ram.Bytes[0xC000 + i] = (byte)(i * 7); });
+        Assert.Contains("iny", r.Result.Listing);
+        for (int i = 0; i < 256; i++) Assert.Equal((byte)(i * 7), r.Ram.Bytes[0xC100 + i]);
+    }
+
+    [Fact]
+    public void A_loop_with_other_pointer_accesses_counts_in_x()
+    {
+        // e.name[i] computes Y = i + offset, so the counter cannot be in Y.
+        var r = Run.Program("""
+            struct E { hp: u8, name: [u8; 4] }
+            var a: E
+            fn main() {
+                var e: ptr E = addr(a)
+                for i in 0..4 { e.name[i] = i + 65 }
+            }
+            """);
+        Assert.Contains("inx", r.Result.Listing);
+        Assert.Equal("ABCD", System.Text.Encoding.ASCII.GetString(r.Ram.Bytes, r.Address("a") + 1, 4));
+    }
+
+    [Fact]
+    public void Only_the_inner_loop_of_two_gets_a_register()
+    {
+        var r = Run.Program("""
+            var a: [u8; 16]
+            fn main() {
+                for i in 0..4 {
+                    for j in 0..4 { a[(i << 2) + j] = i ^ j }
+                }
+            }
+            """);
+        Assert.Contains("main.i", r.Result.Symbols.Keys);
+        Assert.DoesNotContain("main.j", r.Result.Symbols.Keys);
+        for (int i = 0; i < 4; i++)
+            for (int j = 0; j < 4; j++) Assert.Equal(i ^ j, r.U8("a", 4 * i + j));
+    }
+
+    [Theory]
+    [InlineData("for i in 0..4 { g()\n a[i] = 1 }")]          // a call
+    [InlineData("for i in 0..4 { asm {\n nop\n }\n a[i] = 1 }")] // an asm block
+    [InlineData("for i in 0..8 step 2 { a[i] = 1 }")]         // a step other than 1
+    [InlineData("for i in 0..4 { var p: ptr u8 = addr(i)\n a[i] = p[0] }")] // address taken
+    public void A_counter_stays_in_memory_when_the_body_needs_it(string loop)
+    {
+        var r = Run.Program($$"""
+            var a: [u8; 8]
+            fn g() { }
+            fn main() {
+                {{loop}}
+            }
+            """);
+        Assert.Contains("main.i", r.Result.Symbols.Keys);
+    }
+
+    [Fact]
+    public void A_search_loop_returns_its_counter()
+    {
+        var r = Run.Program("""
+            var a: [u8; 16]
+            var at: u8
+            fn find(v: u8) -> u8 {
+                for i in 0..16 {
+                    if a[i] == v { return i }
+                }
+                return 255
+            }
+            fn main() {
+                a[11] = 5
+                at = find(5)
+            }
+            """);
+        Assert.Equal(11, r.U8("at"));
+        Assert.DoesNotContain("find.i", r.Result.Symbols.Keys);
+    }
+}

@@ -1,13 +1,13 @@
 # Bytes of the program image and cycles until main returns, per benchmark.
 # Rewritten by running the tests with TERN_UPDATE_BENCHMARKS=1.
 # name        bytes    cycles
-bubble          134    300781
+bubble          116    241171
 calls           134     31773
-copy            258     70778
-crc8             76     61258
-enemies         206     78790
-fib16           235      3262
+copy            251     68794
+crc8             71     48202
+enemies         198     71061
+fib16           228      3117
 interp          368      7891
-sieve           126     26138
-sum16           191     42342
-total          1728    623013
+sieve           121     24606
+sum16           177     38680
+total          1664    535295
