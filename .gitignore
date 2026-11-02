@@ -9,3 +9,7 @@ examples/*.vs
 tests/benchmarks/*.prg
 tests/benchmarks/*.lst
 tests/benchmarks/*.vs
+tests/benchmarks/*/*.prg
+tests/benchmarks/*/*.lbl
+tests/benchmarks/*/*.map
+tests/benchmarks/*/*.bin

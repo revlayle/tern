@@ -4,12 +4,16 @@ Owned by the coding session. Updated at the end of every coding session.
 
 ## Current
 
-- **Milestone:** M8 (benchmarks against other compilers). Part 1, the M7 follow-up, is done; part 2, the comparison, has not started.
-- **Branch:** `m8-benchmarks` (from `main` after the M7 merge). Part 1 was reviewed (`docs/reviews/m8.md`); findings 1, 3 and 4 are fixed, finding 2 is open (below).
-- **Next step:** part 2 of the M8 roadmap entry: the benchmark tasks in `tests/benchmarks` written in hand-written assembly, Prog8 and cc65, and a report of bytes and cycles. Blocked on tools: cc65 (`cl65`) is not installed on this machine, and Prog8 is in `C:\prog8-stuff` (not on `PATH`: `prog8c` not found). Decide where the other-compiler sources live and how their cycles are measured (they should run in `Tern.Cpu`'s emulator for a fair count).
+- **Milestone:** M8 (benchmarks against other compilers). Both parts are done; the part 2 review findings 1-4 are fixed (`docs/reviews/m8.md`); ready for re-review.
+- **Branch:** `m8-benchmarks`. Part 1 was reviewed (`docs/reviews/m8.md`); findings 1, 3 and 4 are fixed, finding 2 is open (below).
+- **Next step:** review of M8 part 2, then merge. After that, see "Later" in `docs/roadmap.md`. The comparison suggests where Tern's code is still larger than hand-written assembly (see `tests/benchmarks/comparison.md`); the biggest gaps are `sieve` (88 vs 47 bytes, 22030 vs 8489 cycles), `crc8` and `interp`.
 
 ## Done
 
+- **M8 part 2, the comparison** (2026-11-02). 921 tests pass (36 CPU, 885 compiler); `ComparisonTests` is included in that count but only does work with `TERN_COMPARE=1`.
+  - The nine benchmarks exist in hand-written assembly (`tests/benchmarks/asm`, 64tass), Prog8 (`prog8`, 12.0-SNAPSHOT from `C:\prog8-stuff`) and C (`c`, cc65 in `C:\cc65`). `ComparisonTests` builds each with the external tool, runs it in the Tern emulator, checks the result with the same C# check as `BenchmarkTests` (now `Results`, so the check works for every layout), and writes `tests/benchmarks/comparison.md`. Run it with `TERN_COMPARE=1 dotnet test --filter ComparisonTests`; paths can be set with `PROG8_JAR`, `TASS64`, `CL65`. Without the variable it does nothing, so normal runs need no Java or cc65.
+  - Totals (bytes / cycles), all measured from `main` on: Tern 1373 / 526134; assembly 947 / 324419; Prog8 2102 / 698705; cc65 2822 / 1453115. How bytes and cycles are counted for each is in the report. Prog8 cycles include its BSS clearing; cc65 uses `-Oirs -Cl`.
+  - Generated outputs (`*.prg`, `*.lbl`, ...) go to a temp directory; `.gitignore` also covers them in `tests/benchmarks/*/`.
 - **M8 part 1 review fixes** (2026-11-02). 920 tests pass (36 CPU, 884 compiler). Finding 1: `Checker.CheckLoopIndex` is now also used for arrays of structs (`e[i].hp`) and array fields through a pointer (`p.name[i]`), with error tests. Finding 3: removed the redundant `OwnHandler(first.Root, g)` test. Finding 4: the module tests share a `WithModules` helper; the `set_nmi` comment is rewrapped. Finding 2 (the optimizer forgets all state at `cli`/`sei` in asm) is left open: it needs `AsmEffects` to drive what is forgotten, and no benchmark shows a cost yet.
 - **M8 part 1, the M7 follow-up** (branch `m8-benchmarks`, 2026-11-02). 917 tests pass (36 CPU, 881 compiler).
   - Private variables and the module's own handler (spec 8.1, decision 34): `Checker.CheckPrivateGlobalsPerRoot` skips a private variable when one root is an `interrupt fn` declared in the variable's own module. Tests in `InterruptTests`, including the two cases that stay errors. A handler in an imported module is a root only when a compiled function takes its `addr()`; the tests install it that way.
@@ -162,7 +166,17 @@ Not bugs; things to improve, mostly in M7 (optimizer).
 
 ## Questions for the spec session
 
-Questions 1-37 are settled (decisions.md, 2026-11-01 and 2026-11-02). None open.
+Questions 1-37 are settled (decisions.md, 2026-11-01 and 2026-11-02). 
+
+**Open (from the M8 comparison, `tests/benchmarks/comparison.md`):** Tern uses 1.45x the bytes and 1.62x the cycles of hand-written assembly over the nine benchmarks. Most of the gap is three patterns that Tern cannot express, or cannot express cheaply.
+
+38. **Carry out of an 8-bit add.** `sieve` keeps `m` as `u16` only to detect that `m += n` passed 255. The assembly keeps `m` in Y and loops on `bcc` (22030 vs 8489 cycles, 88 vs 47 bytes). Tern has no way to read the carry of an operation; a carry only comes from a call declared `-> bool using carry`. Options:
+    - (a) No language change. The compiler proves that a `u16` stays below 512 (range analysis through the loop, using the `m < 256` exit) and compiles `m += n` and `m < 256` as an 8-bit add and a carry test. Predictable only if the rule is written down; a program that falls just outside the rule silently gets the slow code (tension with design rule 1).
+    - (b) A stepped range, e.g. `for m in (n << 1)..256 step n`, which compiles to `adc` / `bcc`. A fixed code shape, so it fits rule 1. Which step values are allowed (constants only? a `u8` variable?) and what happens when the sum passes 255 would need defining.
+    - (c) An overflow-reporting add as a library or `inline asm fn` (no language change; `inline asm fn` is not supported yet, so `inline fn` with an `asm` block would be used). Measure this first on `sieve`: it shows how much of the gap needs a language or compiler change at all.
+39. **Testing a flag left by earlier code.** Prog8 has `if_cs`, `if_cc`, `if_z`, `if_nz`, `if_neg`, `if_pos`, `if_vs`, `if_vc` (keywords listed in its syntax file; usage not checked). Tern tests a flag only when a function returns `bool using carry` / `zero` / `negative`. Is a flag-test statement wanted for the value left by an `asm` block or a preceding operation, or is `-> bool using carry` on a small `inline fn` enough? One meaning per keyword (rule 3) argues for the second.
+40. **A value kept in a register across a loop.** `crc8` holds `crc` in A for the whole inner loop and uses `asl` to move the top bit into the carry (27667 vs 48189 cycles). Tern keeps loop counters in registers (`using X`) and the optimizer allocates some locals, but a local cannot be declared as living in a register. Is `var crc: u8 using A` (a local kept in the register for its scope, an error if a call or an asm block in its scope needs the register) in scope? Without it the fix is optimizer-only: recognise `x & $80 != 0` followed by `x << 1` as one `asl` + carry test, which needs no spec change.
+41. (Withdrawn.) I asked whether `match` may compile to a jump table; it already does (M6), and `interp` uses one. The `interp` gap (7706 vs 4713 cycles, 329 vs 186 bytes) is in the arm bodies, not the dispatch. From the listing, optimizer work that needs no spec change: `stack[sp - 1]` reloads `sp`, computes `sp - 1` with `sec` / `sbc #1` into a temporary, then indexes, where `stack-1,x` (a constant offset folded into the `abs,x` address) would do; `sp` is reloaded into X for each access; each arm ends with `jmp` to the end of the `match` and then the `while` test; and the range check is `bcc *+5` / `jmp default` (5 bytes) because the default arm is out of branch range.
 
 
 ## Provisional choices made while coding

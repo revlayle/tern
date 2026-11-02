@@ -10,7 +10,7 @@ namespace Tern.Compiler.Tests;
 /// </summary>
 public class BenchmarkTests
 {
-    private static string Directory_
+    internal static string Directory_
     {
         get
         {
@@ -24,7 +24,7 @@ public class BenchmarkTests
     }
 
     /// <summary>Checks a benchmark's results against the same work done in C#.</summary>
-    private static readonly Dictionary<string, Action<Run>> Checks = new()
+    internal static readonly Dictionary<string, Action<Results>> Checks = new()
     {
         ["bubble"] = r =>
         {
@@ -135,7 +135,7 @@ public class BenchmarkTests
         {
             var path = Path.Combine(dir, name + ".tern");
             var r = Run.Program(File.ReadAllText(path), sourcePath: path, maxCycles: 20_000_000);
-            Checks[name!](r);
+            Checks[name!](new Results(r.Ram, (n, o) => r.Address(n) + o));
             measured.Add((name!, r.Result.Image.Length, r.Cpu.Cycles));
         }
 
