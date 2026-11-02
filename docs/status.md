@@ -4,11 +4,24 @@ Owned by the coding session. Updated at the end of every coding session.
 
 ## Current
 
-- **Milestone:** M9 (closing the gap with assembly). Everything on the roadmap list is done except two small parts of "shorter `match` exits" (below); the done-when criteria are met. Ready for `/review`.
-- **Branch:** `m9-close-gap` (from `main` after the M8 merge). 1019 tests pass (36 CPU, 983 compiler).
-- **Next step:** review of M9, then merge. After that, M10 (cross-platform standard library) in `docs/roadmap.md`. Largest remaining gaps to hand-written assembly (`tests/benchmarks/comparison.md`): `bubble` (240,160 vs 130,784 cycles), `copy`, `crc8` (the accumulator is stored to memory after every bit), `sum16`.
+- **Milestone:** M10 (cross-platform standard library). Everything on the roadmap list is built and tested, and the example is checked in VICE. Ready for `/review`. The spec's 10.1 tables are not updated (the coding session does not own the spec): the signatures as built are listed under "Done" below, and question 44 asks for them to be copied in.
+- **Branch:** `m10-stdlib` (from `main` after the M9 merge). 1072 tests pass (36 CPU, 1036 compiler).
+- **Next step:** review of M10, then merge. After that, M11 (C64 graphics library) in `docs/roadmap.md`.
 
 ## Done
+
+- **M10, cross-platform standard library** (2026-11-02). 1072 tests pass (36 CPU, 1036 compiler). `BenchmarkTests` baseline unchanged (no handler in the benchmarks).
+  - **Module parameters and `assert`** (`ModuleParameterTests`). `module name(P: type = default, ...)` header (`Parser`, `ModuleHeader`); `import name(P = value)` (`ImportDecl.Args`). `Checker.DeclareParameters` declares each parameter as a `ConstSymbol` in the module before its other constants. A value is checked in a scratch copy of the main file (re-parsed) that holds only the constants that check without an import, so it can use literals and those constants, wherever they are declared in the main file; any other name gives "'x' is not declared. A parameter value uses literals and ...". Errors: header name differs from the file, header in the main file, `module` after other lines, parameters set outside the main file, unknown or repeated parameter, no default, not an integer type or bool, value does not fit (reported at the main file's import). `assert cond, "message"` (`AssertDecl`, `Checker.CheckAssert`) is checked after the file's declarations, so it can use `sizeof`, `len` and other constants. A failed assert in a module is reported at the main file's import line, with the module's assert position added, when the condition mentions a parameter that the import set; otherwise at the assert. Comparing two constants no longer converts them to `u8` first (`sizeof(T) * 32 <= 256` was an error).
+  - **`interrupt fn` parts** (`InterruptPartTests`). A call from an `interrupt fn` sets `FunctionSymbol.IsPart`; the function is then compiled like a normal one (ends with `rts`, no saving, optimized, frame allocated like a callee's). A call from anywhere else is an error. Parameters and a return value are allowed on `interrupt fn`; one that is a root (main file, or its address is used) with either is an error (`CheckInstallable`). A function that is both a part and installed is an error (one form per function; question 45). A module's private variable may be used by a part of its own module and by main-side functions of that module (`CheckPrivateGlobalsPerRoot`, `OwnPart`); a plain function called from a handler is still rule 31. Test: two module parts sharing private state with their modules' main-side functions under `irqEvery`.
+  - **`cld` in handlers**: a handler starts with `cld` (before the register saving) when its code has `adc`, `sbc` or `jsr`, including a call to a part (`CodeGen.GenInterrupt`). Listing tests both ways (`Handlers_clear_decimal_mode_only_when_they_add_subtract_or_call`). `BcdTests.A_bcd_add_in_main_survives_an_interrupt_handler_that_adds_in_binary` runs `bcd.add` in main with an IRQ every 61 cycles whose handler does `+= 57`; it fails without the `cld`.
+  - **Library** (signatures as built; for spec 10.1):
+    - `math`: `abs8(x: i8 using A) -> u8 using A`, `abs16(x: i16 using AX) -> u16 using AX`, `muls8(a: i8 using A, b: i8 using X) -> i16`, `divs8(a: i8 using A, b: i8 using X) -> i8` (rounds towards zero; `math.remainder8` has the sign of `a`; -128 / -1 = -128), `inline asm fn` `min8`, `max8` (`u8`), `mins8`, `maxs8` (`i8`) with `(a using A, b using X) -> A`, `clamp8` / `clamps8(x using A, lo using X, hi using Y)`, `sin8(x: u8 using A) -> i8`, `cos8` (inline asm, 256-byte private table `SINE`, `round(127 * sin(2 pi i / 256))`, only included when used). Tests `SignedMathTests` (`abs8`, `muls8`, `divs8` for every input; the inline ones for every pair).
+    - `mem.copy_back(dst, src, count)`: last byte first, for overlapping blocks with `dst` above `src`.
+    - `random` (no header): `seed(v: u16)` (0 becomes 1), `next8() -> u8` (xorshift 3, 5, 4: values 1-255, period 255), `next16() -> u16` (xorshift 7, 9, 8: period 65535), `below(n: u8) -> u8` (high byte of `next8() * n` with `math.mul8`; not exactly uniform; 0 for `n = 0`). State is private (`state8`, `state16`), initial value 1. `RandomTests` checks both periods in the emulator and the sequences against C#; using it from main and a handler is the existing private-variable error.
+    - `text`: `dec8s(dst, value: i8) -> u8`, `dec16s(dst, value: i16) -> u8` (with `-`; return the characters written), `dec8z(dst, value: u8, width)`, `dec16z(dst, value: u16, width)` (exactly `width` digits with leading zeros; the value must fit, else the digits are unspecified; nothing is written past `width`). `TextSignedTests`.
+    - `bcd` (n-byte packed decimal, low byte first, pointers): `clear(p, n)`, `add(p, q, n using X)`, `sub`, `add_byte(p, n using X, v using A)` / `sub_byte` (`v` is two packed digits), `inc`, `dec`, `less(p, q, n using X) -> bool using carry`, `equal(p, q, n using Y) -> bool using carry`, `is_zero(p, n using Y) -> bool using zero`, `digits(dst, p, n)` (all 2n digits), `text(dst, p, n) -> u8` (without leading zeros; needs room for 2n at `dst`). Wraps modulo 10^(2n). All leave decimal mode off (`BcdTests`: every two-digit pair, edge values for 1-4 bytes).
+    - `wide`: `struct U32 { lo: u16, hi: u16 }`, `struct U24 { lo: u16, hi: u8 }`, `remainder24`, `remainder32`. For each width W of 24 and 32, taking `ptr U{W}` (result in the first operand): `set{W}(p, v: u16)`, `copy{W}(dst, src)`, `add{W}`, `sub{W}`, `add{W}_u16(p, v)`, `sub{W}_u16`, `inc{W}`, `less{W}(p, q) -> bool using carry`, `equal{W} -> bool using carry`, `is_zero{W}(p) -> bool using zero`, `mul{W}` (low W bits), `div{W}` (remainder in `remainder{W}`), `dec{W}(dst, p) -> u8` (digits written, up to 10 / 8), `dec{W}z(dst, p, width)`, `hex{W}(dst, p)`. Decimal output doubles a copy in decimal mode (`to_bcd{W}`). `src/lib/wide.tern` was generated once from a template (the two widths differ only in byte counts); edit it by hand from now on. `WideTests` (edge and random values for both widths, against C#).
+  - **Example** `examples/arcade.tern`: 32-bit score (`wide`), BCD bonus (`bcd`), sprite on a circle (`sin8`/`cos8`), random SID notes (`random`), 1579 bytes. Checked in VICE (score above 16 bits, bonus 039150 = 25 x 1566 frames). `WideTests.The_arcade_example_compiles_with_every_new_module`.
 
 - **M9, closing the gap with assembly** (2026-11-02). 1019 tests pass (36 CPU, 983 compiler). Tern totals in `tests/benchmarks/comparison.md` (bytes / cycles, measured from `main` on): 1373 / 526134 -> **1225 / 500014** (assembly 947 / 324419). `sieve` 88 / 22030 -> 48 / 8745 (assembly 47 / 8489); `crc8` 48 / 48189 -> 41 / 37949; `interp` 329 / 7706 -> 241 / 6149. `tests/benchmarks/baseline.txt` (whole program, startup included): 1664 / 535295 -> 1516 / 509175.
   - **Variable `u8` step** (`for m in a..=255 step n`): `ForStmt.VariableStep`, `Checker.CheckVariableStep`, `CodeGen.GenFor` / `StepGeneral`. The step is evaluated once (used in place if it is a local the body does not change, else copied to a temporary). With `..=255` the loop ends on the carry: `adc` / `bcc loop` (also for constant steps now). Otherwise: add, `bcs end`, compare with the bound. Errors: signed or 16-bit step, counter not `u8`, counting down. A constant empty range with a variable step emits no code. Tests: `VariableStepTests`.
@@ -142,6 +155,21 @@ Including `jsr` and `rts`; from the tests.
 | `text.dec16` | 296-1640 | edge values and a spread |
 | `text.hex8` | 56-58 | every value |
 | `text.hex16` | 100-104 | |
+| `math.muls8` | 199-252 | every input |
+| `math.divs8` | 250-320 | every input, b != 0 |
+| `math.abs8` / `abs16` | 17-22 / 17-37 | |
+| `random.next8` / `next16` | 57 / 64 | |
+| `random.below` | 235-267 | uses `math.mul8` |
+| `wide.add32` / `sub32` / `add24` | 109 / 109 / 86 | |
+| `wide.add32_u16` | 76 | |
+| `wide.inc32` | 32-109 | |
+| `wide.less32` | 85 | |
+| `wide.copy32` | 77 | |
+| `wide.mul24` / `mul32` | 1212-2100 / 1998-3566 | edge values |
+| `wide.div24` / `div32` | 1958-2966 / 3183-4943 | edge values |
+| `wide.dec24` / `dec32` | 2604-2688 / 3956-4038 | decimal-mode doubling; convert when the value changes |
+| `bcd.add` (3 bytes) | 88 | `sub`, `inc`, `add_byte` within 11 cycles of this |
+| `bcd.text` (3 bytes) | 395-635 | |
 
 ## Known limitations and technical debt
 
@@ -175,9 +203,13 @@ Not bugs; things to improve, mostly in M7 (optimizer).
 - An inline function's parameters go through its frame in memory, as for a call; register parameters are stored and reloaded.
 - Calling an inline function counts as a call: it is not allowed inside a `for ... using X` loop. (Sharing one with no memory between main and a handler is allowed since M7.)
 - An interrupt handler saves every register that any of its instructions changes, on every path.
-- An interrupt handler does not execute `cld`. Tern code never sets decimal mode, but an asm block in main could.
+- A function that is both called as a part and installed as a handler is an error: it is compiled in one form only (question 45).
+- `src/lib/wide.tern` has the 24- and 32-bit code written out twice (generated once from a template).
 
 ## Questions for the spec session
+
+44. **Spec 10.1 tables for M10.** The roadmap asks for the signatures as built in spec 10.1; the coding session cannot edit the spec. They are listed in the M10 entry under "Done". Please copy them in (including `text.dec8z`/`dec16z`, `bcd.text`, `random.below`).
+45. **Part and handler in one function.** Spec 6.3 says "each `interrupt fn` is compiled in the forms that are used" (as a handler if its address is taken, as a part if it is called). Provisional: one form per function; using both is an error ("is called by another interrupt fn ... and its address is also used"). Two copies would need two labels and two frame views for one body. Say if it is wanted.
 
 Questions 1-37 are settled (decisions.md, 2026-11-01 and 2026-11-02). 
 
