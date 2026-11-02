@@ -125,3 +125,8 @@ Settled decisions and the reasons for them. Do not reopen one without new inform
 - **`#f.lo` / `#f.hi` count as a call** from the enclosing function. Interrupt handlers (M6) will need their own rule.
 - **`p - q` needs pointers of the same type**, like comparisons; `as` costs nothing.
 - **`petscii_mixed` and `screen_mixed` have no `π`**; `\$FF` gives the raw byte.
+
+## 2026-11-01: error tests live with their feature
+
+- **A compile error's test goes in the feature's test file** (`AsmTests`, `PointerTests`, `RoutineTests`, ...); `ErrorTests.cs` keeps errors with no feature file (lexer, parser, general type errors). Every error still needs a test. Reason: the error tests for a feature sit next to its other tests, and M3 already works this way. Replaces "every new compile error gets a test in `ErrorTests.cs`" in `CLAUDE.md`.
+- **The spec session owns `CLAUDE.md`**, since it holds the design rules and conventions.
