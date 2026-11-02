@@ -423,4 +423,62 @@ public class C64LibraryTests
         Assert.Equal(6, m[0xD021]);
         Assert.Equal(1, m[0xD015]);
     }
+
+    /// <summary>Memory that records the values written to one address.</summary>
+    private sealed class WatchBus(Ram ram, int watched) : IBus
+    {
+        public List<byte> Writes { get; } = [];
+        public byte Read(ushort address) => ram.Read(address);
+        public void Write(ushort address, byte value)
+        {
+            if (address == watched) Writes.Add(value);
+            ram.Write(address, value);
+        }
+    }
+
+    [Fact]
+    public void Raster_example_cycles_the_border_colors_from_its_interrupt()
+    {
+        // The example never returns, so it is run for a fixed time, with an IRQ every 1000 cycles
+        // standing in for the VIC-II's raster interrupt.
+        var path = AsmTests.FindExample("raster.tern");
+        var result = TernCompiler.Compile(File.ReadAllText(path), sourcePath: path);
+        var ram = new Ram();
+        ram.Load((ushort)result.LoadAddress, result.Image);
+        var bus = new WatchBus(ram, 0xD020);
+        var cpu = new Cpu6502(bus) { PC = (ushort)result.Entry, SP = 0xFF, I = true };
+        long next = 1000;
+        int taken = 0;
+        while (cpu.Cycles < 400_000)
+        {
+            if (cpu.Cycles >= next && cpu.Irq())
+            {
+                taken++;
+                next = cpu.Cycles + 1000;
+            }
+            cpu.Step();
+        }
+
+        byte[] colors = [2, 8, 7, 5, 3, 6, 4, 15];  // red, orange, yellow, green, cyan, blue, purple, light grey
+        Assert.True(bus.Writes.Count > 100, $"{bus.Writes.Count} border writes");
+        Assert.Equal(taken, bus.Writes.Count);
+        for (int i = 0; i < bus.Writes.Count; i++)
+            Assert.Equal(colors[i % 8], bus.Writes[i]);
+
+        byte[] m = ram.Bytes;
+        Assert.Equal(0x35, m[0x01]);
+        Assert.Equal(result.Symbols["raster"], m[0xFFFE] | m[0xFFFF] << 8);
+        Assert.Equal(result.Symbols["ignore"], m[0xFFFA] | m[0xFFFB] << 8);
+        Assert.Equal(0x40, m[result.Symbols["ignore"]]);   // just rti
+        Assert.Equal(1, m[0xD01A]);
+        Assert.Equal(0x7F, m[0xDC0D]);
+        int frames = taken / 8;
+        Assert.Equal(frames & 0xFF, m[result.Symbols["frames"]]);
+        // Main keeps running between interrupts: the counter on screen is at most one frame behind.
+        // Hex digits as screen codes: '0'-'9' are $30-$39, 'A'-'F' are 1-6.
+        static int Digit(byte code) => code >= 0x30 ? code - 0x30 : code + 9;
+        int at = 0x0400 + 12 * 40 + 29;
+        int shown = Digit(m[at]) << 4 | Digit(m[at + 1]);
+        Assert.InRange((frames - shown) & 0xFF, 0, 1);
+    }
 }
