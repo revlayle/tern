@@ -771,6 +771,14 @@ public sealed partial class Checker
         if (f.UsingRegister is { } r) _loopRegisters.Remove(r);
     }
 
+    /// <summary>An index that is the counter of a constant-bounds loop must stay inside the array (spec 3.2).</summary>
+    private void CheckLoopIndex(Expr index, string name, int length)
+    {
+        if (Unwrap(index) is NameExpr { Symbol: VariableSymbol counter } && _loopMax.TryGetValue(counter, out var last) && last >= length)
+            throw new CompileError(index.Pos,
+                $"The loop reaches {last}, past the end of '{name}' (length {length}). Make the loop stop before {length}");
+    }
+
     /// <summary>The largest value a loop with constant bounds reaches, or null if it runs no passes.</summary>
     private static long? LargestLoopValue(long from, long to, bool inclusive, int step)
     {
@@ -962,9 +970,7 @@ public sealed partial class Checker
                         $"'{arr.Name}' has {arr.Type.Length} elements, too many for a u8 index. Read it through a pointer: addr({arr.Name})");
                 if (ix.Index.ConstValue is long idx && idx >= arr.Type.Length)
                     throw new CompileError(ix.Index.Pos, $"Index {idx} is past the end of '{arr.Name}' (length {arr.Type.Length})");
-                if (Unwrap(ix.Index) is NameExpr { Symbol: VariableSymbol counter } && _loopMax.TryGetValue(counter, out var last) && last >= arr.Type.Length)
-                    throw new CompileError(ix.Index.Pos,
-                        $"The loop reaches {last}, past the end of '{arr.Name}' (length {arr.Type.Length}). Make the loop stop before {arr.Type.Length}");
+                CheckLoopIndex(ix.Index, arr.Name, arr.Type.Length);
                 e.Type = arr.Type.Element!;
                 if (arr.Type.Linear) ix.Lowered = LinearIndex(ix);
                 break;
@@ -1542,7 +1548,7 @@ public sealed partial class Checker
                     if (!privateGlobals.Contains(g) || OwnHandler(root, g)) continue;
                     if (!firstUser.TryGetValue(g, out var first))
                         firstUser[g] = (f, root);
-                    else if (first.Root != root && !OwnHandler(first.Root, g))
+                    else if (first.Root != root)
                     {
                         // Reported at the handler, which is in the program's own code.
                         var handler = root.IsInterrupt ? root : first.Root;

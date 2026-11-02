@@ -5,11 +5,12 @@ Owned by the coding session. Updated at the end of every coding session.
 ## Current
 
 - **Milestone:** M8 (benchmarks against other compilers). Part 1, the M7 follow-up, is done; part 2, the comparison, has not started.
-- **Branch:** `m8-benchmarks` (from `main` after the M7 merge).
+- **Branch:** `m8-benchmarks` (from `main` after the M7 merge). Part 1 was reviewed (`docs/reviews/m8.md`); findings 1, 3 and 4 are fixed, finding 2 is open (below).
 - **Next step:** part 2 of the M8 roadmap entry: the benchmark tasks in `tests/benchmarks` written in hand-written assembly, Prog8 and cc65, and a report of bytes and cycles. Blocked on tools: cc65 (`cl65`) is not installed on this machine, and Prog8 is in `C:\prog8-stuff` (not on `PATH`: `prog8c` not found). Decide where the other-compiler sources live and how their cycles are measured (they should run in `Tern.Cpu`'s emulator for a fair count).
 
 ## Done
 
+- **M8 part 1 review fixes** (2026-11-02). 920 tests pass (36 CPU, 884 compiler). Finding 1: `Checker.CheckLoopIndex` is now also used for arrays of structs (`e[i].hp`) and array fields through a pointer (`p.name[i]`), with error tests. Finding 3: removed the redundant `OwnHandler(first.Root, g)` test. Finding 4: the module tests share a `WithModules` helper; the `set_nmi` comment is rewrapped. Finding 2 (the optimizer forgets all state at `cli`/`sei` in asm) is left open: it needs `AsmEffects` to drive what is forgotten, and no benchmark shows a cost yet.
 - **M8 part 1, the M7 follow-up** (branch `m8-benchmarks`, 2026-11-02). 917 tests pass (36 CPU, 881 compiler).
   - Private variables and the module's own handler (spec 8.1, decision 34): `Checker.CheckPrivateGlobalsPerRoot` skips a private variable when one root is an `interrupt fn` declared in the variable's own module. Tests in `InterruptTests`, including the two cases that stay errors. A handler in an imported module is a root only when a compiled function takes its `addr()`; the tests install it that way.
   - A constant-bounds `for` loop that indexes past the end (spec 3.2, decision 32): `Checker.LargestLoopValue` and `_loopMax`. The index must be the loop counter itself (`a[i]`), not an expression of it. Tests in `ErrorTests`.

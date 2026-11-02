@@ -164,8 +164,8 @@ asm fn set_irq(handler: u16 using XY) {
 }
 
 // Install an NMI handler: c64.set_nmi(addr(handler)). The handler must be an 'interrupt fn'.
-// Needs kernal_off first. An NMI cannot be
-// held off, so install it before anything raises one (CIA 2, RESTORE).
+// Needs kernal_off first. An NMI cannot be held off, so install it before anything raises one
+// (CIA 2, RESTORE).
 asm fn set_nmi(handler: u16 using XY) {
     stx $FFFA
     sty $FFFB
