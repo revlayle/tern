@@ -1448,6 +1448,7 @@ public sealed partial class Checker
         }
     }
 
+    /// <summary>Functions reachable from main, callers before callees. Reports recursion.</summary>
     private static List<FunctionSymbol> OrderReachable(FunctionSymbol main)
     {
         var state = new Dictionary<FunctionSymbol, int>(); // 1 = visiting, 2 = done
