@@ -81,6 +81,18 @@ fn main() {
 - A module is loaded once, however many files import it. Modules may import each other.
 - Only the program's main file has `fn main()`.
 - Only functions reachable from `main` are compiled. A module's global variables and `data` are kept only if a compiled function names them (in Tern code or as an assembly operand). An imported module costs nothing for the parts that are not used. The main file's globals are always kept, since an unused one may reserve memory on purpose (e.g. `@ zp`).
+- **Module parameters** are constants the program sets when it imports a module. The module declares them once, in a header that is the first line of the file (before its imports):
+  ```
+  // lib/c64/sprites.tern
+  module sprites(COUNT: u8 = 32, FLICKER: bool = false)
+
+  var list: [Sprite; COUNT]
+  ```
+  and the main file sets any of them by name: `import sprites(COUNT = 40)`. `import sprites` alone uses the defaults.
+  - Only the main file may set parameters, since a module is loaded once. Other files import the module plainly and get the program's values.
+  - Each parameter has a type (an integer type or `bool`) and a default. A value is a constant expression using literals and the main file's constants that do not depend on imported modules; it is checked against the type. An unknown name, a name given twice, or a value that does not fit is an error.
+  - Inside the module a parameter is an ordinary constant; outside it is `sprites.COUNT`. Parameters cost nothing at runtime.
+  - The name in the header must match the file name. A main file has no header; a module needs one only if it has parameters.
 - Platform modules live in `lib/<platform>/` and can only be imported when compiling for that platform; importing one for another platform is an error naming the platform. A platform folder can also provide its own version of a general module.
 
 ## 3. Types
@@ -260,6 +272,15 @@ data rows: [u16; 25] = [row_addr(i) for i in 0..25]
 - Array-building syntax: `[expr for i in range]`.
 - A step limit stops a `const fn` that never finishes, with an error.
 - A `const fn` can live in an imported module (2.2), so table generators can be shared between programs as Tern scripts: `import tables` … `data sine = tables.sine(256)`. Reading files from compile-time code (e.g. converting an image into sprite data) is a possible later extension.
+
+**Compile-time `assert`**: a top-level declaration that generates no code and fails compilation with its message when the condition is false:
+
+```
+assert COUNT >= 8 && COUNT <= 64, "sprites.COUNT must be 8 to 64"
+assert sizeof(Enemy) * 32 <= 256, "the enemy table must fit in a page"
+```
+
+The condition is a constant `bool` expression and the message a string literal. In a module, the error also names the main file's `import` line when a module parameter caused it, so a wrong setting is reported where it was made.
 
 ## 5. Statements
 
@@ -567,6 +588,11 @@ Digits are written as screen codes, which are the same as PETSCII for `0`-`9`. H
 | `vic: Vic @ $D000` | VIC-II registers: `sprite0_x`, `sprite0_y` ... `sprite7_y`, `sprite_x_msb`, `control1`, `raster`, `light_pen_x`, `light_pen_y`, `sprite_enable`, `control2`, `sprite_expand_y`, `memory`, `irq_status`, `irq_enable`, `sprite_priority`, `sprite_multicolor`, `sprite_expand_x`, `sprite_collision`, `sprite_bg_collision`, `border`, `background`, `background1`-`background3`, `sprite_mc0`, `sprite_mc1`, `sprite_color: [u8; 8]` |
 | `sid: Sid @ $D400` | SID registers: `voice1`-`voice3: Voice` (`freq: u16`, `pulse: u16`, `control`, `attack_decay`, `sustain_release`), `cutoff: u16`, `resonance`, `volume`, `paddle_x`, `paddle_y`, `osc3`, `env3` |
 | `cia1: Cia @ $DC00`, `cia2: Cia @ $DD00` | CIA registers: `port_a`, `port_b`, `ddr_a`, `ddr_b`, `timer_a: u16`, `timer_b: u16`, `tod_tenths`, `tod_seconds`, `tod_minutes`, `tod_hours`, `serial`, `icr`, `control_a`, `control_b` |
+
+**Planned for M11** (C64; exact functions settled by the coding session):
+
+- **`sprites`**, a sprite multiplexer: `module sprites(COUNT: u8 = 32, FLICKER: bool = false)`. A public table of `COUNT` virtual sprites (`x: u16`, `y`, `frame` (sprite pointer), `color`, flags for visible, multicolor and expand-X; no expand-Y), which main writes; `update()` once per frame sorts by Y (continuous insertion sort, kept between frames) into the next frame's table (double-buffered); `start()` turns the KERNAL off and installs its handler; `wait_frame()` waits for the handler's frame counter. Hardware sprite *i mod 8* shows sorted sprite *i*. More than 8 sprites on a line: the extra ones are skipped that frame, or, with `FLICKER`, which ones are skipped rotates each frame. Its raster code is an `interrupt fn raster() -> bool using carry` (true at the top of the frame), callable as a part from the program's own handler (6.3): `interrupt fn frame() { if sprites.raster() { scroll.top() } }`.
+- **`scroll`**, smooth character scrolling in eight directions: fine scroll and 38-column/24-row helpers on `c64.vic`; two screen buffers in one VIC bank, the hidden one shifted by one character spread over the 8 fine steps, swapped with `$D018`; color RAM either fixed or shifted at the swap (in asm, racing the beam); new columns and rows filled from a character map (`ptr u8` plus width). Tile maps later. `interrupt fn top()` writes the scroll registers at the top of the frame, as a part of the program's handler; `scroll.start()` installs a minimal handler for programs without the multiplexer. The copy loops are unrolled asm.
 
 **Planned for M10** (cross-platform; the coding session settles exact signatures following the rules above and records them in this section):
 
