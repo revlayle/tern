@@ -122,7 +122,7 @@ Then:
 Spec: 5.1 (variable step), 6.2 and 7 (`inline asm fn`), 11. From the M8 comparison questions settled in `docs/decisions.md` (2026-11-02); the gaps are in `tests/benchmarks/comparison.md`.
 
 - **Variable `u8` step** in `for` loops that count up with a `u8` counter: evaluated once, stops when adding the step carries past 255; `..=255` gives `adc` / `bcc` with no compare (spec 11 shape, listing test). Errors: a negative or 16-bit variable step, a variable step in a loop counting down. Tests at edge values (step 1, 128, 255; start 0 and 255; end below 255).
-- **`inline asm fn`**: the assembly is copied in place of the `jsr`, no `rts` added; register parameters only (memory parameters and fixed inputs are errors); flag returns give `if f()` / `!f()` / `v = f()` with only the branch or store. An empty body reads the flag left by an `asm` block directly before the statement; nothing that changes flags is placed between them. `c64.interrupts_on()`/`interrupts_off()` become `inline asm fn`.
+- **`inline asm fn`**: the assembly is copied in place of the `jsr`, no `rts` added; register parameters only (memory parameters and fixed inputs are errors); flag returns give `if f()` / `!f()` / `v = f()` with only the branch or store. An empty body reads the flag left by an `asm` block directly before the statement; nothing that changes flags is placed between them. For `while f()` the same holds for the test after each pass when the loop body ends with an `asm` block (added 2026-11-02, M9 question 43; listing test); no diagnostic in any case. `c64.interrupts_on()`/`interrupts_off()` become `inline asm fn`.
 - **Optimizer** (no spec change; each with an `OptimizerTests` case and its benchmark delta in the commit):
   - `x & $80 != 0` followed by `x << 1` on the same byte as one `asl` and a carry test (`crc8`);
   - a constant offset folded into the `abs,x` address: `stack[sp - 1]` as `ldx sp` / `lda stack-1,x` (`interp`);
@@ -178,6 +178,13 @@ Done when: an example scrolls a character map in eight directions with at least 
 - `using` on local variables (spec 14.6)
 - Overflow checking and array index checking in the emulator for test runs (spec 14.4, 3.2)
 - Doc comments (`///` before a declaration) and a Tern language server (LSP) that shows them, e.g. that `set_irq` needs an `interrupt fn`
+- **Developer guide**: user documentation that explains how the language behaves on the machine, with examples; it informs and does not forbid. It must cover each behavior below. The spec session adds to this list whenever a decision leaves a behavior that the programmer may rely on, or that may surprise them:
+  - all arithmetic wraps, including index expressions: `buf[head + 1]` with `head = 255` is `buf[0]` (3.1, 3.2); when the optimizer folds a constant offset into the address
+  - an index outside the array is not checked, and the optimizer assumes it does not happen (3.2)
+  - flags after an `asm` block: `if f()`, `while f()` (first test, and each later test when the body ends with an `asm` block) and `v = f()` with an empty-body flag function; after compiled Tern code the flags are unspecified (7)
+  - a variable `for` step of 0 never ends the loop; stepped loops stop when the step carries past the end of the type (5.1)
+  - signed `>>` rounds down, not toward zero (3.1)
+  - `keeps` on a fixed routine is a promise the compiler does not check (6.6); a function reached only through `addr()` has no known root (6.5, 8.1)
 - Memory layout declaration: reserved areas, volatile ranges, named regions (spec 14.12), with `data` at a fixed address (14.9) and banks
 
 New platforms, last:

@@ -122,6 +122,7 @@ fn main() {
 - Array length is at most 256, so any index fits in the X or Y register.
 - Exception: `data` from a string literal or `include_bytes` may be longer than 256 bytes (e.g. a 2 KB character set). It cannot be indexed; use it through a pointer (`addr(name)`).
 - Array indexes are always `u8` and produce `abs,X`/`abs,Y` addressing. For memory larger than 256 bytes, use a `ptr`.
+- **An index expression wraps like all arithmetic** (3.1): with `i = 255`, `a[i + 1]` is `a[0]`, so a 256-element ring buffer can use `buf[head + 1]`. The optimizer folds a constant offset into the address (`a[i - 1]` as `lda a-1,x`) only where the result is the same: when a wrapped index would be outside the array anyway, or when it can prove the sum does not wrap (e.g. a loop counter with constant bounds). Otherwise `a[i + c]` computes the index first (`lda i` / `clc` / `adc #c` / `tax`).
 - **An index outside the array is not supported.** The compiler may assume it never happens: the optimizer treats `a[i] = v` as changing only `a`. There is never a check in the program. A constant index past the end is a compile error, and so is a `for` loop with constant bounds that indexes past the end (`for i in 0..20 { a[i] }` on a `[u8; 10]`). A variable index is checked by the built-in emulator in test runs (14.4). Code that writes across variables on purpose uses a pointer, whose writes the optimizer treats as changing any memory (4).
 - **Arrays with multi-byte elements are split.** `[u16; 32]` is stored as two 32-byte tables, low bytes and high bytes. `a[i]` becomes `lda a_lo,x` / `lda a_hi,x`. Declare it `linear` to get a normal interleaved layout, e.g. for data shared with hardware or assembly: `linear var pts: [u16; 32]`.
 - **`linear` arrays of 16-bit elements** (`u16`, `i16`, `ptr T`) store each value whole, low byte first, as in C. `linear` goes before `var` or `data`. Costs and rules:
@@ -458,7 +459,15 @@ if collides(n) { ... }             // jsr collides / bcc skip
   }
   if fire_pressed() { shoot() }      // lda #$10 / bit $DC00 / bne skip
   ```
-- With an empty body (`inline asm fn carry_set() -> bool using carry {}`) it reads the flag as the code before it left it, at no cost (`if carry_set()` is `bcc skip`). This is defined only right after an `asm` block: when the statement following the block is `if f()`, `while f()` or `v = f()` (also with `!`), the compiler puts nothing that changes flags between the block and the test. After compiled Tern code the flags are unspecified (generated code makes no promise about them, and the optimizer may change it), with no error or warning. Prefer putting the instructions that set the flag inside the function.
+- With an empty body (`inline asm fn carry_set() -> bool using carry {}`) it reads the flag as the code before it left it, at no cost (`if carry_set()` is `bcc skip`). This is defined only right after an `asm` block: when the statement following the block is `if f()`, `while f()` or `v = f()` (also with `!`), the compiler puts nothing that changes flags between the block and the test. For `while f()`, the test after each pass is defined the same way when the loop body ends with an `asm` block; that block's flag is what the next test reads:
+  ```
+  asm { jsr read_byte }              // carry set at end of file
+  while !carry_set() {
+      process()
+      asm { jsr read_byte }          // sets the flag for the next test
+  }
+  ```
+  A test reached any other way (a body ending in Tern code, `continue`) reads whatever flags that code left. The compiler never checks where the flag came from: using it is the programmer's choice. After compiled Tern code the flags are unspecified (generated code makes no promise about them, and the optimizer may change it), with no error or warning. Prefer putting the instructions that set the flag inside the function.
 
 ## 8. Memory model
 
