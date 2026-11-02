@@ -264,12 +264,45 @@ public sealed class ModuleTests : IDisposable
     [InlineData("import util\nfn main() { asm {\n jsr util.nope\n } }", "'util.nope' is not declared")]
     [InlineData("import withmain\nfn main() { }", "Only the program's main file has 'fn main()'; 'withmain' is a module")]
     [InlineData("import util", "The program has no 'fn main()'")]
+    // A missing import (review M4, finding 1).
+    [InlineData("fn main() { text.put(1, 2, 3) }", "'text' is not declared. To use the module text, add 'import text' at the top of the file")]
+    [InlineData("var x: u16\nfn main() { x = c64.SCREEN }", "'c64' is not declared. To use the module c64, add 'import c64' at the top of the file")]
+    [InlineData("fn main() { asm {\n jsr c64.chrout\n } }", "'c64' is not declared. To use the module c64, add 'import c64' at the top of the file")]
+    [InlineData("import util\nvar v: u8\nfn main() { v = other.f() }", "'other' is not declared. To use the module other, add 'import other'")]
+    [InlineData("var v: u8\nfn main() { v = nothing.lo }", "'nothing' is not declared")]
     public void Reports_errors(string source, string expected)
     {
         Write(Src, "util.tern", Util);
         Write(Src, "withmain.tern", "fn main() { }");
         var e = Assert.Throws<CompileError>(() => CompileMain(source));
         Assert.Contains(expected, e.Description);
+    }
+
+    [Fact]
+    public void The_module_name_must_match_the_file_name_exactly()
+    {
+        // Review M4, finding 2: on Windows the file is found whatever the case, but it must not be
+        // loaded twice under two names. Elsewhere it is not found at all; both are errors.
+        Write(Src, "util.tern", Util);
+        Write(Src, "other.tern", "import util\nfn go() { util.bump() }");
+        var e = Assert.Throws<CompileError>(() => CompileMain("import Util\nimport other\nfn main() { Util.bump()\n other.go() }"));
+        Assert.True(e.Description is "The module file is named util.tern; write 'import util'"
+            || e.Description.StartsWith("Cannot find module 'Util'"), e.Description);
+    }
+
+    [Fact]
+    public void Constants_across_an_import_cycle_get_a_clear_error()
+    {
+        // Review M4, finding 3: b is declared before a, so b's declarations cannot use a's constants.
+        Write(Src, "a.tern", "import b\nconst N = 4\nfn fa() { b.fb() }");
+        Write(Src, "b.tern", "import a\nvar buf: [u8; a.N]\nfn fb() { buf[0] = 1 }");
+        var e = Assert.Throws<CompileError>(() => CompileMain("import a\nfn main() { a.fa() }"));
+        Assert.Equal("'a.N' cannot be used in a declaration of b: a and b import each other, and a is declared after b. Move N to b, or to a module both import", e.Description);
+
+        // Bodies may use names in both directions.
+        Write(Src, "b.tern", "import a\nvar n: u8\nfn fb() { n = a.N }");
+        var r = RunMain("import a\nvar v: u8\nfn main() { a.fa()\n v = b2() }\nfn b2() -> u8 { return 0 }");
+        Assert.Equal(4, r.U8("b.n"));
     }
 
     [Fact]
@@ -280,6 +313,6 @@ public sealed class ModuleTests : IDisposable
         Write(Src, "b.tern", "const V = 1");
         Write(Src, "c.tern", "fn g() -> u8 { return b.V }");
         var e = Assert.Throws<CompileError>(() => CompileMain("import a\nimport c\nfn main() { }"));
-        Assert.Equal("'b' is not declared", e.Description);
+        Assert.Equal("'b' is not declared. To use the module b, add 'import b' at the top of the file", e.Description);
     }
 }

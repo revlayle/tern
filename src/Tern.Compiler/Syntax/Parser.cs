@@ -589,7 +589,9 @@ public sealed class Parser
                 Advance();
                 string name = t.Text;
                 // A name in an imported module: text.put
-                if (_modules.Contains(name) && At(TokenKind.Dot))
+                // Also name.member(...) when name is not imported, so that the checker can say to import it.
+                if (At(TokenKind.Dot) && (_modules.Contains(name)
+                    || (PeekAt(1).Kind == TokenKind.Identifier && PeekAt(2).Kind == TokenKind.LParen)))
                 {
                     Advance();
                     name += "." + Expect(TokenKind.Identifier, $"a name in module '{t.Text}' after '.'").Text;

@@ -49,6 +49,7 @@ public sealed partial class Checker
             foreach (var g in program.Globals) DeclareGlobal(g);
             // After the globals, so that a variable named as an address gets the right error.
             foreach (var f in program.Functions.Where(f => f.Address is not null)) DeclareRoutine(f, f.Symbol!);
+            module.Declared = true;
         }
 
         var mainModule = modules[^1];
@@ -98,10 +99,36 @@ public sealed partial class Checker
     }
 
     /// <summary>The error for a name that is not declared. A module name on its own gets a hint.</summary>
-    private CompileError NotDeclared(string name, SourcePos pos) =>
-        _module.Imports.ContainsKey(name)
-            ? new CompileError(pos, $"'{name}' is a module; use the names in it as {name}.name")
-            : new CompileError(pos, $"'{name}' is not declared");
+    private CompileError NotDeclared(string name, SourcePos pos)
+    {
+        if (_module.Imports.ContainsKey(name))
+            return new CompileError(pos, $"'{name}' is a module; use the names in it as {name}.name");
+        int dot = name.IndexOf('.');
+        if (dot <= 0) return new CompileError(pos, $"'{name}' is not declared");
+        if (!_module.Imports.TryGetValue(name[..dot], out var other))
+            return MissingImport(name[..dot], pos);
+        // Modules that import each other are declared one after the other, so a declaration
+        // in the first one cannot use the second one's names yet.
+        if (!other.Declared)
+        {
+            string here = _module.IsMain ? "the main file" : _module.Name;
+            return new CompileError(pos,
+                $"'{name}' cannot be used in a declaration of {here}: {other.Name} and {here} import each other, and {other.Name} is declared after {here}. " +
+                $"Move {name[(dot + 1)..]} to {here}, or to a module both import");
+        }
+        return new CompileError(pos, $"'{name}' is not declared");
+    }
+
+    /// <summary><c>text.put</c> where <c>text</c> is not declared: most likely a missing import.</summary>
+    private static CompileError MissingImport(string module, SourcePos pos) =>
+        new(pos, $"'{module}' is not declared. To use the module {module}, add 'import {module}' at the top of the file");
+
+    /// <summary>Reports <c>name.member</c> where <c>name</c> is not declared as a missing import.</summary>
+    private void CheckMemberTarget(MemberExpr m)
+    {
+        if (m.Member is not ("lo" or "hi") && m.Target is NameExpr n && !n.Name.Contains('.') && Lookup(n.Name) is null && !_module.Imports.ContainsKey(n.Name))
+            throw MissingImport(n.Name, n.Pos);
+    }
 
     /// <summary>Records that the function being checked uses a global, so it is kept in the program.</summary>
     private void UseGlobal(VariableSymbol v)
@@ -748,6 +775,7 @@ public sealed partial class Checker
                 break;
 
             case MemberExpr m:
+                CheckMemberTarget(m);
                 CheckExpr(m.Target);
                 if (m.Member is not ("lo" or "hi"))
                     throw new CompileError(m.Pos, $"Unknown member '.{m.Member}'");

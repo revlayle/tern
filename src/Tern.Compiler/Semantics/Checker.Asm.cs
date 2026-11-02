@@ -54,6 +54,7 @@ public sealed partial class Checker
 
             case MemberExpr m:
             {
+                CheckMemberTarget(m);
                 if (m.Member is not ("lo" or "hi"))
                     throw new CompileError(m.Pos, $"Unknown member '.{m.Member}'; assembly only has .lo and .hi");
                 var inner = AsmOperand(m.Target, labels);

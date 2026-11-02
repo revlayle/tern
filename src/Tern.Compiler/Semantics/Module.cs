@@ -18,6 +18,8 @@ public sealed class Module
     public Dictionary<string, Module> Imports { get; } = new();
     /// <summary>Names declared at the top level of this file, without the module name.</summary>
     public Dictionary<string, Symbol> Scope { get; } = new();
+    /// <summary>Set by the checker once the file's top-level declarations are in <see cref="Scope"/>.</summary>
+    public bool Declared { get; set; }
 
     /// <summary>The name a top-level declaration has outside this file: <c>text.put</c>. Names in the main file stay as written.</summary>
     public string Qualify(string name) => IsMain ? name : $"{Name}.{name}";
@@ -83,7 +85,17 @@ public static class ModuleLoader
             System.IO.Path.Combine(importer.Directory, file),
         ];
         foreach (var path in candidates)
-            if (File.Exists(path)) return System.IO.Path.GetFullPath(path);
+        {
+            if (!File.Exists(path)) continue;
+            // File names ignore case on Windows. The module name must match the file exactly, so that
+            // a module is loaded once and the program also compiles where case matters.
+            var dir = System.IO.Path.GetDirectoryName(path)!;
+            var actual = System.IO.Path.GetFileName(System.IO.Directory.GetFiles(dir, file).Single());
+            if (actual != file)
+                throw new CompileError(import.Pos,
+                    $"The module file is named {actual}; write 'import {System.IO.Path.GetFileNameWithoutExtension(actual)}'");
+            return System.IO.Path.GetFullPath(path);
+        }
 
         if (System.IO.Directory.Exists(library))
             foreach (var dir in System.IO.Directory.GetDirectories(library))
