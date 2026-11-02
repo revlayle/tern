@@ -103,6 +103,17 @@ Then:
 
 ## M8: Benchmarks against other compilers
 
+M7 follow-up first (spec 3.2, 6.5, 8.1, 12.2; settled in `docs/decisions.md`, 2026-11-02):
+
+- **Private variables shared with the module's own handler** (spec 8.1). In `Checker.CheckPrivateGlobalsPerRoot`, skip a private variable when one of the two roots is an `interrupt fn` declared in the variable's own module. Tests in `InterruptTests`:
+  - a `timer` module with `private var ticks: u16`, an `interrupt fn tick()` that increments it, and `fn now() -> u16` that returns it; a main file that calls `timer.now()` compiles and, run with `irqEvery`, sees `ticks` grow (it is volatile, so a wait loop rereads it);
+  - the existing case stays an error: `math.mul8` in main and `math.div8` in a handler declared in the main file;
+  - a module handler sharing a private variable with main through a *different* module (handler in `a`, variable in `b`) stays an error.
+- **A `for` loop with constant bounds that indexes past the end of an array is a compile error** (spec 3.2), e.g. `for i in 0..20 { a[i] }` on a `[u8; 10]`, when the index is the loop counter itself. The message names the array, its length and the loop's last value. Test in the array tests.
+- **`c64.interrupts_on()` and `interrupts_off()` inline**: `cli` / `sei` with no `jsr`. Check the listing in `C64LibraryTests`. The comments of `set_irq` and `set_nmi` say the handler must be an `interrupt fn`.
+
+Then:
+
 - The same tasks in Tern, hand-written assembly, Prog8 and cc65
 - A report of bytes and cycles per task
 
@@ -115,4 +126,5 @@ Then:
 - NES: iNES output, `@ bank(n)`, calls between banks (spec 14.1)
 - Memory layout declaration: reserved areas, volatile ranges, named regions (spec 14.12), with `data` at a fixed address (14.9) and banks
 - Apple II and Atari 8-bit platforms
-- Overflow checking in the emulator for debug runs (spec 14.4)
+- Overflow checking and array index checking in the emulator for test runs (spec 14.4, 3.2)
+- Doc comments (`///` before a declaration) and a Tern language server (LSP) that shows them, e.g. that `set_irq` needs an `interrupt fn`

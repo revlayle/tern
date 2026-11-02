@@ -110,6 +110,7 @@ fn main() {
 - Array length is at most 256, so any index fits in the X or Y register.
 - Exception: `data` from a string literal or `include_bytes` may be longer than 256 bytes (e.g. a 2 KB character set). It cannot be indexed; use it through a pointer (`addr(name)`).
 - Array indexes are always `u8` and produce `abs,X`/`abs,Y` addressing. For memory larger than 256 bytes, use a `ptr`.
+- **An index outside the array is not supported.** The compiler may assume it never happens: the optimizer treats `a[i] = v` as changing only `a`. There is never a check in the program. A constant index past the end is a compile error, and so is a `for` loop with constant bounds that indexes past the end (`for i in 0..20 { a[i] }` on a `[u8; 10]`). A variable index is checked by the built-in emulator in test runs (14.4). Code that writes across variables on purpose uses a pointer, whose writes the optimizer treats as changing any memory (4).
 - **Arrays with multi-byte elements are split.** `[u16; 32]` is stored as two 32-byte tables, low bytes and high bytes. `a[i]` becomes `lda a_lo,x` / `lda a_hi,x`. Declare it `linear` to get a normal interleaved layout, e.g. for data shared with hardware or assembly: `linear var pts: [u16; 32]`.
 - **`linear` arrays of 16-bit elements** (`u16`, `i16`, `ptr T`) store each value whole, low byte first, as in C. `linear` goes before `var` or `data`. Costs and rules:
   - A variable index is doubled first: `pts[i]` is `lda i` / `asl` / `tax` / `lda pts,x` / `lda pts+1,x` (section 11). A constant index is a fixed offset, with no extra code.
@@ -363,7 +364,9 @@ The compiler builds the full call graph. A cycle in the call graph (recursion) i
 
 - Allowed for functions without memory parameters (register parameters are fine), since a call through the address cannot set them. An error for `inline fn`, which has no single body.
 - The compiler cannot see calls through an address, so a function whose address is taken, and every function it reaches, get frames that overlap no other frame (8.1). For an `interrupt fn` or a routine at a fixed address nothing changes.
-- A handler that the CPU calls must be an `interrupt fn`; an ordinary function ends with `rts`.
+- A handler that the CPU calls must be an `interrupt fn`; an ordinary function ends with `rts`. The compiler cannot check this: `addr()` gives a plain `u16`, so `c64.set_irq(addr(plain_fn))` compiles. It is a documented convention of the installing functions.
+- In assembly, `#f.lo` / `#f.hi` take the address of `f` like `addr(f)`; `jsr f` and `jmp f` are calls. Assembly may take the address of a function with memory parameters, since it can set them itself.
+- A function reached only through its address has no known root, so the two-roots check (8.1) cannot see it. Calling it through its address from two roots (main and a handler) is the program's responsibility, like `keeps` (6.6). Globals it uses count as used from an unknown root, so any it shares with other code are volatile.
 
 Algorithms that are naturally recursive (flood fill, tree walks) use an explicit stack: an array plus an index, in a loop. The cost is then visible in the code.
 
@@ -428,6 +431,7 @@ if collides(n) { ... }             // jsr collides / bcc skip
 - Interrupt handlers are separate roots. Their frames never overlap with frames reachable from the main program.
 - **A function reachable from two roots** (main and a handler, or two handlers) is a compile error, unless it has no memory of its own: no memory parameters, no locals and no compiler temporaries, and it calls only such functions. Its only state is registers, which the handler saves. When the reason is a hidden temporary (e.g. for a 16-bit addition), the error says so. Routines at a fixed address may be called from any root.
 - **A module's `private` variable used from two roots** is a compile error, e.g. the library's work bytes (`math.w0`-`w2`): the two sides would overwrite each other's values. Public variables and `data` may be shared.
+  - Exception: when one of the two roots is an `interrupt fn` declared in the variable's own module, sharing is allowed. The module's author wrote both sides, so the sharing is by design, e.g. a `timer` module whose handler counts `private var ticks` and whose `now()` reads it. The variable is volatile, as below.
 - A global variable used from two roots is volatile (4), so a main loop that waits for a flag set by a handler reads it on every pass.
 
 ### 8.2 Zero page allocation
@@ -604,7 +608,19 @@ A platform description gives: CPU variant, free zero-page ranges, RAM ranges for
 - Startup: a BASIC line `10 SYS 2061`, then the startup code (zero globals, copy initialized data, call `main`).
 - Free zero page: `$02–$8F` (BASIC's work area; the program does not return to BASIC) and `$FB–$FE`.
 - Variables: RAM after the program up to `$9FFF`. KERNAL and I/O stay mapped in v0.
-- Volatile areas: `$00–$01` (CPU port), `$D000–$DFFF` (VIC, SID, color RAM, CIAs, cartridge I/O), and the bytes the KERNAL's interrupt changes (the jiffy clock `$A0–$A2`, the keyboard and cursor bytes, the keyboard buffer at `$0277`). The platform description holds the exact list.
+- Volatile areas (4): memory the hardware or the KERNAL's interrupt changes. Fixed-address variables here are volatile with no keyword.
+
+  | Range | What changes it |
+  |---|---|
+  | `$00–$01` | CPU port |
+  | `$91` | STOP key flag |
+  | `$A0–$A2` | jiffy clock |
+  | `$C5–$C6` | last key pressed, keyboard buffer count |
+  | `$CB–$CF` | current key, cursor blink |
+  | `$F5–$F6` | keyboard decode table pointer |
+  | `$0277–$0280` | keyboard buffer |
+  | `$028D–$028E` | shift/Commodore/Ctrl key flags |
+  | `$D000–$DFFF` | VIC, SID, color RAM, CIAs, cartridge I/O |
 - Default encoding: `petscii` (2.1).
 
 **Planned:** NES (iNES, `ricoh2a03`, PRG/CHR banks), Commander X16 (`wdc65c02`), Apple II (binary for DOS 3.3/ProDOS), Atari 8-bit (`.xex`).

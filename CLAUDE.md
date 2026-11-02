@@ -63,4 +63,5 @@ These come from the spec and `docs/decisions.md`. Apply them to every change.
 - When code shape matters, check the listing (`result.Listing`) in a test.
 - A spec keyword that is not implemented yet must give "'x' is not supported yet", not a confusing parse error.
 - No new NuGet dependencies without asking.
+- `BenchmarkTests` fails on any change in bytes or cycles, better or worse. Rewrite the baseline (`TERN_UPDATE_BENCHMARKS=1 dotnet test`) in the same commit as the change that caused it, and give the old and new totals in the commit message.
 - Commit messages: a short summary line, then what changed and why.
