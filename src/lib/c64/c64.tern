@@ -151,8 +151,9 @@ asm fn kernal_off() {
 
 private interrupt fn ignore_nmi() { }
 
-// Install an IRQ handler: c64.set_irq(addr(handler)). Needs kernal_off first. Interrupts are
-// held off while the vector changes.
+// Install an IRQ handler: c64.set_irq(addr(handler)). The handler must be an 'interrupt fn' (it
+// ends with rti); addr() is a plain u16, so this is not checked. Needs kernal_off first.
+// Interrupts are held off while the vector changes.
 asm fn set_irq(handler: u16 using XY) {
     php
     sei
@@ -162,8 +163,9 @@ asm fn set_irq(handler: u16 using XY) {
     rts
 }
 
-// Install an NMI handler: c64.set_nmi(addr(handler)). Needs kernal_off first. An NMI cannot be
-// held off, so install it before anything raises one (CIA 2, RESTORE).
+// Install an NMI handler: c64.set_nmi(addr(handler)). The handler must be an 'interrupt fn'.
+// Needs kernal_off first. An NMI cannot be held off, so install it before anything raises one
+// (CIA 2, RESTORE).
 asm fn set_nmi(handler: u16 using XY) {
     stx $FFFA
     sty $FFFB
@@ -171,13 +173,11 @@ asm fn set_nmi(handler: u16 using XY) {
 }
 
 // Allow IRQs (cli).
-asm fn interrupts_on() {
-    cli
-    rts
+inline fn interrupts_on() {
+    asm { cli }
 }
 
 // Hold IRQs off (sei). NMIs still happen.
-asm fn interrupts_off() {
-    sei
-    rts
+inline fn interrupts_off() {
+    asm { sei }
 }

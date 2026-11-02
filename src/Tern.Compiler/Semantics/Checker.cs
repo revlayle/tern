@@ -27,6 +27,8 @@ public sealed partial class Checker
     private FunctionSymbol? _function;
     private int _loopDepth;
     private readonly HashSet<Register> _loopRegisters = [];
+    /// <summary>The largest value of each enclosing loop counter whose bounds are constants (for index checks).</summary>
+    private readonly Dictionary<VariableSymbol, long> _loopMax = [];
     private int _hiddenCounter;
     private readonly Platform _platform;
 
@@ -759,11 +761,34 @@ public sealed partial class Checker
         if (f.Variable is not null) Declare(counter);
         _loopDepth++;
         counter.Weight += Weight() * 3;   // load, step and compare on every pass
+        if (from is not null && to is not null && LargestLoopValue(from.Value, to.Value, f.Inclusive, f.StepValue) is long largest)
+            _loopMax[counter] = largest;
         CheckBlock(f.Body, newScope: false);
+        _loopMax.Remove(counter);
         _loopDepth--;
         _scopes.RemoveAt(_scopes.Count - 1);
 
         if (f.UsingRegister is { } r) _loopRegisters.Remove(r);
+    }
+
+    /// <summary>An index that is the counter of a constant-bounds loop must stay inside the array (spec 3.2).</summary>
+    private void CheckLoopIndex(Expr index, string name, int length)
+    {
+        if (Unwrap(index) is NameExpr { Symbol: VariableSymbol counter } && _loopMax.TryGetValue(counter, out var last) && last >= length)
+            throw new CompileError(index.Pos,
+                $"The loop reaches {last}, past the end of '{name}' (length {length}). Make the loop stop before {length}");
+    }
+
+    /// <summary>The largest value a loop with constant bounds reaches, or null if it runs no passes.</summary>
+    private static long? LargestLoopValue(long from, long to, bool inclusive, int step)
+    {
+        if (step > 0)
+        {
+            long limit = inclusive ? to : to - 1;
+            return from > limit ? null : from + (limit - from) / step * step;
+        }
+        long floor = inclusive ? to : to + 1;
+        return from < floor ? null : from;
     }
 
     private void CheckMatch(MatchStmt m)
@@ -945,6 +970,7 @@ public sealed partial class Checker
                         $"'{arr.Name}' has {arr.Type.Length} elements, too many for a u8 index. Read it through a pointer: addr({arr.Name})");
                 if (ix.Index.ConstValue is long idx && idx >= arr.Type.Length)
                     throw new CompileError(ix.Index.Pos, $"Index {idx} is past the end of '{arr.Name}' (length {arr.Type.Length})");
+                CheckLoopIndex(ix.Index, arr.Name, arr.Type.Length);
                 e.Type = arr.Type.Element!;
                 if (arr.Type.Linear) ix.Lowered = LinearIndex(ix);
                 break;
@@ -1501,11 +1527,17 @@ public sealed partial class Checker
     /// </summary>
     private static void CheckPrivateGlobalsPerRoot(List<Module> modules, List<FunctionSymbol> ordered)
     {
-        var privateGlobals = modules.Where(m => !m.IsMain)
-            .SelectMany(m => m.Syntax.PrivateNames.Select(n => m.Scope.GetValueOrDefault(n)).OfType<VariableSymbol>())
-            .Where(v => !v.IsData) // read-only tables are safe to share
-            .ToHashSet();
+        var moduleOf = new Dictionary<VariableSymbol, Module>();
+        foreach (var m in modules.Where(m => !m.IsMain))
+            foreach (var v in m.Syntax.PrivateNames.Select(n => m.Scope.GetValueOrDefault(n)).OfType<VariableSymbol>())
+                if (!v.IsData) // read-only tables are safe to share
+                    moduleOf[v] = m;
+        var privateGlobals = moduleOf.Keys.ToHashSet();
         if (privateGlobals.Count == 0) return;
+
+        // A module's own handler may share the module's private variables (spec 8.1): its author wrote both sides.
+        bool OwnHandler(FunctionSymbol root, VariableSymbol g) =>
+            root.IsInterrupt && moduleOf[g].Scope.Values.Contains(root);
 
         var firstUser = new Dictionary<VariableSymbol, (FunctionSymbol Function, FunctionSymbol Root)>();
         foreach (var f in ordered.Where(f => f.FixedAddress is null))
@@ -1513,7 +1545,7 @@ public sealed partial class Checker
                 foreach (var used in f.UsedGlobals)
                 {
                     var g = used.AliasOf ?? used;
-                    if (!privateGlobals.Contains(g)) continue;
+                    if (!privateGlobals.Contains(g) || OwnHandler(root, g)) continue;
                     if (!firstUser.TryGetValue(g, out var first))
                         firstUser[g] = (f, root);
                     else if (first.Root != root)

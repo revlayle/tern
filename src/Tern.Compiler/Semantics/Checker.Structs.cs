@@ -181,6 +181,7 @@ public sealed partial class Checker
                 throw new CompileError(ix.Index.Pos, $"Index {ci} is past the end of '{name}' (length {array.Length})");
             last = at.Offset + (int)ci + (element.Size == 2 ? array.Length : 0);
         }
+        CheckLoopIndex(ix.Index, name, array.Length);
         if (last > 255)
             throw new CompileError(ix.Pos, $"'{name}' reaches offset {last} of the struct; through a pointer, (p),y reaches offsets 0 to 255");
         ix.Lowered = new IndexExpr(ix.Pos, at.Pointer!, ix.Index)
@@ -201,6 +202,7 @@ public sealed partial class Checker
                 $"'{arr.Name}' is linear, so it cannot be indexed: that would need a multiply by the record size. Step through it with a pointer: p = p + sizeof({arr.Type.Element})");
         if (ix.Index.ConstValue is long idx && idx >= arr.Type.Length)
             throw new CompileError(ix.Index.Pos, $"Index {idx} is past the end of '{arr.Name}' (length {arr.Type.Length})");
+        CheckLoopIndex(ix.Index, arr.Name, arr.Type.Length);
         ix.Type = arr.Type.Element!;
         ix.Place = new StructPlace(PlaceKind.Table, 0, Base: arr, Index: ix.Index);
     }
