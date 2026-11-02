@@ -4,12 +4,16 @@ Owned by the coding session. Updated at the end of every coding session.
 
 ## Current
 
-- **Milestone:** M7 (optimizer, first pass), with the M6 follow-up. Complete; reviewed (`docs/reviews/m7.md`: one must-fix, three suggestions), and all four findings are fixed.
-- **Branch:** `m7-optimizer` (from `main` after the M6 merge and the spec commits that settled volatile memory and the M6 questions).
-- **Next step:** re-review the fixes, then `/merge m7-optimizer`. The spec session should look at questions 32-37 below. After the merge, M8 (benchmarks against other compilers); `tests/benchmarks` is a starting point for its task set.
+- **Milestone:** M8 (benchmarks against other compilers). Part 1, the M7 follow-up, is done; part 2, the comparison, has not started.
+- **Branch:** `m8-benchmarks` (from `main` after the M7 merge).
+- **Next step:** part 2 of the M8 roadmap entry: the benchmark tasks in `tests/benchmarks` written in hand-written assembly, Prog8 and cc65, and a report of bytes and cycles. Blocked on tools: cc65 (`cl65`) is not installed on this machine, and Prog8 is in `C:\prog8-stuff` (not on `PATH`: `prog8c` not found). Decide where the other-compiler sources live and how their cycles are measured (they should run in `Tern.Cpu`'s emulator for a fair count).
 
 ## Done
 
+- **M8 part 1, the M7 follow-up** (branch `m8-benchmarks`, 2026-11-02). 917 tests pass (36 CPU, 881 compiler).
+  - Private variables and the module's own handler (spec 8.1, decision 34): `Checker.CheckPrivateGlobalsPerRoot` skips a private variable when one root is an `interrupt fn` declared in the variable's own module. Tests in `InterruptTests`, including the two cases that stay errors. A handler in an imported module is a root only when a compiled function takes its `addr()`; the tests install it that way.
+  - A constant-bounds `for` loop that indexes past the end (spec 3.2, decision 32): `Checker.LargestLoopValue` and `_loopMax`. The index must be the loop counter itself (`a[i]`), not an expression of it. Tests in `ErrorTests`.
+  - `c64.interrupts_on()` / `interrupts_off()` are `inline fn` with an `asm { cli }` / `asm { sei }` block (`inline asm fn` is not supported yet). Listing test in `LibraryTests`. The benchmark baseline did not change.
 - **M7 optimizer, first pass** (branch `m7-optimizer`, 2026-11-02). 904 tests passed at the review (36 CPU, 868 compiler). Examples checked in VICE (`structs`, `library` and `raster`; use `-limitcycles 30000000`, with 20 million VICE sometimes exits before writing the screenshot).
   - **M6 follow-up: `addr(f)`** (spec 6.5). `Checker.TakeFunctionAddress`: a `u16` (`CallExpr.FunctionAddress`), loaded as `#f.lo` / `#f.hi` (`CodeGen.Simple2`). In initial values (`data` jump tables, initialized `var`s, `@ zp` vars) the checker records `VariableSymbol.FunctionAddresses` (byte index, function) and leaves zeros; `TernCompiler.ImageBytes` emits those bytes as `LabelTable` items, the startup code as `lda #f.lo` (`LayoutIndex` follows the split layout of `[u16; n]`). Errors: `inline fn`, memory parameters, `addr(f)` inside a calculation in an initial value, in a `const`.
     - Taking an address (`addr(f)`, or `#f.lo` in assembly) adds the function to `FunctionSymbol.UsedAddresses` (not a call edge; `jsr f` in asm still is one). `Checker.OrderRoots` keeps such functions as extra roots after main and the handlers, and marks them and everything they reach `Isolated`. `Allocator.FrameOffsets` places isolated frames last, after every other frame, so they overlap nothing. A table in a module keeps its functions only when a compiled function uses the table (`UseGlobal`); the main file's tables always do. Assembly may still take the address of a function with memory parameters (an earlier decision, `AsmTests.Address_of_a_function_with_memory_parameters_is_allowed`).
@@ -157,14 +161,8 @@ Not bugs; things to improve, mostly in M7 (optimizer).
 
 ## Questions for the spec session
 
-Questions 1-31 are settled (decisions.md, 2026-11-01 and 2026-11-02). New from M7, each implemented as described and provisional:
+Questions 1-37 are settled (decisions.md, 2026-11-01 and 2026-11-02). None open.
 
-32. **Array indexes outside the array.** The spec does not say what `a[i]` does when `i` is past the end. The optimizer assumes an indexed write changes only its own array (for a fixed-address array: any fixed-address variable, since those may overlap). A program that writes past an array on purpose could then read a stale value of the next variable. Should the spec say an index outside the array is not supported (and the emulator check it in debug runs, like 14.4)?
-33. **Taking an address in assembly.** `#f.lo` / `#f.hi` of an ordinary function now counts as taking its address, like `addr(f)` (its frame is isolated), and no longer as a call; `jsr f` and `jmp f` still are calls. Assembly may still take the address of a function with memory parameters (earlier decision): it can set them itself. Taking an address is not a call edge for the two-roots check either: a function reached only through its address has no known root, so it is never reported as shared; its globals count as used from an unknown root, so a global it shares with main or a handler is volatile.
-34. **Review M6 suggestion 8**, still open: the private-variable rule (31) also rejects a module that declares its own handler and shares a private counter with its own functions (e.g. a `timer` module whose `tick` handler counts and whose `now()` reads the count). The workaround is to make the variable public. Possible fixes: skip the check when one root is a handler declared in the variable's own module, or narrow it to variables only `asm fn`s use.
-35. **`lib/c64` interrupt functions** (roadmap: "the coding session proposes the exact set"): `kernal_off()`, `set_irq(h)`, `set_nmi(h)`, `interrupts_on()`, `interrupts_off()`, with `h` passed as `addr(handler)` in XY. `kernal_off` also turns off CIA 2's NMIs and installs an empty NMI handler, so RESTORE is ignored; KERNAL routines cannot be called afterwards. A raster helper (line and enable) was left out: it is two VIC writes.
-36. **The C64's volatile areas** (spec 12.2 says "the platform description holds the exact list"): `$00-$01`, `$91` (STOP key), `$A0-$A2`, `$C5-$C6`, `$CB-$CF`, `$F5-$F6`, `$0277-$0280`, `$028D-$028E`, `$D000-$DFFF`. Should the spec list them?
-37. **Benchmark baseline.** Any change in bytes or cycles, better or worse, fails `BenchmarkTests` until the baseline is rewritten, so improvements are recorded too. The bytes are the whole image (BASIC line, startup code, code and data); cycles include the startup code.
 
 ## Provisional choices made while coding
 
