@@ -4,15 +4,33 @@ Owned by the coding session. Updated at the end of every coding session.
 
 ## Current
 
-- **Milestone:** M4 (imports and the first standard library), including the M3 follow-up (fixed inputs). Complete; ready for review.
-- **Branch:** `m4-imports` (from `main` after the M3 merge).
-- **Next step:** re-review of `m4-imports` against `docs/reviews/m4.md` (both must-fix findings and suggestions 3 and 4 addressed), then merge. After the merge, M5 (structs). The spec session should look at the questions below; the provisional choices are easy to change.
+- **Milestone:** M5 (structs). Complete; ready for review.
+- **Branch:** `m5-structs` (from `main` after the M4 merge).
+- **Next step:** `/review` of `m5-structs` against the roadmap's M5 "done when" and spec 3.3. After the merge, M6 (`match`, interrupts, function modifiers). The spec session should look at the M5 questions below (10-21); the provisional choices are easy to change.
 
 ## Done
 
 - **M1 core compiler**, merged to `main` (2026-11-01).
 - **M2 pointers, data and strings**, merged to `main` (2026-11-01).
 - **M3 assembly blocks and KERNAL calls**, with the M2 follow-up, merged to `main` (2026-11-01).
+- **M4 imports and the standard library**, with the M3 follow-up (fixed inputs), merged to `main` (2026-11-01). Details below.
+- **M5 structs** (branch `m5-structs`, 2026-11-01). 662 tests pass (34 CPU, 628 compiler).
+  - `struct Name { field: type, field: type @ offset }`, fields separated by `,` or line breaks (`StructDecl`, `Parser.ParseStruct`). `Checker.Structs.cs` lays a struct out once (`StructSymbol.Fields`, `Size`): a field without `@` follows the previous one; nested structs are laid out first; a struct that contains itself, overlapping fields and duplicate names are errors. Struct names are declared before the file's constants, so types may name structs declared further down, and `ptr Enemy` inside `Enemy` works (pointer targets are not laid out). `sizeof(T)` works on structs, also qualified (`sizeof(c64.Vic)`); a type in a module is `shapes.Box` (`ParseType`).
+  - **Lowering.** The checker turns every field access into plain variables, arrays and pointers (`Expr.Lowered`); `Lowering.Apply` puts the lowered forms into the tree before code generation, so the code generator has almost no struct code:
+    - a field of a struct variable is a *view*: a `VariableSymbol` with `AliasOf` (the struct variable) and `AliasOffset`. `player.hp` is `lda player+2`, `player.name[i]` is `lda player+5,x`. `CodeGen.Var()` turns a view into a byte of its storage, so views need no memory and no allocation. Views are cached (`Checker._views`), so the same field is the same symbol. Fixed-address structs give views with a `FixedAddress`, so they are volatile like any `@ addr` variable.
+    - an array of structs is stored as one table per byte of the record: byte k of record i is at `base + k * n + i` (`PlaceKind.Table`). `enemies[i].x` is an index into the view `[u8; n]` at `k * n`: `ldx i` / `lda enemies,x`. A 16-bit field is a split array whose high table is `n` further on (`VariableSymbol.HighTable`; `CodeGen.HighTable()` replaced `Type.Length`).
+    - through a pointer, a field is `p[0]` with the field's offset added to Y (`IndexExpr.Offset`, `Stride`, `SecondByte`; `CodeGen.LoadPointerIndex`, `NextPointerByte`). `e.hp -= 1` is `ldy #2 / lda (e),y / sec / sbc #1 / sta (e),y`; `e.name[i]` is `lda i / clc / adc #off / tay`. A pointer field (`e.next.hp`) is copied to a zero-page temporary first, as is a pointer that is a field of a struct variable (views are never used directly as `(zp),y` pointers).
+  - Struct-typed and array-field expressions carry a `StructPlace` (memory, table or pointer, plus the offset in the record) while being checked; `Checker.Unwrap` gives the lowered form where the checker pattern-matches.
+  - `linear var list: [Enemy; 8]`: whole records in order; cannot be indexed; `addr(list)` is a `ptr Enemy`, stepped with `p + sizeof(Enemy)`.
+  - Arrays inside a struct use the same layout as array variables: `[u16; n]` is split inside the record (low bytes, then high bytes).
+  - Assembly operands may name fields of struct variables: `sta c64.vic.border`, `#c64.vic.background.hi` (`Checker.Asm.cs`).
+  - `lib/c64`: `struct Vic` / `var vic @ $D000` (all registers; `sprite0_x` ... `sprite7_y`, `sprite_color: [u8; 8]`), `struct Voice`, `struct Sid` / `var sid @ $D400` (three nested voices), `struct Cia` / `var cia1 @ $DC00`, `var cia2 @ $DD00`. Unused, they add no bytes (`An_unused_import_adds_no_bytes` still passes).
+  - Tests: `StructTests` (layout, struct variables, fixed addresses and volatility, pointers, linear arrays, arrays of structs, spec 3.3 code shapes, 46 error messages), `ModuleTests` (structs in modules, qualified types), `C64LibraryTests` (register addresses, fields in asm, the example), `AsmTests` (asm field errors).
+  - `examples/structs.tern`: border and background colors and a sprite through `c64.vic`, and eight enemies moved 100 times both by index (`[Enemy; 8]`) and through a pointer (`linear var`). Checked in VICE (needs `-limitcycles 20000000`: loading takes most of 8 million cycles); `C64LibraryTests.Structs_example_moves_both_lists_the_same` checks the screen against the same moves in C#.
+  - Roadmap "done when": the VIC-II struct at `$D000` works in VICE (example); a list of enemies updates through indexing and pointers (example, and `StructTests.A_list_of_enemies_updates_through_indexing_and_pointers`).
+
+## M4 details
+
 - **M3 follow-up: fixed inputs** (branch `m4-imports`, 2026-11-01). `fn get_cursor(true using carry) -> u16 using XY @ $FFF0`: a constant in place of a parameter name. Parsed into `ParamSyntax.FixedValue`, checked in `DeclareRoutine` (after the globals, so a variable gets "must be a constant"), stored in `FunctionSymbol.FixedInputs`. A, X, Y take a `u8` constant, the carry `true`/`false`; pairs and other flags are errors. Calls load fixed registers with the other register arguments (A last) and put `sec`/`clc` right before the `jsr` (spec 11 shape tested). Fixed inputs are not in `Parameters`, so callers pass only the other arguments. `-> u16 using XY`/`AY` already worked. Tests: `RoutineTests` (stand-in PLOT at `$C060`), 13 error messages.
 - **M4 imports and the standard library** (branch `m4-imports`, 2026-11-01). 575 tests pass (34 CPU, 541 compiler).
   - `import name` at the top of a file (`ImportDecl`; after another declaration it is an error). `ModuleLoader` (`Semantics/Module.cs`) loads every file once, by module name, and returns them with each module before its importers (main last). Modules may import each other. Lookup: `lib/<platform>/name.tern`, `lib/name.tern`, then the importing file's folder. A module found only in another platform's folder (`lib/nes/x.tern` when compiling for the C64) is an error naming the platform.
@@ -72,10 +90,16 @@ Not bugs; things to improve, mostly in M7 (optimizer).
 - `mem.fill` reloads `value` on every byte (`lda value` / `sta (dst),y`): 13 cycles per byte instead of 11. Loop-invariant loads are for the optimizer.
 - A `for` bound such as `count.hi` (not a plain variable) is copied to a temporary before the loop.
 - Import cycles: declarations are processed module by module, so in a cycle (a imports b, b imports a) a constant of the later module cannot be used in a declaration of the earlier one. The error says so and suggests moving the constant. Function bodies are not affected.
+- `enemies[i].hp += 1` loads X twice (`ldx i` before the read and again before the write), as `a[i] += 1` on any array does.
+- A pointer that is a field of a struct variable (`player.next.hp`) is always copied to a zero-page temporary, even when the struct is in zero page and could be used as `(player+3),y` directly.
+- A field used as a `for` bound (`for i in 0..s.count`) is copied to a temporary, like any bound that is not a plain local or parameter.
+- Structs are not put in zero page by usage (step 3 of 8.2), only with `@ zp`, like arrays.
+- Struct field offsets use a constant expression; a constant declared later in the same file than the struct cannot be used, since structs are laid out right after the file's constants. Globals cannot be used at all (an offset must be a constant anyway).
+- A struct with `@` gaps in an array of structs costs one table (n bytes) per gap byte.
 
 ## Questions for the spec session
 
-The M3 questions were settled on 2026-11-01. New ones from M4; each is implemented as described and marked provisional:
+The M3 questions were settled on 2026-11-01. From M4 (still open); each is implemented as described and marked provisional:
 
 1. **Line breaks inside brackets.** Implemented: a line break inside `( )` or `[ ]` does not end a statement, so `data t: [u8; 256] = [` can continue over many lines (the spec's `[ ... ]` table example needs this). A `{` or `}` resets the count. Spec 2 says only "statements end at a newline or `;`".
 2. **Platform modules.** Implemented: a platform module lives in `lib/<platform>/` (e.g. `lib/c64/c64.tern`); lookup is `lib/<platform>/`, `lib/`, then the importing file's folder. A module that exists only in another platform's folder is an error. This also lets a platform provide its own version of a general module later. Is a folder per platform the intended mechanism?
@@ -87,8 +111,23 @@ The M3 questions were settled on 2026-11-01. New ones from M4; each is implement
 8. **`c64.get_cursor`** (PLOT read, `-> u16 using XY`) is added to the table in 10.1, from the 6.6 example.
 9. **Spec 11 shape of `math.mul8(a, b)`** (review M4, finding 5): the table shows `lda a` / `ldx b` / `jsr`; the compiler gives `ldx b` / `lda a` / `jsr`, since A is loaded last (M3). Same bytes and cycles; the table could show the compiler's order.
 
+New ones from M5 (structs), also implemented as described and provisional:
+
+10. **Field separators.** Fields are separated by `,` or line breaks (or both), and a trailing `,` is allowed. Spec 3.3 only shows commas on one line; the `lib/c64` structs need one field per line to be readable.
+11. **`@` offsets.** A field without `@` follows the previous field (whatever its offset); fields may be given in any order. Overlapping fields are an error, so there are no unions. Should overlapping fields (two names for one register, e.g. a read and a write meaning) be allowed?
+12. **Array fields with 16-bit elements** are split inside the record, like array variables (3.2): `pts: [u16; 2]` is two low bytes, then two high bytes. Through a pointer, `e.pts[i]` reads offsets `off + i` and `off + 2 + i` (no `asl`).
+13. **Arrays of structs as fields** (`parts: [Point; 4]` inside a struct) give "not supported yet". They would need a layout decision (records or tables inside the record).
+14. **Layout of an array of structs.** "One array per field" is implemented as one table per *byte* of the record: byte k of record i is at `base + k * n + i`. For 8-bit fields this is exactly one table per field; a 16-bit field is a split pair of tables, as in 3.2; nested structs and constant-index array fields flatten the same way. Gaps from `@` offsets cost a table each.
+15. **`addr()`.** `addr(player)` gives `ptr Player`, `addr(list)` of a linear array gives a pointer to its first record. `addr()` of an array of structs stored as tables is an error that suggests `linear`. `addr()` of a field (`addr(player.name)`, e.g. to pass a name to `text.put`) is not supported, since `addr` takes a name. Wanted?
+16. **Initial values and locals.** Structs and arrays of structs cannot have initial values (there is no struct literal); globals are zeroed at startup. Local struct variables are allowed without an initial value, like local arrays (their memory is shared, so it holds leftovers). `data` cannot hold structs.
+17. **`linear` on arrays of numbers** (spec 3.2's `linear var pts: [u16; 32]`) gives "not supported yet"; only arrays of structs can be `linear` now. `linear` goes before `var`.
+18. **Assembly operands** may name a field of a struct variable: `sta c64.vic.border` is `sta $D020`, and `#c64.vic.background.hi` works. Fields through a pointer or in an array of structs are an error in assembly (no fixed address).
+19. **Struct names share the namespace** of constants, variables and functions in a file; a struct cannot be named like a built-in type.
+20. **`lib/c64` register names** (spec 10.1 says only "VIC-II, SID and CIA register structs", e.g. `c64.vic.border`): `vic` (`Vic` at `$D000`: `sprite0_x` ... `sprite7_y`, `sprite_x_msb`, `control1`, `raster`, `light_pen_x/y`, `sprite_enable`, `control2`, `sprite_expand_y`, `memory`, `irq_status`, `irq_enable`, `sprite_priority`, `sprite_multicolor`, `sprite_expand_x`, `sprite_collision`, `sprite_bg_collision`, `border`, `background`, `background1-3`, `sprite_mc0/1`, `sprite_color: [u8; 8]`), `sid` (`Sid` at `$D400`: `voice1-3: Voice` with `freq`, `pulse`, `control`, `attack_decay`, `sustain_release`; `cutoff: u16`, `resonance`, `volume`, `paddle_x/y`, `osc3`, `env3`), `cia1` and `cia2` (`Cia` at `$DC00`/`$DD00`: `port_a/b`, `ddr_a/b`, `timer_a/b: u16`, `tod_tenths/seconds/minutes/hours`, `serial`, `icr`, `control_a/b`). The sprite positions are separate fields, since x and y alternate and arrays of structs cannot be fields (13). Are these names right?
+21. **Field offsets through a pointer** must be 0-255 (what `(p),y` reaches); a larger offset is an error at the access, not at the declaration, since the struct may still be used as a variable or at a fixed address.
+
 The M3 item about where error tests live was settled on 2026-11-01: in each feature's test file.
 
 ## Provisional choices made while coding
 
-Listed as questions 1-9 above. Also: `import` is a reserved word.
+Listed as questions 1-21 above. Also: `import` is a reserved word.

@@ -367,6 +367,27 @@ public class StructTests
         Assert.Equal(43, r.U8("out"));
     }
 
+    [Fact]
+    public void A_chain_of_pointer_fields_is_followed()
+    {
+        var r = Run.Program("""
+            struct Node { value: u8, next: ptr Node }
+            var n1: Node
+            var n2: Node
+            var n3: Node
+            var out: u8
+            fn main() {
+                var p: ptr Node = addr(n1)
+                p.next = addr(n2)
+                p.next.next = addr(n3)
+                p.next.next.value = 5
+                out = p.next.next.value + n1.next.next.value
+            }
+            """);
+        Assert.Equal(5, r.U8("n3"));
+        Assert.Equal(10, r.U8("out"));
+    }
+
     // ---------- Arrays of structs: one table per field ----------
 
     [Fact]
