@@ -1,0 +1,186 @@
+// Packed decimal counters of 1 or more bytes (two digits per byte, low byte first), for scores.
+// A counter is n bytes at a pointer; 3 bytes hold 000000 to 999999. The routines use decimal
+// mode (sed) only around their additions and end with cld. An interrupt handler starts with cld
+// (spec 6.3), and the flags saved for rti bring decimal mode back, so main can be interrupted
+// halfway through an addition.
+//
+// Digits are written as screen codes (the same as PETSCII for 0-9).
+
+// Set the n bytes at p to 0.
+fn clear(p: ptr u8, n: u8) {
+    for i in 0..n using Y {
+        p[i] = 0
+    }
+}
+
+// p += q: n bytes each. A carry out of the top byte is lost (the counter wraps to 0).
+asm fn add(p: ptr u8, q: ptr u8, n: u8 using X) {
+    ldy #0
+    sed
+    clc
+.loop:
+    lda (p),y
+    adc (q),y
+    sta (p),y
+    iny
+    dex
+    bne .loop
+    cld
+}
+
+// p -= q: n bytes each. Going below 0 wraps to 99...9.
+asm fn sub(p: ptr u8, q: ptr u8, n: u8 using X) {
+    ldy #0
+    sed
+    sec
+.loop:
+    lda (p),y
+    sbc (q),y
+    sta (p),y
+    iny
+    dex
+    bne .loop
+    cld
+}
+
+// p += v, where v is two digits in one byte ($25 adds 25).
+asm fn add_byte(p: ptr u8, n: u8 using X, v: u8 using A) {
+    ldy #0
+    sed
+    clc
+    adc (p),y
+    sta (p),y
+    iny
+    dex
+    beq .done
+.loop:
+    lda (p),y
+    adc #0
+    sta (p),y
+    iny
+    dex
+    bne .loop
+.done:
+    cld
+}
+
+// p -= v, where v is two digits in one byte.
+asm fn sub_byte(p: ptr u8, n: u8 using X, v: u8 using A) {
+    sta w0
+    ldy #0
+    sed
+    sec
+    lda (p),y
+    sbc w0
+    sta (p),y
+    iny
+    dex
+    beq .done
+.loop:
+    lda (p),y
+    sbc #0
+    sta (p),y
+    iny
+    dex
+    bne .loop
+.done:
+    cld
+}
+
+// p += 1.
+asm fn inc(p: ptr u8, n: u8 using X) {
+    ldy #0
+    sed
+    sec                 // adding 0 and the carry
+.loop:
+    lda (p),y
+    adc #0
+    sta (p),y
+    iny
+    dex
+    bne .loop
+    cld
+}
+
+// p -= 1.
+asm fn dec(p: ptr u8, n: u8 using X) {
+    ldy #0
+    sed
+    clc                 // subtracting 0 and the borrow
+.loop:
+    lda (p),y
+    sbc #0
+    sta (p),y
+    iny
+    dex
+    bne .loop
+    cld
+}
+
+// True if p < q (n bytes each). Packed decimal compares like binary, so no decimal mode is needed.
+asm fn less(p: ptr u8, q: ptr u8, n: u8 using X) -> bool using carry {
+    ldy #0
+    clc
+.loop:
+    lda (q),y
+    sbc (p),y           // q - p - 1: no borrow if q > p
+    iny
+    dex
+    bne .loop
+}
+
+// True if the n bytes at p and q are the same.
+asm fn equal(p: ptr u8, q: ptr u8, n: u8 using Y) -> bool using carry {
+    dey
+.loop:
+    lda (p),y
+    cmp (q),y
+    bne .no
+    dey
+    bpl .loop
+    sec
+    rts
+.no:
+    clc
+}
+
+// True if all n bytes at p are 0.
+asm fn is_zero(p: ptr u8, n: u8 using Y) -> bool using zero {
+    lda #0
+    dey
+.loop:
+    ora (p),y
+    dey
+    bpl .loop
+    cmp #0
+}
+
+// Write all 2 * n digits of the counter at dst, most significant first, with leading zeros.
+fn digits(dst: ptr u8, p: ptr u8, n: u8) {
+    var k: u8 = 0
+    for i in 0..n {
+        var b: u8 = p[n - 1 - i]
+        dst[k] = (b >> 4) + $30
+        dst[k + 1] = (b & 15) + $30
+        k += 2
+    }
+}
+
+// Write the counter at dst without leading zeros (but at least one digit). Returns the number of
+// digits. dst needs room for 2 * n digits, since the digits are written first and then moved up.
+fn text(dst: ptr u8, p: ptr u8, n: u8) -> u8 {
+    digits(dst, p, n)
+    var total: u8 = n << 1
+    var skip: u8 = 0
+    while skip < total - 1 && dst[skip] == $30 {
+        skip += 1
+    }
+    if skip != 0 {
+        for i in 0..(total - skip) {
+            dst[i] = dst[i + skip]
+        }
+    }
+    return total - skip
+}
+
+private var w0: u8
