@@ -4,12 +4,16 @@ Owned by the coding session. Updated at the end of every coding session.
 
 ## Current
 
-- **Milestone:** M8 (benchmarks against other compilers). Part 1, the M7 follow-up, is done; part 2, the comparison, has not started.
-- **Branch:** `m8-benchmarks` (from `main` after the M7 merge). Part 1 was reviewed (`docs/reviews/m8.md`); findings 1, 3 and 4 are fixed, finding 2 is open (below).
-- **Next step:** part 2 of the M8 roadmap entry: the benchmark tasks in `tests/benchmarks` written in hand-written assembly, Prog8 and cc65, and a report of bytes and cycles. Blocked on tools: cc65 (`cl65`) is not installed on this machine, and Prog8 is in `C:\prog8-stuff` (not on `PATH`: `prog8c` not found). Decide where the other-compiler sources live and how their cycles are measured (they should run in `Tern.Cpu`'s emulator for a fair count).
+- **Milestone:** M8 (benchmarks against other compilers). Both parts are done; ready for `/review`.
+- **Branch:** `m8-benchmarks`. Part 1 was reviewed (`docs/reviews/m8.md`); findings 1, 3 and 4 are fixed, finding 2 is open (below).
+- **Next step:** review of M8 part 2, then merge. After that, see "Later" in `docs/roadmap.md`. The comparison suggests where Tern's code is still larger than hand-written assembly (see `tests/benchmarks/comparison.md`); the biggest gaps are `sieve` (121 vs 47 bytes, 24606 vs 8489 cycles), `crc8` and `interp`.
 
 ## Done
 
+- **M8 part 2, the comparison** (2026-11-02). 921 tests pass (36 CPU, 885 compiler); `ComparisonTests` is included in that count but only does work with `TERN_COMPARE=1`.
+  - The nine benchmarks exist in hand-written assembly (`tests/benchmarks/asm`, 64tass), Prog8 (`prog8`, 12.0-SNAPSHOT from `C:\prog8-stuff`) and C (`c`, cc65 in `C:\cc65`). `ComparisonTests` builds each with the external tool, runs it in the Tern emulator, checks the result with the same C# check as `BenchmarkTests` (now `Results`, so the check works for every layout), and writes `tests/benchmarks/comparison.md`. Run it with `TERN_COMPARE=1 dotnet test --filter ComparisonTests`; paths can be set with `PROG8_JAR`, `TASS64`, `CL65`. Without the variable it does nothing, so normal runs need no Java or cc65.
+  - Totals (bytes / cycles): Tern 1664 / 535295; assembly 947 / 324419; Prog8 2102 / 698705; cc65 2822 / 1453115. How bytes and cycles are counted for each is in the report. Prog8 cycles include its BSS clearing; cc65 uses `-Oirs -Cl`.
+  - Generated outputs (`*.prg`, `*.lbl`, ...) go to a temp directory; `.gitignore` also covers them in `tests/benchmarks/*/`.
 - **M8 part 1 review fixes** (2026-11-02). 920 tests pass (36 CPU, 884 compiler). Finding 1: `Checker.CheckLoopIndex` is now also used for arrays of structs (`e[i].hp`) and array fields through a pointer (`p.name[i]`), with error tests. Finding 3: removed the redundant `OwnHandler(first.Root, g)` test. Finding 4: the module tests share a `WithModules` helper; the `set_nmi` comment is rewrapped. Finding 2 (the optimizer forgets all state at `cli`/`sei` in asm) is left open: it needs `AsmEffects` to drive what is forgotten, and no benchmark shows a cost yet.
 - **M8 part 1, the M7 follow-up** (branch `m8-benchmarks`, 2026-11-02). 917 tests pass (36 CPU, 881 compiler).
   - Private variables and the module's own handler (spec 8.1, decision 34): `Checker.CheckPrivateGlobalsPerRoot` skips a private variable when one root is an `interrupt fn` declared in the variable's own module. Tests in `InterruptTests`, including the two cases that stay errors. A handler in an imported module is a root only when a compiled function takes its `addr()`; the tests install it that way.
