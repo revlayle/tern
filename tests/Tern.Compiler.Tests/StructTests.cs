@@ -224,4 +224,126 @@ public class StructTests
             """);
         Assert.Equal("lda regs+1|clc|adc regs+1|sta a|lda #$01|sta regs+1|lda #$02|sta regs+1|rts", Code(r));
     }
+
+    // ---------- Through a pointer ----------
+
+    [Fact]
+    public void Fields_are_read_and_written_through_a_pointer()
+    {
+        var r = Run.Program("""
+            struct Point { x: u8, y: u8 }
+            struct Enemy { pos: Point, hp: u8, vel: i16, name: [u8; 4], pts: [u16; 2], next: ptr Enemy }
+            var a: Enemy
+            var b: Enemy
+            var out: [u8; 8]
+            var w: u16
+            fn main() {
+                var e: ptr Enemy = addr(a)
+                e.pos.x = 1
+                e.pos.y = e.pos.x + 1
+                e.hp = 10
+                e.hp -= 1
+                e.vel = -300
+                e.vel += 1
+                for i in 0..4 { e.name[i] = i + 65 }
+                e.pts[0] = $1234
+                var k: u8 = 1
+                e.pts[k] = e.pts[0] + $0101
+                e.next = addr(b)
+                e.next.hp = 77
+                e.next.pos.y = e.hp
+                out[0] = e.name[k]
+                out[1] = e.next.hp
+                out[2] = e.pts[k].hi
+                out[3] = e.vel.lo
+                w = e.pts[k]
+                e = e.next
+                out[4] = e.hp
+            }
+            """);
+        int a = r.Address("a"), b = r.Address("b");
+        byte[] m = r.Ram.Bytes;
+        Assert.Equal(new byte[] { 1, 2, 9 }, m[a..(a + 3)]);
+        Assert.Equal(-299, (short)(m[a + 3] | m[a + 4] << 8));
+        Assert.Equal("ABCD", System.Text.Encoding.ASCII.GetString(m, a + 5, 4));
+        Assert.Equal(new byte[] { 0x34, 0x35, 0x12, 0x13 }, m[(a + 9)..(a + 13)]);
+        Assert.Equal(b, m[a + 13] | m[a + 14] << 8);
+        Assert.Equal(77, m[b + 2]);
+        Assert.Equal(9, m[b + 1]);
+        Assert.Equal(new byte[] { (byte)'B', 77, 0x13, unchecked((byte)-299), 77 }, m[r.Address("out")..(r.Address("out") + 5)]);
+        Assert.Equal(0x1335, r.U16("w"));
+        Assert.True(r.Address("main.e") < 0x100, "a pointer used for fields must be in zero page");
+    }
+
+    [Theory]
+    // Spec 3.3.
+    [InlineData("e.hp -= 1", "ldy #$02|lda (e),y|sec|sbc #$01|sta (e),y|rts")]
+    [InlineData("e.pos.y = 5", "ldy #$01|lda #$05|sta (e),y|rts")]
+    [InlineData("x = e.name[i]", "lda i|clc|adc #$03|tay|lda (e),y|sta x|rts")]
+    [InlineData("x = e.name[2]", "ldy #$05|lda (e),y|sta x|rts")]
+    [InlineData("e = e + sizeof(Enemy)", "clc|lda e|adc #$0D|sta e|bcc main.c0|inc e+1|rts")]
+    // Following a pointer field copies it to a zero-page temporary first.
+    [InlineData("x = e.next.hp", "ldy #$0B|lda (e),y|sta main._t0|iny|lda (e),y|sta main._t0+1|ldy #$02|lda (main._t0),y|sta x|rts")]
+    public void Pointer_field_code_shapes(string statement, string expected)
+    {
+        var r = Run.Program($$"""
+            struct Point { x: u8, y: u8 }
+            struct Enemy { pos: Point, hp: u8, name: [u8; 8], next: ptr Enemy }
+            var e: ptr Enemy @ zp
+            var x: u8
+            var i: u8
+            fn main() { {{statement}} }
+            """);
+        Assert.Equal(expected, Code(r));
+    }
+
+    [Fact]
+    public void A_pointer_steps_through_a_linear_array_of_structs()
+    {
+        var r = Run.Program("""
+            struct Enemy { x: u8, y: u8, hp: u8, score: u16 }
+            linear var list: [Enemy; 5]
+            fn main() {
+                var e: ptr Enemy = addr(list)
+                for i in 0..len(list) {
+                    e.x = i
+                    e.y = (i << 1) + 1
+                    e.hp = 100 - i
+                    e.score = 1000 + (i as u16)
+                    e = e + sizeof(Enemy)
+                }
+                // Change every record through the pointer again.
+                e = addr(list)
+                for _ in 0..5 {
+                    e.hp -= 1
+                    e.score += 1
+                    e += sizeof(Enemy)
+                }
+            }
+            """);
+        int a = r.Address("list");
+        for (int i = 0; i < 5; i++)
+        {
+            int at = a + 5 * i;
+            Assert.Equal(i, r.Ram.Bytes[at]);
+            Assert.Equal(i * 2 + 1, r.Ram.Bytes[at + 1]);
+            Assert.Equal(99 - i, r.Ram.Bytes[at + 2]);
+            Assert.Equal(1001 + i, r.Ram.Bytes[at + 3] | r.Ram.Bytes[at + 4] << 8);
+        }
+    }
+
+    [Fact]
+    public void A_cast_pointer_reads_any_memory_as_a_struct()
+    {
+        var r = Run.Program("""
+            struct Pair { lo: u8, hi: u8 }
+            var raw: [u8; 2] = [7, 9]
+            var out: u8
+            fn main() {
+                var p: ptr u8 = addr(raw)
+                out = (p as ptr Pair).hi
+            }
+            """);
+        Assert.Equal(9, r.U8("out"));
+    }
 }
