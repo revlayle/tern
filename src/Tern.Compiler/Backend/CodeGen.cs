@@ -726,7 +726,11 @@ public sealed class CodeGen
             case NameExpr { Symbol: { InMemory: true } v }:
                 return (Var(v), Var(v, 1));
             case CallExpr { AddressOf: { } av }:
-                return (new ImmVarByte(av, false), new ImmVarByte(av, true));
+            {
+                // A field of a struct variable is a view: its storage plus an offset.
+                var (v, offset) = av.AliasOf is { } storage ? (storage, av.AliasOffset) : (av, 0);
+                return (new ImmVarByte(v, false, offset), new ImmVarByte(v, true, offset));
+            }
             case IndexExpr ix when !IsPointerIndex(ix) && ix.Index.ConstValue is long i:
                 var arr = ArrayOf(ix);
                 return (Var(arr, (int)i), Var(arr, HighTable(arr) + (int)i));

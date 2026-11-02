@@ -1093,6 +1093,46 @@ public sealed partial class Checker
         if (count.Type.Kind == TypeKind.IntLiteral) Coerce(count, TernType.U8);
     }
 
+    /// <summary>Makes <c>addr(...)</c> a constant address: the variable's, or a view's (its storage plus an offset).</summary>
+    private static void TakeAddress(CallExpr c, VariableSymbol v)
+    {
+        v.AddressTaken = true;
+        if (v.AliasOf is { } storage) storage.AddressTaken = true;
+        c.AddressOf = v;
+        // An array gives a pointer to its first element. A split array of 16-bit
+        // values gives a pointer to its table of low bytes.
+        c.Type = !v.Type.IsArray ? TernType.PointerTo(v.Type)
+            : v.Type.Element!.IsStruct ? TernType.PointerTo(v.Type.Element)
+            : v.Type.Element!.Size == 1 ? TernType.PointerTo(v.Type.Element!)
+            : TernType.PointerTo(TernType.U8);
+    }
+
+    /// <summary><c>addr(player.name)</c>: a field of a struct variable or of a struct at a fixed address.</summary>
+    private void CheckAddrOfField(CallExpr c, MemberExpr field)
+    {
+        CheckExpr(field);
+        string name = DescribePlace(field);
+        var place = field.Place ?? Unwrap(field) switch
+        {
+            NameExpr { Symbol: { AliasOf: not null } } => null,
+            IndexExpr { Target.Type.IsArray: true } => new StructPlace(PlaceKind.Table, 0),
+            _ => new StructPlace(PlaceKind.Pointer, 0),
+        };
+        switch (place?.Kind)
+        {
+            case PlaceKind.Pointer:
+                throw new CompileError(field.Pos,
+                    $"'{name}' is reached through a pointer, so it has no fixed address. addr() works on fields of struct variables; through a pointer, add the field's offset to the pointer");
+            case PlaceKind.Table:
+                throw new CompileError(field.Pos,
+                    $"'{name}' is in an array of structs, which is stored as one table per field, so the record has no address. addr() works on fields of struct variables");
+        }
+        var view = place is { Kind: PlaceKind.Memory } at
+            ? View(at.Base!, at.Offset, field.Type, name)
+            : ((NameExpr)Unwrap(field)).Symbol!;
+        TakeAddress(c, (VariableSymbol)view);
+    }
+
     private void CheckCall(CallExpr c)
     {
         switch (c.Name)
@@ -1110,8 +1150,13 @@ public sealed partial class Checker
                 throw new CompileError(c.Pos, "include_bytes() can only be the value of data or a global array");
             case "addr":
             {
+                if (c.Args.Count == 1 && c.Args[0] is MemberExpr { Member: not ("lo" or "hi") } field)
+                {
+                    CheckAddrOfField(c, field);
+                    return;
+                }
                 if (c.Args.Count != 1 || c.Args[0] is not NameExpr name)
-                    throw new CompileError(c.Pos, "addr() takes the name of a variable, array or data");
+                    throw new CompileError(c.Pos, "addr() takes the name of a variable, array or data, or a field of a struct variable");
                 switch (Lookup(name.Name))
                 {
                     case null: throw NotDeclared(name.Name, name.Pos);
@@ -1121,18 +1166,11 @@ public sealed partial class Checker
                         if (!v.InMemory) throw new CompileError(name.Pos, $"'{name.Name}' lives in a register and has no address");
                         name.Symbol = v;
                         name.Type = v.Type;
-                        v.AddressTaken = true;
-                        c.AddressOf = v;
                         UseGlobal(v);
                         if (v.Type.IsStructArray && !v.Type.Linear)
                             throw new CompileError(name.Pos,
                                 $"'{name.Name}' is stored as one table per field, so there is no record to point to. Declare it 'linear var' to store whole records");
-                        // An array gives a pointer to its first element. A split array of 16-bit
-                        // values gives a pointer to its table of low bytes.
-                        c.Type = !v.Type.IsArray ? TernType.PointerTo(v.Type)
-                            : v.Type.Element!.IsStruct ? TernType.PointerTo(v.Type.Element)
-                            : v.Type.Element!.Size == 1 ? TernType.PointerTo(v.Type.Element!)
-                            : TernType.PointerTo(TernType.U8);
+                        TakeAddress(c, v);
                         return;
                 }
                 throw new InvalidOperationException();
