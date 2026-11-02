@@ -4,6 +4,11 @@
     <ProjectReference Include="..\Tern.Cpu\Tern.Cpu.csproj" />
   </ItemGroup>
 
+  <!-- The standard library, copied to lib/ next to the compiler (TernCompiler.DefaultLibraryDirectory). -->
+  <ItemGroup>
+    <None Include="..\lib\**\*" Link="lib\%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>

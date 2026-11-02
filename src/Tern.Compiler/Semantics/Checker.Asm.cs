@@ -37,7 +37,7 @@ public sealed partial class Checker
             case NameExpr n:
                 switch (Lookup(n.Name))
                 {
-                    case null: throw new CompileError(n.Pos, $"'{n.Name}' is not declared");
+                    case null: throw NotDeclared(n.Name, n.Pos);
                     case ConstSymbol c: return new AsmValue(c.Value);
                     case FunctionSymbol f: return new AsmValue(0, Function: f);
                     case VariableSymbol v:
@@ -46,6 +46,7 @@ public sealed partial class Checker
                                 ? $"'{n.Name}' is passed in register {v.Register}; use the register directly"
                                 : $"'{n.Name}' lives in register {v.Register}; use the register directly");
                         n.Symbol = v;
+                        UseGlobal(v);
                         v.Weight += Weight();
                         return new AsmValue(0, Variable: v);
                 }
@@ -53,6 +54,7 @@ public sealed partial class Checker
 
             case MemberExpr m:
             {
+                CheckMemberTarget(m);
                 if (m.Member is not ("lo" or "hi"))
                     throw new CompileError(m.Pos, $"Unknown member '.{m.Member}'; assembly only has .lo and .hi");
                 var inner = AsmOperand(m.Target, labels);

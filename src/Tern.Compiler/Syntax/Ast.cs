@@ -262,6 +262,8 @@ public sealed class ParamSyntax(SourcePos pos, string name, TypeSyntax type, Reg
     public string Name { get; } = name;
     public TypeSyntax Type { get; } = type;
     public Register? UsingRegister { get; } = usingRegister;
+    /// <summary>A fixed input (<c>true using carry</c>): the constant passed on every call. Name and type are then empty.</summary>
+    public Expr? FixedValue { get; init; }
 }
 
 public sealed class FnDecl(
@@ -282,8 +284,15 @@ public sealed class FnDecl(
     public FunctionSymbol? Symbol { get; set; }
 }
 
+public sealed class ImportDecl(SourcePos pos, string name) : Node(pos)
+{
+    public string Name { get; } = name;
+}
+
+/// <summary>One source file: a program's main file or a module.</summary>
 public sealed class ProgramSyntax(List<ConstDecl> consts, List<VarDecl> globals, List<FnDecl> functions)
 {
+    public List<ImportDecl> Imports { get; init; } = [];
     public List<ConstDecl> Consts { get; } = consts;
     public List<VarDecl> Globals { get; } = globals;
     public List<FnDecl> Functions { get; } = functions;

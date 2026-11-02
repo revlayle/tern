@@ -231,6 +231,27 @@ public class DataTests
         }
     }
 
+    [Fact]
+    public void Tables_and_arguments_may_span_lines()
+    {
+        var r = Run.Program("""
+            data table: [u8; 6] = [
+                1, 2, 3,
+                4, 5, 6
+            ]
+            var sum: u8
+            fn add(a: u8, b: u8) -> u8 { return a + b }
+            fn main() {
+                sum = add(
+                    table[1],
+                    table[5]
+                )
+            }
+            """);
+        Assert.Equal(8, r.U8("sum"));
+        Assert.Equal([1, 2, 3, 4, 5, 6], Bytes(r, "table", 6));
+    }
+
     [Theory]
     [InlineData("data d: [u8; 2] = [1, 2]\nfn main() { d[0] = 5 }", "'d' is data, which is read-only")]
     [InlineData("data d: [u16; 2] = [1, 2]\nfn main() { d[0].lo = 5 }", "'d' is data, which is read-only")]

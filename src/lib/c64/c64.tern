@@ -1,0 +1,41 @@
+// Commodore 64: screen and color memory, colors, and KERNAL routines.
+// KERNAL routines are called directly in ROM (spec 6.6), so a call costs one jsr.
+
+const SCREEN = $0400            // 40 x 25 screen codes
+const COLOR = $D800             // 40 x 25 color numbers
+
+const BLACK = 0
+const WHITE = 1
+const RED = 2
+const CYAN = 3
+const PURPLE = 4
+const GREEN = 5
+const BLUE = 6
+const YELLOW = 7
+const ORANGE = 8
+const BROWN = 9
+const LIGHT_RED = 10
+const DARK_GREY = 11
+const GREY = 12
+const LIGHT_GREEN = 13
+const LIGHT_BLUE = 14
+const LIGHT_GREY = 15
+
+// Print one PETSCII character at the cursor (CHROUT).
+fn chrout(ch: u8 using A) @ $FFD2 keeps X, Y
+
+// Read a key from the keyboard buffer; 0 if there is none (GETIN).
+fn getin() -> u8 using A @ $FFE4
+
+// Move the text cursor (PLOT with the carry clear).
+fn cursor(false using carry, row: u8 using X, col: u8 using Y) @ $FFF0
+
+// The text cursor: the row in .lo, the column in .hi (PLOT with the carry set).
+fn get_cursor(true using carry) -> u16 using XY @ $FFF0
+
+// Print n PETSCII characters through CHROUT.
+fn print(src: ptr u8, n: u8) {
+    for i in 0..n using Y {
+        chrout(src[i])
+    }
+}

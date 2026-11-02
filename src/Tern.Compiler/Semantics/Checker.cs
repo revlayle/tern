@@ -3,9 +3,11 @@ using Tern.Compiler.Syntax;
 namespace Tern.Compiler.Semantics;
 
 public sealed class CheckedProgram(
-    ProgramSyntax syntax, List<VariableSymbol> globals, List<FunctionSymbol> functions, FunctionSymbol main)
+    List<Module> modules, List<VariableSymbol> globals, List<FunctionSymbol> functions, FunctionSymbol main)
 {
-    public ProgramSyntax Syntax { get; } = syntax;
+    /// <summary>The main file and the modules it imports.</summary>
+    public List<Module> Modules { get; } = modules;
+    /// <summary>The main file's globals, and the globals of modules used by the functions in <see cref="Functions"/>.</summary>
     public List<VariableSymbol> Globals { get; } = globals;
     /// <summary>Functions reachable from <c>main</c>, callers before callees.</summary>
     public List<FunctionSymbol> Functions { get; } = functions;
@@ -18,62 +20,120 @@ public sealed class CheckedProgram(
 /// </summary>
 public sealed partial class Checker
 {
-    private readonly Dictionary<string, Symbol> _globalScope = new();
     private readonly List<Dictionary<string, Symbol>> _scopes = [];
     private readonly List<VariableSymbol> _globals = [];
+    /// <summary>The file being checked.</summary>
+    private Module _module = null!;
     private FunctionSymbol? _function;
     private int _loopDepth;
     private readonly HashSet<Register> _loopRegisters = [];
     private int _hiddenCounter;
     private readonly Platform _platform;
-    private readonly string _baseDirectory;
 
-    private Checker(Platform platform, string baseDirectory)
+    private Checker(Platform platform) => _platform = platform;
+
+    /// <param name="modules">The main file and its modules, each module before the files that import it.</param>
+    public static CheckedProgram Check(List<Module> modules, Platform platform) => new Checker(platform).Run(modules);
+
+    private CheckedProgram Run(List<Module> modules)
     {
-        _platform = platform;
-        _baseDirectory = baseDirectory;
-    }
+        // Declarations file by file, so that a file can use the constants of the modules it imports.
+        foreach (var module in modules)
+        {
+            _module = module;
+            var program = module.Syntax;
+            if (!module.IsMain && program.Functions.FirstOrDefault(f => f.Name == "main") is { } wrongMain)
+                throw new CompileError(wrongMain.Pos, $"Only the program's main file has 'fn main()'; '{module.Name}' is a module");
+            foreach (var c in program.Consts) DeclareConst(c);
+            foreach (var f in program.Functions) DeclareFunction(f);
+            foreach (var g in program.Globals) DeclareGlobal(g);
+            // After the globals, so that a variable named as an address gets the right error.
+            foreach (var f in program.Functions.Where(f => f.Address is not null)) DeclareRoutine(f, f.Symbol!);
+            module.Declared = true;
+        }
 
-    /// <param name="baseDirectory">Where <c>include_bytes</c> looks for files: the source file's directory.</param>
-    public static CheckedProgram Check(ProgramSyntax program, Platform platform, string baseDirectory) =>
-        new Checker(platform, baseDirectory).Run(program);
-
-    private CheckedProgram Run(ProgramSyntax program)
-    {
-        foreach (var c in program.Consts) DeclareConst(c);
-        foreach (var f in program.Functions) DeclareFunction(f);
-        foreach (var g in program.Globals) DeclareGlobal(g);
-        // After the globals, so that a variable named as an address gets the right error.
-        foreach (var f in program.Functions.Where(f => f.Address is not null)) DeclareRoutine(f, f.Symbol!);
-
-        if (!_globalScope.TryGetValue("main", out var m) || m is not FunctionSymbol main)
-            throw new CompileError(new SourcePos(1, 1), "The program has no 'fn main()'");
+        var mainModule = modules[^1];
+        if (!mainModule.Scope.TryGetValue("main", out var m) || m is not FunctionSymbol main)
+            throw new CompileError(new SourcePos(1, 1, mainModule.Path), "The program has no 'fn main()'");
         if (main.Parameters.Count > 0 || main.ReturnType.Kind != TypeKind.Void)
             throw new CompileError(main.Pos, "'main' must have no parameters and no return value");
         if (main.FixedAddress is not null)
             throw new CompileError(main.Pos, "'main' must have a body");
 
-        foreach (var f in program.Functions.Where(f => f.Address is null)) CheckFunctionBody(f);
+        foreach (var module in modules)
+        {
+            _module = module;
+            foreach (var f in module.Syntax.Functions.Where(f => f.Address is null)) CheckFunctionBody(f);
+        }
 
+        // Only what main can reach goes into the program, so unused parts of a module cost nothing.
+        // The main file's globals are all kept.
         var reachable = OrderReachable(main);
-        return new CheckedProgram(program, _globals, reachable, main);
+        var used = reachable.SelectMany(f => f.UsedGlobals).Concat(mainModule.Scope.Values.OfType<VariableSymbol>()).ToHashSet();
+        return new CheckedProgram(modules, _globals.Where(used.Contains).ToList(), reachable, main);
     }
 
     // ---------- Declarations ----------
 
-    private void Declare(Symbol symbol)
+    /// <param name="name">The name in this file's scope; for top-level declarations of a module, without the module name.</param>
+    private void Declare(Symbol symbol, string? name = null)
     {
-        var scope = _scopes.Count > 0 ? _scopes[^1] : _globalScope;
-        if (Lookup(symbol.Name) is { } existing)
-            throw new CompileError(symbol.Pos, $"'{symbol.Name}' is already declared at {existing.Pos}");
-        scope[symbol.Name] = symbol;
+        name ??= symbol.Name;
+        var scope = _scopes.Count > 0 ? _scopes[^1] : _module.Scope;
+        if (_module.Imports.ContainsKey(name))
+            throw new CompileError(symbol.Pos, $"'{name}' is the name of an imported module; choose another name");
+        if (Lookup(name) is { } existing)
+            throw new CompileError(symbol.Pos, $"'{name}' is already declared at {existing.Pos}");
+        scope[name] = symbol;
     }
 
+    /// <summary>Finds a name in the enclosing scopes and the current file, or <c>module.name</c> in an imported module.</summary>
     private Symbol? Lookup(string name)
     {
+        int dot = name.IndexOf('.');
+        if (dot > 0)
+            return _module.Imports.TryGetValue(name[..dot], out var module) ? module.Scope.GetValueOrDefault(name[(dot + 1)..]) : null;
         for (int i = _scopes.Count - 1; i >= 0; i--)
             if (_scopes[i].TryGetValue(name, out var s)) return s;
-        return _globalScope.GetValueOrDefault(name);
+        return _module.Scope.GetValueOrDefault(name);
+    }
+
+    /// <summary>The error for a name that is not declared. A module name on its own gets a hint.</summary>
+    private CompileError NotDeclared(string name, SourcePos pos)
+    {
+        if (_module.Imports.ContainsKey(name))
+            return new CompileError(pos, $"'{name}' is a module; use the names in it as {name}.name");
+        int dot = name.IndexOf('.');
+        if (dot <= 0) return new CompileError(pos, $"'{name}' is not declared");
+        if (!_module.Imports.TryGetValue(name[..dot], out var other))
+            return MissingImport(name[..dot], pos);
+        // Modules that import each other are declared one after the other, so a declaration
+        // in the first one cannot use the second one's names yet.
+        if (!other.Declared)
+        {
+            string here = _module.IsMain ? "the main file" : _module.Name;
+            return new CompileError(pos,
+                $"'{name}' cannot be used in a declaration of {here}: {other.Name} and {here} import each other, and {other.Name} is declared after {here}. " +
+                $"Move {name[(dot + 1)..]} to {here}, or to a module both import");
+        }
+        return new CompileError(pos, $"'{name}' is not declared");
+    }
+
+    /// <summary><c>text.put</c> where <c>text</c> is not declared: most likely a missing import.</summary>
+    private static CompileError MissingImport(string module, SourcePos pos) =>
+        new(pos, $"'{module}' is not declared. To use the module {module}, add 'import {module}' at the top of the file");
+
+    /// <summary>Reports <c>name.member</c> where <c>name</c> is not declared as a missing import.</summary>
+    private void CheckMemberTarget(MemberExpr m)
+    {
+        if (m.Member is not ("lo" or "hi") && m.Target is NameExpr n && !n.Name.Contains('.') && Lookup(n.Name) is null && !_module.Imports.ContainsKey(n.Name))
+            throw MissingImport(n.Name, n.Pos);
+    }
+
+    /// <summary>Records that the function being checked uses a global, so it is kept in the program.</summary>
+    private void UseGlobal(VariableSymbol v)
+    {
+        if (v.Kind == VariableKind.Global) _function?.UsedGlobals.Add(v);
     }
 
     private void DeclareConst(ConstDecl decl)
@@ -95,12 +155,21 @@ public sealed partial class Checker
     {
         if (decl.Name is "addr" or "len" or "sizeof" or "include_bytes")
             throw new CompileError(decl.Pos, $"'{decl.Name}' is a built-in function; choose another name");
-        var fn = new FunctionSymbol(decl.Name, decl.Pos) { Declaration = decl };
+        var fn = new FunctionSymbol(_module.Qualify(decl.Name), decl.Pos) { Declaration = decl };
         decl.Symbol = fn;
 
         var usedRegisters = new HashSet<char>();
         foreach (var p in decl.Parameters)
         {
+            if (p.FixedValue is not null)
+            {
+                // Checked with the routine's address, after the globals are declared.
+                if (decl.Address is null)
+                    throw new CompileError(p.Pos, decl.IsAsm
+                        ? "Fixed inputs are only for routines at a fixed address. An asm fn sets up its inputs in its own code"
+                        : "Fixed inputs are only for routines at a fixed address (fn name(...) @ $addr). Give the parameter a name and a type: 'name: type'");
+                continue;
+            }
             var type = ResolveType(p.Type);
             if (!type.IsScalar) throw new CompileError(p.Pos, "Parameters must be numbers or bool");
             var param = new VariableSymbol(p.Name, p.Pos, type, VariableKind.Parameter, fn);
@@ -138,7 +207,33 @@ public sealed partial class Checker
         else if (decl.ReturnUsing is not null)
             throw new CompileError(decl.Pos, "'using' needs a return type");
 
-        Declare(fn);
+        Declare(fn, decl.Name);
+    }
+
+    /// <summary>A constant passed on every call of a routine at a fixed address: <c>true using carry</c>, <c>3 using X</c>.</summary>
+    private void DeclareFixedInput(FunctionSymbol fn, ParamSyntax p, HashSet<char> usedRegisters)
+    {
+        var reg = p.UsingRegister!.Value;
+        var value = p.FixedValue!;
+        CheckExpr(value);
+        if (value.ConstValue is not long v)
+            throw new CompileError(value.Pos, "A fixed input must be a constant");
+        switch (reg)
+        {
+            case Register.Carry:
+                if (value.Type.Kind != TypeKind.Bool)
+                    throw new CompileError(value.Pos, "The carry takes true or false");
+                break;
+            case Register.A or Register.X or Register.Y:
+                Coerce(value, TernType.U8);
+                break;
+            default:
+                throw new CompileError(p.Pos, $"A fixed input goes in A, X, Y or the carry, not {reg}");
+        }
+        char key = reg == Register.Carry ? 'c' : reg.ToString()[0];
+        if (!usedRegisters.Add(key))
+            throw new CompileError(p.Pos, reg == Register.Carry ? "The carry is set more than once" : $"Register {reg} is used by more than one parameter");
+        fn.FixedInputs.Add((reg, v));
     }
 
     /// <summary>A routine that already exists at a fixed address: the address and the registers it keeps.</summary>
@@ -150,6 +245,10 @@ public sealed partial class Checker
         if (a < 0 || a > 0xFFFF)
             throw new CompileError(decl.Address.Pos, $"Address ${a:X} is outside memory");
         fn.FixedAddress = (int)a;
+
+        var usedRegisters = fn.Parameters.SelectMany(p => p.PassedIn!.Value.ToString().Where(char.IsUpper)).ToHashSet();
+        foreach (var p in decl.Parameters.Where(p => p.FixedValue is not null))
+            DeclareFixedInput(fn, p, usedRegisters);
 
         foreach (var (reg, pos) in decl.Keeps)
         {
@@ -178,7 +277,7 @@ public sealed partial class Checker
         // A string or include_bytes() gives a [u8; N] array, which may be longer than 256 bytes.
         var bytes = decl.Init is null ? null : ByteSource(decl.Init);
         var type = bytes is not null && decl.TypeSyntax is null ? TernType.ArrayOf(TernType.U8, bytes.Length) : DeclaredType(decl);
-        var v = new VariableSymbol(decl.Name, decl.Pos, type, VariableKind.Global, null) { IsData = decl.IsData };
+        var v = new VariableSymbol(_module.Qualify(decl.Name), decl.Pos, type, VariableKind.Global, null) { IsData = decl.IsData };
         decl.Symbol = v;
         ApplyPlacement(decl, v, allowAddress: true);
 
@@ -199,7 +298,7 @@ public sealed partial class Checker
             else
                 v.InitialBytes = ConstantBytes(decl.Init, type);
         }
-        Declare(v);
+        Declare(v, decl.Name);
         _globals.Add(v);
     }
 
@@ -239,7 +338,7 @@ public sealed partial class Checker
     {
         if (call.Args is not [StringExpr { Encoding: null } file])
             throw new CompileError(call.Pos, "include_bytes() takes a file name in quotes");
-        var path = Path.Combine(_baseDirectory, file.Text);
+        var path = Path.Combine(_module.Directory, file.Text);
         byte[] bytes;
         try
         {
@@ -631,13 +730,14 @@ public sealed partial class Checker
             case NameExpr n:
                 switch (Lookup(n.Name))
                 {
-                    case null: throw new CompileError(n.Pos, $"'{n.Name}' is not declared");
+                    case null: throw NotDeclared(n.Name, n.Pos);
                     case ConstSymbol c:
                         e.Type = c.Type;
                         e.ConstValue = c.Value;
                         break;
                     case VariableSymbol v:
                         n.Symbol = v;
+                        UseGlobal(v);
                         e.Type = v.Type;
                         v.Weight += Weight();
                         break;
@@ -675,6 +775,7 @@ public sealed partial class Checker
                 break;
 
             case MemberExpr m:
+                CheckMemberTarget(m);
                 CheckExpr(m.Target);
                 if (m.Member is not ("lo" or "hi"))
                     throw new CompileError(m.Pos, $"Unknown member '.{m.Member}'");
@@ -920,7 +1021,7 @@ public sealed partial class Checker
                     throw new CompileError(c.Pos, "addr() takes the name of a variable, array or data");
                 switch (Lookup(name.Name))
                 {
-                    case null: throw new CompileError(name.Pos, $"'{name.Name}' is not declared");
+                    case null: throw NotDeclared(name.Name, name.Pos);
                     case ConstSymbol: throw new CompileError(name.Pos, $"'{name.Name}' is a constant, which has no address");
                     case FunctionSymbol: throw new CompileError(name.Pos, "addr() of a function is not supported yet");
                     case VariableSymbol v:
@@ -929,6 +1030,7 @@ public sealed partial class Checker
                         name.Type = v.Type;
                         v.AddressTaken = true;
                         c.AddressOf = v;
+                        UseGlobal(v);
                         // An array gives a pointer to its first element. A split array of 16-bit
                         // values gives a pointer to its table of low bytes.
                         c.Type = !v.Type.IsArray ? TernType.PointerTo(v.Type)
@@ -948,7 +1050,9 @@ public sealed partial class Checker
             }
         }
 
-        if (Lookup(c.Name) is not FunctionSymbol fn)
+        var symbol = Lookup(c.Name);
+        if (symbol is null && c.Name.Contains('.')) throw NotDeclared(c.Name, c.Pos);
+        if (symbol is not FunctionSymbol fn)
             throw new CompileError(c.Pos, $"'{c.Name}' is not a function");
         if (c.Args.Count != fn.Parameters.Count)
             throw new CompileError(c.Pos, $"'{fn.Name}' takes {fn.Parameters.Count} argument(s), not {c.Args.Count}");
@@ -961,6 +1065,9 @@ public sealed partial class Checker
             foreach (var held in _loopRegisters)
                 if (p.PassedIn is { } pr && pr.Uses(held))
                     throw new CompileError(c.Pos, $"'{fn.Name}' takes '{p.Name}' in {held}, which holds the loop variable. Remove 'using {held}' from the loop");
+        foreach (var (reg, _) in fn.FixedInputs)
+            if (_loopRegisters.Contains(reg))
+                throw new CompileError(c.Pos, $"'{fn.Name}' takes a fixed input in {reg}, which holds the loop variable. Remove 'using {reg}' from the loop");
         c.Function = fn;
         c.Type = fn.ReturnType;
         _function?.Callees.Add(fn);

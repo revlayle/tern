@@ -155,11 +155,15 @@ public sealed class FunctionSymbol(string name, SourcePos pos) : Symbol(name, po
     /// <summary>All variables in this function's frame: parameters, locals and temporaries.</summary>
     public List<VariableSymbol> FrameVariables { get; } = [];
     public HashSet<FunctionSymbol> Callees { get; } = [];
+    /// <summary>Global variables this function names; only globals used by reachable functions go into the program.</summary>
+    public HashSet<VariableSymbol> UsedGlobals { get; } = [];
     public FnDecl? Declaration { get; set; }
     /// <summary>Set for a routine that already exists at this address (<c>fn f() @ $FFD2</c>). It has no body or frame.</summary>
     public int? FixedAddress { get; set; }
     /// <summary>Registers (A, X, Y) a routine at a fixed address promises to leave unchanged.</summary>
     public HashSet<Register> Keeps { get; } = [];
+    /// <summary>Constants a routine at a fixed address receives on every call (<c>true using carry</c>, <c>3 using X</c>).</summary>
+    public List<(Register Register, long Value)> FixedInputs { get; } = [];
 
     public string Label => Name;
 

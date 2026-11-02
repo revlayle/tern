@@ -10,7 +10,11 @@ public sealed class Parser
 
     private Parser(List<Token> tokens) => _tokens = tokens;
 
-    public static ProgramSyntax Parse(string source) => new Parser(Lexer.Tokenize(source)).ParseProgram();
+    /// <param name="file">The source file, for positions in error messages and the listing.</param>
+    public static ProgramSyntax Parse(string source, string? file = null) => new Parser(Lexer.Tokenize(source, file)).ParseProgram();
+
+    /// <summary>Modules imported by this file. <c>name.member</c> after one of them is a qualified name.</summary>
+    private readonly HashSet<string> _modules = [];
 
     private Token Current => _tokens[_pos];
     private Token PeekAt(int offset) => _tokens[Math.Min(_pos + offset, _tokens.Count - 1)];
@@ -59,12 +63,25 @@ public sealed class Parser
         var consts = new List<ConstDecl>();
         var globals = new List<VarDecl>();
         var functions = new List<FnDecl>();
+        var imports = new List<ImportDecl>();
 
         SkipTerminators();
+        while (At(TokenKind.Import))
+        {
+            Advance();
+            var name = Expect(TokenKind.Identifier, "a module name after 'import'");
+            if (!_modules.Add(name.Text))
+                throw new CompileError(name.Pos, $"'{name.Text}' is imported twice");
+            imports.Add(new ImportDecl(name.Pos, name.Text));
+            ExpectEndOfStatement();
+            SkipTerminators();
+        }
         while (!At(TokenKind.Eof))
         {
             switch (Current.Kind)
             {
+                case TokenKind.Import:
+                    throw new CompileError(Current.Pos, "'import' must be at the top of the file, before other declarations");
                 case TokenKind.Const: consts.Add(ParseConst()); break;
                 case TokenKind.Var: globals.Add(ParseVar()); break;
                 case TokenKind.Data: globals.Add(ParseData()); break;
@@ -82,7 +99,7 @@ public sealed class Parser
             }
             SkipTerminators();
         }
-        return new ProgramSyntax(consts, globals, functions);
+        return new ProgramSyntax(consts, globals, functions) { Imports = imports };
     }
 
     /// <summary>Keywords from the spec that this compiler version does not implement yet.</summary>
@@ -148,6 +165,16 @@ public sealed class Parser
         {
             do
             {
+                // A fixed input: a constant in place of the name, e.g. "true using carry".
+                if (!(At(TokenKind.Identifier) && PeekAt(1).Kind == TokenKind.Colon))
+                {
+                    var value = ParseExpr();
+                    if (!At(TokenKind.Using))
+                        throw new CompileError(Current.Pos, $"Expected a parameter 'name: type', or a fixed input such as 'true using carry'; found {Describe(Current)}");
+                    Advance();
+                    parameters.Add(new ParamSyntax(value.Pos, "", new NamedTypeSyntax(value.Pos, ""), ParseRegister()) { FixedValue = value });
+                    continue;
+                }
                 var pname = Expect(TokenKind.Identifier, "parameter name");
                 Expect(TokenKind.Colon, "':'");
                 var ptype = ParseType();
@@ -560,7 +587,16 @@ public sealed class Parser
             case TokenKind.Identifier:
             {
                 Advance();
-                if (!At(TokenKind.LParen)) return new NameExpr(t.Pos, t.Text);
+                string name = t.Text;
+                // A name in an imported module: text.put
+                // Also name.member(...) when name is not imported, so that the checker can say to import it.
+                if (At(TokenKind.Dot) && (_modules.Contains(name)
+                    || (PeekAt(1).Kind == TokenKind.Identifier && PeekAt(2).Kind == TokenKind.LParen)))
+                {
+                    Advance();
+                    name += "." + Expect(TokenKind.Identifier, $"a name in module '{t.Text}' after '.'").Text;
+                }
+                if (!At(TokenKind.LParen)) return new NameExpr(t.Pos, name);
                 Advance();
                 var args = new List<Expr>();
                 if (!At(TokenKind.RParen))
@@ -568,7 +604,7 @@ public sealed class Parser
                     do args.Add(ParseExpr()); while (Accept(TokenKind.Comma));
                 }
                 Expect(TokenKind.RParen, "')'");
-                return new CallExpr(t.Pos, t.Text, args);
+                return new CallExpr(t.Pos, name, args);
             }
             default:
                 throw new CompileError(t.Pos, $"Expected an expression, found {Describe(t)}");
