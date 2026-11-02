@@ -133,7 +133,25 @@ Spec: 5.1 (variable step), 6.2 and 7 (`inline asm fn`), 11. From the M8 comparis
 
 Done when: `sieve`'s inner loop compiles to the same instructions as `tests/benchmarks/asm/sieve.asm` (listing test); the comparison totals are below M8's 1373 bytes / 526134 cycles, with the new numbers in `comparison.md`; all tests pass.
 
+## M10: Cross-platform standard library
+
+Spec: 6.3 (`cld` in handlers), 10.1 ("Planned for M10").
+
+- Interrupt handlers start with `cld` unless they execute no `adc`/`sbc` and no `jsr`; listing tests both ways
+- `wide`: `U24`/`U32` structs; set, copy, add, subtract (also with a `u16`), increment, compare, multiply, divide, decimal (optionally fixed width) and hex output, for both widths
+- `bcd`: 1-4 byte packed decimal counters: add, subtract, compare, digits
+- `math`: `muls8`, `divs8`, `abs8`, `abs16`, `min`/`max`/`clamp` for `u8` and `i8` as `inline asm fn`, `sin8`/`cos8`
+- `random`: 8- and 16-bit xorshift, seed, value below `n`
+- `text`: `dec8s`, `dec16s`, fixed-width decimal; `mem.copy_back`
+- Spec 10.1 tables updated with the signatures as built; cycle counts in `docs/status.md`'s library table
+
+Tests as in M4: 8-bit routines for every input, 16/24/32-bit on edge values (0, 1, 255/256 boundaries of each byte, the maximum, wrap-around) and against C#; `bcd` on every two-digit pair; `random` checked for its full period. An unused module adds no bytes.
+
+Done when: an example keeps a 32-bit score with `wide` and a BCD score with `bcd`, shows both on screen and plays a sound or moves a sprite with `sin8` and `random`, checked in VICE; a test runs a `bcd` add in main while an IRQ handler with arithmetic fires, and both give correct results.
+
 ## Later (not yet ordered, except that new platforms come last)
+
+- Floats as a library with a 4-byte format, built on `wide` (not a priority)
 
 - Signed loop variables
 - `const fn` with compile-time `int` and `real`, array-building syntax (spec 4.1)

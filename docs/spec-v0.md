@@ -349,7 +349,7 @@ inline fn wait_frame() { ... }
 `interrupt fn raster() { ... }` saves and restores the registers it changes and ends with `rti`; the CPU saves the flags.
 
 - A register is saved if any instruction in the handler changes it, including instructions in asm blocks. Any `jsr` counts as changing A, X and Y. X and Y are saved through A, so A is saved whenever X or Y is. The order is A, X, Y.
-- The handler does not execute `cld`. Tern code never sets decimal mode.
+- The handler starts with `cld`, since main may be in decimal mode (the `bcd` library, or an asm block with `sed`) when the interrupt arrives. Decimal mode only changes `adc` and `sbc`, so `cld` is left out when the handler executes neither: no `adc` or `sbc` in its code or asm blocks, and no `jsr`.
 - Code the compiler cannot follow, such as an asm `jmp` out of the handler, saves and restores registers itself.
 - A handler cannot be called, neither from Tern nor with `jsr`. Naming it in assembly (`lda #raster.lo`) or with `addr(raster)` is not a call.
 - Every `interrupt fn` in the main file is compiled, even if nothing installs it. A module's handler is compiled only when a compiled function names it.
@@ -560,6 +560,14 @@ Digits are written as screen codes, which are the same as PETSCII for `0`-`9`. H
 | `vic: Vic @ $D000` | VIC-II registers: `sprite0_x`, `sprite0_y` ... `sprite7_y`, `sprite_x_msb`, `control1`, `raster`, `light_pen_x`, `light_pen_y`, `sprite_enable`, `control2`, `sprite_expand_y`, `memory`, `irq_status`, `irq_enable`, `sprite_priority`, `sprite_multicolor`, `sprite_expand_x`, `sprite_collision`, `sprite_bg_collision`, `border`, `background`, `background1`-`background3`, `sprite_mc0`, `sprite_mc1`, `sprite_color: [u8; 8]` |
 | `sid: Sid @ $D400` | SID registers: `voice1`-`voice3: Voice` (`freq: u16`, `pulse: u16`, `control`, `attack_decay`, `sustain_release`), `cutoff: u16`, `resonance`, `volume`, `paddle_x`, `paddle_y`, `osc3`, `env3` |
 | `cia1: Cia @ $DC00`, `cia2: Cia @ $DD00` | CIA registers: `port_a`, `port_b`, `ddr_a`, `ddr_b`, `timer_a: u16`, `timer_b: u16`, `tod_tenths`, `tod_seconds`, `tod_minutes`, `tod_hours`, `serial`, `icr`, `control_a`, `control_b` |
+
+**Planned for M10** (cross-platform; the coding session settles exact signatures following the rules above and records them in this section):
+
+- **`wide`**: 24- and 32-bit unsigned numbers as structs, `wide.U24` and `wide.U32` (fields `b0`...`b3`, little-endian). There are no 24- or 32-bit primitive types. Struct parameters are not allowed (3.3), so every function takes pointers, and the result goes into the first operand, as in assembly: `wide.add32(addr(score), addr(bonus))`. Functions for each width (`add24`, `add32`, ...): `set_u16`, `copy`, `add`, `sub`, `add_u16`, `sub_u16`, `inc`; `less`, `equal`, `is_zero` returning flags; `mul` (the low 24/32 bits, shift-and-add), `div` by shift-and-subtract (remainder in a library variable, as `math.div16`); `dec` (optionally fixed width with leading zeros) and `hex` into memory. Simple loops like `math`; nothing beyond these. Converting to decimal costs thousands of cycles: convert when the value changes, or keep a displayed-only score in `bcd`.
+- **`bcd`**: packed decimal counters of 1 to 4 bytes (two digits per byte) for scores: add, subtract, compare, write as digits. Uses `sed`/`cld`; interrupt handlers clear decimal mode (6.3).
+- **`math`**: signed `muls8`, `divs8`, `abs8`, `abs16`; `min`, `max`, `clamp` for `u8` and `i8` (`inline asm fn`, no `jsr`); `sin8`/`cos8` (256 steps per circle, results −127..127, one shared table).
+- **`random`**: 8- and 16-bit xorshift generators, a seed function and a value below `n`. Its state is a private variable, so using it from main and a handler is an error (8.1); a handler that needs random numbers uses its own generator.
+- **`text`**: signed decimal (`dec8s`, `dec16s`) and fixed-width decimal with leading zeros. **`mem`**: `copy_back` for overlapping blocks where `dst` is above `src`.
 
 Example: `c64.vic.border = c64.BLACK` is `lda #0` / `sta $D020`.
 
