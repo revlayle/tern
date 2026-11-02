@@ -277,6 +277,25 @@ public class OptimizerTests
         Assert.Contains("asl a / bcc ", Main(r));
         Assert.Contains("asl a / bcs ", Main(r));
     }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1)]
+    public void A_load_is_removed_before_a_jump_to_code_that_sets_the_flags(int c)
+    {
+        // N and Z are not read on any path after the second "ldx sp", so it can go although a jmp follows.
+        var r = Run.Program($$"""
+            var stack: [u8; 16] = [0, 4, 5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+            var sp: u8 = 2
+            var c: u8 = {{c}}
+            fn main() {
+                if c != 0 { stack[sp - 1] = stack[sp - 1] + stack[sp] } else { sp = 7 }
+            }
+            """);
+        Assert.Equal(c == 1 ? 9 : 4, r.U8("stack", 1));
+        Assert.Equal(c == 1 ? 2 : 7, r.U8("sp"));
+        Assert.Equal(1, Main(r).Split("ldx sp").Length - 1);
+    }
 }
 
 /// <summary>A parameter passed in X or Y stays in its register when the body allows it (roadmap M7).</summary>

@@ -263,28 +263,45 @@ public static class Optimizer
         return before;
     }
 
-    /// <summary>True if N or Z may be read after item <paramref name="k"/> before something sets both.</summary>
-    private static bool NzLiveAfter(List<AsmItem> code, int k, FunctionSymbol function)
+    /// <summary>
+    /// True if N or Z may be read after item <paramref name="k"/> before something sets both. Follows
+    /// jumps and both ways of a branch; gives up (true) on anything it cannot follow, and after a
+    /// fixed number of steps.
+    /// </summary>
+    private static bool NzLiveAfter(List<AsmItem> code, int k, FunctionSymbol function, Dictionary<Label, int> positions)
     {
         // A bool returned in Z or N (-> bool using zero) is read after rts.
         bool returnsInNz = function.ReturnRegister is Register.Zero or Register.Negative;
-        for (int j = k + 1; j < code.Count; j++)
+        var visited = new HashSet<int>();
+        var paths = new Stack<int>();
+        paths.Push(k + 1);
+        int steps = 0;
+        while (paths.Count > 0)
         {
-            switch (code[j])
+            for (int j = paths.Pop(); j < code.Count; j++)
             {
-                case Instr i:
-                    if (i.Mnemonic is Jsr or Rti) return false;
-                    if (i.Mnemonic == Rts && !FromAsm(i)) return returnsInNz;
-                    if (i.Mnemonic is Rts or Mnemonic.Jmp || IsBranch(i.Mnemonic)) return true;
-                    var (reads, writes) = AsmEffects.Of(i.Mnemonic, i.Mode);
-                    if ((reads & (CpuState.N | CpuState.Z)) != 0) return true;
-                    if (writes.HasFlag(CpuState.N) && writes.HasFlag(CpuState.Z)) return false;
+                if (!visited.Add(j)) break;
+                if (++steps > 200) return true;
+                if (code[j] is LabelTable or DataBytes) return true;
+                if (code[j] is not Instr i) continue;
+                if (i.Mnemonic is Jsr or Rti) break;
+                if (i.Mnemonic == Rts)
+                {
+                    if (FromAsm(i) || returnsInNz) return true;
                     break;
-                case LabelTable or DataBytes:
-                    return true;
+                }
+                var (reads, writes) = AsmEffects.Of(i.Mnemonic, i.Mode);
+                if ((reads & (CpuState.N | CpuState.Z)) != 0) return true;
+                if (writes.HasFlag(CpuState.N) && writes.HasFlag(CpuState.Z)) break;
+                if (IsBranch(i.Mnemonic) || i.Mnemonic == Mnemonic.Jmp)
+                {
+                    if (Target(i) is not { } target || !positions.TryGetValue(target, out int at)) return true;
+                    if (i.Mnemonic == Mnemonic.Jmp) { j = at - 1; continue; }
+                    paths.Push(at);
+                }
             }
         }
-        return true;
+        return false;
     }
 
     /// <summary>
@@ -301,6 +318,9 @@ public static class Optimizer
     /// </remarks>
     private static bool RemoveRedundant(List<AsmItem> code, FunctionSymbol function)
     {
+        var positions = new Dictionary<Label, int>();
+        for (int k = 0; k < code.Count; k++)
+            if (code[k] is LabelDef d) positions[d.Label] = k;
         var before = Analyse(code, function);
         var kept = new List<AsmItem>(code.Count);
         bool flagsChanged = false;
@@ -312,7 +332,7 @@ public static class Optimizer
                 continue;
             }
             bool FlagsMatch(HashSet<Operand> value) =>
-                (!flagsChanged && s.Flags is Reg f && s.Regs[(int)f].Overlaps(value)) || !NzLiveAfter(code, k, function);
+                (!flagsChanged && s.Flags is Reg f && s.Regs[(int)f].Overlaps(value)) || !NzLiveAfter(code, k, function, positions);
             bool redundant = false, setsFlags = true;
             if (Loaded(i.Mnemonic) is Reg load && Trackable(i))
                 redundant = s.Regs[(int)load].Contains(i.Operand!) && FlagsMatch([i.Operand!]);
