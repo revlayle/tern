@@ -301,7 +301,8 @@ break; continue; return value
   1. If both bounds are constants, their order gives the direction: `0..=9` counts up, `9..=0` counts down.
   2. If the end is the constant `0` (`n..0`, `n..=0`), the loop counts down.
   3. Otherwise the loop counts up. A negative `step` counts down: `for i in a..=b step -1`.
-- `step` must be a non-zero constant. Without `step`, the step is 1 or −1 depending on direction. As in C, `for i in x..=y step 2` matches `for (i = x; i <= y; i += 2)`, and `x..y` matches `i < y`.
+- `step` is a non-zero constant. Without `step`, the step is 1 or −1 depending on direction.
+- **Variable step:** a loop that counts up with a `u8` counter may have a `u8` expression as its step, evaluated once like the bounds: `for m in (n << 1)..=255 step n`. It follows the rule for a variable end below: the loop stops when adding the step carries past 255, so `..=255` compiles to `adc` / `bcc` with no compare (section 11). A step that is 0 at runtime never ends the loop; the compiler adds no check (design rule 1). A negative or 16-bit variable step is an error. As in C, `for i in x..=y step 2` matches `for (i = x; i <= y; i += 2)`, and `x..y` matches `i < y`.
 - With a step other than ±1, the counter can jump past the end. With constant bounds the compiler computes the last value and compares against the value after it, as usual. With a variable end, the loop tests "less than" (`cmp` / `bcc`) instead of "not equal", and stops if adding the step carries past the end of the type (e.g. 250, 254, then 258 would wrap to 2). This costs a few extra instructions per pass.
 - **Constant ranges:** an empty range (`5..5`) generates no code and gives a warning. A range with one value (`5..=5`) generates the body once, with no loop instructions. The compiler never unrolls longer loops on its own.
 - **Variable bounds:** if the range can be empty at runtime, the compiler adds one check before the loop. This costs a few cycles per loop, not per pass, and is left out when the compiler can prove the range is not empty.
@@ -572,6 +573,7 @@ These are the intended translations. The optimizer may produce something shorter
 | `for i in 0..n using X` | `ldx #0` / `cpx n` / `beq done` / … `inx` / `cpx n` / `bne loop` |
 | `for i in 0..=255 using X` | `ldx #0` … `inx` / `bne loop` |
 | `for _ in 0..10` | `ldx #10` … `dex` / `bne loop` |
+| `for m in s..=255 step n using Y` (n a `u8` variable) | `ldy s` … `tya` / `clc` / `adc n` / `tay` / `bcc loop` |
 | `for i in 5..=5` | the body once, with `i` = 5 |
 | `if a == 0 { }` | `lda a` / `bne skip` |
 | `if a < b { }` unsigned | `lda a` / `cmp b` / `bcs skip` |
@@ -668,7 +670,7 @@ Each item is decided when the feature it belongs to is built.
 3. **`pha`/`pla` for temporaries.** `pha`/`pla` is 2 bytes and 7 cycles, against 4 bytes and 6 cycles for a zero-page temporary. Likely direction: the optimizer chooses, but never across a function call. Settle with benchmarks.
 4. **Overflow checks in debug builds.** Likely direction: no extra code in the program. The built-in emulator checks for overflow while running tests, using the compiler's debug information.
 5. **User-defined encodings,** e.g. for the NES, where each game decides which tile shows which character: a character-to-byte table declared in source. Built-in encodings are settled (2.1).
-6. **`using` on local variables** (`var count: u8 using Y`). Leave out until generated code shows a need.
+6. **`using` on local variables** (`var count: u8 using Y`). Leave out until generated code shows a need. Deferred again 2026-11-02 (M8 question 40): `crc8` would keep `crc` in A, but A is needed by almost every expression, so the optimizer handles that case first (`x & $80 != 0` then `x << 1` as one `asl` and a carry test).
 7. **A general decorator syntax.** Only if modifier keywords grow past five or six.
 8. **Language name.** "Tern" is a placeholder.
 9. **`data` at a fixed address** (`data x @ $C000 = ...`). Not supported yet, since the program image is one block. Needed for fixed-address tables and for `@ bank(n)` (item 1).
