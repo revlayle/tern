@@ -4,9 +4,9 @@ Owned by the coding session. Updated at the end of every coding session.
 
 ## Current
 
-- **Milestone:** M6 (`match`, interrupts, function modifiers), with the M5 follow-up. Complete; not reviewed yet.
+- **Milestone:** M6 (`match`, interrupts, function modifiers), with the M5 follow-up. Complete; reviewed (`docs/reviews/m6.md`: three must-fix, three suggestions), and all six findings are fixed.
 - **Branch:** `m6-match` (from `main` after the M5 merge and the spec commits that settled the M4/M5 questions).
-- **Next step:** `/review` of `m6-match` (it holds the M5 follow-up and M6). The spec session should look at the M6 questions below (22-30); the provisional choices are easy to change.
+- **Next step:** re-review the fixes, then `/merge m6-match`. After the merge, M7 (optimizer); the spec session settles open question 14.10 first. The spec session should also look at the M6 questions below (22-31); the provisional choices are easy to change.
 
 ## Done
 
@@ -30,6 +30,13 @@ Owned by the coding session. Updated at the end of every coding session.
   - `RejectUnsupported` is gone: every keyword the parser reserves is implemented.
   - **`examples/raster.tern`**: eight color bars in the border from a VIC-II raster interrupt. KERNAL off (`$01 = $35`), handlers in the RAM vectors `$FFFE` (raster) and `$FFFA` (an empty NMI handler, so RESTORE does nothing), installed with an asm block. The handler acknowledges through an `inline fn`, picks the color with a `match` (a jump table) and sets the next raster line; main prints the frame count. Checked in VICE (`-limitcycles 20000000`): the bars and a running counter show. `C64LibraryTests.Raster_example_cycles_the_border_colors_from_its_interrupt` runs it with an IRQ every 1000 cycles and checks every border write, the vectors and the counter on screen.
   - Roadmap "done when": the raster example runs in VICE; `match` code shapes are checked (`MatchTests.Code_shapes`, `A_dense_match_uses_a_jump_table`).
+  - Review fixes (`docs/reviews/m6.md`), in "Fix the M6 review findings" and "Move the OrderReachable summary back to it". 816 tests pass (36 CPU, 780 compiler).
+    1. A module's private variable used by functions from two roots is an error (`Checker.CheckPrivateGlobalsPerRoot`), reported at the handler and naming both functions: `math.mul8` in main with `math.div8` in a handler share `math.w0`-`w2`. Public globals and private `data` (read-only, e.g. `text.DIGITS`) may be shared. Tests: `InterruptTests.Private_module_variables_used_from_two_roots_are_errors`, `Public_variables_and_private_data_may_be_shared_with_a_handler`.
+    2. A dense `match` uses the compare chain when X and Y both hold loop variables (`MatchTests.A_dense_match_inside_loops_using_x_and_y_uses_a_compare_chain`).
+    3. A `match` with no value arms always evaluates its value, so a volatile read is kept (`MatchTests.A_match_with_only_a_default_still_reads_a_volatile_value`).
+    4. Copies of an inline function reuse its free temporaries (`CodeGen._inlineTemps`), so its frame does not grow per call site (`InlineTests.Copies_of_an_inline_function_share_its_temporaries`).
+    5. `examples/raster.tern` explains that the bars are not stabilized and their right edge jitters.
+    6. The `OrderReachable` summary is back above it.
 - **M5 follow-up** (branch `m6-match`, 2026-11-01). 726 tests pass (34 CPU, 692 compiler).
   - `private` before a top-level `const`, `var`, `linear var`, `data`, `struct`, `fn` or `asm fn` (spec 2.2). The parser records the names (`ProgramSyntax.PrivateNames`); `Checker.Lookup` does not find another module's private names, and `NotDeclared` then says "'m.x' is private to the module m". This one lookup serves Tern code, types, `sizeof`, `addr` and assembly operands. `private` inside a function, twice, or before `import` is an error. In the main file it is allowed and changes nothing. `lib/math` (`w0`-`w2`, `SQUARE_*`) and `lib/text` (`DIGITS`, `POWERS`) mark their work bytes and tables private. Tests: `ModuleTests` (`Private_*`), `MathLibraryTests.Library_work_variables_and_tables_are_private`.
   - `addr(player.name)` (spec 3.4): `Checker.CheckAddrOfField` takes the field's view (a scalar or array field is already one; a nested struct field gets one) and `CodeGen.Simple2` loads the storage's address plus the offset as two immediates. Works in zero page, at fixed addresses and across modules (`addr(c64.vic.border)` is `$D020`). Fields through a pointer or in an array of structs are errors. Tests: `StructTests` (`Addr_of_a_field_*`).
@@ -137,7 +144,8 @@ The M4 and M5 questions (1-21) were settled on 2026-11-01 (decisions.md) and are
 28. **`inline fn`.** Keeps its static frame (parameters and locals have fixed addresses, as for a call), so it costs the same memory but saves the `jsr`/`rts`. Automatic inlining of small single-caller functions (spec 6.2) is left to the optimizer (M7). `inline asm fn` gives "not supported yet" (its `rts` and local labels would need rewriting); naming an inline function in assembly is an error.
 29. **`noinit` syntax.** Spec 4 says only "a variable can be marked `noinit`". Implemented as a prefix, like `linear`: `noinit var buf: [u8; 256]`, also `noinit linear var` and `private noinit var`; `@ zp` works. Errors: with an initial value, at a fixed address (never zeroed anyway), on `data`, on locals.
 30. **Raster example** (roadmap M6): uses the RAM vectors with the KERNAL switched off, rather than the KERNAL's `$0314` vector, since a Tern handler saves its own registers and ends with `rti`, while a `$0314` handler must end by jumping into the KERNAL's exit code.
+31. **Private module variables and interrupts** (review M6, finding 1). A module's private variable used by compiled functions from two roots is an error; the library's work bytes are the case that matters (`math.w0`-`w2`). Public variables and private `data` may be shared. Spec 8.1 could say so. A later improvement could move work bytes into the functions' frames, so that e.g. `math.mul8` in main and `math.div8` in a handler would be allowed.
 
 ## Provisional choices made while coding
 
-Listed as questions 22-30 above. Also: `import` and `private` are reserved words.
+Listed as questions 22-31 above. Also: `import` and `private` are reserved words.
