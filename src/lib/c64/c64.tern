@@ -39,3 +39,82 @@ fn print(src: ptr u8, n: u8) {
         chrout(src[i])
     }
 }
+
+// ---------- Hardware registers (volatile: every read and write happens) ----------
+
+// VIC-II video chip at $D000.
+struct Vic {
+    sprite0_x: u8 @ $00, sprite0_y: u8, sprite1_x: u8, sprite1_y: u8
+    sprite2_x: u8, sprite2_y: u8, sprite3_x: u8, sprite3_y: u8
+    sprite4_x: u8, sprite4_y: u8, sprite5_x: u8, sprite5_y: u8
+    sprite6_x: u8, sprite6_y: u8, sprite7_x: u8, sprite7_y: u8
+    sprite_x_msb: u8 @ $10          // bit 8 of each sprite's x position
+    control1: u8 @ $11              // bit 7: bit 8 of the raster line; vertical scroll, screen on, bitmap
+    raster: u8 @ $12                // current raster line (read), raster interrupt line (write)
+    light_pen_x: u8 @ $13
+    light_pen_y: u8 @ $14
+    sprite_enable: u8 @ $15
+    control2: u8 @ $16              // horizontal scroll, 38/40 columns, multicolor
+    sprite_expand_y: u8 @ $17
+    memory: u8 @ $18                // screen and character memory
+    irq_status: u8 @ $19
+    irq_enable: u8 @ $1A
+    sprite_priority: u8 @ $1B
+    sprite_multicolor: u8 @ $1C
+    sprite_expand_x: u8 @ $1D
+    sprite_collision: u8 @ $1E      // sprite-sprite collisions
+    sprite_bg_collision: u8 @ $1F   // sprite-background collisions
+    border: u8 @ $20
+    background: u8 @ $21
+    background1: u8 @ $22
+    background2: u8 @ $23
+    background3: u8 @ $24
+    sprite_mc0: u8 @ $25            // shared sprite multicolors
+    sprite_mc1: u8 @ $26
+    sprite_color: [u8; 8] @ $27
+}
+var vic: Vic @ $D000
+
+// One SID voice.
+struct Voice {
+    freq: u16                       // frequency
+    pulse: u16                      // pulse width (12 bits)
+    control: u8                     // waveform, gate, sync, ring
+    attack_decay: u8
+    sustain_release: u8
+}
+
+// SID sound chip at $D400. Most registers can only be written.
+struct Sid {
+    voice1: Voice @ $00
+    voice2: Voice @ $07
+    voice3: Voice @ $0E
+    cutoff: u16 @ $15               // filter cutoff: bits 0-2 in the low byte, bits 3-10 in the high byte
+    resonance: u8 @ $17             // resonance and filter routing
+    volume: u8 @ $18                // volume (bits 0-3) and filter mode
+    paddle_x: u8 @ $19
+    paddle_y: u8 @ $1A
+    osc3: u8 @ $1B                  // voice 3 waveform output
+    env3: u8 @ $1C                  // voice 3 envelope output
+}
+var sid: Sid @ $D400
+
+// CIA chip: two ports, two timers, a time-of-day clock.
+struct Cia {
+    port_a: u8 @ $00
+    port_b: u8 @ $01
+    ddr_a: u8 @ $02                 // data direction of port A: 1 = output
+    ddr_b: u8 @ $03
+    timer_a: u16 @ $04
+    timer_b: u16 @ $06
+    tod_tenths: u8 @ $08
+    tod_seconds: u8 @ $09
+    tod_minutes: u8 @ $0A
+    tod_hours: u8 @ $0B
+    serial: u8 @ $0C
+    icr: u8 @ $0D                   // interrupt control and status
+    control_a: u8 @ $0E
+    control_b: u8 @ $0F
+}
+var cia1: Cia @ $DC00               // keyboard, joysticks, timer interrupt
+var cia2: Cia @ $DD00               // serial bus, VIC bank, NMI

@@ -52,11 +52,25 @@ public sealed partial class Checker
                 }
                 throw new InvalidOperationException();
 
+            case MemberExpr m when m.Member is not ("lo" or "hi"):
+            {
+                // A field of a struct variable: its address, e.g. sta vic.border.
+                CheckMemberTarget(m);
+                CheckExpr(m.Target);
+                if (!(m.Target.Type.IsStruct || m.Target.Type is { IsPointer: true, Element.IsStruct: true }))
+                    throw new CompileError(m.Pos, $"Unknown member '.{m.Member}'; assembly only has .lo and .hi, and fields of struct variables");
+                CheckField(m);
+                if (m.Lowered is NameExpr { Symbol.AliasOf: { } storage } view)
+                    return new AsmValue(view.Symbol!.AliasOffset, Variable: storage);
+                if (m.Place is { Kind: PlaceKind.Memory } place)
+                    return new AsmValue(place.Offset, Variable: place.Base);
+                throw new CompileError(m.Pos,
+                    "In assembly, a field must belong to a struct variable (lda player.hp). Fields through a pointer or in an array of structs have no fixed address");
+            }
+
             case MemberExpr m:
             {
                 CheckMemberTarget(m);
-                if (m.Member is not ("lo" or "hi"))
-                    throw new CompileError(m.Pos, $"Unknown member '.{m.Member}'; assembly only has .lo and .hi");
                 var inner = AsmOperand(m.Target, labels);
                 bool high = m.Member == "hi";
                 if (inner.High is not null) throw new CompileError(m.Pos, $".{m.Member} of a value that is already one byte");

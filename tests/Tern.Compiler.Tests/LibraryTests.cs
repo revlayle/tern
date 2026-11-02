@@ -344,4 +344,60 @@ public class C64LibraryTests
         Assert.Equal(without.Image, with.Image);
         Assert.Equal(without.Report, with.Report);
     }
+
+    [Fact]
+    public void Register_structs_are_at_the_chip_addresses()
+    {
+        var r = Run.Program("""
+            import c64
+            fn main() {
+                c64.vic.border = c64.BLUE
+                c64.vic.background = c64.vic.border + 1
+                c64.vic.sprite0_x = 1
+                c64.vic.sprite7_y = 2
+                c64.vic.sprite_enable = $81
+                c64.vic.sprite_color[7] = c64.YELLOW
+                c64.sid.voice1.freq = $1234
+                c64.sid.voice3.sustain_release = 5
+                c64.sid.cutoff = $0607
+                c64.sid.volume = 15
+                c64.cia1.timer_a = $4025
+                c64.cia2.icr = $7F
+            }
+            """);
+        byte[] m = r.Ram.Bytes;
+        Assert.Equal(6, m[0xD020]);
+        Assert.Equal(7, m[0xD021]);
+        Assert.Equal(1, m[0xD000]);
+        Assert.Equal(2, m[0xD00F]);
+        Assert.Equal(0x81, m[0xD015]);
+        Assert.Equal(7, m[0xD02E]);
+        Assert.Equal(new byte[] { 0x34, 0x12 }, m[0xD400..0xD402]);
+        Assert.Equal(5, m[0xD414]);
+        Assert.Equal(new byte[] { 0x07, 0x06 }, m[0xD415..0xD417]);
+        Assert.Equal(15, m[0xD418]);
+        Assert.Equal(new byte[] { 0x25, 0x40 }, m[0xDC04..0xDC06]);
+        Assert.Equal(0x7F, m[0xDD0D]);
+        // Every field access is one absolute instruction: lda #6 / sta $D020.
+        Assert.Contains("A9 06", r.Result.Listing);
+        Assert.Contains("8D 20 D0", r.Result.Listing);
+    }
+
+    [Fact]
+    public void Register_struct_fields_in_assembly()
+    {
+        var r = Run.Program("""
+            import c64
+            fn main() {
+                asm {
+                    lda #2
+                    sta c64.vic.border
+                    lda #c64.vic.background.hi
+                    sta c64.vic.sprite_color+3
+                }
+            }
+            """);
+        Assert.Equal(2, r.Ram.Bytes[0xD020]);
+        Assert.Equal(0xD0, r.Ram.Bytes[0xD02A]);
+    }
 }

@@ -500,6 +500,8 @@ public class AsmTests
     [InlineData("var v: u8\nfn main() { asm {\n lda v*2\n } }", "an address can only have a constant added or subtracted")]
     [InlineData("var v: u8\nfn main() { asm {\n lda #v.lo.hi\n } }", "of a value that is already one byte")]
     [InlineData("var v: u8\nfn main() { asm {\n lda v.x\n } }", "Unknown member '.x'; assembly only has .lo and .hi")]
+    [InlineData("struct S { x: u8 }\nvar p: ptr S\nfn main() { asm {\n lda p.x\n } }", "In assembly, a field must belong to a struct variable")]
+    [InlineData("struct S { x: u8 }\nvar s: S\nfn main() { asm {\n lda s.y\n } }", "Struct 'S' has no field 'y'")]
     [InlineData("fn main() { asm {\n lda nothing\n } }", "'nothing' is not declared")]
     [InlineData("var t: [u8; 2]\nfn main() { asm {\n lda t[1]\n } }", "An assembly operand must be a constant, or the name of a variable, function or .label")]
     [InlineData("fn main() { asm {\n lda 70000\n } }", "Address 70000 is outside memory")]
