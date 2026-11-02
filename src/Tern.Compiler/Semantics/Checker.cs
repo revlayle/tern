@@ -1501,11 +1501,17 @@ public sealed partial class Checker
     /// </summary>
     private static void CheckPrivateGlobalsPerRoot(List<Module> modules, List<FunctionSymbol> ordered)
     {
-        var privateGlobals = modules.Where(m => !m.IsMain)
-            .SelectMany(m => m.Syntax.PrivateNames.Select(n => m.Scope.GetValueOrDefault(n)).OfType<VariableSymbol>())
-            .Where(v => !v.IsData) // read-only tables are safe to share
-            .ToHashSet();
+        var moduleOf = new Dictionary<VariableSymbol, Module>();
+        foreach (var m in modules.Where(m => !m.IsMain))
+            foreach (var v in m.Syntax.PrivateNames.Select(n => m.Scope.GetValueOrDefault(n)).OfType<VariableSymbol>())
+                if (!v.IsData) // read-only tables are safe to share
+                    moduleOf[v] = m;
+        var privateGlobals = moduleOf.Keys.ToHashSet();
         if (privateGlobals.Count == 0) return;
+
+        // A module's own handler may share the module's private variables (spec 8.1): its author wrote both sides.
+        bool OwnHandler(FunctionSymbol root, VariableSymbol g) =>
+            root.IsInterrupt && moduleOf[g].Scope.Values.Contains(root);
 
         var firstUser = new Dictionary<VariableSymbol, (FunctionSymbol Function, FunctionSymbol Root)>();
         foreach (var f in ordered.Where(f => f.FixedAddress is null))
@@ -1513,10 +1519,10 @@ public sealed partial class Checker
                 foreach (var used in f.UsedGlobals)
                 {
                     var g = used.AliasOf ?? used;
-                    if (!privateGlobals.Contains(g)) continue;
+                    if (!privateGlobals.Contains(g) || OwnHandler(root, g)) continue;
                     if (!firstUser.TryGetValue(g, out var first))
                         firstUser[g] = (f, root);
-                    else if (first.Root != root)
+                    else if (first.Root != root && !OwnHandler(first.Root, g))
                     {
                         // Reported at the handler, which is in the program's own code.
                         var handler = root.IsInterrupt ? root : first.Root;

@@ -183,6 +183,74 @@ public class InterruptTests
         Assert.Null(e.Pos.File); // reported in the program, at the handler
     }
 
+    /// <summary>Runs a main file that imports the given user modules, each written to a temporary folder.</summary>
+    private static Run RunWithModules(string main, (string Name, string Text)[] modules, long irqEvery = 0)
+    {
+        var dir = Directory.CreateTempSubdirectory("tern");
+        try
+        {
+            foreach (var (name, text) in modules) File.WriteAllText(Path.Combine(dir.FullName, name + ".tern"), text);
+            return Run.Program(main, sourcePath: Path.Combine(dir.FullName, "main.tern"), irqEvery: irqEvery);
+        }
+        finally { dir.Delete(recursive: true); }
+    }
+
+    [Fact]
+    public void A_module_handler_may_share_the_modules_private_variable()
+    {
+        // Spec 8.1: the module's author wrote both sides, so a handler in the module may use its private variable.
+        var r = RunWithModules("""
+            import c64
+            import timer
+            var seen: u16
+            fn main() {
+                c64.kernal_off()
+                c64.set_irq(addr(timer.tick))
+                c64.interrupts_on()
+                for _ in 0..200 { seen = timer.now() }
+            }
+            """, [("timer", """
+            private var ticks: u16
+            interrupt fn tick() { ticks += 1 }
+            fn now() -> u16 { return ticks }
+            """)], irqEvery: 300);
+        Assert.True(r.Interrupts > 2);
+        Assert.Equal(r.Interrupts, r.U16("seen"));
+    }
+
+    [Fact]
+    public void A_handler_of_another_module_may_not_share_a_private_variable()
+    {
+        var dir = Directory.CreateTempSubdirectory("tern");
+        try
+        {
+            File.WriteAllText(Path.Combine(dir.FullName, "b.tern"), """
+                private var n: u8
+                fn poke() { n += 1 }
+                fn peek() -> u8 { return n }
+                """);
+            File.WriteAllText(Path.Combine(dir.FullName, "a.tern"), """
+                import b
+                interrupt fn h() { b.poke() }
+                """);
+            var main = """
+                import a
+                import b
+                import c64
+                var x: u8
+                fn main() {
+                    c64.kernal_off()
+                    c64.set_irq(addr(a.h))
+                    x = b.peek()
+                }
+                """;
+            var e = Assert.Throws<CompileError>(() =>
+                TernCompiler.Compile(main, null, Path.Combine(dir.FullName, "main.tern"), "lib"));
+            Assert.Contains("both use 'b.n', a private variable of its module", e.Description);
+        }
+        finally { dir.Delete(recursive: true); }
+    }
+
     [Fact]
     public void Functions_with_no_memory_may_be_shared_with_a_handler()
     {
