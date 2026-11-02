@@ -255,6 +255,47 @@ public class MatchTests
     }
 
     [Fact]
+    public void A_dense_match_inside_loops_using_x_and_y_uses_a_compare_chain()
+    {
+        // Review M6, finding 2: a jump table needs X or Y.
+        var r = Run.Program("""
+            var out: [u8; 16]
+            fn main() {
+                for i in 0..2 using X {
+                    for j in 0..9 using Y {
+                        match j {
+                            0 => out[0] += 1
+                            1 => out[1] += 1
+                            2 => out[2] += 1
+                            3 => out[3] += 1
+                            4 => out[4] += 1
+                            5 => out[5] += 1
+                            6 => out[6] += 1
+                            7 => out[7] += 1
+                            _ => out[15] += 1
+                        }
+                    }
+                }
+            }
+            """);
+        for (int k = 0; k < 8; k++) Assert.Equal(2, r.U8("out", k));
+        Assert.Equal(2, r.U8("out", 15));
+        Assert.DoesNotContain("jumphi", r.Result.Listing);
+    }
+
+    [Fact]
+    public void A_match_with_only_a_default_still_reads_a_volatile_value()
+    {
+        // Review M6, finding 3: spec 4, every read of a fixed-address variable happens.
+        var r = Run.Program("""
+            var reg: u8 @ $C000
+            var r: u8
+            fn main() { match reg { _ => r = 1 } }
+            """);
+        Assert.Equal("lda reg|lda #$01|sta r|rts", Code(r));
+    }
+
+    [Fact]
     public void A_match_where_every_arm_returns_ends_the_function()
     {
         var r = Run.Program("""

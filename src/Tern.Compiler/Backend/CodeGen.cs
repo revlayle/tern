@@ -184,6 +184,8 @@ public sealed class CodeGen
     private Label? _interruptExit;
     /// <summary>Where a <c>return</c> goes in the copy of an inline function being generated: its end.</summary>
     private Label? _inlineExit;
+    /// <summary>Free temporaries of each inline function, kept between its copies, which never run at the same time.</summary>
+    private readonly Dictionary<FunctionSymbol, List<VariableSymbol>> _inlineTemps = new();
 
     /// <summary>Leaves the function: <c>rts</c>, or a jump to the end of an inline copy or of an interrupt handler.</summary>
     private void ReturnJump()
@@ -205,6 +207,7 @@ public sealed class CodeGen
         _fn = f;
         _interruptExit = null;
         _freeTemps.Clear();
+        if (_inlineTemps.TryGetValue(f, out var pool)) _freeTemps.AddRange(pool);
         var end = NewLabel("inline_end");
         _inlineExit = end;
         _out.Add(new Comment($"inline {f.Name}"));
@@ -214,6 +217,7 @@ public sealed class CodeGen
             _out.RemoveAt(_out.Count - 1);
         Place(end);
         (_fn, _inlineExit, _interruptExit) = (caller, callerExit, interruptExit);
+        _inlineTemps[f] = _freeTemps.ToList();
         _freeTemps.Clear();
         _freeTemps.AddRange(callerTemps);
         _lastSource = default;
@@ -353,7 +357,7 @@ public sealed class CodeGen
         var end = NewLabel("mend");
         if (arms.Count == 0)
         {
-            if (Simple1(m.Subject) is null) GenA(m.Subject); // it may call a function
+            GenA(m.Subject); // it may call a function or read a volatile register
             if (fallback is not null) GenBlock(fallback.Body);
             return;
         }
@@ -368,7 +372,9 @@ public sealed class CodeGen
         int low = patterns.Min(p => p.From), high = patterns.Max(p => p.To);
         int span = high - low + 1;
         List<MatchArm> order;
-        if (tests >= JumpTableTests && span <= 2 * tests)
+        // A jump table needs X or Y; inside loops using both, the compare chain needs neither.
+        bool indexFree = !_reserved.Contains(Register.X) || !_reserved.Contains(Register.Y);
+        if (tests >= JumpTableTests && span <= 2 * tests && indexFree)
         {
             // Jump table: push the target address minus 1, high byte first, and rts to it.
             if (low > 0) { Emit(Sec); Op(Sbc, Byte(low)); }

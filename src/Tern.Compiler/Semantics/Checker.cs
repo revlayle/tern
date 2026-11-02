@@ -79,6 +79,7 @@ public sealed partial class Checker
         // Only what main and the interrupt handlers can reach goes into the program, so unused parts
         // of a module cost nothing. The main file's globals are all kept.
         var reachable = OrderRoots(main, mainModule);
+        CheckPrivateGlobalsPerRoot(modules, reachable, main);
         var used = reachable.SelectMany(f => f.UsedGlobals).Concat(mainModule.Scope.Values.OfType<VariableSymbol>()).ToHashSet();
         return new CheckedProgram(modules, _globals.Where(used.Contains).ToList(), reachable, main);
     }
@@ -1370,7 +1371,6 @@ public sealed partial class Checker
 
     // ---------- Call graph ----------
 
-    /// <summary>Functions reachable from main, callers before callees. Reports recursion.</summary>
     /// <summary>
     /// The functions reachable from main, then from each interrupt handler, callers first. Handlers
     /// are roots: those of the main file, and those a compiled function names (to install them).
@@ -1407,6 +1407,45 @@ public sealed partial class Checker
             }
         }
         return all;
+    }
+
+    /// <summary>
+    /// A module's private global used from two roots (main and a handler, or two handlers) is an
+    /// error: an interrupt could change it while the other root is using it, and the caller cannot
+    /// see it (review M6, finding 1). The library's work bytes are such globals. Public globals are
+    /// how main and handlers talk to each other, and data is read-only, so both stay allowed.
+    /// </summary>
+    private static void CheckPrivateGlobalsPerRoot(List<Module> modules, List<FunctionSymbol> ordered, FunctionSymbol main)
+    {
+        var privateGlobals = modules.Where(m => !m.IsMain)
+            .SelectMany(m => m.Syntax.PrivateNames.Select(n => m.Scope.GetValueOrDefault(n)).OfType<VariableSymbol>())
+            .Where(v => !v.IsData) // read-only tables are safe to share
+            .ToHashSet();
+        if (privateGlobals.Count == 0) return;
+
+        // ordered is main's tree, then each handler's tree; a function belongs to the root that starts its tree.
+        var firstUser = new Dictionary<VariableSymbol, (FunctionSymbol Function, FunctionSymbol Root)>();
+        FunctionSymbol root = main;
+        foreach (var f in ordered.Where(f => f.FixedAddress is null))
+        {
+            if (f.IsInterrupt) root = f;
+            foreach (var used in f.UsedGlobals)
+            {
+                var g = used.AliasOf ?? used;
+                if (!privateGlobals.Contains(g)) continue;
+                if (!firstUser.TryGetValue(g, out var first))
+                    firstUser[g] = (f, root);
+                else if (first.Root != root)
+                {
+                    string Describe(FunctionSymbol r) => r == main ? "main" : $"the interrupt handler '{r.Name}'";
+                    // Reported at the handler, which is in the program's own code.
+                    throw new CompileError(root.Pos,
+                        $"'{first.Function.Name}' (called from {Describe(first.Root)}) and '{f.Name}' (called from {Describe(root)}) both use '{g.Name}', " +
+                        $"a private variable of its module. An interrupt could change it while the other is using it. " +
+                        $"Call functions of this module from only main or only one interrupt handler");
+                }
+            }
+        }
     }
 
     private static List<FunctionSymbol> OrderReachable(FunctionSymbol main)

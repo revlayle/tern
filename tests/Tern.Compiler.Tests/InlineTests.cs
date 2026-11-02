@@ -196,6 +196,40 @@ public class InlineTests
         Assert.NotEqual(s["f.a"], s["h.k"]);
     }
 
+    [Fact]
+    public void Copies_of_an_inline_function_share_its_temporaries()
+    {
+        // Review M6, finding 4: three copies need no more temporaries than one.
+        static int Temps(string calls)
+        {
+            var r = TernCompiler.Compile($$"""
+                var a: [u8; 4] = [1, 2, 3, 4]
+                var out: u8
+                fn g(v: u8) -> u8 { return v + 1 }
+                inline fn f(i: u8) -> u8 { return a[i] + g(i) + a[i ^ 1] + g(i + 1) }
+                fn main() { {{calls}} }
+                """);
+            return r.Report.Split('\n').Count(l => l.Contains("f._t"));
+        }
+        int one = Temps("out = f(0)");
+        Assert.True(one > 0);
+        Assert.Equal(one, Temps("out = f(0)\n out = f(1)\n out = f(2)"));
+        var run = Run.Program("""
+            var a: [u8; 4] = [1, 2, 3, 4]
+            var out: [u8; 3]
+            fn g(v: u8) -> u8 { return v + 1 }
+            inline fn f(i: u8) -> u8 { return a[i] + g(i) + a[i ^ 1] + g(i + 1) }
+            fn main() {
+                out[0] = f(0)
+                out[1] = f(1)
+                out[2] = f(2)
+            }
+            """);
+        int[] a = [1, 2, 3, 4];
+        for (int i = 0; i < 3; i++)
+            Assert.Equal(a[i] + (i + 1) + a[i ^ 1] + (i + 2), run.U8("out", i));
+    }
+
     [Theory]
     [InlineData("inline asm fn f() {\n rts\n }\nfn main() { }", "'inline asm fn' is not supported yet")]
     [InlineData("inline var x: u8\nfn main() { }", "'inline' goes before 'fn'")]

@@ -171,6 +171,47 @@ public class InterruptTests
     }
 
     [Theory]
+    // Review M6, finding 1: mul8 and div8 share math's private work bytes.
+    [InlineData("import math\nvar q: u8\nvar p: u16\ninterrupt fn handler() { q = math.div8(200, 7) }\nfn main() { p = math.mul8(3, 13) }",
+        "'math.mul8' (called from main) and 'math.div8' (called from the interrupt handler 'handler') both use 'math.w0', a private variable of its module")]
+    [InlineData("import math\nvar q: u8\nvar p: u16\ninterrupt fn h1() { q = math.div8(200, 7) }\ninterrupt fn h2() { p = math.mul16(3, 13) }\nfn main() { }",
+        "(called from the interrupt handler 'h1') and 'math.mul16' (called from the interrupt handler 'h2') both use 'math.w")]
+    public void Private_module_variables_used_from_two_roots_are_errors(string source, string expected)
+    {
+        var e = Assert.Throws<CompileError>(() => TernCompiler.Compile(source));
+        Assert.Contains(expected, e.Description);
+        Assert.Null(e.Pos.File); // reported in the program, at the handler
+    }
+
+    [Fact]
+    public void Public_variables_and_private_data_may_be_shared_with_a_handler()
+    {
+        // math.remainder8 is public; text.DIGITS, used by hex8 and dec8, is private but read-only data.
+        var r = Run.Program($$"""
+            import math
+            import text
+            var shown: [u8; 4]
+            var q: u8
+            var rest: u8
+            interrupt fn handler() {
+                text.hex8(addr(shown), 171)
+                rest = math.remainder8
+            }
+            fn main() {
+                {{Install}}
+                q = math.div8(200, 7)
+                for _ in 0..50 { var n: u8 = text.dec8(addr(shown) + 2, 42) }
+                asm {
+                    sei
+                }
+            }
+            """, irqEvery: 300);
+        Assert.True(r.Interrupts > 0);
+        Assert.Equal(28, r.U8("q"));
+        Assert.Equal(new byte[] { 1, 2, 0x34, 0x32 }, r.Ram.Bytes[r.Address("shown")..(r.Address("shown") + 4)]); // "AB", "42"
+    }
+
+    [Theory]
     [InlineData("interrupt fn h(x: u8) { }\nfn main() { }", "An interrupt handler takes no parameters and returns no value")]
     [InlineData("interrupt fn h() -> u8 { return 1 }\nfn main() { }", "An interrupt handler takes no parameters and returns no value")]
     [InlineData("interrupt fn h() { }\nfn main() { h() }", "'h' is an interrupt handler, which only the CPU calls (it ends with rti). Install its address in the interrupt vector")]

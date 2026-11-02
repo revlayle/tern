@@ -5,6 +5,11 @@
 //
 // The KERNAL is switched off ($01 = $35), so the CPU takes interrupts through
 // the vectors at $FFFA (NMI) and $FFFE (IRQ) in RAM, and handlers end with rti.
+//
+// The bars are not stabilized: the color changes about 60 cycles after the
+// interrupt, near the end of the line, and that edge jitters by a few cycles
+// depending on which instruction main was running when the interrupt came.
+// A stable raster needs a double-IRQ or timer trick, beyond this example.
 import c64
 import text
 
