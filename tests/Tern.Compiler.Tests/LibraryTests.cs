@@ -400,4 +400,27 @@ public class C64LibraryTests
         Assert.Equal(2, r.Ram.Bytes[0xD020]);
         Assert.Equal(0xD0, r.Ram.Bytes[0xD02A]);
     }
+
+    [Fact]
+    public void Structs_example_moves_both_lists_the_same()
+    {
+        var path = AsmTests.FindExample("structs.tern");
+        var r = Run.Program(File.ReadAllText(path), sourcePath: path);
+        byte[] m = r.Ram.Bytes;
+        // The same moves in C#.
+        for (int i = 0; i < 8; i++)
+        {
+            int x = (i << 2) + 1, dx = (i & 1) == 1 ? 255 : 1;
+            for (int f = 0; f < 100; f++)
+            {
+                x = (x + dx) & 0xFF;
+                if (x == 0 || x == 39) dx = (0 - dx) & 0xFF;
+            }
+            Assert.Equal(i + 1, m[0x0400 + (i + 2) * 40 + x]);      // screen code of 'A' is 1
+            Assert.Equal(i + 1, m[0x0400 + (i + 15) * 40 + x]);
+        }
+        Assert.Equal(0, m[0xD020]);
+        Assert.Equal(6, m[0xD021]);
+        Assert.Equal(1, m[0xD015]);
+    }
 }
