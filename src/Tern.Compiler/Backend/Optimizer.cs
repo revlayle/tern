@@ -17,7 +17,7 @@ public static class Optimizer
     public static void Run(List<AsmItem> code, FunctionSymbol function)
     {
         RemoveUnreachable(code);
-        while (RemoveRedundant(code, function)) { }
+        while (RemoveRedundant(code, function) | FoldShiftTests(code, function)) { }
     }
 
     private static bool FromAsm(Instr i) => i.AsmPos is not null;
@@ -327,5 +327,72 @@ public static class Optimizer
         code.Clear();
         code.AddRange(kept);
         return true;
+    }
+
+    // ---------- Bit test and shift ----------
+
+    /// <summary>The index of the next instruction or label at or after <paramref name="k"/>, skipping comments and source lines.</summary>
+    private static int NextReal(List<AsmItem> code, int k)
+    {
+        while (k < code.Count && code[k] is Comment or SourceLine) k++;
+        return k;
+    }
+
+    private static int PreviousReal(List<AsmItem> code, int k)
+    {
+        while (k >= 0 && code[k] is Comment or SourceLine) k--;
+        return k;
+    }
+
+    /// <summary>
+    /// <c>and #$80</c> / <c>beq else</c> followed on both paths by <c>lda x</c> / <c>asl a</c>, where A
+    /// already holds x: the shift tests bit 7 itself. The two shifts become one, before the branch,
+    /// and the branch tests the carry (<c>asl a</c> / <c>bcc else</c>). Every register and flag has the
+    /// value it had after the shifts it replaces. For <c>if x &amp; $80 != 0 { x = x &lt;&lt; 1 ... } else { x = x &lt;&lt; 1 }</c> (CRC loops).
+    /// </summary>
+    private static bool FoldShiftTests(List<AsmItem> code, FunctionSymbol function)
+    {
+        var positions = new Dictionary<Label, int>();
+        var references = new Dictionary<Label, int>();
+        for (int k = 0; k < code.Count; k++)
+        {
+            if (code[k] is LabelDef d) positions[d.Label] = k;
+            if (code[k] is Instr i && Target(i) is { } t) references[t] = references.GetValueOrDefault(t) + 1;
+        }
+        var unknown = UnknownEntries(code);
+        State?[]? before = null;
+
+        for (int k = 0; k < code.Count; k++)
+        {
+            if (code[k] is not Instr { Mnemonic: And, Mode: Immediate, Operand: Imm { Value: 0x80 }, AsmPos: null }) continue;
+            int b = NextReal(code, k + 1);
+            if (b >= code.Count || code[b] is not Instr { Mnemonic: Beq or Bne } branch || FromAsm(branch)) continue;
+            if (Target(branch) is not { } label || references[label] != 1 || unknown.Contains(label) || !positions.TryGetValue(label, out int p)) continue;
+
+            int l1 = NextReal(code, b + 1);
+            if (l1 >= code.Count || code[l1] is not Instr { Mnemonic: Lda, Operand: VarOperand { Variable.IsVolatile: false } x } load1 || FromAsm(load1)) continue;
+            int a1 = NextReal(code, l1 + 1);
+            if (a1 >= code.Count || code[a1] is not Instr { Mnemonic: Asl, Mode: Accumulator, AsmPos: null }) continue;
+
+            int l2 = NextReal(code, p + 1);
+            if (l2 >= code.Count || code[l2] is not Instr { Mnemonic: Lda, AsmPos: null } load2 || load2.Operand != x || load2.Mode != load1.Mode) continue;
+            int a2 = NextReal(code, l2 + 1);
+            if (a2 >= code.Count || code[a2] is not Instr { Mnemonic: Asl, Mode: Accumulator, AsmPos: null }) continue;
+
+            // The first path must not run on into the label, or the second shift would be needed there.
+            int before2 = PreviousReal(code, p - 1);
+            if (before2 < 0 || code[before2] is not Instr last || FallsThrough(last)) continue;
+            // The label's code must not be entered from anywhere else.
+            if (code.GetRange(p + 1, l2 - p - 1).Any(item => item is LabelDef)) continue;
+
+            before ??= Analyse(code, function);
+            if (before[k] is not { } state || !state.Regs[(int)Reg.A].Contains(x)) continue;
+
+            code[k] = new Instr(Asl, Accumulator);
+            code[b] = new Instr(branch.Mnemonic == Beq ? Bcc : Bcs, branch.Mode, branch.Operand);
+            foreach (int remove in new[] { a2, l2, a1, l1 }.OrderByDescending(r => r)) code.RemoveAt(remove);
+            return true;
+        }
+        return false;
     }
 }

@@ -240,6 +240,43 @@ public class OptimizerTests
         Assert.Equal([5, 6, 7, 8], r.Ram.Bytes.AsSpan(r.Address("dst"), 4).ToArray());
         Assert.Equal([6, 7, 8, 9], r.Ram.Bytes.AsSpan(r.Address("src"), 4).ToArray());
     }
+
+    [Theory]
+    [InlineData(0x00)]
+    [InlineData(0x01)]
+    [InlineData(0x7F)]
+    [InlineData(0x80)]
+    [InlineData(0xFF)]
+    [InlineData(0xA5)]
+    public void A_bit_7_test_followed_by_shifts_in_both_arms_is_one_shift_and_a_carry_test(int start)
+    {
+        var r = Run.Program($$"""
+            var set_arm: u8 = {{start}}
+            var clear_arm: u8 = {{start}}
+            var plain: u8 = {{start}}
+            fn main() {
+                for _ in 0..8 {
+                    if set_arm & $80 != 0 { set_arm = (set_arm << 1) ^ $07 } else { set_arm = set_arm << 1 }
+                    if clear_arm & $80 == 0 { clear_arm = clear_arm << 1 } else { clear_arm = (clear_arm << 1) ^ $1D }
+                    if plain & $80 != 0 { plain = plain << 1 }
+                }
+            }
+            """);
+        byte a = (byte)start, b = (byte)start, c = (byte)start;
+        for (int k = 0; k < 8; k++)
+        {
+            a = (byte)((a & 0x80) != 0 ? (a << 1) ^ 0x07 : a << 1);
+            b = (byte)((b & 0x80) == 0 ? b << 1 : (b << 1) ^ 0x1D);
+            if ((c & 0x80) != 0) c = (byte)(c << 1);
+        }
+        Assert.Equal(a, r.U8("set_arm"));
+        Assert.Equal(b, r.U8("clear_arm"));
+        Assert.Equal(c, r.U8("plain"));
+        // Two folded tests: no "and #$80" is left except the one-armed test, which has no second shift to share.
+        Assert.Equal(1, Main(r).Split("and #$80").Length - 1);
+        Assert.Contains("asl a / bcc ", Main(r));
+        Assert.Contains("asl a / bcs ", Main(r));
+    }
 }
 
 /// <summary>A parameter passed in X or Y stays in its register when the body allows it (roadmap M7).</summary>
