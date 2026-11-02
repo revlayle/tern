@@ -3,7 +3,7 @@ using Tern.Compiler.Syntax;
 namespace Tern.Compiler.Semantics;
 
 /// <summary><see cref="IntLiteral"/> is a number literal that has not yet taken a type from its context.</summary>
-public enum TypeKind { Error, Void, U8, I8, U16, I16, Bool, Array, Ptr, IntLiteral }
+public enum TypeKind { Error, Void, U8, I8, U16, I16, Bool, Array, Ptr, Struct, IntLiteral }
 
 public sealed class TernType
 {
@@ -19,21 +19,31 @@ public sealed class TernType
     public TypeKind Kind { get; }
     public TernType? Element { get; }
     public int Length { get; }
+    /// <summary>For a struct type: its declaration and layout.</summary>
+    public StructSymbol? Struct { get; }
+    /// <summary>An array of structs declared <c>linear</c>: whole records one after another, instead of one table per field.</summary>
+    public bool Linear { get; }
 
-    private TernType(TypeKind kind, TernType? element = null, int length = 0)
+    private TernType(TypeKind kind, TernType? element = null, int length = 0, StructSymbol? @struct = null, bool linear = false)
     {
         Kind = kind;
         Element = element;
         Length = length;
+        Struct = @struct;
+        Linear = linear;
     }
 
-    public static TernType ArrayOf(TernType element, int length) => new(TypeKind.Array, element, length);
+    public static TernType ArrayOf(TernType element, int length, bool linear = false) => new(TypeKind.Array, element, length, linear: linear);
     public static TernType PointerTo(TernType target) => new(TypeKind.Ptr, target);
+    public static TernType StructOf(StructSymbol s) => new(TypeKind.Struct, @struct: s);
 
     public bool IsInteger => Kind is TypeKind.U8 or TypeKind.I8 or TypeKind.U16 or TypeKind.I16;
     public bool IsSigned => Kind is TypeKind.I8 or TypeKind.I16;
     public bool IsArray => Kind == TypeKind.Array;
     public bool IsPointer => Kind == TypeKind.Ptr;
+    public bool IsStruct => Kind == TypeKind.Struct;
+    /// <summary>An array whose elements are structs.</summary>
+    public bool IsStructArray => IsArray && Element!.IsStruct;
     /// <summary>A value that fits in one or two bytes and can be loaded, stored and compared.</summary>
     public bool IsScalar => IsInteger || Kind == TypeKind.Bool || Kind == TypeKind.Ptr;
 
@@ -42,6 +52,7 @@ public sealed class TernType
         TypeKind.U8 or TypeKind.I8 or TypeKind.Bool => 1,
         TypeKind.U16 or TypeKind.I16 or TypeKind.Ptr => 2,
         TypeKind.Array => Element!.Size * Length,
+        TypeKind.Struct => Struct!.Size,
         _ => 0,
     };
 
@@ -54,8 +65,9 @@ public sealed class TernType
     public bool SameAs(TernType other) =>
         Kind == other.Kind && Kind switch
         {
-            TypeKind.Array => Length == other.Length && Element!.SameAs(other.Element!),
+            TypeKind.Array => Length == other.Length && Linear == other.Linear && Element!.SameAs(other.Element!),
             TypeKind.Ptr => Element!.SameAs(other.Element!),
+            TypeKind.Struct => Struct == other.Struct,
             _ => true,
         };
 
@@ -63,6 +75,7 @@ public sealed class TernType
     {
         TypeKind.Array => $"[{Element}; {Length}]",
         TypeKind.Ptr => $"ptr {Element}",
+        TypeKind.Struct => Struct!.Name,
         TypeKind.IntLiteral => "number",
         _ => Kind.ToString().ToLowerInvariant(),
     };
@@ -94,6 +107,39 @@ public sealed class ConstSymbol(string name, SourcePos pos, TernType type, long 
     public TernType Type { get; } = type;
     public long Value { get; } = value;
 }
+
+/// <summary>A field of a struct: its type and its offset from the start of the struct.</summary>
+public sealed record StructField(string Name, SourcePos Pos, TernType Type, int Offset);
+
+public sealed class StructSymbol(string name, SourcePos pos, StructDecl declaration) : Symbol(name, pos)
+{
+    public StructDecl Declaration { get; } = declaration;
+    /// <summary>Filled when the struct is laid out.</summary>
+    public List<StructField> Fields { get; } = [];
+    public int Size { get; set; }
+    /// <summary>0 = not laid out, 1 = being laid out, 2 = done.</summary>
+    public int LayoutState { get; set; }
+    public TernType Type => _type ??= TernType.StructOf(this);
+    private TernType? _type;
+
+    public StructField? Field(string name) => Fields.FirstOrDefault(f => f.Name == name);
+}
+
+public enum PlaceKind
+{
+    /// <summary>In a variable: <see cref="StructPlace.Base"/> + offset.</summary>
+    Memory,
+    /// <summary>
+    /// Record <see cref="StructPlace.Index"/> of an array of structs, stored one table per field:
+    /// byte k of record i is at Base + k * length + i.
+    /// </summary>
+    Table,
+    /// <summary>Where <see cref="StructPlace.Pointer"/> points, plus offset.</summary>
+    Pointer,
+}
+
+/// <summary>Where a struct (or an array field of one) is: <see cref="Offset"/> is the byte offset inside the record.</summary>
+public sealed record StructPlace(PlaceKind Kind, int Offset, VariableSymbol? Base = null, Syntax.Expr? Index = null, Syntax.Expr? Pointer = null);
 
 public enum VariableKind { Global, Local, Parameter, Temp }
 
@@ -134,6 +180,18 @@ public sealed class VariableSymbol(string name, SourcePos pos, TernType type, Va
     public long Weight { get; set; }
     /// <summary>Assigned by the allocator.</summary>
     public int Address { get; set; } = -1;
+
+    /// <summary>
+    /// Set for a view: part of another variable's memory, such as the field <c>player.hp</c> or the
+    /// table of one field in an array of structs. A view has no memory of its own; it is at
+    /// <see cref="AliasOf"/> + <see cref="AliasOffset"/>.
+    /// </summary>
+    public VariableSymbol? AliasOf { get; init; }
+    public int AliasOffset { get; init; }
+    /// <summary>For an array view of 16-bit values: the distance from the low-byte table to the high-byte table (default: the length).</summary>
+    public int? HighTable { get; init; }
+    /// <summary>The variable that owns the memory: itself, or the variable a view is part of.</summary>
+    public VariableSymbol Storage => AliasOf ?? this;
 
     public bool IsVolatile => FixedAddress.HasValue;
     /// <summary>Must be placed in zero page; compilation fails if it does not fit.</summary>

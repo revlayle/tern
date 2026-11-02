@@ -15,8 +15,8 @@ public sealed class CodeGen
     /// <summary>A two-byte location in memory: <see cref="Var"/> + <see cref="Offset"/>.</summary>
     private readonly record struct Loc(VariableSymbol Var, int Offset = 0)
     {
-        public VarOperand Lo => new(Var, Offset);
-        public VarOperand Hi => new(Var, Offset + 1);
+        public VarOperand Lo => CodeGen.Var(Var, Offset);
+        public VarOperand Hi => CodeGen.Var(Var, Offset + 1);
     }
 
     private readonly CheckedProgram _program;
@@ -69,7 +69,12 @@ public sealed class CodeGen
     private void Jmp(Label l) => Emit(Mnemonic.Jmp, Absolute, new LabelOperand(l));
     private void Branch(Mnemonic m, Label l) => Emit(m, Relative, new LabelOperand(l));
     private Label NewLabel(string hint) => new($"{_fn.Name}.{hint}{_labelCounter++}");
-    private static VarOperand Var(VariableSymbol v, int offset = 0) => new(v, offset);
+    /// <summary>A byte of a variable. A view (a struct field, a field table) is a byte of the variable it is part of.</summary>
+    private static VarOperand Var(VariableSymbol v, int offset = 0) =>
+        v.AliasOf is { } storage ? new(storage, v.AliasOffset + offset) : new(v, offset);
+
+    /// <summary>The distance from the low-byte table of a split array to its high-byte table.</summary>
+    private static int HighTable(VariableSymbol arr) => arr.HighTable ?? arr.Type.Length;
     private static Imm Byte(long v) => new((int)(v & 0xFF));
 
     /// <param name="zeroPage">The temporary must be in zero page, e.g. to hold a pointer for (zp),y.</param>
@@ -420,14 +425,14 @@ public sealed class CodeGen
                 if (ix.Index.ConstValue is long ci)
                 {
                     Op(Lda, lo); Op(Sta, Var(arr, (int)ci));
-                    Op(Lda, hi); Op(Sta, Var(arr, arr.Type.Length + (int)ci));
+                    Op(Lda, hi); Op(Sta, Var(arr, HighTable(arr) + (int)ci));
                 }
                 else
                 {
                     var reg = LoadIndex(ix.Index);
                     var mode = reg == Register.X ? AbsoluteX : AbsoluteY;
                     Op(Lda, lo); Emit(Sta, mode, Var(arr));
-                    Op(Lda, hi); Emit(Sta, mode, Var(arr, arr.Type.Length));
+                    Op(Lda, hi); Emit(Sta, mode, Var(arr, HighTable(arr)));
                 }
                 if (temp is not null) Release(temp);
                 break;
@@ -464,7 +469,7 @@ public sealed class CodeGen
     private void StoreArrayByte(IndexExpr ix, int byteIndex)
     {
         var arr = ArrayOf(ix);
-        int table = byteIndex == 0 ? 0 : arr.Type.Length;
+        int table = byteIndex == 0 ? 0 : HighTable(arr);
         if (ix.Index.ConstValue is long ci)
         {
             Op(Sta, Var(arr, table + (int)ci));
@@ -503,7 +508,7 @@ public sealed class CodeGen
                 int b = m.Member == "hi" ? 1 : 0;
                 if (m.Target is NameExpr { Symbol: { InMemory: true } mv }) return Var(mv, b);
                 if (m.Target is IndexExpr { Index.ConstValue: long mi } mix && !IsPointerIndex(mix))
-                    return Var(ArrayOf(mix), (b == 1 ? ArrayOf(mix).Type.Length : 0) + (int)mi);
+                    return Var(ArrayOf(mix), (b == 1 ? HighTable(ArrayOf(mix)) : 0) + (int)mi);
                 if (Simple2(m.Target) is { } pair) return b == 1 ? pair.Hi : pair.Lo;
                 return null;
             case CastExpr cast when cast.Type.Size == 1:
@@ -536,7 +541,7 @@ public sealed class CodeGen
     private void LoadArrayByte(IndexExpr ix, int byteIndex)
     {
         var arr = ArrayOf(ix);
-        int table = byteIndex == 0 ? 0 : arr.Type.Length;
+        int table = byteIndex == 0 ? 0 : HighTable(arr);
         if (ix.Index.ConstValue is long ci)
         {
             Op(Lda, Var(arr, table + (int)ci));
@@ -724,7 +729,7 @@ public sealed class CodeGen
                 return (new ImmVarByte(av, false), new ImmVarByte(av, true));
             case IndexExpr ix when !IsPointerIndex(ix) && ix.Index.ConstValue is long i:
                 var arr = ArrayOf(ix);
-                return (Var(arr, (int)i), Var(arr, arr.Type.Length + (int)i));
+                return (Var(arr, (int)i), Var(arr, HighTable(arr) + (int)i));
             case CastExpr cast when cast.Operand.Type.Size == 2:
                 return Simple2(cast.Operand);
             default:
@@ -778,13 +783,13 @@ public sealed class CodeGen
                 if (ix.Index.ConstValue is long ci)
                 {
                     Op(Lda, Var(arr, (int)ci)); Op(Sta, d.Lo);
-                    Op(Lda, Var(arr, arr.Type.Length + (int)ci)); Op(Sta, d.Hi);
+                    Op(Lda, Var(arr, HighTable(arr) + (int)ci)); Op(Sta, d.Hi);
                     return;
                 }
                 var reg = LoadIndex(ix.Index);
                 var mode = reg == Register.X ? AbsoluteX : AbsoluteY;
                 Emit(Lda, mode, Var(arr)); Op(Sta, d.Lo);
-                Emit(Lda, mode, Var(arr, arr.Type.Length)); Op(Sta, d.Hi);
+                Emit(Lda, mode, Var(arr, HighTable(arr))); Op(Sta, d.Hi);
                 return;
             }
 
@@ -1063,9 +1068,12 @@ public sealed class CodeGen
 
     private static bool IsPointerIndex(IndexExpr ix) => ix.Target.Type.IsPointer;
 
-    /// <summary>The pointer variable itself, if (zp),y can use it directly.</summary>
+    /// <summary>
+    /// The pointer variable itself, if (zp),y can use it directly. A pointer field (a view) is not
+    /// known to be in zero page, so it is copied to a temporary.
+    /// </summary>
     private static VariableSymbol? DirectPointer(Expr target) =>
-        target is NameExpr { Symbol: { InMemory: true } v } && v.FixedAddress is null or <= 0xFE ? v : null;
+        target is NameExpr { Symbol: { InMemory: true, AliasOf: null } v } && v.FixedAddress is null or <= 0xFE ? v : null;
 
     /// <summary>
     /// The zero-page pointer for p[i]: the variable, or a temporary holding a computed pointer
@@ -1079,33 +1087,55 @@ public sealed class CodeGen
         return (Var(temp), temp);
     }
 
+    /// <summary>Bytes per index step of p[i]: the element size, or 1 for an array field of a struct.</summary>
+    private static int Stride(IndexExpr ix) => ix.Stride != 0 ? ix.Stride : ix.Type.Size;
+
+    /// <summary>Y is just the index: a one-byte element, no field offset.</summary>
+    private static bool PlainPointerIndex(IndexExpr ix) => ix.Type.Size == 1 && Stride(ix) == 1 && ix.Offset == 0;
+
     /// <summary>Loading Y for this element does not change A.</summary>
     private static bool PointerIndexIsCheap(IndexExpr ix) =>
         ix.Index.ConstValue is not null
-        || (ix.Type.Size == 1 && (ix.Index is NameExpr { Symbol.Register: Register.Y } || Simple1(ix.Index) is not null));
+        || (PlainPointerIndex(ix) && (ix.Index is NameExpr { Symbol.Register: Register.Y } || Simple1(ix.Index) is not null));
 
-    /// <summary>Puts the offset of byte <paramref name="byteIndex"/> of element p[i] in Y.</summary>
+    /// <summary>
+    /// Puts the offset of byte <paramref name="byteIndex"/> of element p[i] in Y:
+    /// field offset + i * stride, plus the distance to the second byte.
+    /// </summary>
     private void LoadPointerIndex(IndexExpr ix, int byteIndex)
     {
-        int size = ix.Type.Size;
+        int stride = Stride(ix);
+        int offset = ix.Offset;
         var index = ix.Index;
-        if (size == 1 && index is NameExpr { Symbol.Register: Register.Y }) return;
+        // The second byte is one further on (iny), or in the high-byte half of a split array field.
+        bool iny = byteIndex > 0 && ix.SecondByte == 1;
+        if (byteIndex > 0 && !iny) offset += ix.SecondByte;
+        if (PlainPointerIndex(ix) && index is NameExpr { Symbol.Register: Register.Y }) return;
         if (_reserved.Contains(Register.Y))
             throw new CompileError(ix.Pos, "p[i] needs the Y register, which holds a loop variable. Use 'using X' for that loop");
         if (index.ConstValue is long c)
         {
-            Op(Ldy, Byte(c * size + byteIndex));
+            Op(Ldy, Byte(offset + c * stride + (iny ? 1 : 0)));
             return;
         }
-        if (size == 1 && Simple1(index) is { } op)
+        if (stride == 1 && offset == 0 && Simple1(index) is { } op)
             Op(Ldy, op);
         else
         {
             GenA(index);
-            if (size == 2) Emit(Asl, Accumulator);
+            if (stride == 2) Emit(Asl, Accumulator);
+            if (offset != 0) { Emit(Clc); Op(Adc, Byte(offset)); }
             Emit(Tay);
         }
-        if (byteIndex > 0) Emit(Iny);
+        if (iny) Emit(Iny);
+    }
+
+    /// <summary>After byte 0 of a 16-bit p[i], puts the offset of byte 1 in Y. A may change.</summary>
+    private void NextPointerByte(IndexExpr ix)
+    {
+        if (ix.SecondByte == 1) Emit(Iny);
+        else if (ix.Index.ConstValue is not null) LoadPointerIndex(ix, 1);
+        else { Emit(Tya); Emit(Clc); Op(Adc, Byte(ix.SecondByte)); Emit(Tay); }
     }
 
     /// <summary>Reads (lda) or writes (sta) one byte of p[i]. For a write, the value is in A.</summary>
@@ -1137,6 +1167,7 @@ public sealed class CodeGen
         if (ix.Type.Size != 1) return false;
         // dst[i] = src[i]: one Y load for both.
         var source = value is IndexExpr vix && IsPointerIndex(vix) && vix.Type.Size == 1 && SameIndex(vix.Index, ix.Index)
+            && vix.Offset == ix.Offset && Stride(vix) == Stride(ix)
             ? DirectPointer(vix.Target) : null;
         if (source is null && UsesY(value)) return false;
 
@@ -1188,7 +1219,7 @@ public sealed class CodeGen
         var (p, temp) = PointerBase(ix.Target);
         LoadPointerIndex(ix, 0);
         Emit(Lda, IndirectIndexed, p); Op(Sta, d.Lo);
-        Emit(Iny);
+        NextPointerByte(ix);
         Emit(Lda, IndirectIndexed, p); Op(Sta, d.Hi);
         if (temp is not null) Release(temp);
     }
@@ -1207,7 +1238,7 @@ public sealed class CodeGen
         var (p, temp) = PointerBase(ix.Target);
         LoadPointerIndex(ix, 0);
         Op(Lda, pair.Value.Lo); Emit(Sta, IndirectIndexed, p);
-        Emit(Iny);
+        NextPointerByte(ix);
         Op(Lda, pair.Value.Hi); Emit(Sta, IndirectIndexed, p);
         if (temp is not null) Release(temp);
         if (valueTemp is not null) Release(valueTemp);
@@ -1408,7 +1439,7 @@ public sealed class CodeGen
         (Operand Lo, Operand Hi) bound;
         if (to is not null)
             bound = (Byte(to.Value), Byte(to.Value >> 8));
-        else if (f.To is NameExpr { Symbol: { InMemory: true, Kind: VariableKind.Local or VariableKind.Parameter } bv }
+        else if (f.To is NameExpr { Symbol: { InMemory: true, AliasOf: null, Kind: VariableKind.Local or VariableKind.Parameter } bv }
                  && bv.Type.Size == type.Size && bv != c && !bv.AddressTaken && !AssignsVar(f.Body, bv))
             bound = (Var(bv), Var(bv, 1));
         else
@@ -1710,9 +1741,10 @@ public sealed class CodeGen
         _ => false,
     };
 
+    /// <summary>True if <paramref name="e"/> reads <paramref name="v"/>'s memory (views count as their whole variable).</summary>
     private static bool ReadsVar(Expr e, VariableSymbol v) => e switch
     {
-        NameExpr n => n.Symbol == v,
+        NameExpr n => n.Symbol?.Storage == v.Storage,
         UnaryExpr u => ReadsVar(u.Operand, v),
         BinaryExpr b => ReadsVar(b.Left, v) || ReadsVar(b.Right, v),
         IndexExpr ix => ReadsVar(ix.Target, v) || ReadsVar(ix.Index, v),

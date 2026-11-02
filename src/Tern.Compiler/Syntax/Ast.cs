@@ -33,6 +33,14 @@ public abstract class Expr(SourcePos pos) : Node(pos)
     public TernType Type { get; set; } = TernType.Error;
     /// <summary>Set by the checker when the expression is a compile-time constant.</summary>
     public long? ConstValue { get; set; }
+    /// <summary>
+    /// Set by the checker for a struct field: the same access written with plain variables, arrays
+    /// and pointers (<c>player.hp</c> becomes a view of <c>player</c>'s memory). It replaces this
+    /// expression before code generation.
+    /// </summary>
+    public Expr? Lowered { get; set; }
+    /// <summary>Set by the checker on struct-typed expressions and array fields: where the memory is.</summary>
+    public StructPlace? Place { get; set; }
 }
 
 public sealed class NumberExpr(SourcePos pos, long value) : Expr(pos)
@@ -67,13 +75,13 @@ public sealed class NameExpr(SourcePos pos, string name) : Expr(pos)
 public sealed class UnaryExpr(SourcePos pos, TokenKind op, Expr operand) : Expr(pos)
 {
     public TokenKind Op { get; } = op;
-    public Expr Operand { get; } = operand;
+    public Expr Operand { get; set; } = operand;
 }
 public sealed class BinaryExpr(SourcePos pos, TokenKind op, Expr left, Expr right) : Expr(pos)
 {
     public TokenKind Op { get; } = op;
-    public Expr Left { get; } = left;
-    public Expr Right { get; } = right;
+    public Expr Left { get; set; } = left;
+    public Expr Right { get; set; } = right;
 }
 public sealed class CallExpr(SourcePos pos, string name, List<Expr> args) : Expr(pos)
 {
@@ -85,13 +93,22 @@ public sealed class CallExpr(SourcePos pos, string name, List<Expr> args) : Expr
 }
 public sealed class IndexExpr(SourcePos pos, Expr target, Expr index) : Expr(pos)
 {
-    public Expr Target { get; } = target;
-    public Expr Index { get; } = index;
+    public Expr Target { get; set; } = target;
+    public Expr Index { get; set; } = index;
+
+    // Through a pointer (p[i] and struct fields), Y = Offset + i * Stride for the first byte,
+    // and the second byte of a 16-bit value is SecondByte further on.
+    /// <summary>A constant added to Y: the field's offset in the struct.</summary>
+    public int Offset { get; init; }
+    /// <summary>Bytes per index step; 0 means the element size.</summary>
+    public int Stride { get; init; }
+    /// <summary>The distance to the second byte of a 16-bit element: 1, or the length of a split array field.</summary>
+    public int SecondByte { get; init; } = 1;
 }
 /// <summary>Member access. In v0 only <c>.lo</c> and <c>.hi</c> on 16-bit values.</summary>
 public sealed class MemberExpr(SourcePos pos, Expr target, string member) : Expr(pos)
 {
-    public Expr Target { get; } = target;
+    public Expr Target { get; set; } = target;
     public string Member { get; } = member;
 }
 public sealed class ArrayLiteralExpr(SourcePos pos, List<Expr> elements) : Expr(pos)
@@ -100,7 +117,7 @@ public sealed class ArrayLiteralExpr(SourcePos pos, List<Expr> elements) : Expr(
 }
 public sealed class CastExpr(SourcePos pos, Expr operand, TypeSyntax target) : Expr(pos)
 {
-    public Expr Operand { get; } = operand;
+    public Expr Operand { get; set; } = operand;
     public TypeSyntax Target { get; } = target;
 }
 
@@ -122,21 +139,23 @@ public sealed class VarDecl(SourcePos pos, string name, TypeSyntax? type, Placem
     public string Name { get; } = name;
     public TypeSyntax? TypeSyntax { get; } = type;
     public Placement Placement { get; } = placement;
-    public Expr? Init { get; } = init;
+    public Expr? Init { get; set; } = init;
     /// <summary>Declared with <c>data</c> instead of <c>var</c>.</summary>
     public bool IsData { get; init; }
+    /// <summary>Declared <c>linear var</c>: an array of structs stored as whole records.</summary>
+    public bool IsLinear { get; init; }
     public VariableSymbol? Symbol { get; set; }
 }
 public sealed class AssignStmt(SourcePos pos, Expr target, TokenKind op, Expr value) : Stmt(pos)
 {
-    public Expr Target { get; } = target;
+    public Expr Target { get; set; } = target;
     /// <summary><see cref="TokenKind.Eq"/> or a compound operator such as <see cref="TokenKind.PlusEq"/>.</summary>
     public TokenKind Op { get; } = op;
-    public Expr Value { get; } = value;
+    public Expr Value { get; set; } = value;
 }
 public sealed class ExprStmt(SourcePos pos, Expr expr) : Stmt(pos)
 {
-    public Expr Expr { get; } = expr;
+    public Expr Expr { get; set; } = expr;
 }
 public sealed class BlockStmt(SourcePos pos, List<Stmt> statements) : Stmt(pos)
 {
@@ -144,14 +163,14 @@ public sealed class BlockStmt(SourcePos pos, List<Stmt> statements) : Stmt(pos)
 }
 public sealed class IfStmt(SourcePos pos, Expr condition, BlockStmt then, Stmt? @else) : Stmt(pos)
 {
-    public Expr Condition { get; } = condition;
+    public Expr Condition { get; set; } = condition;
     public BlockStmt Then { get; } = then;
     /// <summary>A <see cref="BlockStmt"/>, or an <see cref="IfStmt"/> for "else if".</summary>
     public Stmt? Else { get; } = @else;
 }
 public sealed class WhileStmt(SourcePos pos, Expr condition, BlockStmt body) : Stmt(pos)
 {
-    public Expr Condition { get; } = condition;
+    public Expr Condition { get; set; } = condition;
     public BlockStmt Body { get; } = body;
 }
 public sealed class ForStmt(
@@ -160,8 +179,8 @@ public sealed class ForStmt(
 {
     /// <summary>Null for <c>_</c>.</summary>
     public string? Variable { get; } = variable;
-    public Expr From { get; } = from;
-    public Expr To { get; } = to;
+    public Expr From { get; set; } = from;
+    public Expr To { get; set; } = to;
     public bool Inclusive { get; } = inclusive;
     public Expr? Step { get; } = step;
     public Register? UsingRegister { get; } = usingRegister;
@@ -245,7 +264,7 @@ public sealed record AsmValue(
 public sealed class ContinueStmt(SourcePos pos) : Stmt(pos);
 public sealed class ReturnStmt(SourcePos pos, Expr? value) : Stmt(pos)
 {
-    public Expr? Value { get; } = value;
+    public Expr? Value { get; set; } = value;
 }
 
 // ---------- Declarations ----------
@@ -254,7 +273,7 @@ public sealed class ConstDecl(SourcePos pos, string name, TypeSyntax? type, Expr
 {
     public string Name { get; } = name;
     public TypeSyntax? TypeSyntax { get; } = type;
-    public Expr Value { get; } = value;
+    public Expr Value { get; set; } = value;
 }
 
 public sealed class ParamSyntax(SourcePos pos, string name, TypeSyntax type, Register? usingRegister) : Node(pos)
@@ -289,10 +308,25 @@ public sealed class ImportDecl(SourcePos pos, string name) : Node(pos)
     public string Name { get; } = name;
 }
 
+/// <summary>A struct field: <c>name: type</c>, optionally <c>@ offset</c>.</summary>
+public sealed class FieldSyntax(SourcePos pos, string name, TypeSyntax type, Expr? offset) : Node(pos)
+{
+    public string Name { get; } = name;
+    public TypeSyntax Type { get; } = type;
+    public Expr? Offset { get; } = offset;
+}
+
+public sealed class StructDecl(SourcePos pos, string name, List<FieldSyntax> fields) : Node(pos)
+{
+    public string Name { get; } = name;
+    public List<FieldSyntax> Fields { get; } = fields;
+}
+
 /// <summary>One source file: a program's main file or a module.</summary>
 public sealed class ProgramSyntax(List<ConstDecl> consts, List<VarDecl> globals, List<FnDecl> functions)
 {
     public List<ImportDecl> Imports { get; init; } = [];
+    public List<StructDecl> Structs { get; init; } = [];
     public List<ConstDecl> Consts { get; } = consts;
     public List<VarDecl> Globals { get; } = globals;
     public List<FnDecl> Functions { get; } = functions;

@@ -69,7 +69,7 @@ public static class Allocator
 
         // 2. Best effort: the most used small variables.
         var candidates = placeable
-            .Where(v => !v.ForcedZeroPage && !v.Type.IsArray && v.Weight > 0)
+            .Where(v => !v.ForcedZeroPage && !v.Type.IsArray && !v.Type.IsStruct && v.Weight > 0)
             .OrderByDescending(v => v.Weight).ThenBy(v => v.QualifiedName, StringComparer.Ordinal);
         foreach (var v in candidates)
         {
