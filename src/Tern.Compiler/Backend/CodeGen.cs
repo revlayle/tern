@@ -184,7 +184,8 @@ public sealed class CodeGen
         var p = f.Parameters.FirstOrDefault(p => p.PassedIn is Register.X or Register.Y && p.Type.Size == 1
             && !p.AddressTaken && !AssignsVar(body, p) && !(f.ReturnRegister is { } ret && ret.Uses(p.PassedIn!.Value)));
         Register? kept = null;
-        if (p is not null && AllowsRegisterParameter(body))
+        // In Y, every pointer access must be exactly p[param]; others need to load Y.
+        if (p is not null && KeepsIndexRegistersFree(body) && (p.PassedIn != Register.Y || PointerIndexes(body, p).Other == 0))
         {
             kept = p.PassedIn!.Value;
             p.Register = kept;
@@ -194,27 +195,51 @@ public sealed class CodeGen
         return kept;
     }
 
-    private static bool AllowsRegisterParameter(Node node) => node switch
+    /// <summary>
+    /// True if the code leaves X and Y alone apart from its own use of them: it calls nothing and has
+    /// no asm block or loop held in a register. A parameter or counter may then stay in X or Y.
+    /// </summary>
+    private static bool KeepsIndexRegistersFree(Node node) => !Descendants(node).Any(n => n
+        is CallExpr { Function: not null } or AsmStmt or ForStmt { UsingRegister: not null });
+
+    /// <summary>The nodes directly inside a statement or expression.</summary>
+    private static IEnumerable<Node> Children(Node node)
     {
-        CallExpr c => c.Function is null && c.Args.All(AllowsRegisterParameter),
-        AsmStmt => false,
-        ForStmt f => f.UsingRegister is null && AllowsRegisterParameter(f.From) && AllowsRegisterParameter(f.To)
-            && (f.Step is null || AllowsRegisterParameter(f.Step)) && AllowsRegisterParameter(f.Body),
-        BlockStmt b => b.Statements.All(AllowsRegisterParameter),
-        IfStmt i => AllowsRegisterParameter(i.Condition) && AllowsRegisterParameter(i.Then) && (i.Else is null || AllowsRegisterParameter(i.Else)),
-        WhileStmt w => AllowsRegisterParameter(w.Condition) && AllowsRegisterParameter(w.Body),
-        MatchStmt m => AllowsRegisterParameter(m.Subject) && m.Arms.All(a => AllowsRegisterParameter(a.Body)),
-        ReturnStmt r => r.Value is null || AllowsRegisterParameter(r.Value),
-        AssignStmt a => AllowsRegisterParameter(a.Target) && AllowsRegisterParameter(a.Value),
-        ExprStmt e => AllowsRegisterParameter(e.Expr),
-        VarDecl v => v.Init is null || AllowsRegisterParameter(v.Init),
-        UnaryExpr u => AllowsRegisterParameter(u.Operand),
-        BinaryExpr b => AllowsRegisterParameter(b.Left) && AllowsRegisterParameter(b.Right),
-        IndexExpr ix => AllowsRegisterParameter(ix.Target) && AllowsRegisterParameter(ix.Index),
-        MemberExpr m => AllowsRegisterParameter(m.Target),
-        CastExpr c => AllowsRegisterParameter(c.Operand),
-        _ => true,
-    };
+        switch (node)
+        {
+            case BlockStmt b: return b.Statements;
+            case IfStmt i: return i.Else is null ? [i.Condition, i.Then] : [i.Condition, i.Then, i.Else];
+            case WhileStmt w: return [w.Condition, w.Body];
+            case ForStmt f: return f.Step is null ? [f.From, f.To, f.Body] : [f.From, f.To, f.Step, f.Body];
+            case MatchStmt m: return m.Arms.Select(a => (Node)a.Body).Prepend(m.Subject);
+            case ReturnStmt { Value: { } v }: return [v];
+            case AssignStmt a: return [a.Target, a.Value];
+            case ExprStmt e: return [e.Expr];
+            case VarDecl { Init: { } init }: return [init];
+            case UnaryExpr u: return [u.Operand];
+            case BinaryExpr b: return [b.Left, b.Right];
+            case IndexExpr ix: return [ix.Target, ix.Index];
+            case MemberExpr m: return [m.Target];
+            case CastExpr c: return [c.Operand];
+            case CallExpr c: return c.Args;
+            case ArrayLiteralExpr l: return l.Elements;
+            default: return [];
+        }
+    }
+
+    /// <summary>A node and everything inside it.</summary>
+    private static IEnumerable<Node> Descendants(Node node) => Children(node).SelectMany(Descendants).Prepend(node);
+
+    /// <summary>
+    /// Pointer accesses in the code: those that are exactly <c>p[v]</c> (Y = v, no ldy needed) and
+    /// the others, which load Y themselves.
+    /// </summary>
+    private static (int Plain, int Other) PointerIndexes(Node node, VariableSymbol v)
+    {
+        var accesses = Descendants(node).OfType<IndexExpr>().Where(IsPointerIndex).ToList();
+        int plain = accesses.Count(ix => PlainPointerIndex(ix) && ix.Index is NameExpr { Symbol: var s } && s == v);
+        return (plain, accesses.Count - plain);
+    }
 
     /// <summary>
     /// Register parameters are stored into the frame, so the body can use A, X and Y freely, except
@@ -1770,73 +1795,12 @@ public sealed class CodeGen
     private void ChooseCounterRegister(ForStmt f, VariableSymbol c)
     {
         if (c.Type.Size != 1 || Math.Abs(f.StepValue) != 1 || c.AddressTaken || _reserved.Count > 0
-            || ContainsLoop(f.Body) || !AllowsRegisterParameter(f.Body)) return;
-        var (plain, other) = (0, 0);
-        CountPointerIndexes(f.Body, c, ref plain, ref other);
+            || Descendants(f.Body).Any(n => n is ForStmt or WhileStmt) || !KeepsIndexRegistersFree(f.Body)) return;
+        var (plain, other) = PointerIndexes(f.Body, c);
         var reg = plain > 0 && other == 0 ? Register.Y : Register.X;
-        if (_fn.ReturnRegister is { } ret && ret.Uses(reg) && ContainsReturnValue(f.Body)) return;
+        if (_fn.ReturnRegister is { } ret && ret.Uses(reg) && Descendants(f.Body).Any(n => n is ReturnStmt { Value: not null })) return;
         c.Register = reg;
         _fn.FrameVariables.Remove(c);
-    }
-
-    private static bool ContainsLoop(Stmt s) => s switch
-    {
-        ForStmt or WhileStmt => true,
-        BlockStmt b => b.Statements.Any(ContainsLoop),
-        IfStmt i => ContainsLoop(i.Then) || (i.Else is not null && ContainsLoop(i.Else)),
-        MatchStmt m => m.Arms.Any(a => ContainsLoop(a.Body)),
-        _ => false,
-    };
-
-    private static bool ContainsReturnValue(Stmt s) => s switch
-    {
-        ReturnStmt r => r.Value is not null,
-        BlockStmt b => b.Statements.Any(ContainsReturnValue),
-        IfStmt i => ContainsReturnValue(i.Then) || (i.Else is not null && ContainsReturnValue(i.Else)),
-        MatchStmt m => m.Arms.Any(a => ContainsReturnValue(a.Body)),
-        _ => false,
-    };
-
-    /// <summary>Counts pointer accesses: those that are exactly <c>p[c]</c> (Y = c), and the others.</summary>
-    private static void CountPointerIndexes(Node? node, VariableSymbol c, ref int plain, ref int other)
-    {
-        switch (node)
-        {
-            case IndexExpr ix:
-                if (IsPointerIndex(ix))
-                {
-                    if (PlainPointerIndex(ix) && ix.Index is NameExpr { Symbol: var s } && s == c) plain++;
-                    else other++;
-                }
-                CountPointerIndexes(ix.Target, c, ref plain, ref other);
-                CountPointerIndexes(ix.Index, c, ref plain, ref other);
-                break;
-            case BlockStmt b: foreach (var x in b.Statements) CountPointerIndexes(x, c, ref plain, ref other); break;
-            case IfStmt i:
-                CountPointerIndexes(i.Condition, c, ref plain, ref other);
-                CountPointerIndexes(i.Then, c, ref plain, ref other);
-                CountPointerIndexes(i.Else, c, ref plain, ref other);
-                break;
-            case MatchStmt m:
-                CountPointerIndexes(m.Subject, c, ref plain, ref other);
-                foreach (var a in m.Arms) CountPointerIndexes(a.Body, c, ref plain, ref other);
-                break;
-            case ReturnStmt r: CountPointerIndexes(r.Value, c, ref plain, ref other); break;
-            case AssignStmt a:
-                CountPointerIndexes(a.Target, c, ref plain, ref other);
-                CountPointerIndexes(a.Value, c, ref plain, ref other);
-                break;
-            case ExprStmt e: CountPointerIndexes(e.Expr, c, ref plain, ref other); break;
-            case VarDecl v: CountPointerIndexes(v.Init, c, ref plain, ref other); break;
-            case UnaryExpr u: CountPointerIndexes(u.Operand, c, ref plain, ref other); break;
-            case BinaryExpr b:
-                CountPointerIndexes(b.Left, c, ref plain, ref other);
-                CountPointerIndexes(b.Right, c, ref plain, ref other);
-                break;
-            case MemberExpr m: CountPointerIndexes(m.Target, c, ref plain, ref other); break;
-            case CastExpr cast: CountPointerIndexes(cast.Operand, c, ref plain, ref other); break;
-            case CallExpr call: foreach (var a in call.Args) CountPointerIndexes(a, c, ref plain, ref other); break;
-        }
     }
 
     /// <summary><c>for _ in a..b</c> with constant bounds: count down to zero.</summary>

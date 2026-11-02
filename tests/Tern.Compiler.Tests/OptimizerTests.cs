@@ -277,6 +277,38 @@ public class RegisterParameterTests
     }
 
     [Fact]
+    public void A_parameter_in_y_is_stored_when_another_pointer_access_needs_y()
+    {
+        // Review M7, finding 1: p[3] and w[2] load Y themselves.
+        var r = Run.Program("""
+            var buf: [u8; 8]
+            var words: [u8; 8]
+            var p: ptr u8
+            var w: ptr u16
+            var res: u16
+            fn f(n: u8 using Y) { p[3] = n }
+            fn g(n: u8 using Y) { res = w[2] + n as u16 }
+            fn h(n: u8 using Y) { p[n] = p[n] + 1 }
+            fn main() {
+                p = addr(buf)
+                w = addr(words) as ptr u16
+                words[4] = $34
+                words[5] = $12
+                f(2)
+                g(5)
+                buf[6] = 9
+                h(6)
+            }
+            """);
+        Assert.Equal(2, r.U8("buf", 3));
+        Assert.Equal(0x1234 + 5, r.U16("res"));
+        Assert.Equal(10, r.U8("buf", 6));
+        Assert.Contains("sty f.n", r.Result.Listing);
+        Assert.Contains("sty g.n", r.Result.Listing);
+        Assert.DoesNotContain("sty h.n", r.Result.Listing);   // only p[n]: stays in Y
+    }
+
+    [Fact]
     public void An_inline_function_keeps_its_parameter_in_the_register()
     {
         var r = Run.Program("""
