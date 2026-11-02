@@ -126,6 +126,13 @@ public static class Optimizer
         }
     }
 
+    /// <summary>
+    /// "These two registers hold the same value", as left by a transfer, whatever that value is. It stays
+    /// in both registers' sets until one of them is changed (which clears its set), so a transfer back
+    /// can be removed, also around a loop. It is only ever in the sets of those two registers.
+    /// </summary>
+    private sealed record Same(Reg First, Reg Second) : Operand;
+
     private static Reg? Loaded(Mnemonic m) => m switch { Lda => Reg.A, Ldx => Reg.X, Ldy => Reg.Y, _ => null };
     private static Reg? Stored(Mnemonic m) => m switch { Sta => Reg.A, Stx => Reg.X, Sty => Reg.Y, _ => null };
     private static (Reg From, Reg To)? Transfer(Mnemonic m) => m switch
@@ -175,8 +182,12 @@ public static class Optimizer
         }
         if (Transfer(m) is var (from, to))
         {
+            // The registers now hold the same value, known or not.
+            var same = new Same((Reg)Math.Min((int)from, (int)to), (Reg)Math.Max((int)from, (int)to));
+            s.Regs[(int)from].Add(same);
             s.Regs[(int)to].Clear();
-            s.Regs[(int)to].UnionWith(s.Regs[(int)from]);
+            // Other markers are not copied: "A and X are the same" says nothing about the register copied to.
+            s.Regs[(int)to].UnionWith(s.Regs[(int)from].Where(o => o is not Same || o == same));
             s.Flags = to;
             return;
         }

@@ -205,6 +205,41 @@ public class OptimizerTests
             """);
         Assert.Equal(3, r.U8("r"));
     }
+
+    [Fact]
+    public void A_transfer_back_is_removed_when_the_registers_are_still_equal()
+    {
+        var r = Run.Program("""
+            var a: [u8; 256]
+            var n: u8 = 3
+            fn main() {
+                for m in 6..=255 step n using Y { a[m] = m }
+            }
+            """);
+        // The step is copied once before the loop (a global may change); inside, A already holds Y after the sta.
+        Assert.Contains("tya / sta a,y / clc / adc main._t0 / tay / bcc ", Main(r));
+        Assert.Equal(6, r.U8("a", 6));
+        Assert.Equal(252, r.U8("a", 252));
+        Assert.Equal(0, r.U8("a", 7));
+    }
+
+    [Fact]
+    public void Equal_registers_are_forgotten_when_one_is_loaded_again()
+    {
+        // txa / tay makes A, X and Y equal; the second loop's txa copies a different X, so tay must stay.
+        var r = Run.Program("""
+            var src: [u8; 4] = [5, 6, 7, 8]
+            var dst: [u8; 4]
+            fn main() {
+                var s: ptr u8 = addr(src)
+                var d: ptr u8 = addr(dst)
+                for i in 0..4 using X { d[i] = s[i] }
+                for i in 0..4 using X { s[i] += 1 }
+            }
+            """);
+        Assert.Equal([5, 6, 7, 8], r.Ram.Bytes.AsSpan(r.Address("dst"), 4).ToArray());
+        Assert.Equal([6, 7, 8, 9], r.Ram.Bytes.AsSpan(r.Address("src"), 4).ToArray());
+    }
 }
 
 /// <summary>A parameter passed in X or Y stays in its register when the body allows it (roadmap M7).</summary>
