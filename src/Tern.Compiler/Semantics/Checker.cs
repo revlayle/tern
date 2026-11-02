@@ -303,8 +303,6 @@ public sealed partial class Checker
             throw new CompileError(decl.Pos, $"'{decl.Name}' is a built-in function; choose another name");
         var fn = new FunctionSymbol(_module.Qualify(decl.Name), decl.Pos) { Declaration = decl, IsInterrupt = decl.IsInterrupt, IsInline = decl.IsInline };
         decl.Symbol = fn;
-        if (decl.IsInterrupt && (decl.Parameters.Count > 0 || decl.ReturnType is not null))
-            throw new CompileError(decl.Pos, "An interrupt handler takes no parameters and returns no value: the CPU calls it, not your code");
 
         var usedRegisters = new HashSet<char>();
         foreach (var p in decl.Parameters)
@@ -1476,8 +1474,12 @@ public sealed partial class Checker
         if (symbol is not FunctionSymbol fn)
             throw new CompileError(c.Pos, $"'{c.Name}' is not a function");
         if (fn.IsInterrupt)
-            throw new CompileError(c.Pos,
-                $"'{c.Name}' is an interrupt handler, which only the CPU calls (it ends with rti). Install its address in the interrupt vector");
+        {
+            if (_function is not { IsInterrupt: true })
+                throw new CompileError(c.Pos,
+                    $"'{c.Name}' is an interrupt fn, which only the CPU or another interrupt fn calls. Install its address in the interrupt vector, or call it from an interrupt fn");
+            fn.IsPart = true;
+        }
         if (c.Args.Count != fn.Parameters.Count)
             throw new CompileError(c.Pos, $"'{fn.Name}' takes {fn.Parameters.Count} argument(s), not {c.Args.Count}");
         for (int i = 0; i < c.Args.Count; i++)
@@ -1590,12 +1592,20 @@ public sealed partial class Checker
         var all = new List<FunctionSymbol>();
         var seen = new HashSet<FunctionSymbol>();
         var roots = new List<FunctionSymbol> { main };
-        roots.AddRange(mainModule.Scope.Values.OfType<FunctionSymbol>().Where(f => f.IsInterrupt).OrderBy(f => f.Pos.Line));
+        roots.AddRange(mainModule.Scope.Values.OfType<FunctionSymbol>().Where(f => f.IsInterrupt && !f.IsPart).OrderBy(f => f.Pos.Line));
+        foreach (var h in roots.Skip(1)) CheckInstallable(h);
         var addressTaken = new List<FunctionSymbol>();
 
         void Named(FunctionSymbol f)
         {
-            if (f.IsInterrupt) { if (!roots.Contains(f)) roots.Add(f); }
+            if (f.IsInterrupt)
+            {
+                if (f.IsPart)
+                    throw new CompileError(f.Pos,
+                        $"'{f.Name}' is called by another interrupt fn (so it is compiled as a part, ending with rts) and its address is also used to install it (which needs rti). Use it one way, or write a second interrupt fn for the other");
+                CheckInstallable(f);
+                if (!roots.Contains(f)) roots.Add(f);
+            }
             else if (!addressTaken.Contains(f)) addressTaken.Add(f);
         }
         // The main file's globals are all kept, so the functions in their initial values are too.
@@ -1621,6 +1631,15 @@ public sealed partial class Checker
             else Add(addressTaken[a++], isRoot: false);
         }
         return all;
+    }
+
+    /// <summary>A handler is entered by the CPU, with nothing to pass: only a part may have parameters or a return value.</summary>
+    private static void CheckInstallable(FunctionSymbol f)
+    {
+        if (f.Parameters.Count > 0 || f.ReturnType.Kind != TypeKind.Void)
+            throw new CompileError(f.Pos,
+                $"'{f.Name}' has {(f.Parameters.Count > 0 ? "parameters" : "a return value")}, so it can only be called as a part of another interrupt fn. " +
+                "An interrupt handler takes no parameters and returns no value: the CPU calls it, not your code");
     }
 
     private static string DescribeRoot(FunctionSymbol root) => root.IsInterrupt ? $"the interrupt handler '{root.Name}'" : "main";
@@ -1671,6 +1690,8 @@ public sealed partial class Checker
         // A module's own handler may share the module's private variables (spec 8.1): its author wrote both sides.
         bool OwnHandler(FunctionSymbol root, VariableSymbol g) =>
             root.IsInterrupt && moduleOf[g].Scope.Values.Contains(root);
+        // Or through an interrupt fn of the module that is called as a part (decision 34).
+        bool OwnPart(FunctionSymbol f, VariableSymbol g) => f.IsInterrupt && moduleOf[g].Scope.Values.Contains(f);
 
         var firstUser = new Dictionary<VariableSymbol, (FunctionSymbol Function, FunctionSymbol Root)>();
         foreach (var f in ordered.Where(f => f.FixedAddress is null))
@@ -1678,7 +1699,7 @@ public sealed partial class Checker
                 foreach (var used in f.UsedGlobals)
                 {
                     var g = used.AliasOf ?? used;
-                    if (!privateGlobals.Contains(g) || OwnHandler(root, g)) continue;
+                    if (!privateGlobals.Contains(g) || OwnHandler(root, g) || OwnPart(f, g)) continue;
                     if (!firstUser.TryGetValue(g, out var first))
                         firstUser[g] = (f, root);
                     else if (first.Root != root)

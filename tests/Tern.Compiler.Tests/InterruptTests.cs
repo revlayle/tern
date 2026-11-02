@@ -118,7 +118,7 @@ public class InterruptTests
     // X is saved through A.
     [InlineData("interrupt fn handler() { buf[count] = 0 }", "pha|txa|pha|lda #$00|ldx count|sta buf,x|pla|tax|pla|rti")]
     // A call may change every register.
-    [InlineData("interrupt fn handler() { f() }", "pha|txa|pha|tya|pha|jsr f|pla|tay|pla|tax|pla|rti")]
+    [InlineData("interrupt fn handler() { f() }", "cld|pha|txa|pha|tya|pha|jsr f|pla|tay|pla|tax|pla|rti")]
     // return goes to the code that restores the registers.
     [InlineData("interrupt fn handler() {\n if count == 0 { return }\n count = 0\n }",
         "pha|lda count|bne handler.endif1|jmp handler.exit0|lda #$00|sta count|pla|rti")]
@@ -318,7 +318,7 @@ public class InterruptTests
     [Theory]
     [InlineData("interrupt fn h(x: u8) { }\nfn main() { }", "An interrupt handler takes no parameters and returns no value")]
     [InlineData("interrupt fn h() -> u8 { return 1 }\nfn main() { }", "An interrupt handler takes no parameters and returns no value")]
-    [InlineData("interrupt fn h() { }\nfn main() { h() }", "'h' is an interrupt handler, which only the CPU calls (it ends with rti). Install its address in the interrupt vector")]
+    [InlineData("interrupt fn h() { }\nfn main() { h() }", "'h' is an interrupt fn, which only the CPU or another interrupt fn calls")]
     [InlineData("interrupt fn h() { }\nfn main() { asm {\n jsr h\n } }", "'h' is an interrupt handler: it ends with rti, so jsr cannot call it")]
     [InlineData("var v: u8\nfn f() { var t = v\n v = t + 1 }\ninterrupt fn h() { f() }\nfn main() { f() }",
         "'f' is called from main and from the interrupt handler 'h'. An interrupt can stop it halfway and run it again, which would overwrite its memory: the local variable 't'")]
