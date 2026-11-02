@@ -53,6 +53,7 @@ public static class Assembler
                 {
                     Instr i => s.LongBranch ? 5 : InstructionSet.OperandSize(s.Mode) + 1,
                     DataBytes d => d.Bytes.Length,
+                    LabelTable t => t.Labels.Count,
                     Padding p => p.SizeAt(pc),
                     _ => 0,
                 };
@@ -106,6 +107,18 @@ public static class Assembler
                         listing.AppendLine($"${s.Address + k:X4}  {string.Join(" ", chunk.Select(b => b.ToString("X2")))}");
                     }
                     break;
+                case LabelTable t:
+                {
+                    var table = t.Labels.Select(l => (byte)Byte(Resolve(l) + t.Offset, t.High)).ToArray();
+                    bytes.AddRange(table);
+                    for (int k = 0; k < table.Length; k += 8)
+                    {
+                        var names = t.Labels.Skip(k).Take(8).Select(l => ImmLabelByte.OffsetText(l.Name, t.Offset));
+                        listing.AppendLine($"${s.Address + k:X4}  {string.Join(" ", table.Skip(k).Take(8).Select(b => b.ToString("X2")))}"
+                            + $"  ; {(t.High ? "hi" : "lo")}: {string.Join(", ", names)}");
+                    }
+                    break;
+                }
                 case Padding p when s.Size > 0:
                     bytes.AddRange(new byte[s.Size]);
                     listing.AppendLine($"${s.Address:X4}  {s.Size} byte(s) of padding: {p.Reason}");

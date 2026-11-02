@@ -191,6 +191,7 @@ public sealed class CodeGen
             case IfStmt i: GenIf(i); break;
             case WhileStmt w: GenWhile(w); break;
             case ForStmt f: GenFor(f); break;
+            case MatchStmt m: GenMatch(m); break;
             case BreakStmt: Jmp(_loops[^1].Break); break;
             case ContinueStmt: Jmp(_loops[^1].Continue); break;
             case ReturnStmt r: GenReturn(r); break;
@@ -247,6 +248,115 @@ public sealed class CodeGen
         }
         _loopDepth--;
         Place(end);
+    }
+
+    /// <summary>
+    /// A match uses a jump table when a compare chain would need at least this many compares (a
+    /// range needs two) and the values span at most twice that many. Below that, the chain is
+    /// about as fast (5 cycles per compare against about 30 for the table) and shorter.
+    /// </summary>
+    private const int JumpTableTests = 8;
+
+    /// <summary>
+    /// <c>match</c>: the value is loaded into A once (for an <c>i8</c>, with <c>eor #$80</c>, so that
+    /// signed order becomes unsigned order). Dense cases use a jump table, others a chain of
+    /// <c>cmp</c> and branches. Arm bodies follow, each ending with a jump to the end; the default
+    /// arm (or the end) is where values that match nothing go.
+    /// </summary>
+    private void GenMatch(MatchStmt m)
+    {
+        var arms = m.Arms.Where(a => !a.IsDefault).ToList();
+        var fallback = m.Arms.FirstOrDefault(a => a.IsDefault);
+        var end = NewLabel("mend");
+        if (arms.Count == 0)
+        {
+            if (Simple1(m.Subject) is null) GenA(m.Subject); // it may call a function
+            if (fallback is not null) GenBlock(fallback.Body);
+            return;
+        }
+        var labels = arms.ToDictionary(a => a, _ => NewLabel("case"));
+        var otherwise = fallback is null ? end : NewLabel("default");
+
+        GenA(m.Subject);
+        if (m.Subject.Type.IsSigned) Op(Eor, Byte(0x80));
+
+        var patterns = arms.SelectMany(a => a.Patterns.Select(p => (Arm: a, p.From, p.To))).ToList();
+        int tests = patterns.Sum(p => p.From == p.To ? 1 : 2);
+        int low = patterns.Min(p => p.From), high = patterns.Max(p => p.To);
+        int span = high - low + 1;
+        List<MatchArm> order;
+        if (tests >= JumpTableTests && span <= 2 * tests)
+        {
+            // Jump table: push the target address minus 1, high byte first, and rts to it.
+            if (low > 0) { Emit(Sec); Op(Sbc, Byte(low)); }
+            if (span < 256) { Op(Cmp, Byte(span)); Branch(Bcs, otherwise); }
+            var reg = FreeIndexRegister(m.Pos);
+            Emit(reg == Register.X ? Tax : Tay);
+            var targets = new Label[span];
+            for (int v = 0; v < span; v++)
+                targets[v] = patterns.FirstOrDefault(p => p.From <= v + low && v + low <= p.To).Arm is { } arm ? labels[arm] : otherwise;
+            var hiTable = NewLabel("jumphi");
+            var loTable = NewLabel("jumplo");
+            var mode = reg == Register.X ? AbsoluteX : AbsoluteY;
+            Emit(Lda, mode, new LabelOperand(hiTable)); Emit(Pha);
+            Emit(Lda, mode, new LabelOperand(loTable)); Emit(Pha);
+            Emit(Rts);
+            Place(hiTable); _out.Add(new LabelTable(targets, High: true, Offset: -1));
+            Place(loTable); _out.Add(new LabelTable(targets, High: false, Offset: -1));
+            order = arms;
+        }
+        else
+        {
+            // Compare chain, in source order. The last test is inverted to go to the default, so the
+            // last arm's body follows it directly.
+            for (int i = 0; i < patterns.Count; i++)
+            {
+                var (arm, from, to) = patterns[i];
+                if (i < patterns.Count - 1) Test(from, to, labels[arm]);
+                else TestInverted(from, to, otherwise);
+            }
+            order = [arms[^1], .. arms.Take(arms.Count - 1)];
+        }
+
+        var bodies = order.Select(a => (labels[a], a.Body)).ToList();
+        if (fallback is not null) bodies.Add((otherwise, fallback.Body));
+        for (int i = 0; i < bodies.Count; i++)
+        {
+            Place(bodies[i].Item1);
+            GenBlock(bodies[i].Body);
+            if (i < bodies.Count - 1 && !EndsWithJump()) Jmp(end);
+        }
+        Place(end);
+
+        // Branches to target when A (unsigned) is in from..to.
+        void Test(int from, int to, Label target)
+        {
+            if (from == to) { Op(Cmp, Byte(from)); Branch(Beq, target); }
+            else if (from == 0 && to == 255) Jmp(target);
+            else if (from == 0) { Op(Cmp, Byte(to + 1)); Branch(Bcc, target); }
+            else if (to == 255) { Op(Cmp, Byte(from)); Branch(Bcs, target); }
+            else
+            {
+                var skip = NewLabel("next");
+                Op(Cmp, Byte(from)); Branch(Bcc, skip);
+                Op(Cmp, Byte(to + 1)); Branch(Bcc, target);
+                Place(skip);
+            }
+        }
+
+        // Branches to target when A is not in from..to, and falls through when it is.
+        void TestInverted(int from, int to, Label target)
+        {
+            if (from == to) { Op(Cmp, Byte(from)); Branch(Bne, target); }
+            else if (from == 0 && to == 255) { }
+            else if (from == 0) { Op(Cmp, Byte(to + 1)); Branch(Bcs, target); }
+            else if (to == 255) { Op(Cmp, Byte(from)); Branch(Bcc, target); }
+            else
+            {
+                Op(Cmp, Byte(from)); Branch(Bcc, target);
+                Op(Cmp, Byte(to + 1)); Branch(Bcs, target);
+            }
+        }
     }
 
     private void GenReturn(ReturnStmt r)
@@ -1790,6 +1900,7 @@ public sealed class CodeGen
         IfStmt i => AssignsVar(i.Then, v) || (i.Else is not null && AssignsVar(i.Else, v)),
         WhileStmt w => AssignsVar(w.Body, v),
         ForStmt f => AssignsVar(f.Body, v),
+        MatchStmt m => m.Arms.Any(a => AssignsVar(a.Body, v)),
         AsmStmt asm => asm.Effects!.VariablesWritten.Contains(v),
         _ => false,
     };

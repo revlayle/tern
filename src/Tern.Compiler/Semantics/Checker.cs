@@ -563,6 +563,7 @@ public sealed partial class Checker
                 _loopDepth--;
                 break;
             case ForStmt f: CheckFor(f); break;
+            case MatchStmt m: CheckMatch(m); break;
             case AsmStmt a: CheckAsm(a); break;
             case BreakStmt or ContinueStmt:
                 if (_loopDepth == 0) throw new CompileError(stmt.Pos, "'break' and 'continue' must be inside a loop");
@@ -727,6 +728,52 @@ public sealed partial class Checker
         if (f.UsingRegister is { } r) _loopRegisters.Remove(r);
     }
 
+    private void CheckMatch(MatchStmt m)
+    {
+        CheckExpr(m.Subject);
+        if (m.Subject.Type.Kind == TypeKind.IntLiteral) Coerce(m.Subject, DefaultType(m.Subject));
+        var type = m.Subject.Type;
+        if (type.Kind is TypeKind.U16 or TypeKind.I16)
+            throw new CompileError(m.Subject.Pos, "'match' on a 16-bit value is not supported yet. Match on .lo or .hi, or use if / else if");
+        if (type.Kind is not (TypeKind.U8 or TypeKind.I8))
+            throw new CompileError(m.Subject.Pos, $"'match' needs a u8 or i8 value, not {type}");
+        int bias = type.IsSigned ? 128 : 0;
+
+        // Which arm matches each value, to find values matched twice.
+        var owner = new MatchPattern?[256];
+        for (int a = 0; a < m.Arms.Count; a++)
+        {
+            var arm = m.Arms[a];
+            if (arm.IsDefault && a != m.Arms.Count - 1)
+                throw new CompileError(m.Arms[a + 1].Pos, "This arm can never run: '_' above it matches every value. Put '_' last");
+            foreach (var p in arm.Patterns)
+            {
+                long low = PatternValue(p.Low, type), high = p.High is null ? low : PatternValue(p.High, type);
+                if (high < low)
+                    throw new CompileError(p.Pos, $"The range {low}..={high} is empty; write the smaller value first");
+                p.From = (int)low + bias;
+                p.To = (int)high + bias;
+                for (int v = p.From; v <= p.To; v++)
+                {
+                    if (owner[v] is { } first)
+                        throw new CompileError(p.Pos, $"{v - bias} is already matched at {first.Pos}; each value may appear in one pattern only");
+                    owner[v] = p;
+                }
+            }
+            CheckBlock(arm.Body);
+        }
+    }
+
+    /// <summary>A constant in a match pattern, as a value of the subject's type.</summary>
+    private long PatternValue(Expr e, TernType type)
+    {
+        CheckExpr(e);
+        if (e.ConstValue is not long v)
+            throw new CompileError(e.Pos, "A match pattern must be a constant: a number, a character or a const");
+        Coerce(e, type);
+        return v;
+    }
+
     /// <summary>True if the code calls a function that may change <paramref name="reg"/>: any function except a routine that keeps it.</summary>
     private bool ContainsCall(Node node, Register reg) => node switch
     {
@@ -736,6 +783,7 @@ public sealed partial class Checker
         IfStmt i => ContainsCall(i.Condition, reg) || ContainsCall(i.Then, reg) || (i.Else is not null && ContainsCall(i.Else, reg)),
         WhileStmt w => ContainsCall(w.Condition, reg) || ContainsCall(w.Body, reg),
         ForStmt f => ContainsCall(f.From, reg) || ContainsCall(f.To, reg) || ContainsCall(f.Body, reg),
+        MatchStmt m => ContainsCall(m.Subject, reg) || m.Arms.Any(a => ContainsCall(a.Body, reg)),
         ReturnStmt r => r.Value is not null && ContainsCall(r.Value, reg),
         AssignStmt a => ContainsCall(a.Target, reg) || ContainsCall(a.Value, reg),
         ExprStmt e => ContainsCall(e.Expr, reg),
@@ -754,6 +802,7 @@ public sealed partial class Checker
         BlockStmt b => b.Statements.Count > 0 && AlwaysReturns(b.Statements[^1]),
         IfStmt i => i.Else is not null && AlwaysReturns(i.Then) && AlwaysReturns(i.Else),
         WhileStmt w => w.Condition.ConstValue == 1 && !ContainsBreak(w.Body),
+        MatchStmt m => m.Arms.Count > 0 && m.Arms[^1].IsDefault && m.Arms.All(a => AlwaysReturns(a.Body)),
         _ => false,
     };
 
@@ -763,6 +812,7 @@ public sealed partial class Checker
         BreakStmt => true,
         BlockStmt b => b.Statements.Any(ContainsBreak),
         IfStmt i => ContainsBreak(i.Then) || (i.Else is not null && ContainsBreak(i.Else)),
+        MatchStmt m => m.Arms.Any(a => ContainsBreak(a.Body)),
         _ => false,
     };
 

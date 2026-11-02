@@ -192,6 +192,37 @@ public sealed class ForStmt(
 }
 public sealed class BreakStmt(SourcePos pos) : Stmt(pos);
 
+/// <summary><c>match subject { 0 => a()  1, 2 => b()  3..=7 => { ... }  _ => c() }</c></summary>
+public sealed class MatchStmt(SourcePos pos, Expr subject, List<MatchArm> arms) : Stmt(pos)
+{
+    public Expr Subject { get; set; } = subject;
+    public List<MatchArm> Arms { get; } = arms;
+}
+
+/// <summary>One arm: its patterns (empty for <c>_</c>) and its body.</summary>
+public sealed class MatchArm(SourcePos pos, List<MatchPattern> patterns, BlockStmt body)
+{
+    public SourcePos Pos { get; } = pos;
+    /// <summary>Empty for the default arm <c>_</c>.</summary>
+    public List<MatchPattern> Patterns { get; } = patterns;
+    public bool IsDefault => Patterns.Count == 0;
+    public BlockStmt Body { get; } = body;
+}
+
+/// <summary>A value <c>3</c>, or a range <c>3..=7</c> when <see cref="High"/> is set.</summary>
+public sealed class MatchPattern(SourcePos pos, Expr low, Expr? high)
+{
+    public SourcePos Pos { get; } = pos;
+    public Expr Low { get; } = low;
+    public Expr? High { get; } = high;
+    /// <summary>
+    /// Set by the checker: the values matched, 0-255 in unsigned order. For an <c>i8</c> subject,
+    /// 128 is added (the code compares after <c>eor #$80</c>), so -128 is 0 and 127 is 255.
+    /// </summary>
+    public int From { get; set; }
+    public int To { get; set; }
+}
+
 // ---------- Assembly ----------
 
 /// <summary>An <c>asm { ... }</c> block, or the body of an <c>asm fn</c>.</summary>

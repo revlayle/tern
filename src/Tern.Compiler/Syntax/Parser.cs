@@ -127,7 +127,7 @@ public sealed class Parser
     /// <summary>Keywords from the spec that this compiler version does not implement yet.</summary>
     private void RejectUnsupported()
     {
-        if (Current.Kind is TokenKind.Match or TokenKind.Inline or TokenKind.Interrupt or TokenKind.Noinit)
+        if (Current.Kind is TokenKind.Inline or TokenKind.Interrupt or TokenKind.Noinit)
             throw new CompileError(Current.Pos, $"'{Current.Text}' is not supported yet");
     }
 
@@ -346,6 +346,7 @@ public sealed class Parser
                 return new WhileStmt(start.Pos, cond, ParseBlock());
             }
             case TokenKind.For: return ParseFor();
+            case TokenKind.Match: return ParseMatch();
             case TokenKind.Break:
             {
                 var t = Advance();
@@ -404,6 +405,60 @@ public sealed class Parser
         }
         Stmt elseStmt = At(TokenKind.If) ? ParseIf() : ParseBlock();
         return new IfStmt(start.Pos, cond, then, elseStmt);
+    }
+
+    /// <summary>
+    /// <c>match x { arm... }</c>; one arm per line: patterns separated by ',', then '=>' and a block
+    /// or a single statement.
+    /// </summary>
+    private MatchStmt ParseMatch()
+    {
+        var start = Expect(TokenKind.Match, "'match'");
+        var subject = ParseExpr();
+        var open = Expect(TokenKind.LBrace, "'{' after the match value");
+        var arms = new List<MatchArm>();
+        SkipTerminators();
+        while (!Accept(TokenKind.RBrace))
+        {
+            if (At(TokenKind.Eof)) throw new CompileError(open.Pos, "'match' is not closed with '}'");
+            var armPos = Current.Pos;
+            var patterns = new List<MatchPattern>();
+            bool isDefault = false;
+            do
+            {
+                if (At(TokenKind.Identifier) && Current.Text == "_")
+                {
+                    var underscore = Advance();
+                    if (patterns.Count > 0 || At(TokenKind.Comma))
+                        throw new CompileError(underscore.Pos, "'_' matches every value, so it must be alone in its arm: '_ => ...'");
+                    isDefault = true;
+                    break;
+                }
+                var low = ParseExpr();
+                Expr? high = null;
+                if (Accept(TokenKind.DotDotEq)) high = ParseExpr();
+                else if (At(TokenKind.DotDot))
+                    throw new CompileError(Current.Pos, "A range in a match includes its end: write 'low..=high'");
+                patterns.Add(new MatchPattern(low.Pos, low, high));
+            } while (Accept(TokenKind.Comma));
+            Expect(TokenKind.FatArrow, "'=>' after the match pattern");
+            BlockStmt body;
+            if (At(TokenKind.LBrace))
+            {
+                body = ParseBlock();
+                ExpectEndOfStatement();
+            }
+            else
+            {
+                if (At(TokenKind.Newline) || At(TokenKind.RBrace))
+                    throw new CompileError(Current.Pos, "Expected a statement or '{ }' after '=>'");
+                var stmt = ParseStatement();
+                body = new BlockStmt(stmt.Pos, [stmt]);
+            }
+            arms.Add(new MatchArm(armPos, isDefault ? [] : patterns, body));
+            SkipTerminators();
+        }
+        return new MatchStmt(start.Pos, subject, arms);
     }
 
     private ForStmt ParseFor()

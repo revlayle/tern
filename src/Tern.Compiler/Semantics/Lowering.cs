@@ -20,6 +20,10 @@ public static class Lowering
                 break;
             case WhileStmt w: w.Condition = Lower(w.Condition); Apply(w.Body); break;
             case ForStmt f: f.From = Lower(f.From); f.To = Lower(f.To); Apply(f.Body); break;
+            case MatchStmt m:
+                m.Subject = Lower(m.Subject);
+                foreach (var arm in m.Arms) Apply(arm.Body);
+                break;
             case ReturnStmt r: if (r.Value is not null) r.Value = Lower(r.Value); break;
         }
     }
