@@ -86,8 +86,7 @@ Done when: the raster example runs in VICE and `match` code shapes are checked i
 
 ## M7: Optimizer, first pass
 
-Before starting: the spec session settles open question 14.10 (fixed-address RAM that is not volatile).
-
+- Volatile memory (spec 4): platform volatile areas, the `volatile` keyword, variables shared between roots, pointer accesses; the error for a fixed-address variable overlapping the program
 - Keep register parameters in registers when the function does not need the register
 - Track register contents to remove redundant loads (e.g. `lda` after `sta` of the same value)
 - Remove unreachable code (e.g. `rts` after an endless loop)
@@ -106,5 +105,6 @@ Before starting: the spec session settles open question 14.10 (fixed-address RAM
 - `using` on local variables (spec 14.6)
 - 65C02 CPU variant and Commander X16 platform
 - NES: iNES output, `@ bank(n)`, calls between banks (spec 14.1)
+- Memory layout declaration: reserved areas, volatile ranges, named regions (spec 14.12), with `data` at a fixed address (14.9) and banks
 - Apple II and Atari 8-bit platforms
 - Overflow checking in the emulator for debug runs (spec 14.4)

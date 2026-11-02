@@ -138,7 +138,7 @@ A struct can be used in three ways:
    ```
    struct Vic { sprite0_x: u8 @ $00, border: u8 @ $20, background: u8 @ $21 }
    var vic: Vic @ $D000
-   vic.border = 0                 // sta $D020 (volatile, as with any fixed address)
+   vic.border = 0                 // sta $D020 (volatile: in the platform's I/O area, 4)
    ```
 3. **Through a pointer.** `p.field` reads or writes the field of the struct `p` points to:
    ```
@@ -215,7 +215,8 @@ const WIDTH: u8 = 40
 var score: u16                     // static RAM, placed by the compiler
 var lives: u8 = 3                  // initialized at program start
 var p: ptr u8 @ zp                // somewhere in zero page
-var border: u8 @ $D020             // fixed address: memory-mapped I/O
+var border: u8 @ $D020             // fixed address: memory-mapped I/O, volatile
+volatile var flags: u8 @ $C000     // fixed-address RAM that something else changes
 
 data sine: [u8; 256] = [ ... ]     // read-only table in memory (may be placed in ROM)
 data msg = "GAME OVER"
@@ -227,7 +228,14 @@ data msg = "GAME OVER"
   - a constant expression: a fixed address, e.g. `@ $D020` or `@ VIC + $20`,
   - `zp`: anywhere in zero page, chosen by the compiler. This is a guarantee: if zero page is full, compilation fails (8.2),
   - `bank(n)`: in ROM bank `n` (for functions and `data`; see 12.2).
-- **Fixed-address variables (`@ addr`) are volatile.** Every read and write in the source happens exactly once and in order. The optimizer never removes, merges or reorders them. All other variables may be cached in registers.
+- **Volatile memory.** Every read and write of volatile memory in the source happens exactly once and in order; the optimizer never removes, merges or reorders them. Memory is volatile when:
+  - it lies in one of the platform's volatile areas (12.2), such as I/O registers. This needs no keyword: `var border: u8 @ $D020` is volatile,
+  - the variable is marked `volatile`, a prefix like `noinit`: `volatile var flags: u8 @ $C000`. Use it for RAM that hardware or outside code changes behind the program's back. On a struct or array it covers every field and element. It is allowed only on global `var`s; writing it on a variable that is already volatile is allowed,
+  - the variable is used by functions reachable from main and from an interrupt handler, or from two handlers (8.1). The compiler finds this from the call graph,
+  - it is read or written through a pointer, since the compiler cannot know where a pointer points.
+
+  All other memory is ordinary: its values may be kept in registers, and redundant reads and writes removed. An asm block, and a call to a routine at a fixed address, make the optimizer forget the values it holds for ordinary memory. There is no way to mark memory inside a volatile area as ordinary; a memory layout declaration may add one later (14.12).
+- **A fixed-address variable must not overlap the program**, its data, or the variables the compiler places. That is a compile error that names the variable and both address ranges. Fixed-address variables are often graphics data that the VIC must find in a given 16 KB bank; move the data or make the program smaller. Fixed-address variables may overlap each other.
 - Global variables without an initializer are zeroed at startup. A variable can be marked `noinit` to skip that.
 - Local variables (other than arrays) must have an initial value. Their memory is shared with other functions (8.1), so it holds no useful value on entry.
 
@@ -394,6 +402,7 @@ if collides(n) { ... }             // jsr collides / bcc skip
 - Every function has a static frame: its parameters, locals and compiler temporaries, at fixed addresses.
 - **Two frames may share memory if the functions can never be active at the same time**, that is, neither is reachable from the other in the call graph. This is computed from the call graph, so total RAM use is the deepest call path, similar to a stack, but with absolute addressing.
 - Interrupt handlers are separate roots. Their frames never overlap with frames reachable from the main program. A function reachable from both main and an interrupt handler is a compile error unless marked `reentrant` (not in v0).
+- A global variable used from two roots is volatile (4), so a main loop that waits for a flag set by a handler reads it on every pass.
 
 ### 8.2 Zero page allocation
 
@@ -560,7 +569,7 @@ These are the intended translations. The optimizer may produce something shorter
 
 ### 12.2 Platforms
 
-A platform description gives: CPU variant, free zero-page ranges, RAM ranges for variables, code start address, output file format, startup code, and the default character encoding (2.1).
+A platform description gives: CPU variant, free zero-page ranges, RAM ranges for variables, volatile areas (4), code start address, output file format, startup code, and the default character encoding (2.1).
 
 **C64 (first platform)**
 
@@ -568,6 +577,7 @@ A platform description gives: CPU variant, free zero-page ranges, RAM ranges for
 - Startup: a BASIC line `10 SYS 2061`, then the startup code (zero globals, copy initialized data, call `main`).
 - Free zero page: `$02–$8F` (BASIC's work area; the program does not return to BASIC) and `$FB–$FE`.
 - Variables: RAM after the program up to `$9FFF`. KERNAL and I/O stay mapped in v0.
+- Volatile areas: `$00–$01` (CPU port), `$D000–$DFFF` (VIC, SID, color RAM, CIAs, cartridge I/O), and the bytes the KERNAL's interrupt changes (the jiffy clock `$A0–$A2`, the keyboard and cursor bytes, the keyboard buffer at `$0277`). The platform description holds the exact list.
 - Default encoding: `petscii` (2.1).
 
 **Planned:** NES (iNES, `ricoh2a03`, PRG/CHR banks), Commander X16 (`wdc65c02`), Apple II (binary for DOS 3.3/ProDOS), Atari 8-bit (`.xex`).
@@ -619,5 +629,16 @@ Each item is decided when the feature it belongs to is built.
 7. **A general decorator syntax.** Only if modifier keywords grow past five or six.
 8. **Language name.** "Tern" is a placeholder.
 9. **`data` at a fixed address** (`data x @ $C000 = ...`). Not supported yet, since the program image is one block. Needed for fixed-address tables and for `@ bank(n)` (item 1).
-10. **Fixed-address RAM that is not volatile.** All `@ addr` variables are volatile (section 4), which suits hardware registers such as `$D020` but blocks optimizations on plain RAM at a fixed address (a buffer at `$C000`, sprite data the program draws into). Needed: a way to mark fixed-address memory as ordinary RAM. Decide before the optimizer (roadmap M7).
+10. **Fixed-address RAM that is not volatile.** Settled 2026-11-02: platform volatile areas plus a `volatile` keyword (section 4).
 11. **Arrays of structs as struct fields** (`parts: [Point; 4]`, or the VIC's interleaved sprite x/y). Not supported yet; a limited form is wanted eventually. Discuss after a first complete version. Notes so far: a constant index is always a fixed offset; stored as tables inside the record, a variable index costs nothing extra; a `linear` field (needed for hardware layouts) could allow a variable index only when the element size is 2, 4 or 8 (a shift, as for 16-bit pointers).
+12. **Memory layout declaration.** A declaration in source that describes the machine's memory: areas for the program, reserved areas the compiler never fills (e.g. VIC graphics at `$2000–$3FFF`), volatile ranges, named regions for placement (`var map: [u8; 2048] @ buffers`, keeping `@` a location), and later banks. The platform gives the default map; a program declares what it changes. Sketch:
+    ```
+    memory {
+        $0801..=$1FFF  program
+        $2000..=$3FFF  reserved              // VIC bank 0: sprites, character set
+        $4000..=$9FFF  program
+        $C000..=$CFFF  region buffers
+        $D000..=$DFFF  volatile
+    }
+    ```
+    Open: whether a function may cross a gap (or the compiler inserts a `jmp`), where the declaration lives (main file or a shared file), and whether it replaces or adjusts the platform's map. Decide together with items 1 and 9.
