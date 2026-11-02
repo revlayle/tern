@@ -18,6 +18,8 @@ public sealed class Module
     public Dictionary<string, Module> Imports { get; } = new();
     /// <summary>Names declared at the top level of this file, without the module name.</summary>
     public Dictionary<string, Symbol> Scope { get; } = new();
+    /// <summary>The <c>import</c> in the main file that loads this module (its arguments set the module's parameters), or null.</summary>
+    public ImportDecl? ImportedBy { get; set; }
     /// <summary>Set by the checker once the file's top-level declarations are in <see cref="Scope"/>.</summary>
     public bool Declared { get; set; }
 
@@ -46,6 +48,9 @@ public static class ModuleLoader
         {
             foreach (var import in m.Syntax.Imports)
             {
+                if (import.Args.Count > 0 && !m.IsMain)
+                    throw new CompileError(import.Args[0].Pos,
+                        $"Only the program's main file can set the parameters of '{import.Name}', since a module is loaded once. Import it plainly here and set {import.Args[0].Name} in the main file");
                 if (!loaded.TryGetValue(import.Name, out var module))
                 {
                     var path = Find(import, m, platform, libraryDirectory);
@@ -62,6 +67,7 @@ public static class ModuleLoader
                     loaded[import.Name] = module;
                     Visit(module);
                 }
+                if (m.IsMain) module.ImportedBy = import;
                 m.Imports[import.Name] = module;
             }
             order.Add(m);

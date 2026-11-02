@@ -48,12 +48,14 @@ public sealed partial class Checker
                 throw new CompileError(wrongMain.Pos, $"Only the program's main file has 'fn main()'; '{module.Name}' is a module");
             // Struct names first, so that types can name structs declared further down.
             foreach (var s in program.Structs) DeclareStruct(s);
+            DeclareParameters(module, modules[^1]);
             foreach (var c in program.Consts) DeclareConst(c);
             foreach (var s in program.Structs) LayOut((StructSymbol)module.Scope[s.Name]);
             foreach (var f in program.Functions) DeclareFunction(f);
             foreach (var g in program.Globals) DeclareGlobal(g);
             // After the globals, so that a variable named as an address gets the right error.
             foreach (var f in program.Functions.Where(f => f.Address is not null)) DeclareRoutine(f, f.Symbol!);
+            foreach (var a in program.Asserts) CheckAssert(a, module);
             module.Declared = true;
         }
 
@@ -177,6 +179,108 @@ public sealed partial class Checker
         // A table of function addresses keeps those functions in the program.
         foreach (var (_, f) in v.Storage.FunctionAddresses) _function.UsedAddresses.Add(f);
     }
+
+    /// <summary>The main file with the constants it can declare without any import, for evaluating module parameter values.</summary>
+    private Module? _parameterScope;
+
+    /// <summary>Declares a module's parameters as constants, using the values from the main file's import or the defaults.</summary>
+    private void DeclareParameters(Module module, Module main)
+    {
+        var header = module.Syntax.Header;
+        var import = module.ImportedBy;
+        if (header is not null && module.IsMain)
+            throw new CompileError(header.Pos, "The main file has no module header; 'module' is only for modules that have parameters");
+        if (header is not null && header.Name != module.Name)
+            throw new CompileError(header.Pos, $"The module header says '{header.Name}' but the file is {module.Name}.tern; the name must match the file");
+        var parameters = header?.Parameters ?? [];
+        if (import is not null)
+        {
+            var seen = new HashSet<string>();
+            foreach (var arg in import.Args)
+            {
+                if (parameters.All(p => p.Name != arg.Name))
+                    throw new CompileError(arg.Pos, header is null
+                        ? $"Module '{module.Name}' has no parameters (it has no 'module {module.Name}(...)' header)"
+                        : $"Module '{module.Name}' has no parameter '{arg.Name}'; its parameters are {string.Join(", ", parameters.Select(p => p.Name))}");
+                if (!seen.Add(arg.Name))
+                    throw new CompileError(arg.Pos, $"Parameter '{arg.Name}' is set twice");
+            }
+        }
+        var saved = _module;
+        foreach (var p in parameters)
+        {
+            var type = ResolveType(p.Type);
+            if (!(type.IsInteger || type.Kind == TypeKind.Bool))
+                throw new CompileError(p.Type.Pos, "A module parameter is an integer type or bool");
+            var arg = import?.Args.FirstOrDefault(a => a.Name == p.Name);
+            Expr value = arg?.Value ?? p.Default;
+            if (arg is not null)
+            {
+                // The value may use literals and the main file's constants that need no import.
+                _parameterScope ??= ParameterScope(main);
+                _module = _parameterScope;
+                try { CheckExpr(value); }
+                catch (CompileError e)
+                {
+                    throw new CompileError(e.Pos, e.Description + ". A parameter value uses literals and the main file's constants that do not depend on imported modules");
+                }
+                finally { _module = saved; }
+            }
+            else
+                CheckExpr(value);
+            if (value.ConstValue is not long v)
+                throw new CompileError(value.Pos, $"The value of parameter '{p.Name}' is not known at compile time");
+            Coerce(value, type);
+            Declare(new ConstSymbol(p.Name, p.Pos, type, v));
+        }
+    }
+
+    private Module ParameterScope(Module main)
+    {
+        // A fresh copy of the main file, so that checking its constants here changes nothing in the real syntax tree.
+        var scope = new Module
+        {
+            Name = "", Path = main.Path, Directory = main.Directory, Source = main.Source,
+            Syntax = Parser.Parse(main.Source, main.Path),
+        };
+        var saved = _module;
+        _module = scope;
+        foreach (var c in scope.Syntax.Consts)
+        {
+            try { DeclareConst(c); }
+            catch (CompileError) { } // needs an import or a later constant: not usable in a parameter value
+        }
+        _module = saved;
+        return scope;
+    }
+
+    private void CheckAssert(AssertDecl a, Module module)
+    {
+        CheckExpr(a.Condition);
+        if (a.Condition.Type.Kind != TypeKind.Bool)
+            throw new CompileError(a.Condition.Pos, "An assert condition is a bool, e.g. COUNT <= 64");
+        if (a.Condition.ConstValue is not long v)
+            throw new CompileError(a.Condition.Pos, "An assert condition must be known at compile time: use constants, sizeof and len");
+        if (v != 0) return;
+        // A wrong parameter is reported where the main file set it.
+        var import = module.ImportedBy;
+        if (import is not null && import.Args.Count > 0 && module.Syntax.Header is { } header
+            && import.Args.Any(arg => header.Parameters.Any(p => p.Name == arg.Name) && Mentions(a.Condition, arg.Name)))
+            throw new CompileError(import.Pos, $"{a.Message} (assert at {a.Pos})");
+        throw new CompileError(a.Pos, a.Message);
+    }
+
+    private static bool Mentions(Expr e, string name) => e switch
+    {
+        NameExpr n => n.Name == name,
+        UnaryExpr u => Mentions(u.Operand, name),
+        BinaryExpr b => Mentions(b.Left, name) || Mentions(b.Right, name),
+        CallExpr c => c.Args.Any(x => Mentions(x, name)),
+        CastExpr c => Mentions(c.Operand, name),
+        IndexExpr i => Mentions(i.Target, name) || Mentions(i.Index, name),
+        MemberExpr m => Mentions(m.Target, name),
+        _ => false,
+    };
 
     private void DeclareConst(ConstDecl decl)
     {
@@ -1127,7 +1231,8 @@ public sealed partial class Checker
                 else
                 {
                     var t = Unify(b.Left, b.Right, b.Pos);
-                    if (t.Kind == TypeKind.IntLiteral) { Coerce(b.Left, DefaultType(b.Left)); Coerce(b.Right, b.Left.Type); }
+                    // Two constants are compared as plain numbers: sizeof(T) * 32 <= 256 must not wrap to u8.
+                    if (t.Kind == TypeKind.IntLiteral && !(l is not null && r is not null)) { Coerce(b.Left, DefaultType(b.Left)); Coerce(b.Right, b.Left.Type); }
                 }
                 b.Type = TernType.Bool;
                 if (l is not null && r is not null)

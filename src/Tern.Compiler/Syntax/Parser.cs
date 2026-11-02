@@ -66,14 +66,48 @@ public sealed class Parser
         var imports = new List<ImportDecl>();
         var structs = new List<StructDecl>();
 
+        var asserts = new List<AssertDecl>();
         SkipTerminators();
+        ModuleHeader? header = null;
+        if (At(TokenKind.Module))
+        {
+            var kw = Advance();
+            var hname = Expect(TokenKind.Identifier, "the module name after 'module'");
+            var parameters = new List<ModuleParam>();
+            Expect(TokenKind.LParen, "'(' after the module name; a module without parameters needs no header");
+            while (!At(TokenKind.RParen))
+            {
+                var pname = Expect(TokenKind.Identifier, "a parameter name");
+                Expect(TokenKind.Colon, "':' and a type after the parameter name");
+                var ptype = ParseType();
+                Expect(TokenKind.Eq, "'= default value' (every module parameter has a default)");
+                parameters.Add(new ModuleParam(pname.Pos, pname.Text, ptype, ParseExpr()));
+                if (!Accept(TokenKind.Comma)) break;
+            }
+            Expect(TokenKind.RParen, "')'");
+            header = new ModuleHeader(kw.Pos, hname.Text, parameters);
+            ExpectEndOfStatement();
+            SkipTerminators();
+        }
         while (At(TokenKind.Import))
         {
             Advance();
             var name = Expect(TokenKind.Identifier, "a module name after 'import'");
             if (!_modules.Add(name.Text))
                 throw new CompileError(name.Pos, $"'{name.Text}' is imported twice");
-            imports.Add(new ImportDecl(name.Pos, name.Text));
+            var args = new List<ImportArg>();
+            if (Accept(TokenKind.LParen))
+            {
+                while (!At(TokenKind.RParen))
+                {
+                    var aname = Expect(TokenKind.Identifier, "a parameter name");
+                    Expect(TokenKind.Eq, "'= value' after the parameter name");
+                    args.Add(new ImportArg(aname.Pos, aname.Text, ParseExpr()));
+                    if (!Accept(TokenKind.Comma)) break;
+                }
+                Expect(TokenKind.RParen, "')'");
+            }
+            imports.Add(new ImportDecl(name.Pos, name.Text) { Args = args });
             ExpectEndOfStatement();
             SkipTerminators();
         }
@@ -92,7 +126,7 @@ public sealed class Parser
                 ParseDeclaration();
             SkipTerminators();
         }
-        return new ProgramSyntax(consts, globals, functions) { Imports = imports, Structs = structs, PrivateNames = privateNames };
+        return new ProgramSyntax(consts, globals, functions) { Header = header, Asserts = asserts, Imports = imports, Structs = structs, PrivateNames = privateNames };
 
         // Parses one top-level declaration and returns its name.
         string ParseDeclaration()
@@ -101,6 +135,18 @@ public sealed class Parser
             {
                 case TokenKind.Import:
                     throw new CompileError(Current.Pos, "'import' must be at the top of the file, before other declarations");
+                case TokenKind.Module:
+                    throw new CompileError(Current.Pos, "'module' must be the first line of the file, before the imports");
+                case TokenKind.Assert:
+                {
+                    var t = Advance();
+                    var cond = ParseExpr();
+                    Expect(TokenKind.Comma, "',' and a message string after the condition");
+                    var msg = Expect(TokenKind.String, "a message string");
+                    ExpectEndOfStatement();
+                    asserts.Add(new AssertDecl(t.Pos, cond, msg.Text));
+                    return "";
+                }
                 case TokenKind.Const: { var d = ParseConst(); consts.Add(d); return d.Name; }
                 case TokenKind.Var: { var d = ParseVar(); globals.Add(d); return d.Name; }
                 case TokenKind.Linear: { var d = ParseLinearVar(); globals.Add(d); return d.Name; }
