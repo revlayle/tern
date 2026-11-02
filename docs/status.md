@@ -166,7 +166,17 @@ Not bugs; things to improve, mostly in M7 (optimizer).
 
 ## Questions for the spec session
 
-Questions 1-37 are settled (decisions.md, 2026-11-01 and 2026-11-02). None open.
+Questions 1-37 are settled (decisions.md, 2026-11-01 and 2026-11-02). 
+
+**Open (from the M8 comparison, `tests/benchmarks/comparison.md`):** Tern uses 1.76x the bytes and 1.65x the cycles of hand-written assembly over the nine benchmarks. Most of the gap is three patterns that Tern cannot express, or cannot express cheaply.
+
+38. **Carry out of an 8-bit add.** `sieve` keeps `m` as `u16` only to detect that `m += n` passed 255. The assembly keeps `m` in Y and loops on `bcc` (24606 vs 8489 cycles, 121 vs 47 bytes). Tern has no way to read the carry of an operation; a carry only comes from a call declared `-> bool using carry`. Options:
+    - (a) No language change. The compiler proves that a `u16` stays below 512 (range analysis through the loop, using the `m < 256` exit) and compiles `m += n` and `m < 256` as an 8-bit add and a carry test. Predictable only if the rule is written down; a program that falls just outside the rule silently gets the slow code (tension with design rule 1).
+    - (b) A stepped range, e.g. `for m in (n << 1)..256 step n`, which compiles to `adc` / `bcc`. A fixed code shape, so it fits rule 1. Which step values are allowed (constants only? a `u8` variable?) and what happens when the sum passes 255 would need defining.
+    - (c) An overflow-reporting add as a library or `inline asm fn` (no language change; `inline asm fn` is not supported yet, so `inline fn` with an `asm` block would be used). Measure this first on `sieve`: it shows how much of the gap needs a language or compiler change at all.
+39. **Testing a flag left by earlier code.** Prog8 has `if_cs`, `if_cc`, `if_z`, `if_nz`, `if_neg`, `if_pos`, `if_vs`, `if_vc` (keywords listed in its syntax file; usage not checked). Tern tests a flag only when a function returns `bool using carry` / `zero` / `negative`. Is a flag-test statement wanted for the value left by an `asm` block or a preceding operation, or is `-> bool using carry` on a small `inline fn` enough? One meaning per keyword (rule 3) argues for the second.
+40. **A value kept in a register across a loop.** `crc8` holds `crc` in A for the whole inner loop and uses `asl` to move the top bit into the carry (27667 vs 48202 cycles). Tern keeps loop counters in registers (`using X`) and the optimizer allocates some locals, but a local cannot be declared as living in a register. Is `var crc: u8 using A` (a local kept in the register for its scope, an error if a call or an asm block in its scope needs the register) in scope? Without it the fix is optimizer-only: recognise `x & $80 != 0` followed by `x << 1` as one `asl` + carry test, which needs no spec change.
+41. **`match` as a jump table.** `interp` dispatches through a compare chain (7891 vs 4713 cycles, 368 vs 186 bytes). For dense constant arms, a table of handler addresses with `pha` / `pha` / `rts` is fixed-size inline code with no runtime routine. Does it satisfy rule 1 ("cost is visible"), and where is the density threshold (cost of a chain vs 2 bytes per table slot plus the dispatch)? Spec section 11 would list the shape.
 
 
 ## Provisional choices made while coding
