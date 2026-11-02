@@ -148,6 +148,8 @@ public sealed class VarDecl(SourcePos pos, string name, TypeSyntax? type, Placem
     public bool IsLinear { get; init; }
     /// <summary>Declared <c>noinit var</c>: a global that is not zeroed at startup.</summary>
     public bool IsNoinit { get; set; }
+    /// <summary>Declared <c>volatile var</c>: memory that something else changes (spec 4).</summary>
+    public bool IsVolatile { get; set; }
     public VariableSymbol? Symbol { get; set; }
 }
 public sealed class AssignStmt(SourcePos pos, Expr target, TokenKind op, Expr value) : Stmt(pos)

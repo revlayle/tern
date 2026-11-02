@@ -192,6 +192,7 @@ public sealed class ModuleTests : IDisposable
             Header = Platform.C64.Header,
             ZeroPage = Platform.C64.ZeroPage,
             RamEnd = Platform.C64.RamEnd,
+            VolatileAreas = Platform.C64.VolatileAreas,
             DefaultEncoding = Platform.C64.DefaultEncoding,
         };
         var e = Assert.Throws<CompileError>(() => CompileMain("import hw\nfn main() { }", other));

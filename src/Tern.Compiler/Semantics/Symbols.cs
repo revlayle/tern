@@ -151,7 +151,7 @@ public sealed class VariableSymbol(string name, SourcePos pos, TernType type, Va
     /// <summary>The function whose frame holds this variable; null for globals.</summary>
     public FunctionSymbol? Owner { get; } = owner;
 
-    /// <summary>Set for <c>@ $addr</c> variables. These are volatile.</summary>
+    /// <summary>Set for <c>@ $addr</c> variables.</summary>
     public int? FixedAddress { get; set; }
     public bool RequireZeroPage { get; set; }
     /// <summary>Set for loop variables that live in a register (<c>using X</c>). They have no memory.</summary>
@@ -200,7 +200,18 @@ public sealed class VariableSymbol(string name, SourcePos pos, TernType type, Va
     /// <summary>The variable that owns the memory: itself, or the variable a view is part of.</summary>
     public VariableSymbol Storage => AliasOf ?? this;
 
-    public bool IsVolatile => FixedAddress.HasValue;
+    /// <summary>Declared <c>volatile var</c>.</summary>
+    public bool DeclaredVolatile { get; init; }
+    /// <summary>At a fixed address in one of the platform's volatile areas, e.g. I/O registers.</summary>
+    public bool InVolatileArea { get; set; }
+    /// <summary>A global used by functions reached from two roots (main and a handler, or two handlers).</summary>
+    public bool UsedFromTwoRoots { get; set; }
+
+    /// <summary>
+    /// Every read and write happens exactly once and in order; the optimizer never removes, merges
+    /// or reorders them (spec 4). For a view, the variable it is part of decides.
+    /// </summary>
+    public bool IsVolatile => Storage is var s && (s.DeclaredVolatile || s.InVolatileArea || s.UsedFromTwoRoots);
     /// <summary>Must be placed in zero page; compilation fails if it does not fit.</summary>
     public bool ForcedZeroPage => RequireZeroPage || Dereferenced || AsmZeroPage;
     public bool InMemory => Register is null;

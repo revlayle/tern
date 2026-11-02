@@ -80,6 +80,7 @@ public sealed partial class Checker
         // of a module cost nothing. The main file's globals are all kept.
         var reachable = OrderRoots(main, mainModule);
         CheckPrivateGlobalsPerRoot(modules, reachable);
+        MarkGlobalsUsedFromTwoRoots(reachable);
         var used = reachable.SelectMany(f => f.UsedGlobals).Concat(mainModule.Scope.Values.OfType<VariableSymbol>()).ToHashSet();
         return new CheckedProgram(modules, _globals.Where(used.Contains).ToList(), reachable, main);
     }
@@ -322,7 +323,10 @@ public sealed partial class Checker
         // A string or include_bytes() gives a [u8; N] array, which may be longer than 256 bytes.
         var bytes = decl.Init is null ? null : ByteSource(decl.Init);
         var type = bytes is not null && decl.TypeSyntax is null ? TernType.ArrayOf(TernType.U8, bytes.Length) : DeclaredType(decl);
-        var v = new VariableSymbol(_module.Qualify(decl.Name), decl.Pos, type, VariableKind.Global, null) { IsData = decl.IsData, NoInit = decl.IsNoinit };
+        var v = new VariableSymbol(_module.Qualify(decl.Name), decl.Pos, type, VariableKind.Global, null)
+        {
+            IsData = decl.IsData, NoInit = decl.IsNoinit, DeclaredVolatile = decl.IsVolatile,
+        };
         decl.Symbol = v;
         ApplyPlacement(decl, v, allowAddress: true);
         if (decl.IsNoinit && decl.Init is not null)
@@ -448,6 +452,7 @@ public sealed partial class Checker
                 if (a < 0 || a + v.Type.Size > 0x10000)
                     throw new CompileError(addr.Pos, $"Address ${a:X} is outside memory");
                 v.FixedAddress = (int)a;
+                v.InVolatileArea = _platform.IsVolatile((int)a, (int)a + v.Type.Size - 1);
                 break;
         }
     }
@@ -1520,6 +1525,25 @@ public sealed partial class Checker
                             $"a private variable of its module. An interrupt could change it while the other is using it. " +
                             $"Call functions of this module from only main or only one interrupt handler");
                     }
+                }
+    }
+
+    /// <summary>
+    /// A global used from two roots is volatile (spec 4, 8.1), so that a main loop waiting for a flag
+    /// set by a handler reads it on every pass. A function reached from an address-taken function
+    /// may be called from any root, so it also counts as reached from an unknown one.
+    /// </summary>
+    private static void MarkGlobalsUsedFromTwoRoots(List<FunctionSymbol> ordered)
+    {
+        var unknown = new FunctionSymbol("(through an address)", default);
+        var rootOf = new Dictionary<VariableSymbol, FunctionSymbol>();
+        foreach (var f in ordered.Where(f => f.FixedAddress is null))
+            foreach (var root in f.Isolated ? f.Roots.Append(unknown) : f.Roots)
+                foreach (var used in f.UsedGlobals)
+                {
+                    var g = used.Storage;
+                    if (rootOf.TryGetValue(g, out var other) && other != root) g.UsedFromTwoRoots = true;
+                    else rootOf[g] = root;
                 }
     }
 

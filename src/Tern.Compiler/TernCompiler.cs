@@ -88,6 +88,7 @@ public static class TernCompiler
                 throw new CompileError(new SourcePos(1, 1),
                     $"Program and variables end at ${ramEnd:X4}, past the end of usable RAM (${platform.RamEnd:X4})");
         });
+        CheckFixedAddresses(program, platform, ramEnd);
 
         var image = platform.Header.Concat(code.Bytes).ToArray();
         var prg = new byte[] { (byte)platform.LoadAddress, (byte)(platform.LoadAddress >> 8) }.Concat(image).ToArray();
@@ -125,6 +126,33 @@ public static class TernCompiler
             ViceLabels = vice.ToString(),
             Report = report.ToString(),
         };
+    }
+
+    /// <summary>
+    /// A fixed-address variable must not overlap the program, its data or the variables the compiler
+    /// places (spec 4); a growing program would otherwise overwrite it silently. Fixed-address
+    /// variables may overlap each other.
+    /// </summary>
+    private static void CheckFixedAddresses(CheckedProgram program, Platform platform, int ramEnd)
+    {
+        var inZeroPage = program.Globals.Where(g => g.FixedAddress is null)
+            .Concat(program.Functions.SelectMany(f => f.FrameVariables))
+            .Where(v => v.Address is >= 0 and < 0x100).ToList();
+        static string Range(int first, int last) => first == last ? $"${first:X4}" : $"${first:X4}-${last:X4}";
+        foreach (var g in program.Globals)
+        {
+            if (g.FixedAddress is not int first) continue;
+            int last = first + g.Type.Size - 1;
+            if (first <= ramEnd && last >= platform.LoadAddress)
+                throw new CompileError(g.Pos,
+                    $"'{g.Name}' at {Range(first, last)} overlaps the program and its variables at {Range(platform.LoadAddress, ramEnd)}. " +
+                    $"Move '{g.Name}', or make the program smaller");
+            foreach (var v in inZeroPage)
+                if (first <= v.Address + v.Type.Size - 1 && last >= v.Address)
+                    throw new CompileError(g.Pos,
+                        $"'{g.Name}' at {Range(first, last)} overlaps '{v.QualifiedName}' at {Range(v.Address, v.Address + v.Type.Size - 1)}, " +
+                        $"which the compiler placed in zero page. Move '{g.Name}' out of ${platform.ZeroPage.First:X2}-${platform.ZeroPage.Last:X2}");
+        }
     }
 
     /// <summary>
