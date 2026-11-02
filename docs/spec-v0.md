@@ -30,7 +30,7 @@ Tern is a programming language for 6502-family processors. It aims to be easy to
 
 - UTF-8 files with the extension `.tern`.
 - Comments: `// to end of line` and `/* block */`.
-- Statements end at a newline or `;`.
+- Statements end at a newline or `;`. A newline inside `( )` or `[ ]` does not end a statement, so argument lists and tables can span lines. A `{` or `}` ends that rule.
 - Identifiers: `[A-Za-z_][A-Za-z0-9_]*`. Case-sensitive.
 - A program can be split into modules, one per file. `import name` loads `name.tern` (2.2).
 
@@ -75,12 +75,13 @@ fn main() {
 }
 ```
 
-- `import name` goes at the top of a file, before other declarations. It loads `name.tern` from the compiler's `lib/` folder (the standard library, 10.1), or else from the folder of the importing file. The same mechanism splits your own program into files.
+- `import name` goes at the top of a file, before other declarations. It loads `name.tern` from, in order: the compiler's `lib/<platform>/` folder (e.g. `lib/c64/`), the compiler's `lib/` folder (the standard library, 10.1), then the folder of the importing file. The same mechanism splits your own program into files. A module name must match its file name exactly, including case.
 - Everything declared at the top level of a module is used with the module name: `text.put`, `c64.SCREEN`. `.` still means "member of", as for fields and `.lo`/`.hi`. Names in different modules never clash.
+- **`private`** before a declaration (`private var w0: u8`, `private data TABLE ...`, `private fn helper()`, `private const`, `private struct`) makes it usable only inside its own module, including from assembly. Without it, a top-level declaration is public.
 - A module is loaded once, however many files import it. Modules may import each other.
 - Only the program's main file has `fn main()`.
-- Only functions reachable from `main` are compiled, so an imported module costs nothing for the parts that are not called.
-- Platform modules (such as `c64`) can only be imported when compiling for that platform.
+- Only functions reachable from `main` are compiled. A module's global variables and `data` are kept only if a compiled function names them (in Tern code or as an assembly operand). An imported module costs nothing for the parts that are not used. The main file's globals are always kept, since an unused one may reserve memory on purpose (e.g. `@ zp`).
+- Platform modules live in `lib/<platform>/` and can only be imported when compiling for that platform; importing one for another platform is an error naming the platform. A platform folder can also provide its own version of a general module.
 
 ## 3. Types
 
@@ -115,6 +116,12 @@ fn main() {
 
 ```
 struct Enemy { x: u8, y: u8, hp: u8, vel: i16 }
+
+struct Voice {                     // one field per line also works
+    freq: u16
+    pulse: u16
+    control: u8,                   // commas are optional at line ends; a trailing comma is allowed
+}
 ```
 
 A struct describes a **memory layout**: field names, types and offsets. It works as an overlay on memory and is always used in place. **Structs are never copied:** there is no struct assignment, comparison, struct parameter or struct return value. To pass a struct to a function, pass a `ptr` or an array index. To copy one, call `copy()`.
@@ -149,14 +156,20 @@ e.pos.y = 5                        // ldy #1 / sta (e),y
 ```
 
 - A struct cannot contain itself directly (its size would be infinite). A pointer to its own type, like `next`, is fine.
+- **Field offsets.** A field without `@` follows the previous field in the declaration, wherever that one is. Fields with `@` may be given in any order. Overlapping fields are an error (there are no unions).
+- Struct names share the namespace of constants, variables and functions in their file. A struct cannot be named like a built-in type.
 - Following a pointer field, as in `e.next.hp`, first copies the pointer into a zero-page temporary, then reads through it.
-- **Array fields** such as `name: [u8; 8]` work normally in a single struct (`player.name[i]` is `lda player+off,x`). Through a pointer, the index and the field offset are added: `lda i` / `clc` / `adc #off` / `tay` / `lda (e),y`.
+- Through a pointer, a field's offset must be 0-255, since that is what `(p),Y` reaches. A larger offset is an error at the access, not at the declaration, since the struct may still be used as a variable or at a fixed address.
+- **Array fields** such as `name: [u8; 8]` work normally in a single struct (`player.name[i]` is `lda player+off,x`). Through a pointer, the index and the field offset are added: `lda i` / `clc` / `adc #off` / `tay` / `lda (e),y`. Array fields with 16-bit elements are split inside the record, as in 3.2: `pts: [u16; 2]` is two low bytes, then two high bytes.
+- Array fields whose elements are structs (`parts: [Point; 4]`) are not supported yet (14.11).
+- **No initial values.** There are no struct literals: struct variables and arrays of structs cannot have an initial value, and global ones are zeroed at startup. Local struct variables are allowed without one, like local arrays; their memory is shared (8.1), so it holds leftovers. `data` cannot hold structs.
+- `addr(player)` gives a `ptr Enemy`. `addr(player.name)` gives the address of a field of a struct variable, or of a struct at a fixed address (3.4).
 
-**Arrays of structs are stored as one array per field** ("structure of arrays"). `enemies[i].x` is a single `lda enemies_x,x`, and multi-byte fields are split as in 3.2. Nested structs flatten all the way down: `enemies[i].pos.x` is one table, `enemies_pos_x`. An array field inside an array of structs, as in `enemies[i].name[j]`, can only be indexed with a constant `j`, because a variable `j` would need a multiply. Use a `linear` array and a pointer instead. A `linear` array of structs stores whole records one after another, so a `ptr Enemy` can step through it. Linear struct arrays cannot be indexed, since that would need a multiply by the struct size: use a pointer.
+**Arrays of structs are stored as one array per field** ("structure of arrays"). `enemies[i].x` is a single `lda enemies_x,x`, and multi-byte fields are split as in 3.2. Nested structs flatten all the way down: `enemies[i].pos.x` is one table, `enemies_pos_x`. Precisely, there is one table per *byte* of the record: byte k of record i is at `base + k * n + i`, where `n` is the array length. A gap left by `@` offsets costs one table of `n` bytes per gap byte. An array field inside an array of structs, as in `enemies[i].name[j]`, can only be indexed with a constant `j`, because a variable `j` would need a multiply. Use a `linear` array and a pointer instead. A `linear` array of structs (`linear var list: [Enemy; 8]`; `linear` goes before `var`) stores whole records one after another, so a `ptr Enemy` can step through it; `addr(list)` points to the first record. Linear struct arrays cannot be indexed, since that would need a multiply by the struct size: use a pointer. `addr()` of an array of structs stored as tables is an error.
 
 ### 3.4 Pointers
 
-- `ptr T` is a 16-bit address. `addr(name)` gives a pointer to a variable or array: `ptr T` for a variable of type `T`, a pointer to the first element for an array of one-byte elements, and `ptr u8` to the low-byte table for a split array of 16-bit values. Use `as u16` for the address as a number. `addr()` of a function is not supported yet.
+- `ptr T` is a 16-bit address. `addr(name)` gives a pointer to a variable or array: `ptr T` for a variable of type `T`, a pointer to the first element for an array of one-byte elements, and `ptr u8` to the low-byte table for a split array of 16-bit values. A field of a struct variable or of a struct at a fixed address works too: `addr(player.name)` (no code beyond loading the constant address). Fields through a pointer and in an array of structs are errors. Use `as u16` for the address as a number. `addr()` of a function is not supported yet.
 - A number literal (or an untyped `const`) converts to a pointer without `as`, since literals take their type from context: `var p: ptr u8 = $0400`, `p == 0`. A typed `u16` value needs `as`.
 - `p[i]` with `i: u8` compiles to `(zp),Y` addressing. There is no separate dereference operator: use `p[0]`.
 - On a pointer to a 16-bit type, the index counts elements: `p[i]` reads the bytes at offsets `2*i` and `2*i+1`. The byte offset must fit in the 256 bytes `(zp),Y` reaches: a constant index above 127 is an error, and a variable index of 128 or more wraps within those 256 bytes.
@@ -352,7 +365,7 @@ chrout('A')                        // lda #$41 / jsr $FFD2
   A fixed register value is loaded with `lda`/`ldx`/`ldy #n`, and a fixed carry is one `sec` or `clc` right before the `jsr`, after all other arguments. The carry is the only flag allowed, since it is the only one with both a set and a clear instruction. Fixed inputs are only for routines at a fixed address: an `asm fn` sets them up in its own code.
 - **Registers:** the compiler cannot see inside the routine, so it assumes that a call changes A, X, Y and the flags. `keeps` after the address lists registers the routine leaves unchanged (`A`, `X`, `Y`; flags always count as changed). This is a promise taken from the routine's documentation; the compiler does not check it. A `for ... using X` loop may call a routine that keeps X (likewise Y); calls to other functions in such a loop are still an error.
 - The routine is a leaf in the call graph: it has no frame and calls nothing the compiler knows about.
-- In assembly the name stands for the address, as for any function: `jsr chrout`, `lda #chrout.lo`. `addr()` of a function is not supported yet (3.4).
+- In assembly the name stands for the address, as for any function: `jsr chrout`, `lda #chrout.lo`. For a routine with fixed inputs, `jsr get_cursor` is a plain `jsr $FFF0`: the block sets the carry or registers itself. `addr()` of a function is not supported yet (3.4).
 - A routine that returns values in more than the return registers of 6.1, or needs other setup, is wrapped in an `asm fn` (section 9).
 - A function with a body and `@ $addr` (compiled code placed at a fixed address) is not supported yet.
 
@@ -416,6 +429,7 @@ asm fn fill(value: u8 using A, count: u8 using X) {
 
 - Assembly is parsed by the compiler into the same instruction objects it generates itself.
 - Operands may name Tern variables, constants, arrays (use `enemies.x` for a field array) and functions. As usual in assembly, a name stands for its address: `lda score` reads the byte at `score`, and `score+1` is the next byte.
+- A field of a struct variable or of a struct at a fixed address is an address too: `sta c64.vic.border` is `sta $D020`, and `#c64.vic.background.hi` works. Fields through a pointer have no fixed address, so they are an error in assembly.
 - Low and high bytes of an address are written `.lo` and `.hi`, as in Tern: `lda #msg.lo` / `ldx #msg.hi`. The assembler-style `<` and `>` are not used, since they are comparison operators in Tern.
 - An immediate operand is a number from -128 to 255, or a byte of an address: `#name.lo`, `#name.hi`. `#name` alone is an error.
 - Labels starting with `.` are local to the block.
@@ -429,7 +443,7 @@ asm fn fill(value: u8 using A, count: u8 using X) {
 
 | Built-in | Meaning |
 |---|---|
-| `addr(name)` | Pointer to a variable or array (3.4) |
+| `addr(name)` | Pointer to a variable, array, or field of a struct variable (3.4) |
 | `sizeof(T)` | Size of a type in bytes |
 | `len(a)` | Number of elements in an array (compile-time) |
 
@@ -439,24 +453,25 @@ The standard library is ordinary Tern and `asm fn` source in the compiler's `lib
 
 **Strings and memory blocks are passed as a pointer plus a length**, matching `len()` on literals. The library has no zero-terminated variants.
 
-The tables below are the first version. Exact signatures may be refined when the library is written (roadmap M4).
+The tables below describe the library as written in M4 and M5. Work variables and tables that callers should not use are `private` (2.2).
 
 **`math`**: cycle-heavy arithmetic (the operators only work on constants, 3.1)
 
 | Function | Signature | Method |
 |---|---|---|
 | `mul8` | `(a: u8 using A, b: u8 using X) -> u16` | Shift-and-add loop: small, slower |
-| `mul8_fast` | `(a: u8 using A, b: u8 using X) -> u16` | Quarter-square tables: much faster, adds about 2 KB of tables |
-| `mul16` | `(a: u16, b: u16) -> u16` | Shift-and-add loop, low 16 bits of the product |
+| `mul8_fast` | `(a: u8 using A, b: u8 using X) -> u16` | Quarter-square tables: much faster, adds 1 KB of tables (four 256-byte tables), only when called |
+| `mul16` | `(m: u16, n: u16) -> u16` | Shift-and-add loop, low 16 bits of the product |
 | `div8` | `(a: u8 using A, b: u8 using X) -> u8` | Shift-and-subtract loop. Also sets `math.remainder8` |
-| `div16` | `(a: u16, b: u16) -> u16` | Shift-and-subtract loop. Also sets `math.remainder16` |
+| `div16` | `(n: u16, d: u16) -> u16` | Shift-and-subtract loop. Also sets `math.remainder16` |
 | `shl8`, `shr8` | `(x: u8 using A, n: u8 using X) -> u8` | Loop of `n` shifts |
 | `shl16`, `shr16` | `(x: u16 using AX, n: u8 using Y) -> u16` | Loop of `n` shifts |
 
 - Division computes the quotient and the remainder together, as in assembly. The remainder is left in a library variable (`math.remainder8`, `math.remainder16`) for the caller to read straight after the call.
 - Division by zero does not trap. The result is unspecified.
 - Multiplying or dividing by a constant needs no library call: write the shifts and adds (`(w << 5) + (w << 3)` for `w × 40`), or `& 7` for "mod 8".
-- Signed versions (`muls8`, `divs8`, ...) follow the same pattern.
+- Memory parameters of `asm fn` routines are not named `a`, since `asl a` means the accumulator (9). Arguments are positional, so callers are not affected.
+- Signed versions (`muls8`, `divs8`, ...) will follow the same pattern; they are added when a program needs them.
 
 **`mem`**: memory blocks
 
@@ -486,8 +501,13 @@ Digits are written as screen codes, which are the same as PETSCII for `0`-`9`. H
 | `chrout(ch: u8 using A)` | Print one PETSCII character through the KERNAL (`$FFD2`) |
 | `print(src: ptr u8, n: u8)` | Print a PETSCII string through the KERNAL |
 | `getin() -> u8 using A` | Read a key from the keyboard buffer; 0 if none (KERNAL `$FFE4`) |
-| `cursor(row: u8 using X, col: u8 using Y)` | Move the text cursor (KERNAL `PLOT`) |
-| VIC-II, SID and CIA register structs | Planned with structs (roadmap M5), e.g. `c64.vic.border` |
+| `cursor(row: u8 using X, col: u8 using Y)` | Move the text cursor (KERNAL `PLOT`, `$FFF0`, fixed carry clear) |
+| `get_cursor() -> u16 using XY` | Read the cursor position: row in the low byte, column in the high byte (KERNAL `PLOT`, fixed carry set) |
+| `vic: Vic @ $D000` | VIC-II registers: `sprite0_x`, `sprite0_y` ... `sprite7_y`, `sprite_x_msb`, `control1`, `raster`, `light_pen_x`, `light_pen_y`, `sprite_enable`, `control2`, `sprite_expand_y`, `memory`, `irq_status`, `irq_enable`, `sprite_priority`, `sprite_multicolor`, `sprite_expand_x`, `sprite_collision`, `sprite_bg_collision`, `border`, `background`, `background1`-`background3`, `sprite_mc0`, `sprite_mc1`, `sprite_color: [u8; 8]` |
+| `sid: Sid @ $D400` | SID registers: `voice1`-`voice3: Voice` (`freq: u16`, `pulse: u16`, `control`, `attack_decay`, `sustain_release`), `cutoff: u16`, `resonance`, `volume`, `paddle_x`, `paddle_y`, `osc3`, `env3` |
+| `cia1: Cia @ $DC00`, `cia2: Cia @ $DD00` | CIA registers: `port_a`, `port_b`, `ddr_a`, `ddr_b`, `timer_a: u16`, `timer_b: u16`, `tod_tenths`, `tod_seconds`, `tod_minutes`, `tod_hours`, `serial`, `icr`, `control_a`, `control_b` |
+
+Example: `c64.vic.border = c64.BLACK` is `lda #0` / `sta $D020`.
 
 KERNAL routines that fit 6.1 are declared as routines at a fixed address (6.6), so calls go straight to the ROM. The others are `asm fn` wrappers.
 
@@ -518,7 +538,7 @@ These are the intended translations. The optimizer may produce something shorter
 | `-x` (u8) | `lda x` / `eor #$FF` / `clc` / `adc #1` |
 | `x << 2` | `asl` / `asl` (on A or directly on memory) |
 | `(w << 5) + (w << 3)` (w: u16, i.e. w × 40) | shifts and one 16-bit add, inline |
-| `math.mul8(a, b)` | `lda a` / `ldx b` / `jsr math.mul8` (result in A/X) |
+| `math.mul8(a, b)` | `ldx b` / `lda a` / `jsr math.mul8` (A is loaded last; result in A/X) |
 | `i & 7` (i.e. i mod 8) | `lda i` / `and #7` |
 
 ## 12. Targets
@@ -594,3 +614,4 @@ Each item is decided when the feature it belongs to is built.
 8. **Language name.** "Tern" is a placeholder.
 9. **`data` at a fixed address** (`data x @ $C000 = ...`). Not supported yet, since the program image is one block. Needed for fixed-address tables and for `@ bank(n)` (item 1).
 10. **Fixed-address RAM that is not volatile.** All `@ addr` variables are volatile (section 4), which suits hardware registers such as `$D020` but blocks optimizations on plain RAM at a fixed address (a buffer at `$C000`, sprite data the program draws into). Needed: a way to mark fixed-address memory as ordinary RAM. Decide before the optimizer (roadmap M7).
+11. **Arrays of structs as struct fields** (`parts: [Point; 4]`, or the VIC's interleaved sprite x/y). Not supported yet; a limited form is wanted eventually. Discuss after a first complete version. Notes so far: a constant index is always a fixed offset; stored as tables inside the record, a variable index costs nothing extra; a `linear` field (needed for hardware layouts) could allow a variable index only when the element size is 2, 4 or 8 (a shift, as for 16-bit pointers).

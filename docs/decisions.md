@@ -130,3 +130,30 @@ Settled decisions and the reasons for them. Do not reopen one without new inform
 
 - **A compile error's test goes in the feature's test file** (`AsmTests`, `PointerTests`, `RoutineTests`, ...); `ErrorTests.cs` keeps errors with no feature file (lexer, parser, general type errors). Every error still needs a test. Reason: the error tests for a feature sit next to its other tests, and M3 already works this way. Replaces "every new compile error gets a test in `ErrorTests.cs`" in `CLAUDE.md`.
 - **The spec session owns `CLAUDE.md`**, since it holds the design rules and conventions.
+
+## 2026-11-01: M4 and M5 questions settled
+
+Provisional choices confirmed as built (status questions 1, 2, 4, 6-10, 12, 14, 16, 18-21):
+
+- **A newline inside `( )` or `[ ]` does not end a statement**, so tables and argument lists can span lines.
+- **Platform modules live in `lib/<platform>/`**; lookup is `lib/<platform>/`, `lib/`, then the importing file's folder. A platform folder can also replace a general module.
+- **`math.mul16(m, n)` / `div16(n, d)`**: `asm fn` memory parameters avoid the name `a` (`asl a` is the accumulator). `mul8_fast` uses 1 KB of tables. Signed versions are written when a program needs them.
+- **`jsr` to a routine with fixed inputs in assembly is a plain `jsr`**; the block sets them up. In assembly a name is only an address.
+- **`c64.get_cursor`** is part of the library; spec 11 shows `ldx b` / `lda a` for `math.mul8` (A is loaded last).
+- **Struct fields are separated by `,` or newlines**, with an optional trailing `,`.
+- **`[u16; n]` fields are split inside the record**, like array variables.
+- **Arrays of structs store one table per byte of the record**; `@` gaps cost a table each.
+- **No struct initial values or struct literals**; local structs are allowed without one, like local arrays; `data` cannot hold structs.
+- **Assembly may name fields of struct variables** (fixed addresses), not fields through a pointer.
+- **Struct names share the file's namespace**; offsets through a pointer must be 0-255, checked at the access.
+- **`lib/c64` register names** as listed in spec 10.1.
+
+Decided:
+
+- **Unused globals in the main file are kept** (question 3); a module's unused globals and `data` are dropped. No keyword to pin a global. Reason: in the main file an unused `@ zp` or `@ addr` global usually reserves memory on purpose; library leftovers are clutter. A pin keyword would only be needed if dropping were the default.
+- **`private` keyword for module members** (question 5). `private` before a top-level declaration limits it to its own module, also in assembly; the default stays public. Reason: a leading `_` would be either an unchecked convention or a second meaning for `_` next to `for _ in`. A keyword is explicit and keeps existing code unchanged. The library marks its work bytes and tables `private`.
+- **Overlapping struct fields stay an error** (question 11). It catches typos in register maps. Revisit if a real case appears (likely: allow overlap only between fields placed with `@`).
+- **Arrays of structs as struct fields: "not supported yet"** (question 13). A limited form is wanted eventually; discuss after a first complete version (spec 14.11).
+- **`addr()` of a field** of a struct variable or fixed-address struct (question 15): `addr(player.name)`. The address is a constant, so it costs nothing; needed to pass a field to `text.put`. Fields through a pointer or in an array of structs are errors.
+- **Spec 2.2 now states that unused module data is dropped**, not only unreachable functions (already implemented, tested in `MathLibraryTests`).
+- Still open: question 17 (`linear` on 16-bit number arrays).

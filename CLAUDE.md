@@ -26,6 +26,7 @@ src/Tern.Compiler/
   Platform.cs            target machine descriptions (C64)
   TernCompiler.cs        driver: source -> .prg, listing, labels, report
 src/Tern.Cli/            `tern` command-line tool
+src/lib/                 standard library source (.tern); platform modules in src/lib/<platform>/; copied to lib/ next to the compiler
 tests/Tern.Cpu.Tests/    CPU tests, including Klaus Dormann's 6502 functional test
 tests/Tern.Compiler.Tests/  end-to-end tests: compile, run in the emulator, check memory
 examples/                example .tern programs
