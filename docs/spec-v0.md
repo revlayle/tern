@@ -351,7 +351,14 @@ inline fn wait_frame() { ... }
 - A register is saved if any instruction in the handler changes it, including instructions in asm blocks. Any `jsr` counts as changing A, X and Y. X and Y are saved through A, so A is saved whenever X or Y is. The order is A, X, Y.
 - The handler starts with `cld`, since main may be in decimal mode (the `bcd` library, or an asm block with `sed`) when the interrupt arrives. Decimal mode only changes `adc` and `sbc`, so `cld` is left out when the handler executes neither: no `adc` or `sbc` in its code or asm blocks, and no `jsr`.
 - Code the compiler cannot follow, such as an asm `jmp` out of the handler, saves and restores registers itself.
-- A handler cannot be called, neither from Tern nor with `jsr`. Naming it in assembly (`lda #raster.lo`) or with `addr(raster)` is not a call.
+- A handler cannot be called from ordinary code, neither from Tern nor with `jsr`. Naming it in assembly (`lda #raster.lo`) or with `addr(raster)` is not a call.
+- **An `interrupt fn` may be called from another `interrupt fn`.** The called one is then compiled as a *part*: its body ending in `rts`, with no register saving and no `rti`; the installed (outer) handler saves registers once and ends with the one `rti`. Each `interrupt fn` is compiled in the forms that are used: as a handler if its address is taken, as a part if it is called. This lets a program combine library interrupt code (a sprite multiplexer, a scroller) in one handler it installs itself:
+  ```
+  interrupt fn frame() {
+      if sprites.raster() { scroll.top() }
+  }
+  ```
+  A part may have register parameters and a return value (e.g. `-> bool using carry`); such an `interrupt fn` cannot be installed (`addr()` of it is an error). A part reached from two handlers is an error, as for any function with memory (8.1).
 - Every `interrupt fn` in the main file is compiled, even if nothing installs it. A module's handler is compiled only when a compiled function names it.
 - **Installing a handler is platform specific**, done by platform library functions (e.g. in `c64`) or an asm block, using `addr()` (6.5).
 
