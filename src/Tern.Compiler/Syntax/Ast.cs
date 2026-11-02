@@ -195,6 +195,8 @@ public sealed class ForStmt(
     public VariableSymbol? Symbol { get; set; }
     /// <summary>Signed step, set by the checker: 1, -1, or the <c>step</c> value.</summary>
     public int StepValue { get; set; }
+    /// <summary>True for a step that is a u8 expression; the loop counts up and <c>StepValue</c> is 1.</summary>
+    public bool VariableStep { get; set; }
 }
 public sealed class BreakStmt(SourcePos pos) : Stmt(pos);
 

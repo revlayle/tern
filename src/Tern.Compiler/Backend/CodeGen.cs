@@ -292,8 +292,10 @@ public sealed class CodeGen
         var end = NewLabel("inline_end");
         _inlineExit = end;
         _out.Add(new Comment($"inline {f.Name}"));
-        var kept = KeptRegister(f);
-        StoreRegisterParameters(f);
+        // An inline asm fn keeps its register parameters where they arrive, as an asm fn does.
+        bool isAsm = f.Declaration!.IsAsm;
+        var kept = isAsm ? null : KeptRegister(f);
+        if (!isAsm) StoreRegisterParameters(f);
         if (kept is { } k) _reserved.Add(k);
         GenBlock(f.Declaration!.Body);
         if (kept is { } r) _reserved.Remove(r);
@@ -719,10 +721,11 @@ public sealed class CodeGen
                 }
                 else
                 {
-                    var reg = LoadIndex(ix.Index);
+                    var (index, shift) = FoldIndexOffset(ix.Index, arr);
+                    var reg = LoadIndex(index);
                     var mode = reg == Register.X ? AbsoluteX : AbsoluteY;
-                    Op(Lda, lo); Emit(Sta, mode, Var(arr));
-                    Op(Lda, hi); Emit(Sta, mode, Var(arr, HighTable(arr)));
+                    Op(Lda, lo); Emit(Sta, mode, Var(arr, shift));
+                    Op(Lda, hi); Emit(Sta, mode, Var(arr, HighTable(arr) + shift));
                 }
                 if (temp is not null) Release(temp);
                 break;
@@ -765,19 +768,20 @@ public sealed class CodeGen
             Op(Sta, Var(arr, table + (int)ci));
             return;
         }
+        var (index, shift) = FoldIndexOffset(ix.Index, arr);
         VariableSymbol? saved = null;
-        if (!IndexIsCheap(ix.Index))
+        if (!IndexIsCheap(index))
         {
             saved = AcquireTemp(1);
             Op(Sta, Var(saved));
         }
-        var reg = LoadIndex(ix.Index);
+        var reg = LoadIndex(index);
         if (saved is not null)
         {
             Op(Lda, Var(saved));
             Release(saved);
         }
-        Emit(Sta, reg == Register.X ? AbsoluteX : AbsoluteY, Var(arr, table));
+        Emit(Sta, reg == Register.X ? AbsoluteX : AbsoluteY, Var(arr, table + shift));
     }
 
     // ---------- 8-bit expressions: result in A ----------
@@ -813,6 +817,18 @@ public sealed class CodeGen
     private bool IndexIsCheap(Expr index) =>
         index is NameExpr { Symbol.Register: not null } || Simple1(index) is not null;
 
+    /// <summary>
+    /// <c>a[i - c]</c> is addressed as <c>a-c,x</c> with i in the index register, so the subtraction
+    /// costs nothing (spec 11). Only where the wrap-around of the u8 index cannot matter: i - c wraps to
+    /// 256 - c + i, which is past the end of an array shorter than 257 - c elements.
+    /// </summary>
+    private static (Expr Index, int Offset) FoldIndexOffset(Expr index, VariableSymbol array) =>
+        index is BinaryExpr { Op: TokenKind.Minus, Type.Kind: TypeKind.U8 } b
+            && b.Left.Type is { Size: 1, IsSigned: false } && b.Right.ConstValue is long c && c > 0
+            && array.Type.Length + c <= 256
+            ? (b.Left, -(int)c)
+            : (index, 0);
+
     /// <summary>Puts an array index into X or Y and returns which.</summary>
     private Register LoadIndex(Expr index)
     {
@@ -837,8 +853,9 @@ public sealed class CodeGen
             Op(Lda, Var(arr, table + (int)ci));
             return;
         }
-        var reg = LoadIndex(ix.Index);
-        Emit(Lda, reg == Register.X ? AbsoluteX : AbsoluteY, Var(arr, table));
+        var (index, shift) = FoldIndexOffset(ix.Index, arr);
+        var reg = LoadIndex(index);
+        Emit(Lda, reg == Register.X ? AbsoluteX : AbsoluteY, Var(arr, table + shift));
     }
 
     private void GenA(Expr e)
@@ -1082,10 +1099,11 @@ public sealed class CodeGen
                     Op(Lda, Var(arr, HighTable(arr) + (int)ci)); Op(Sta, d.Hi);
                     return;
                 }
-                var reg = LoadIndex(ix.Index);
+                var (index, shift) = FoldIndexOffset(ix.Index, arr);
+                var reg = LoadIndex(index);
                 var mode = reg == Register.X ? AbsoluteX : AbsoluteY;
-                Emit(Lda, mode, Var(arr)); Op(Sta, d.Lo);
-                Emit(Lda, mode, Var(arr, HighTable(arr))); Op(Sta, d.Hi);
+                Emit(Lda, mode, Var(arr, shift)); Op(Sta, d.Lo);
+                Emit(Lda, mode, Var(arr, HighTable(arr) + shift)); Op(Sta, d.Hi);
                 return;
             }
 
@@ -1707,7 +1725,7 @@ public sealed class CodeGen
         var cont = NewLabel("fnext");
         var top = NewLabel("for");
 
-        if (from is not null && to is not null)
+        if (from is not null && to is not null && !f.VariableStep)
         {
             long span = up ? to.Value - from.Value : from.Value - to.Value;
             long count = inclusive ? (span < 0 ? 0 : span / d + 1) : (span <= 0 ? 0 : (span + d - 1) / d);
@@ -1732,6 +1750,12 @@ public sealed class CodeGen
             }
         }
 
+        if (f.VariableStep && from is not null && to is not null && (inclusive ? from > to : from >= to))
+        {
+            _out.Add(new Comment("empty loop: no code"));
+            return;
+        }
+
         // The end bound is evaluated once, before the loop.
         VariableSymbol? boundTemp = null;
         (Operand Lo, Operand Hi) bound;
@@ -1746,6 +1770,22 @@ public sealed class CodeGen
             if (type.Size == 1) { GenA(f.To); Op(Sta, Var(boundTemp)); }
             else Gen16(f.To, new Loc(boundTemp));
             bound = (Var(boundTemp), Var(boundTemp, 1));
+        }
+
+        // A variable step is evaluated once too: used in place if it is a local the body does not change.
+        VariableSymbol? stepTemp = null;
+        Operand? stepOperand = null;
+        if (f.VariableStep)
+        {
+            if (f.Step is NameExpr { Symbol: { InMemory: true, AliasOf: null, Kind: VariableKind.Local or VariableKind.Parameter } sv }
+                && sv.Type.Size == 1 && sv != c && !sv.AddressTaken && !AssignsVar(f.Body, sv))
+                stepOperand = Var(sv);
+            else
+            {
+                stepTemp = AcquireTemp(1);
+                GenA(f.Step!); Op(Sta, Var(stepTemp));
+                stepOperand = Var(stepTemp);
+            }
         }
 
         SetCounter(c, f.From);
@@ -1775,13 +1815,14 @@ public sealed class CodeGen
         _loops.RemoveAt(_loops.Count - 1);
         Place(cont);
 
-        if (type.Size == 1 && d == 1)
+        if (type.Size == 1 && d == 1 && !f.VariableStep)
             StepByOne(c, up, inclusive, from, to, bound, top, end);
         else
-            StepGeneral(c, up, d, inclusive, bound, top, end);
+            StepGeneral(c, up, stepOperand ?? Byte(d), inclusive, to, bound, top, end);
 
         Place(end);
         if (c.Register is { } r) _reserved.Remove(r);
+        if (stepTemp is not null) Release(stepTemp);
         if (boundTemp is not null) Release(boundTemp);
     }
 
@@ -2011,18 +2052,18 @@ public sealed class CodeGen
     }
 
     /// <summary>The end of a loop with a larger step or a 16-bit counter.</summary>
-    private void StepGeneral(VariableSymbol c, bool up, int d, bool inclusive, (Operand Lo, Operand Hi) bound, Label top, Label end)
+    private void StepGeneral(VariableSymbol c, bool up, Operand step, bool inclusive, long? to, (Operand Lo, Operand Hi) bound, Label top, Label end)
     {
         if (c.Register is { } reg)
         {
             Emit(reg == Register.X ? Txa : Tya);
-            if (up) { Emit(Clc); Op(Adc, Byte(d)); } else { Emit(Sec); Op(Sbc, Byte(d)); }
+            if (up) { Emit(Clc); Op(Adc, step); } else { Emit(Sec); Op(Sbc, step); }
             Emit(reg == Register.X ? Tax : Tay);
         }
         else
         {
             Op(Lda, Var(c));
-            if (up) { Emit(Clc); Op(Adc, Byte(d)); } else { Emit(Sec); Op(Sbc, Byte(d)); }
+            if (up) { Emit(Clc); Op(Adc, step); } else { Emit(Sec); Op(Sbc, step); }
             Op(Sta, Var(c));
             if (c.Type.Size == 2)
             {
@@ -2031,6 +2072,13 @@ public sealed class CodeGen
                 Op(Sta, Var(c, 1));
             }
         }
+        // Up to 255 inclusive: the carry is the whole test, so the loop goes on while there is none.
+        if (up && inclusive && c.Type.Size == 1 && to == 255)
+        {
+            Branch(Bcc, top);
+            return;
+        }
+
         // Leave if the counter went past the end of its type.
         Branch(up ? Bcs : Bcc, end);
 

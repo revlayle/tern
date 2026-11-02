@@ -172,4 +172,30 @@ public class BenchmarkTests
             $"Benchmark results differ from tests/benchmarks/baseline.txt:\n{changes}\n" +
             $"If the change is intended, run the tests with TERN_UPDATE_BENCHMARKS=1 to record it.\n\n{table}");
     }
+
+    /// <summary>The instructions of main between a label and the next, as mnemonics (M9: same as the assembly).</summary>
+    [Fact]
+    public void The_sieve_inner_loop_is_the_loop_of_the_assembly_version()
+    {
+        string dir = Directory_;
+        var path = Path.Combine(dir, "sieve.tern");
+        var listing = TernCompiler.Compile(File.ReadAllText(path), sourcePath: path).Listing
+            .Split((char)10).Select(l => l.TrimEnd((char)13)).ToList();
+        int start = listing.FindIndex(l => l.StartsWith("main.for"));
+        int end = listing.FindIndex(start, l => l.StartsWith("main.fend"));
+        var tern = listing[start..end].Where(l => l.StartsWith('$')).Select(l => l[17..].Split(';')[0].Trim().Split(' ')[0]).ToList();
+
+        // The loop of asm/sieve.asm, from "mark" to its bcc.
+        var asm = File.ReadAllLines(Path.Combine(dir, "asm", "sieve.asm"));
+        int mark = Array.FindIndex(asm, l => l.StartsWith("mark"));
+        var expected = new List<string>();
+        for (int k = mark; ; k++)
+        {
+            var op = asm[k].Split(';')[0].Trim();
+            if (k == mark) op = op["mark".Length..].Trim();
+            expected.Add(op.Split(' ', StringSplitOptions.RemoveEmptyEntries)[0]);
+            if (expected[^1] == "bcc") break;
+        }
+        Assert.Equal(expected, tern);
+    }
 }

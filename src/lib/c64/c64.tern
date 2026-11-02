@@ -173,11 +173,11 @@ asm fn set_nmi(handler: u16 using XY) {
 }
 
 // Allow IRQs (cli).
-inline fn interrupts_on() {
-    asm { cli }
+inline asm fn interrupts_on() {
+    cli
 }
 
 // Hold IRQs off (sei). NMIs still happen.
-inline fn interrupts_off() {
-    asm { sei }
+inline asm fn interrupts_off() {
+    sei
 }

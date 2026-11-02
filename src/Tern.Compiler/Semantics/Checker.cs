@@ -231,6 +231,9 @@ public sealed partial class Checker
                 // An asm fn or a fixed-address routine uses register parameters where they arrive; they have no memory.
                 if (decl.IsAsm || decl.Address is not null) param.Register = reg;
             }
+            else if (decl.IsAsm && decl.IsInline)
+                throw new CompileError(p.Pos,
+                    $"Parameter '{p.Name}' of an inline asm fn must be passed in a register (using A, X, Y, AX, AY or XY): it is copied into each caller, which has no memory for it");
             else if (decl.Address is not null)
                 throw new CompileError(p.Pos,
                     $"Parameter '{p.Name}' must be passed in a register (using A, X, Y, AX, AY or XY): a routine at a fixed address has no memory for parameters");
@@ -565,6 +568,13 @@ public sealed partial class Checker
 
         CheckBlock(decl.Body, newScope: false);
 
+        // Copied into the caller, an rts or rti would end the caller too.
+        if (decl is { IsAsm: true, IsInline: true })
+            foreach (var ins in ((AsmStmt)decl.Body.Statements[0]).Lines.OfType<AsmInstruction>())
+                if (ins.Mnemonic is Tern.Cpu.Mnemonic.Rts or Tern.Cpu.Mnemonic.Rti)
+                    throw new CompileError(ins.Pos,
+                        $"'{ins.Mnemonic.ToString().ToLowerInvariant()}' in an inline asm fn would end the function that calls it, since the code is copied there. Remove it: the code simply runs on after the copy");
+
         if (_function.ReturnType.Kind != TypeKind.Void && !decl.IsAsm && !AlwaysReturns(decl.Body))
             throw new CompileError(decl.Pos, $"'{decl.Name}' can reach its end without returning a value");
 
@@ -720,11 +730,13 @@ public sealed partial class Checker
         Coerce(f.To, type);
 
         long? from = f.From.ConstValue, to = f.To.ConstValue;
-        if (f.Step is not null)
+        if (f.Step is not null) CheckExpr(f.Step);
+        if (f.Step is { ConstValue: null, Type.IsInteger: true })
+            CheckVariableStep(f, type, from, to);
+        else if (f.Step is not null)
         {
-            CheckExpr(f.Step);
             if (f.Step.ConstValue is not long step || step == 0)
-                throw new CompileError(f.Step.Pos, "'step' must be a non-zero constant");
+                throw new CompileError(f.Step.Pos, "'step' must be a non-zero constant, or a u8 variable in a loop that counts up with a u8 counter");
             if (Math.Abs(step) > 127)
                 throw new CompileError(f.Step.Pos, "'step' must be between -127 and 127");
             if (from is not null && to is not null && from != to && (to > from) != (step > 0))
@@ -769,6 +781,22 @@ public sealed partial class Checker
         _scopes.RemoveAt(_scopes.Count - 1);
 
         if (f.UsingRegister is { } r) _loopRegisters.Remove(r);
+    }
+
+    /// <summary>A step that is not a constant (spec 5.1): a u8 value, in a loop that counts up with a u8 counter.</summary>
+    private static void CheckVariableStep(ForStmt f, TernType counter, long? from, long? to)
+    {
+        var step = f.Step!;
+        if (step.Type.IsSigned)
+            throw new CompileError(step.Pos, $"A variable step must be a u8, but this is {step.Type}: a variable step cannot be negative");
+        if (step.Type.Size != 1)
+            throw new CompileError(step.Pos, $"A variable step must be a u8, but this is {step.Type}. Convert with 'as u8' if it always fits");
+        if (counter.Size != 1 || counter.IsSigned)
+            throw new CompileError(step.Pos, $"A variable step needs a u8 loop counter, but the bounds are {counter}. Use a constant step, or u8 bounds");
+        if ((from is not null && to is not null && to < from) || (from is null && to == 0))
+            throw new CompileError(step.Pos, "A variable step cannot be used in a loop that counts down. Count up, or use a constant negative step");
+        f.VariableStep = true;
+        f.StepValue = 1;
     }
 
     /// <summary>An index that is the counter of a constant-bounds loop must stay inside the array (spec 3.2).</summary>

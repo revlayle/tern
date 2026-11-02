@@ -123,7 +123,7 @@ public class OptimizerTests
     [Theory]
     [InlineData("f()")]
     [InlineData("p[0] = 9")]
-    [InlineData("asm {\n nop\n }")]
+    [InlineData("asm {\n lda #7\n sta $C100\n }")]
     public void Calls_pointer_writes_and_assembly_make_the_optimizer_forget(string between)
     {
         var r = Run.Program($$"""
@@ -139,7 +139,56 @@ public class OptimizerTests
             }
             """);
         Assert.Contains("lda x / sta v", Main(r));
-        Assert.Equal(between == "asm {\n nop\n }" ? 4 : 9, r.U8("v"));
+        Assert.Equal(between.StartsWith("asm") ? 7 : 9, r.U8("v"));
+    }
+
+    [Theory]
+    [InlineData("nop", true)]
+    [InlineData("cli", true)]
+    [InlineData("sei", true)]
+    [InlineData("ldy $D012", true)]     // changes Y and the flags, not A or memory
+    [InlineData("lda #1", false)]       // changes A
+    [InlineData("sta $D020", false)]    // a write to a fixed address may change any variable
+    [InlineData("inc $D020", false)]
+    public void Assembly_forgets_only_what_it_changes(string instruction, bool kept)
+    {
+        var r = Run.Program($$"""
+            var x: u8
+            var y: u8
+            fn main() {
+                x = 5
+                asm {
+                    {{instruction}}
+                }
+                y = x
+            }
+            """);
+        // A held 5 (the value just stored in x). Kept: "sta y" follows the block with no reload.
+        Assert.Equal(kept, !Main(r).Contains("lda x"));
+        Assert.Equal(5, r.U8("y"));
+    }
+
+    [Fact]
+    public void Assembly_that_writes_a_variable_makes_the_optimizer_forget_only_that_one()
+    {
+        var r = Run.Program("""
+            var x: u8
+            var y: u8
+            var z: u8
+            fn main() {
+                x = 5
+                y = 6
+                asm {
+                    inc x
+                }
+                z = y
+                y = x
+            }
+            """);
+        Assert.Equal(6, r.U8("y"));
+        Assert.Equal(6, r.U8("z"));
+        // A held 6 and the block did not change it, so "sta z" needs no load; x was changed, so it is loaded again.
+        Assert.Contains("inc x / sta z / lda x / sta y", Main(r));
     }
 
     [Fact]
@@ -204,6 +253,246 @@ public class OptimizerTests
             }
             """);
         Assert.Equal(3, r.U8("r"));
+    }
+
+    [Fact]
+    public void A_transfer_back_is_removed_when_the_registers_are_still_equal()
+    {
+        var r = Run.Program("""
+            var a: [u8; 256]
+            var n: u8 = 3
+            fn main() {
+                for m in 6..=255 step n using Y { a[m] = m }
+            }
+            """);
+        // The step is copied once before the loop (a global may change); inside, A already holds Y after the sta.
+        Assert.Contains("tya / sta a,y / clc / adc main._t0 / tay / bcc ", Main(r));
+        Assert.Equal(6, r.U8("a", 6));
+        Assert.Equal(252, r.U8("a", 252));
+        Assert.Equal(0, r.U8("a", 7));
+    }
+
+    [Fact]
+    public void Equal_registers_are_forgotten_when_one_is_loaded_again()
+    {
+        // txa / tay makes A, X and Y equal; the second loop's txa copies a different X, so tay must stay.
+        var r = Run.Program("""
+            var src: [u8; 4] = [5, 6, 7, 8]
+            var dst: [u8; 4]
+            fn main() {
+                var s: ptr u8 = addr(src)
+                var d: ptr u8 = addr(dst)
+                for i in 0..4 using X { d[i] = s[i] }
+                for i in 0..4 using X { s[i] += 1 }
+            }
+            """);
+        Assert.Equal([5, 6, 7, 8], r.Ram.Bytes.AsSpan(r.Address("dst"), 4).ToArray());
+        Assert.Equal([6, 7, 8, 9], r.Ram.Bytes.AsSpan(r.Address("src"), 4).ToArray());
+    }
+
+    [Theory]
+    [InlineData(0x00)]
+    [InlineData(0x01)]
+    [InlineData(0x7F)]
+    [InlineData(0x80)]
+    [InlineData(0xFF)]
+    [InlineData(0xA5)]
+    public void A_bit_7_test_followed_by_shifts_in_both_arms_is_one_shift_and_a_carry_test(int start)
+    {
+        var r = Run.Program($$"""
+            var set_arm: u8 = {{start}}
+            var clear_arm: u8 = {{start}}
+            var plain: u8 = {{start}}
+            fn main() {
+                for _ in 0..8 {
+                    if set_arm & $80 != 0 { set_arm = (set_arm << 1) ^ $07 } else { set_arm = set_arm << 1 }
+                    if clear_arm & $80 == 0 { clear_arm = clear_arm << 1 } else { clear_arm = (clear_arm << 1) ^ $1D }
+                    if plain & $80 != 0 { plain = plain << 1 }
+                }
+            }
+            """);
+        byte a = (byte)start, b = (byte)start, c = (byte)start;
+        for (int k = 0; k < 8; k++)
+        {
+            a = (byte)((a & 0x80) != 0 ? (a << 1) ^ 0x07 : a << 1);
+            b = (byte)((b & 0x80) == 0 ? b << 1 : (b << 1) ^ 0x1D);
+            if ((c & 0x80) != 0) c = (byte)(c << 1);
+        }
+        Assert.Equal(a, r.U8("set_arm"));
+        Assert.Equal(b, r.U8("clear_arm"));
+        Assert.Equal(c, r.U8("plain"));
+        // Two folded tests: no "and #$80" is left except the one-armed test, which has no second shift to share.
+        Assert.Equal(1, Main(r).Split("and #$80").Length - 1);
+        Assert.Contains("asl a / bcc ", Main(r));
+        Assert.Contains("asl a / bcs ", Main(r));
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1)]
+    public void A_load_is_removed_before_a_jump_to_code_that_sets_the_flags(int c)
+    {
+        // N and Z are not read on any path after the second "ldx sp", so it can go although a jmp follows.
+        var r = Run.Program($$"""
+            var stack: [u8; 16] = [0, 4, 5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+            var sp: u8 = 2
+            var c: u8 = {{c}}
+            fn main() {
+                if c != 0 { stack[sp - 1] = stack[sp - 1] + stack[sp] } else { sp = 7 }
+            }
+            """);
+        Assert.Equal(c == 1 ? 9 : 4, r.U8("stack", 1));
+        Assert.Equal(c == 1 ? 2 : 7, r.U8("sp"));
+        Assert.Equal(1, Main(r).Split("ldx sp").Length - 1);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1)]
+    [InlineData(2)]
+    [InlineData(9)]
+    public void A_jump_to_a_jump_goes_to_the_final_target(int op)
+    {
+        // The if at the end of the first arm ends in "jmp endif", where endif: is only "jmp mend".
+        var r = Run.Program($$"""
+            var out: u8
+            var n: u8 = {{op}}
+            var f: u8 = 1
+            fn main() {
+                match n {
+                    0 => { if f != 0 { out = 10 } else { out = 11 } }
+                    1 => out = 20
+                    _ => out = 30
+                }
+            }
+            """);
+        Assert.Equal(op == 0 ? 10 : op == 1 ? 20 : 30, r.U8("out"));
+        var code = Main(r);
+        Assert.DoesNotContain("jmp main.endif", code);
+    }
+
+    [Fact]
+    public void The_bit_7_fold_needs_a_plain_load_not_an_indexed_one()
+    {
+        // A holds a[0]; the arms load a[i], which is a different byte.
+        var r = Run.Program("""
+            var a: [u8; 4]
+            var b: [u8; 4]
+            fn main() {
+                a[0] = $80
+                a[1] = 1
+                a[2] = 2
+                a[3] = 3
+                for i in 0..4 {
+                    var t: u8 = a[0]
+                    if t & $80 != 0 { b[i] = a[i] << 1 } else { b[i] = a[i] << 1 }
+                }
+            }
+            """);
+        Assert.Equal([0, 2, 4, 6], r.Ram.Bytes.AsSpan(r.Address("b"), 4).ToArray());
+    }
+
+    [Fact]
+    public void Assembly_that_patches_its_own_code_makes_the_optimizer_forget()
+    {
+        var r = Run.Program("""
+            var out: u8
+            fn main() {
+                var v: u8 = 7
+                asm {
+                    lda v
+                    sta .smc+1
+                .smc:
+                    lda #0
+                }
+                out = 0
+            }
+            """);
+        Assert.Equal(0, r.U8("out"));
+    }
+
+    [Fact]
+    public void An_index_register_is_loaded_once_for_several_arrays_with_the_same_index()
+    {
+        var r = Run.Program("""
+            var a: [u8; 4] = [1, 2, 3, 4]
+            var c: [u8; 4] = [10, 20, 30, 40]
+            var b: [u8; 4]
+            fn main() {
+                var i: u8 = 2
+                b[i] = a[i] + c[i]
+            }
+            """);
+        Assert.Equal(33, r.U8("b", 2));
+        Assert.Equal(1, Main(r).Split("ldx main.i").Length - 1);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(3)]
+    public void A_while_test_after_a_body_ending_in_asm_reads_that_blocks_flag(int start)
+    {
+        var r = Run.Program($$"""
+            var n: u8 = {{start}}
+            var count: u8
+            inline asm fn is_zero() -> bool using zero {}
+            fn main() {
+                asm { lda n }
+                while !is_zero() {
+                    count += 1
+                    asm {
+                        dec n
+                        lda n
+                    }
+                }
+            }
+            """);
+        Assert.Equal(start, r.U8("count"));
+    }
+
+    [Fact]
+    public void Nothing_but_the_branch_lies_between_a_bodys_last_asm_and_the_while_test()
+    {
+        var r = Run.Program("""
+            var n: u8 = 3
+            var count: u8
+            inline asm fn is_zero() -> bool using zero {}
+            fn main() {
+                asm { lda n }
+                while !is_zero() {
+                    count += 1
+                    asm {
+                        dec n
+                        lda n
+                    }
+                }
+            }
+            """);
+        var code = r.Result.Listing.Split((char)10).Where(l => l.StartsWith('$')).ToList();
+        int last = code.FindLastIndex(c => c.Contains(" lda n "));
+        Assert.Contains(" bne ", code[last + 1]);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(7)]
+    public void Code_patched_from_another_function_is_not_trusted(int v)
+    {
+        var r = Run.Program($$"""
+            var out: u8
+            fn g() {
+                asm { lda #0 }
+                out = 0
+            }
+            fn main() {
+                asm {
+                    lda #{{v}}
+                    sta g+1
+                }
+                g()
+            }
+            """);
+        Assert.Equal(0, r.U8("out"));
     }
 }
 

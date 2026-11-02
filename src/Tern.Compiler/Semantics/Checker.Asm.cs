@@ -216,6 +216,9 @@ public sealed partial class Checker
         effects.Reads |= reads;
         effects.Writes |= writes;
         if (ins.Mnemonic == Mnemonic.Jsr) effects.Calls = true;
+        // sta g+1: the assembly patches the code of g, so the optimizer cannot trust g's own instructions.
+        if (ins.Value?.Function is { } patched && (AsmEffects.WritesMemory(ins.Mnemonic, ins.Mode) || ins.Mnemonic is Mnemonic.Sta or Mnemonic.Stx or Mnemonic.Sty))
+            patched.CodePatched = true;
 
         // A register that holds a loop variable must survive the block.
         foreach (var reg in _loopRegisters)

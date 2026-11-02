@@ -6,10 +6,9 @@ fn main() {
     var n: u8 = 2
     while n < 16 {
         if composite[n] == 0 {
-            var m: u16 = (n as u16) << 1
-            while m < 256 {
-                composite[m.lo] = 1
-                m += n as u16
+            // Any non-zero value marks a number: store m itself.
+            for m in (n << 1)..=255 step n using Y {
+                composite[m] = m
             }
         }
         n += 1

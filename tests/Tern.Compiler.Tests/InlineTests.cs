@@ -231,7 +231,6 @@ public class InlineTests
     }
 
     [Theory]
-    [InlineData("inline asm fn f() {\n rts\n }\nfn main() { }", "'inline asm fn' is not supported yet")]
     [InlineData("inline var x: u8\nfn main() { }", "'inline' goes before 'fn'")]
     [InlineData("inline interrupt fn f() { }\nfn main() { }", "'inline' goes before 'fn'")]
     [InlineData("interrupt inline fn f() { }\nfn main() { }", "'interrupt' goes before 'fn'")]
