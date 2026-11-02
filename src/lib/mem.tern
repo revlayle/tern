@@ -27,3 +27,27 @@ fn fill(dst: ptr u8, value: u8, count: u16) {
         dst[i] = value
     }
 }
+
+// Copy count bytes from src to dst, last byte first. Overlapping blocks
+// work when dst is above src (for dst below src use copy).
+fn copy_back(dst: ptr u8, src: ptr u8, count: u16) {
+    // Start at the whole pages' end: the loose bytes above them go first, then the pages from the top.
+    var pages: u16 = (count.hi as u16) << 8
+    dst += pages
+    src += pages
+    var i: u8 = count.lo
+    while i != 0 {
+        i -= 1
+        dst[i] = src[i]
+    }
+    for _ in 0..count.hi {
+        dst -= 256
+        src -= 256
+        var j: u8 = 0
+        while true {
+            j -= 1
+            dst[j] = src[j]
+            if j == 0 { break }
+        }
+    }
+}
