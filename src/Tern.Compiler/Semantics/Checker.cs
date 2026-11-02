@@ -316,9 +316,13 @@ public sealed partial class Checker
         // A string or include_bytes() gives a [u8; N] array, which may be longer than 256 bytes.
         var bytes = decl.Init is null ? null : ByteSource(decl.Init);
         var type = bytes is not null && decl.TypeSyntax is null ? TernType.ArrayOf(TernType.U8, bytes.Length) : DeclaredType(decl);
-        var v = new VariableSymbol(_module.Qualify(decl.Name), decl.Pos, type, VariableKind.Global, null) { IsData = decl.IsData };
+        var v = new VariableSymbol(_module.Qualify(decl.Name), decl.Pos, type, VariableKind.Global, null) { IsData = decl.IsData, NoInit = decl.IsNoinit };
         decl.Symbol = v;
         ApplyPlacement(decl, v, allowAddress: true);
+        if (decl.IsNoinit && decl.Init is not null)
+            throw new CompileError(decl.Init.Pos, $"'{decl.Name}' is noinit, so it cannot have an initial value. Leave out one or the other");
+        if (decl.IsNoinit && v.FixedAddress is not null)
+            throw new CompileError(decl.Pos, $"'{decl.Name}' is at a fixed address, which is never zeroed; leave out 'noinit'");
 
         if (decl.IsData && (type.IsStruct || type.IsStructArray))
             throw new CompileError(decl.Pos, "Data cannot hold structs yet. Use a var, or data arrays of numbers");

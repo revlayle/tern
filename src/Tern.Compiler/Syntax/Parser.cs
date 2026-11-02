@@ -84,7 +84,7 @@ public sealed class Parser
             {
                 var p = Advance();
                 if (!(Current.Kind is TokenKind.Const or TokenKind.Var or TokenKind.Linear or TokenKind.Struct or TokenKind.Data or TokenKind.Fn
-                      or TokenKind.Interrupt || (At(TokenKind.Asm) && PeekAt(1).Kind == TokenKind.Fn)))
+                      or TokenKind.Interrupt or TokenKind.Noinit || (At(TokenKind.Asm) && PeekAt(1).Kind == TokenKind.Fn)))
                     throw new CompileError(p.Pos, $"'private' goes before a declaration (const, var, data, struct or fn); found {Describe(Current)}");
                 privateNames.Add(ParseDeclaration());
             }
@@ -107,6 +107,17 @@ public sealed class Parser
                 case TokenKind.Struct: { var d = ParseStruct(); structs.Add(d); return d.Name; }
                 case TokenKind.Data: { var d = ParseData(); globals.Add(d); return d.Name; }
                 case TokenKind.Fn: { var d = ParseFn(); functions.Add(d); return d.Name; }
+                case TokenKind.Noinit:
+                {
+                    var t = Advance();
+                    if (!At(TokenKind.Var) && !At(TokenKind.Linear))
+                        throw new CompileError(t.Pos, $"'noinit' goes before 'var', e.g. 'noinit var buffer: [u8; 256]'; found {Describe(Current)}");
+                    var d = At(TokenKind.Linear) ? ParseLinearVar() : ParseVar();
+                    if (d.IsData) throw new CompileError(t.Pos, "'noinit' is for variables; data is never zeroed");
+                    d.IsNoinit = true;
+                    globals.Add(d);
+                    return d.Name;
+                }
                 case TokenKind.Interrupt:
                 {
                     var t = Advance();
@@ -141,7 +152,7 @@ public sealed class Parser
     /// <summary>Keywords from the spec that this compiler version does not implement yet.</summary>
     private void RejectUnsupported()
     {
-        if (Current.Kind is TokenKind.Inline or TokenKind.Noinit)
+        if (Current.Kind is TokenKind.Inline)
             throw new CompileError(Current.Pos, $"'{Current.Text}' is not supported yet");
     }
 
@@ -386,6 +397,8 @@ public sealed class Parser
                 throw new CompileError(Current.Pos, "'asm fn' must be declared outside functions");
             case TokenKind.Interrupt:
                 throw new CompileError(Current.Pos, "'interrupt fn' must be declared outside functions");
+            case TokenKind.Noinit:
+                throw new CompileError(Current.Pos, "'noinit' is for global variables; local variables are never zeroed");
             case TokenKind.Asm:
                 Advance();
                 return ParseAsmBody();

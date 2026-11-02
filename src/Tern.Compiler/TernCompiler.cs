@@ -70,7 +70,7 @@ public static class TernCompiler
         }
         // Variables after the program start at bss. Move them all, if needed, so that no jmp (...)
         // vector among them starts at an address ending in $FF.
-        var ramVectors = plan.ZeroedGlobals.Concat(plan.FrameVariables)
+        var ramVectors = plan.ZeroedGlobals.Concat(plan.NoinitGlobals).Concat(plan.FrameVariables)
             .SelectMany(e => e.Var.JumpVectorOffsets.Select(o => e.Offset + o)).ToList();
         if (ramVectors.Count > 0)
             items.Add(new Padding(pc => AvoidPageEnd(pc, ramVectors), "no jmp (...) vector may start at $xxFF"));
@@ -80,7 +80,7 @@ public static class TernCompiler
         var code = Assembler.Assemble(items, platform.CodeStart, end =>
         {
             foreach (var (g, label) in imageLabels) g.Address = label.Address;
-            foreach (var (v, offset) in plan.ZeroedGlobals) v.Address = end + offset;
+            foreach (var (v, offset) in plan.ZeroedGlobals.Concat(plan.NoinitGlobals)) v.Address = end + offset;
             foreach (var (v, offset) in plan.FrameVariables) v.Address = end + offset;
             ramEnd = end + plan.TotalSize - 1;
             if (ramEnd > platform.RamEnd)
@@ -135,13 +135,13 @@ public static class TernCompiler
             if (offsets.All(o => ((pc + skip + o) & 0xFF) != 0xFF)) return skip;
     }
 
-    /// <summary>Startup code: set up zero-page globals and clear the uninitialized ones in RAM.</summary>
+    /// <summary>Startup code: set up zero-page globals and clear the uninitialized ones in RAM (except noinit ones).</summary>
     private static List<AsmItem> Startup(RamPlan plan, Label bss)
     {
         var items = new List<AsmItem> { new Instr(Cld) };
 
         int? a = null;
-        foreach (var g in plan.ZeroPageGlobals)
+        foreach (var g in plan.ZeroPageGlobals.Where(g => !g.NoInit))
         {
             var bytes = MemoryLayout(g, g.InitialBytes ?? new byte[g.Type.Size]);
             for (int i = 0; i < bytes.Length; i++)

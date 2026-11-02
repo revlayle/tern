@@ -162,6 +162,8 @@ public sealed class VariableSymbol(string name, SourcePos pos, TernType type, Va
     public bool ReadOnly { get; set; }
     /// <summary>Initial bytes for globals (null means zero).</summary>
     public byte[]? InitialBytes { get; set; }
+    /// <summary>A global declared <c>noinit</c>: not zeroed at startup.</summary>
+    public bool NoInit { get; init; }
     /// <summary>Declared with <c>data</c>: read-only, stored in the program image.</summary>
     public bool IsData { get; set; }
     /// <summary>A pointer read or written through with <c>p[i]</c>. It must be in zero page.</summary>

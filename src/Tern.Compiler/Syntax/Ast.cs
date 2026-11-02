@@ -144,6 +144,8 @@ public sealed class VarDecl(SourcePos pos, string name, TypeSyntax? type, Placem
     public bool IsData { get; init; }
     /// <summary>Declared <c>linear var</c>: an array of structs stored as whole records.</summary>
     public bool IsLinear { get; init; }
+    /// <summary>Declared <c>noinit var</c>: a global that is not zeroed at startup.</summary>
+    public bool IsNoinit { get; set; }
     public VariableSymbol? Symbol { get; set; }
 }
 public sealed class AssignStmt(SourcePos pos, Expr target, TokenKind op, Expr value) : Stmt(pos)
