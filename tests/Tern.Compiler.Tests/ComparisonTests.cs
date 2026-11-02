@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Text;
 using System.Text.RegularExpressions;
+using Tern.Compiler;
 using Tern.Cpu;
 
 namespace Tern.Compiler.Tests;
@@ -18,19 +19,6 @@ public class ComparisonTests
     private const long MaxCycles = 20_000_000;
     private const ushort Sentinel = 0xFFF0;
 
-    private static string BenchmarkDirectory
-    {
-        get
-        {
-            for (var dir = new DirectoryInfo(AppContext.BaseDirectory); dir is not null; dir = dir.Parent)
-            {
-                var path = Path.Combine(dir.FullName, "tests", "benchmarks");
-                if (Directory.Exists(path)) return path;
-            }
-            throw new DirectoryNotFoundException($"tests/benchmarks not found above {AppContext.BaseDirectory}");
-        }
-    }
-
     private sealed record Measure(int Bytes, long Cycles);
 
     [Fact]
@@ -38,7 +26,7 @@ public class ComparisonTests
     {
         if (Environment.GetEnvironmentVariable("TERN_COMPARE") != "1") return;
 
-        string dir = BenchmarkDirectory;
+        string dir = BenchmarkTests.Directory_;
         string work = Path.Combine(Path.GetTempPath(), "tern-compare-" + Guid.NewGuid().ToString("N")[..8]);
         Directory.CreateDirectory(work);
         var names = BenchmarkTests.Checks.Keys.Order(StringComparer.Ordinal).ToList();
@@ -47,10 +35,7 @@ public class ComparisonTests
         {
             foreach (var name in names)
             {
-                var path = Path.Combine(dir, name + ".tern");
-                var run = Run.Program(File.ReadAllText(path), sourcePath: path, maxCycles: MaxCycles);
-                BenchmarkTests.Checks[name](new Results(run.Ram, (n, o) => run.Address(n) + o));
-                var tern = new Measure(run.Result.Image.Length, run.Cpu.Cycles);
+                var tern = RunTern(dir, name);
 
                 rows.Add((name, tern, RunAsm(dir, work, name), RunProg8(dir, work, name), RunC(dir, work, name)));
             }
@@ -60,6 +45,25 @@ public class ComparisonTests
             try { Directory.Delete(work, true); } catch (IOException) { }
         }
         File.WriteAllText(Path.Combine(dir, "comparison.md"), Report(rows));
+    }
+
+    // ---- Tern ----
+
+    /// <summary>Bytes from the label <c>main</c> to the end of the image, and the cycles from entering main to its rts, as for the others.</summary>
+    private static Measure RunTern(string dir, string name)
+    {
+        var path = Path.Combine(dir, name + ".tern");
+        var result = TernCompiler.Compile(File.ReadAllText(path), sourcePath: path);
+        var ram = new Ram();
+        ram.Load((ushort)result.LoadAddress, result.Image);
+        var cpu = new Cpu6502(ram) { PC = (ushort)result.Entry, SP = 0xFF, I = true };
+        int main = result.Symbols["main"];
+        while (cpu.PC != main) Step(cpu, name + ".tern startup");
+        long from = cpu.Cycles;
+        while (cpu.PC != result.HaltAddress) Step(cpu, name + ".tern");
+        long cycles = cpu.Cycles - from;
+        Verify(name, new Results(ram, (n, o) => result.Symbols[n] + o), "Tern");
+        return new Measure(result.LoadAddress + result.Image.Length - main, cycles);
     }
 
     // ---- hand-written assembly ----
@@ -74,7 +78,7 @@ public class ComparisonTests
         int load = file[0] | (file[1] << 8);
         ram.Load((ushort)load, file.AsSpan(2));
         var symbols = ParseLabels(File.ReadAllLines(labels), @"^(\w+)\s*=\s*\$([0-9a-fA-F]+)");
-        long cycles = CallRoutine(ram, symbols["start"], out _);
+        long cycles = CallRoutine(ram, symbols["start"]);
         Verify(name, new Results(ram, (n, o) => symbols[n] + o), "assembly");
         return new Measure(file.Length - 2, cycles);
     }
@@ -95,10 +99,8 @@ public class ComparisonTests
         var monitor = ParseLabels(File.ReadAllLines(Path.Combine(work, name + ".vice-mon-list")), @"^al\s+([0-9a-fA-F]+)\s+\.(\S+)", addressFirst: true);
         var asmLines = File.ReadAllLines(Path.Combine(work, name + ".asm"));
 
-        // The entry code is `cld; tsx; stx; jsr init_system_phase2; jsr start; jmp cleanup_at_exit`.
-        int entry = monitor["prog8_entrypoint"];
-        int start = ram.Bytes[entry + 9] | (ram.Bytes[entry + 10] << 8);
-        long cycles = CallRoutine(ram, start, out _);
+        int start = monitor["p8b_main:p8s_start"];
+        long cycles = CallRoutine(ram, start);
 
         // Variables of the main block: in the monitor list, or zero page equates in the assembly.
         var zeroPage = new Dictionary<string, int>();
@@ -174,11 +176,11 @@ public class ComparisonTests
     // ---- shared ----
 
     /// <summary>Runs a subroutine as if called with jsr, and returns the cycles it took including its final rts.</summary>
-    private static long CallRoutine(Ram ram, int entry, out Cpu6502 cpu)
+    private static long CallRoutine(Ram ram, int entry)
     {
         ram.Bytes[0x1FF] = (byte)((Sentinel - 1) >> 8);
         ram.Bytes[0x1FE] = (byte)((Sentinel - 1) & 0xFF);
-        cpu = new Cpu6502(ram) { PC = (ushort)entry, SP = 0xFD, I = true };
+        var cpu = new Cpu6502(ram) { PC = (ushort)entry, SP = 0xFD, I = true };
         while (cpu.PC != Sentinel) Step(cpu, $"routine at ${entry:X4}");
         return cpu.Cycles;
     }
@@ -260,17 +262,23 @@ public class ComparisonTests
         sb.AppendLine();
         sb.AppendLine("## How the numbers are taken");
         sb.AppendLine();
-        sb.AppendLine("- **Cycles** run from the first instruction of the program's `main` to its final `rts`. System startup is");
-        sb.AppendLine("  not counted (for cc65 the startup code runs first, and timing starts when `main` is entered). The Tern");
-        sb.AppendLine("  number is the one in `baseline.txt`: until `main` returns, which includes the few instructions of the entry code.");
+        sb.AppendLine("- **Cycles** run from the first instruction of the program's `main` to its final `rts`. Startup is not counted:");
+        sb.AppendLine("  for Tern and cc65 the startup code runs first and timing starts when `main` is entered; the assembly has none.");
+        sb.AppendLine("  The numbers in `baseline.txt` are different: they cover the whole Tern program, startup included.");
         sb.AppendLine("- **Bytes** are the program's code and data, and for Prog8 and cc65 the library routines it uses. Left out: the BASIC");
-        sb.AppendLine("  line, entry code and the C64 startup/exit block (Prog8); the startup modules and BSS (cc65); variables in BSS (all).");
-        sb.AppendLine("- Variables start at zero in every version. Prog8 pays cycles for clearing its BSS and initialising variables at the");
-        sb.AppendLine("  start of `main`; Tern, the assembly and cc65 rely on zeroed memory and do not.");
+        sb.AppendLine("  line and startup code (Tern, from the `main` label on); the BASIC line, entry code and the C64 startup/exit block");
+        sb.AppendLine("  (Prog8); the startup modules (cc65); variables in BSS (all).");
+        sb.AppendLine("- Variables start at zero in every version. Tern, the assembly and cc65 do the clearing outside the measured part");
+        sb.AppendLine("  (Tern's startup, zeroed memory, cc65's `zerobss`). Prog8 clears its BSS and initialises variables at the start of");
+        sb.AppendLine("  `main`, so its bytes and cycles include that.");
         sb.AppendLine("- **Prog8**: 12.0-SNAPSHOT, `%zeropage basicsafe`, `%option no_sysinit`, default optimisation.");
         sb.AppendLine("- **cc65**: `cl65 -t none -Oirs -Cl` (inlining, register variables, static locals).");
         sb.AppendLine("- **Assembly**: written for the task, in the style of an experienced programmer: registers and zero page for");
-        sb.AppendLine("  values, constants where the task fixes them (the copy sizes), no generic library routines.");
+        sb.AppendLine("  values, constants where the task fixes them (the copy sizes), no generic library routines. The `interp` dispatch");
+        sb.AppendLine("  does not range-check the opcode, where Tern's `match` sends other values to the `_` arm.");
+        sb.AppendLine("- **Data layout**: Tern, the assembly and Prog8 keep `enemies` as one table per field; the C version uses an array of");
+        sb.AppendLine("  structs (natural C), so each access multiplies the index by 5. Its large `enemies` cycle count is that choice, not");
+        sb.AppendLine("  only cc65's code generation.");
         return sb.ToString();
     }
 }

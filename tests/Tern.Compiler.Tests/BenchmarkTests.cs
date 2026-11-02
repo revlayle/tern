@@ -10,7 +10,7 @@ namespace Tern.Compiler.Tests;
 /// </summary>
 public class BenchmarkTests
 {
-    private static string Directory_
+    internal static string Directory_
     {
         get
         {
