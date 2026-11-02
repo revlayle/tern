@@ -117,16 +117,33 @@ Then:
 - The same tasks in Tern, hand-written assembly, Prog8 and cc65
 - A report of bytes and cycles per task
 
-## Later (not yet ordered)
+## M9: Closing the gap with assembly
 
-- From the M8 comparison (decided 2026-11-02): variable `u8` step in up-counting `for` loops (spec 5.1); `inline asm fn` with flag returns (6.2, 7); optimizer work that needs no spec change: `x & $80 != 0` then `x << 1` as one `asl` and a carry test, constant offsets folded into `abs,x` (`stack[sp - 1]` as `stack-1,x`), reusing X across accesses, shorter `match` arm exits and range checks
+Spec: 5.1 (variable step), 6.2 and 7 (`inline asm fn`), 11. From the M8 comparison questions settled in `docs/decisions.md` (2026-11-02); the gaps are in `tests/benchmarks/comparison.md`.
+
+- **Variable `u8` step** in `for` loops that count up with a `u8` counter: evaluated once, stops when adding the step carries past 255; `..=255` gives `adc` / `bcc` with no compare (spec 11 shape, listing test). Errors: a negative or 16-bit variable step, a variable step in a loop counting down. Tests at edge values (step 1, 128, 255; start 0 and 255; end below 255).
+- **`inline asm fn`**: the assembly is copied in place of the `jsr`, no `rts` added; register parameters only (memory parameters and fixed inputs are errors); flag returns give `if f()` / `!f()` / `v = f()` with only the branch or store. An empty body reads the flag left by an `asm` block directly before the statement; nothing that changes flags is placed between them. `c64.interrupts_on()`/`interrupts_off()` become `inline asm fn`.
+- **Optimizer** (no spec change; each with an `OptimizerTests` case and its benchmark delta in the commit):
+  - `x & $80 != 0` followed by `x << 1` on the same byte as one `asl` and a carry test (`crc8`);
+  - a constant offset folded into the `abs,x` address: `stack[sp - 1]` as `ldx sp` / `lda stack-1,x` (`interp`);
+  - X (or Y) reused across array accesses with the same index;
+  - shorter `match` exits: an arm that ends the loop body branches to the loop test directly; the range check uses a short branch when the default is in range;
+  - asm `cli`/`sei` (and other blocks) forget only what `AsmEffects` says they change (M8 part 1 review finding 2).
+- Rewrite `tests/benchmarks/sieve.tern` with the variable step, and other benchmarks where the new features fit; update the baseline and `comparison.md`.
+
+Done when: `sieve`'s inner loop compiles to the same instructions as `tests/benchmarks/asm/sieve.asm` (listing test); the comparison totals are below M8's 1373 bytes / 526134 cycles, with the new numbers in `comparison.md`; all tests pass.
+
+## Later (not yet ordered, except that new platforms come last)
 
 - Signed loop variables
 - `const fn` with compile-time `int` and `real`, array-building syntax (spec 4.1)
 - `using` on local variables (spec 14.6)
-- 65C02 CPU variant and Commander X16 platform
-- NES: iNES output, `@ bank(n)`, calls between banks (spec 14.1)
-- Memory layout declaration: reserved areas, volatile ranges, named regions (spec 14.12), with `data` at a fixed address (14.9) and banks
-- Apple II and Atari 8-bit platforms
 - Overflow checking and array index checking in the emulator for test runs (spec 14.4, 3.2)
 - Doc comments (`///` before a declaration) and a Tern language server (LSP) that shows them, e.g. that `set_irq` needs an `interrupt fn`
+- Memory layout declaration: reserved areas, volatile ranges, named regions (spec 14.12), with `data` at a fixed address (14.9) and banks
+
+New platforms, last:
+
+- 65C02 CPU variant and Commander X16 platform
+- NES: iNES output, `@ bank(n)`, calls between banks (spec 14.1)
+- Apple II and Atari 8-bit platforms
