@@ -428,6 +428,17 @@ public sealed class ModuleTests : IDisposable
     }
 
     [Fact]
+    public void A_module_interrupt_handler_is_kept_only_when_named()
+    {
+        Write(Src, "irq.tern", "var ticks: u8\ninterrupt fn tick() { ticks += 1 }\nfn other() { }");
+        var unused = CompileMain("import irq\nfn main() { irq.other() }");
+        Assert.DoesNotContain("irq.tick", unused.Symbols.Keys);
+        var used = CompileMain("import irq\nfn main() { asm {\n lda #irq.tick.lo\n sta $FFFE\n } }");
+        Assert.Contains("irq.tick", used.Symbols.Keys);
+        Assert.Contains("irq.ticks", used.Symbols.Keys);
+    }
+
+    [Fact]
     public void Private_names_are_private_between_modules_too()
     {
         Write(Src, "secret.tern", Secret);

@@ -216,6 +216,10 @@ public sealed class FunctionSymbol(string name, SourcePos pos) : Symbol(name, po
     /// <summary>Global variables this function names; only globals used by reachable functions go into the program.</summary>
     public HashSet<VariableSymbol> UsedGlobals { get; } = [];
     public FnDecl? Declaration { get; set; }
+    /// <summary>An <c>interrupt fn</c>: a root of the call graph, with frames of its own.</summary>
+    public bool IsInterrupt { get; set; }
+    /// <summary>Interrupt handlers this function names in assembly (to install them); they are kept in the program.</summary>
+    public HashSet<FunctionSymbol> UsedInterrupts { get; } = [];
     /// <summary>Set for a routine that already exists at this address (<c>fn f() @ $FFD2</c>). It has no body or frame.</summary>
     public int? FixedAddress { get; set; }
     /// <summary>Registers (A, X, Y) a routine at a fixed address promises to leave unchanged.</summary>

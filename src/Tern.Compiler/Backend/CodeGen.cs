@@ -166,8 +166,50 @@ public sealed class CodeGen
             }
         }
 
+        if (f.IsInterrupt)
+        {
+            GenInterrupt(f);
+            return;
+        }
         GenBlock(f.Declaration!.Body);
         if (!EndsWithJump()) Emit(Rts);
+    }
+
+    /// <summary>Where a <c>return</c> in an interrupt handler goes: the code that restores the registers.</summary>
+    private Label? _interruptExit;
+
+    /// <summary>
+    /// An interrupt handler: the body, between code that saves and restores the registers it
+    /// changes, then <c>rti</c> (the CPU saved the flags). A call may change every register. Saving
+    /// X or Y goes through A, so A is saved whenever X or Y is.
+    /// </summary>
+    private void GenInterrupt(FunctionSymbol f)
+    {
+        int start = _out.Count;
+        _interruptExit = NewLabel("exit");
+        GenBlock(f.Declaration!.Body);
+        if (_out[^1] is Instr { Mnemonic: Mnemonic.Jmp, Operand: LabelOperand { Label: var l } } && l == _interruptExit)
+            _out.RemoveAt(_out.Count - 1);
+
+        var changed = CpuState.None;
+        foreach (var i in _out.Skip(start).OfType<Instr>())
+            changed |= AsmEffects.Of(i.Mnemonic, i.Mode).Writes;
+        bool x = changed.HasFlag(CpuState.X), y = changed.HasFlag(CpuState.Y);
+        bool a = x || y || changed.HasFlag(CpuState.A);
+
+        var save = new List<AsmItem>();
+        if (a) save.Add(new Instr(Pha));
+        if (x) { save.Add(new Instr(Txa)); save.Add(new Instr(Pha)); }
+        if (y) { save.Add(new Instr(Tya)); save.Add(new Instr(Pha)); }
+        if (save.Count > 0) save.Insert(0, new Comment($"save {string.Join(", ", new[] { a ? "A" : null, x ? "X" : null, y ? "Y" : null }.OfType<string>())}"));
+        _out.InsertRange(start, save);
+
+        Place(_interruptExit);
+        if (y) { Emit(Pla); Emit(Tay); }
+        if (x) { Emit(Pla); Emit(Tax); }
+        if (a) Emit(Pla);
+        Emit(Rti);
+        _interruptExit = null;
     }
 
     // ---------- Statements ----------
@@ -363,7 +405,8 @@ public sealed class CodeGen
     {
         if (r.Value is null)
         {
-            Emit(Rts);
+            if (_interruptExit is { } exit) Jmp(exit);
+            else Emit(Rts);
             return;
         }
         var value = r.Value;

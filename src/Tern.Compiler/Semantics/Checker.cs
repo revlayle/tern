@@ -9,7 +9,7 @@ public sealed class CheckedProgram(
     public List<Module> Modules { get; } = modules;
     /// <summary>The main file's globals, and the globals of modules used by the functions in <see cref="Functions"/>.</summary>
     public List<VariableSymbol> Globals { get; } = globals;
-    /// <summary>Functions reachable from <c>main</c>, callers before callees.</summary>
+    /// <summary>Functions reachable from <c>main</c>, then from each interrupt handler; callers before callees.</summary>
     public List<FunctionSymbol> Functions { get; } = functions;
     public FunctionSymbol Main { get; } = main;
 }
@@ -62,6 +62,8 @@ public sealed partial class Checker
             throw new CompileError(main.Pos, "'main' must have no parameters and no return value");
         if (main.FixedAddress is not null)
             throw new CompileError(main.Pos, "'main' must have a body");
+        if (main.IsInterrupt)
+            throw new CompileError(main.Pos, "'main' cannot be an interrupt handler; give the handler another name");
 
         foreach (var module in modules)
         {
@@ -72,9 +74,9 @@ public sealed partial class Checker
         foreach (var module in modules)
             foreach (var f in module.Syntax.Functions) Lowering.Apply(f.Body);
 
-        // Only what main can reach goes into the program, so unused parts of a module cost nothing.
-        // The main file's globals are all kept.
-        var reachable = OrderReachable(main);
+        // Only what main and the interrupt handlers can reach goes into the program, so unused parts
+        // of a module cost nothing. The main file's globals are all kept.
+        var reachable = OrderRoots(main, mainModule);
         var used = reachable.SelectMany(f => f.UsedGlobals).Concat(mainModule.Scope.Values.OfType<VariableSymbol>()).ToHashSet();
         return new CheckedProgram(modules, _globals.Where(used.Contains).ToList(), reachable, main);
     }
@@ -186,8 +188,10 @@ public sealed partial class Checker
     {
         if (decl.Name is "addr" or "len" or "sizeof" or "include_bytes")
             throw new CompileError(decl.Pos, $"'{decl.Name}' is a built-in function; choose another name");
-        var fn = new FunctionSymbol(_module.Qualify(decl.Name), decl.Pos) { Declaration = decl };
+        var fn = new FunctionSymbol(_module.Qualify(decl.Name), decl.Pos) { Declaration = decl, IsInterrupt = decl.IsInterrupt };
         decl.Symbol = fn;
+        if (decl.IsInterrupt && (decl.Parameters.Count > 0 || decl.ReturnType is not null))
+            throw new CompileError(decl.Pos, "An interrupt handler takes no parameters and returns no value: the CPU calls it, not your code");
 
         var usedRegisters = new HashSet<char>();
         foreach (var p in decl.Parameters)
@@ -1257,6 +1261,9 @@ public sealed partial class Checker
         if (symbol is null && c.Name.Contains('.')) throw NotDeclared(c.Name, c.Pos);
         if (symbol is not FunctionSymbol fn)
             throw new CompileError(c.Pos, $"'{c.Name}' is not a function");
+        if (fn.IsInterrupt)
+            throw new CompileError(c.Pos,
+                $"'{c.Name}' is an interrupt handler, which only the CPU calls (it ends with rti). Install its address in the interrupt vector");
         if (c.Args.Count != fn.Parameters.Count)
             throw new CompileError(c.Pos, $"'{fn.Name}' takes {fn.Parameters.Count} argument(s), not {c.Args.Count}");
         for (int i = 0; i < c.Args.Count; i++)
@@ -1358,6 +1365,44 @@ public sealed partial class Checker
     // ---------- Call graph ----------
 
     /// <summary>Functions reachable from main, callers before callees. Reports recursion.</summary>
+    /// <summary>
+    /// The functions reachable from main, then from each interrupt handler, callers first. Handlers
+    /// are roots: those of the main file, and those a compiled function names (to install them).
+    /// A function with a body may belong to only one root, since a handler can run in the middle of it
+    /// and its frame would be overwritten (spec 8.1).
+    /// </summary>
+    private static List<FunctionSymbol> OrderRoots(FunctionSymbol main, Module mainModule)
+    {
+        var all = new List<FunctionSymbol>();
+        var rootOf = new Dictionary<FunctionSymbol, FunctionSymbol>();
+        var roots = new List<FunctionSymbol> { main };
+        roots.AddRange(mainModule.Scope.Values.OfType<FunctionSymbol>().Where(f => f.IsInterrupt).OrderBy(f => f.Pos.Line));
+        for (int r = 0; r < roots.Count; r++)
+        {
+            foreach (var f in OrderReachable(roots[r]))
+            {
+                if (f.FixedAddress is not null)
+                {
+                    // A routine at a fixed address has no frame; it may be called from anywhere.
+                    if (rootOf.TryAdd(f, roots[r])) all.Add(f);
+                    continue;
+                }
+                if (rootOf.TryGetValue(f, out var other))
+                {
+                    string Describe(FunctionSymbol root) => root == main ? "main" : $"the interrupt handler '{root.Name}'";
+                    throw new CompileError(f.Pos,
+                        $"'{f.Name}' is called from {Describe(other)} and from {Describe(roots[r])}. An interrupt can stop it halfway and run it again, " +
+                        "which would overwrite its variables, so a function cannot be shared between main and interrupt handlers. Use a copy for each");
+                }
+                rootOf[f] = roots[r];
+                all.Add(f);
+                foreach (var h in f.UsedInterrupts)
+                    if (!roots.Contains(h)) roots.Add(h);
+            }
+        }
+        return all;
+    }
+
     private static List<FunctionSymbol> OrderReachable(FunctionSymbol main)
     {
         var state = new Dictionary<FunctionSymbol, int>(); // 1 = visiting, 2 = done

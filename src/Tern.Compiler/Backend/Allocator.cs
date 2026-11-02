@@ -129,13 +129,24 @@ public static class Allocator
         return plan;
     }
 
-    /// <summary>Each function's frame starts after the frames of all its callers.</summary>
+    /// <summary>
+    /// Each function's frame starts after the frames of all its callers. An interrupt handler can
+    /// run at any moment, so its frame starts after every frame placed before it (main's, and
+    /// earlier handlers'); the functions it calls follow it.
+    /// </summary>
     private static Dictionary<FunctionSymbol, int> FrameOffsets(
         List<FunctionSymbol> callersFirst, Dictionary<FunctionSymbol, List<FunctionSymbol>> callers, Func<FunctionSymbol, int> size)
     {
         var offsets = new Dictionary<FunctionSymbol, int>();
+        int end = 0;
         foreach (var f in callersFirst)
-            offsets[f] = callers[f].Count == 0 ? 0 : callers[f].Max(c => offsets[c] + size(c));
+        {
+            // A routine at a fixed address has no frame; it may be called from main and from handlers.
+            offsets[f] = f.IsInterrupt ? end
+                : f.FixedAddress is not null || callers[f].Count == 0 ? 0
+                : callers[f].Max(c => offsets[c] + size(c));
+            end = Math.Max(end, offsets[f] + size(f));
+        }
         return offsets;
     }
 

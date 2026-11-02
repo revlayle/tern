@@ -84,7 +84,7 @@ public sealed class Parser
             {
                 var p = Advance();
                 if (!(Current.Kind is TokenKind.Const or TokenKind.Var or TokenKind.Linear or TokenKind.Struct or TokenKind.Data or TokenKind.Fn
-                      || (At(TokenKind.Asm) && PeekAt(1).Kind == TokenKind.Fn)))
+                      or TokenKind.Interrupt || (At(TokenKind.Asm) && PeekAt(1).Kind == TokenKind.Fn)))
                     throw new CompileError(p.Pos, $"'private' goes before a declaration (const, var, data, struct or fn); found {Describe(Current)}");
                 privateNames.Add(ParseDeclaration());
             }
@@ -107,6 +107,20 @@ public sealed class Parser
                 case TokenKind.Struct: { var d = ParseStruct(); structs.Add(d); return d.Name; }
                 case TokenKind.Data: { var d = ParseData(); globals.Add(d); return d.Name; }
                 case TokenKind.Fn: { var d = ParseFn(); functions.Add(d); return d.Name; }
+                case TokenKind.Interrupt:
+                {
+                    var t = Advance();
+                    if (!At(TokenKind.Fn))
+                        throw new CompileError(t.Pos, At(TokenKind.Asm)
+                            ? "An interrupt handler in assembly is an 'asm fn' that saves what it changes and ends with rti; 'interrupt' is for handlers in Tern"
+                            : $"'interrupt' goes before 'fn', e.g. 'interrupt fn raster() {{ ... }}'; found {Describe(Current)}");
+                    var d = ParseFn();
+                    if (d.Address is not null)
+                        throw new CompileError(d.Pos, "An interrupt handler needs a body; '@ $addr' declares a routine that is already there");
+                    d.IsInterrupt = true;
+                    functions.Add(d);
+                    return d.Name;
+                }
                 case TokenKind.Asm when PeekAt(1).Kind == TokenKind.Fn:
                 {
                     Advance();
@@ -127,7 +141,7 @@ public sealed class Parser
     /// <summary>Keywords from the spec that this compiler version does not implement yet.</summary>
     private void RejectUnsupported()
     {
-        if (Current.Kind is TokenKind.Inline or TokenKind.Interrupt or TokenKind.Noinit)
+        if (Current.Kind is TokenKind.Inline or TokenKind.Noinit)
             throw new CompileError(Current.Pos, $"'{Current.Text}' is not supported yet");
     }
 
@@ -370,6 +384,8 @@ public sealed class Parser
             case TokenKind.Data: throw new CompileError(Current.Pos, "'data' must be declared outside functions");
             case TokenKind.Asm when PeekAt(1).Kind == TokenKind.Fn:
                 throw new CompileError(Current.Pos, "'asm fn' must be declared outside functions");
+            case TokenKind.Interrupt:
+                throw new CompileError(Current.Pos, "'interrupt fn' must be declared outside functions");
             case TokenKind.Asm:
                 Advance();
                 return ParseAsmBody();

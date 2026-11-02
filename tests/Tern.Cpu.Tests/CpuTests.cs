@@ -28,6 +28,54 @@ public class CpuTests
     }
 
     [Fact]
+    public void Irq_is_taken_only_with_interrupts_enabled_and_rti_returns()
+    {
+        // $0200: nop / nop. Handler at $0300: inc $10 / rti.
+        var (cpu, ram) = Setup(0x0200, (Nop, Implied, 0), (Nop, Implied, 0));
+        var handler = new List<byte>();
+        Encoder.Encode(Inc, ZeroPage, 0x10, 0x0300, handler);
+        Encoder.Encode(Rti, Implied, 0, 0x0302, handler);
+        ram.Load(0x0300, handler.ToArray());
+        ram.Bytes[0xFFFE] = 0x00;
+        ram.Bytes[0xFFFF] = 0x03;
+        cpu.SP = 0xFF;
+
+        cpu.I = true;
+        Assert.False(cpu.Irq());
+        Assert.Equal(0x0200, cpu.PC);
+
+        cpu.I = false;
+        cpu.C = true;
+        cpu.Step();                       // first nop
+        long before = cpu.Cycles;
+        Assert.True(cpu.Irq());
+        Assert.Equal(7, cpu.Cycles - before);
+        Assert.Equal(0x0300, cpu.PC);
+        Assert.True(cpu.I);
+        Assert.Equal(0x02, ram.Bytes[0x01FF]);  // return address high
+        Assert.Equal(0x01, ram.Bytes[0x01FE]);  // low: the second nop
+        Assert.Equal(0x21, ram.Bytes[0x01FD]);  // flags: C and bit 5, B clear
+        cpu.Step();                       // inc $10
+        cpu.Step();                       // rti
+        Assert.Equal(0x0201, cpu.PC);
+        Assert.False(cpu.I);
+        Assert.True(cpu.C);
+        Assert.Equal(0xFF, cpu.SP);
+        Assert.Equal(1, ram.Bytes[0x10]);
+    }
+
+    [Fact]
+    public void Nmi_is_taken_with_interrupts_disabled()
+    {
+        var (cpu, ram) = Setup(0x0200, (Nop, Implied, 0));
+        ram.Bytes[0xFFFA] = 0x34;
+        ram.Bytes[0xFFFB] = 0x12;
+        cpu.I = true;
+        cpu.Nmi();
+        Assert.Equal(0x1234, cpu.PC);
+    }
+
+    [Fact]
     public void Indexed_store_always_takes_five_cycles()
     {
         var (cpu, ram) = Setup(0x0200, (Sta, AbsoluteX, 0x10F0));

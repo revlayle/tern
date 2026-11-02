@@ -11,7 +11,7 @@ public class MatchTests
         var listing = r.Result.Listing;
         var start = listing.IndexOf($"\n{function}:", StringComparison.Ordinal);
         var code = new List<string>();
-        foreach (var l in listing[(start + 1)..].Split('\n').Skip(1))
+        foreach (var l in listing[(start + 1)..].Split('\n').Skip(1).Select(l => l.TrimEnd('\r')))
         {
             if (l.EndsWith(':') && !l.StartsWith(' ') && !l.StartsWith('$') && !l.StartsWith(';') && !l.StartsWith($"{function}.")) break;
             if (l.StartsWith('$') && l.Length > 17 && !l.Contains("; hi:") && !l.Contains("; lo:")) code.Add(l[17..].Split(';')[0].Trim());
