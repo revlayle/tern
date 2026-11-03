@@ -62,13 +62,14 @@ public sealed class SpriteTests
         public Cpu6502 Cpu { get; }
         public int Interrupts { get; private set; }
 
-        public Rig(string source, long cycles, int pointerBase = 0x07F8, Action<Rig>? onStep = null)
+        public Rig(string source, long cycles, int pointerBase = 0x07F8, Action<Rig>? onStep = null, bool stealCycles = false)
         {
             Result = TernCompiler.Compile(source);
             Ram.Load((ushort)Result.LoadAddress, Result.Image);
             Vic = new FakeVic(Ram, pointerBase);
             Cpu = new Cpu6502(Vic) { PC = (ushort)Result.Entry, SP = 0xFF, I = true };
             Vic.Cpu = Cpu;
+            Vic.StealCycles = stealCycles;
             while (Cpu.Cycles < cycles)
             {
                 Cpu.Step();

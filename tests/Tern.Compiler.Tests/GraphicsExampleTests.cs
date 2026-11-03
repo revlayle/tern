@@ -17,7 +17,7 @@ public sealed class GraphicsExampleTests
         int seenWrites = 0;
         const int Frames = 140;
         var marks = new List<string>();
-        var rig = new SpriteTests.Rig(source, (Frames + 40) * 312 * 63, pointerBase: 0x83F8, onStep: r =>
+        var rig = new SpriteTests.Rig(source, (Frames + 40) * 312 * 63, pointerBase: 0x83F8, stealCycles: true, onStep: r =>
         {
             if (marks.Count < 400 && r.Cpu.Cycles > 20L * 312 * 63)
             {

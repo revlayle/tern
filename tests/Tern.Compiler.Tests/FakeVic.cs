@@ -79,7 +79,18 @@ public sealed class FakeVic : IBus
         int raster = (int)(line % Lines);
         if (raster == _compare) _status |= 1;
         DrawLine(line, raster);
+        if (StealCycles)
+        {
+            // Bad lines take the bus for about 40 cycles; each sprite line fetches 2-3 bytes.
+            bool badLine = raster is >= 0x30 and <= 0xF7 && (raster & 7) == (_regs[0x11] & 7) && (_regs[0x11] & 0x10) != 0;
+            int stolen = badLine ? 40 : 0;
+            if (Seen.TryGetValue(line, out var shown)) stolen += shown.Count * 2;
+            Cpu.Cycles += stolen;
+        }
     }
+
+    /// <summary>When set, bad lines and sprite fetches take cycles from the CPU, as on a real C64.</summary>
+    public bool StealCycles { get; set; }
 
     /// <summary>True while an enabled interrupt is waiting.</summary>
     public bool IrqPending => (_status & _regs[0x1A]) != 0;

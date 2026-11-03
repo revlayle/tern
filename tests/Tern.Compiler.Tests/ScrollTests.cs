@@ -104,7 +104,7 @@ public sealed class ScrollTests
             r.Move(dx, dy);
             r.AssertConsistent($"move {i} ({dx},{dy})");
         }
-        // The camera may wait up to four frames for the hidden screen when a direction starts at a coarse step.
+        // The camera may wait up to six frames for the hidden screen when a direction starts at a coarse step.
         int moved = Math.Max(Math.Abs(r.PixelX - startX), Math.Abs(r.PixelY - startY));
         Assert.InRange(moved, 33, 40);
         if (dx == 0 || dy == 0)
