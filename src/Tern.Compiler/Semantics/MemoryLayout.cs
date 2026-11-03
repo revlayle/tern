@@ -28,6 +28,9 @@ public sealed class MemoryLayout
     /// <summary>Volatile ranges added by the memory block, in addition to the platform's.</summary>
     public List<AddressRange> Volatile { get; } = [];
 
+    /// <summary>The block has <c>program</c> lines, which replace the platform's program areas.</summary>
+    public bool ProgramReplaced { get; private init; }
+
     public bool IsVolatile(int first, int last) => Volatile.Any(a => first <= a.Last && last >= a.First);
 
     /// <summary>The platform's map: one program area from the load address to the end of usable RAM.</summary>
@@ -90,7 +93,8 @@ public sealed class MemoryLayout
         var layout = new MemoryLayout
         {
             Program = programAreas,
-            ZeroPage = zeroPage.Count > 0 ? zeroPage : Subtract([new AddressRange(platform.ZeroPage.First, platform.ZeroPage.Last)], taken),
+            ProgramReplaced = program.Count > 0,
+            ZeroPage = zeroPage.Count > 0 ? zeroPage : Subtract([new AddressRange(platform.ZeroPage.First, platform.ZeroPage.Last)], taken.Concat(program)),
         };
         layout.Reserved.AddRange(reserved);
         foreach (var (name, range) in regions) layout.Regions[name] = range;

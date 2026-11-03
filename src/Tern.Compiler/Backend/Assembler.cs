@@ -116,6 +116,26 @@ public static class Assembler
                 int end = Lay(section, at);
                 if (end > at) fixedRanges.Add(new AddressRange(at, end - 1));
             }
+            // The first section (the BASIC line and startup code, or a binary's jump table) must be at the
+            // start of the first area: data placed there with '@' would push it away.
+            var firstSection = sections.FirstOrDefault(s => s.Info.FixedAddress is null);
+            if (firstSection is not null && areas.Count > 0)
+            {
+                int firstEnd = Lay(firstSection, areas[0].First);
+                if (firstEnd > areas[0].First)
+                {
+                    var head = new AddressRange(areas[0].First, firstEnd - 1);
+                    foreach (var section in sections.Where(s => s.Info.FixedAddress is not null))
+                    {
+                        int at = section.Info.FixedAddress!.Value;
+                        int end = Lay(section, at);
+                        if (end > at && head.Overlaps(new AddressRange(at, end - 1)))
+                            throw new CompileError(new SourcePos(1, 1),
+                                $"'{section.Info.Name}' at {new AddressRange(at, end - 1)} overlaps the {(firstSection.Info.Name == "jump table" ? "jump table" : "BASIC line and startup code")} at {head}, " +
+                                "which must be at the start of the first program area. Move the data, or start the program area lower");
+                    }
+                }
+            }
             var free = MemoryLayout.Subtract(areas, fixedRanges);
             if (free.Count == 0)
                 throw new CompileError(new SourcePos(1, 1), $"No program area is left: the data placed with '@' fills {MemoryLayout.List(areas)}");

@@ -254,7 +254,36 @@ public class BinaryTests
         Assert.Contains("const WORK_LAST = $C80F", b.Result.ApiModule);
     }
 
+    [Fact]
+    public void The_interface_module_lists_each_zero_page_range_the_binary_uses_and_its_fixed_and_reserved_memory()
+    {
+        var b = new Binary("""
+            memory {
+                $C000..=$C0FF  program
+                $02..=$03      zeropage
+                $FB..=$FE      zeropage
+                $C800..=$C8FF  reserved
+            }
+            var p1: ptr u8 @ zp
+            var p2: ptr u8 @ zp
+            var p3: ptr u8 @ zp
+            var t: u8 @ $C900
+            var vic: u8 @ $D020
+            fn f() { p1[0] = 1; p2[0] = 2; p3[0] = 3; t = 1; vic = 2 }
+            export f
+            """);
+        string api = b.Result.ApiModule!;
+        Assert.Contains("const ZP_FIRST = $02", api);
+        Assert.Contains("const ZP_LAST = $03", api);
+        Assert.Contains("const ZP2_FIRST = $FB", api);
+        Assert.Contains("const ZP2_LAST = $FE", api);
+        Assert.Contains("const FIXED_FIRST = $C900", api);
+        Assert.Contains("const RESERVED_FIRST = $C800", api);
+        Assert.DoesNotContain("$D020", api);                  // hardware registers are not the binary's memory
+    }
+
     // ---------- A Tern host ----------
+
 
     private static T WithHost<T>(string binarySource, Func<string, CompileResult, T> work)
     {
@@ -422,6 +451,7 @@ public class BinaryTests
     [InlineData("inline fn h() { }\nexport h", "'h' is inline")]
     [InlineData("fn chrout(c: u8 using A) @ $FFD2\nexport chrout", "'chrout' is a routine at a fixed address, not part of this binary")]
     [InlineData("fn f(n: u8) { }\nexport f", "'f' takes 'n' in memory, which the caller of a binary cannot set")]
+    [InlineData("memory { $C000..=$CFFF program }\nexport play\ndata first: [u8; 3] @ $C000 = [1, 2, 3]\nfn play() { }", "overlaps the jump table at $C000-")]
     [InlineData("fn f() { }\nexport", "Expected a function name after 'export'")]
     [InlineData("fn f() { }", "The program has no 'fn main()'. A binary for another program to call has an 'export' line instead")]
     [InlineData("fn f() { f() }\nexport f", "Recursion is not allowed")]

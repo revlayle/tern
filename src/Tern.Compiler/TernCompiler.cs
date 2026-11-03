@@ -17,6 +17,7 @@ public sealed class CompileResult
     /// <summary>Where execution starts.</summary>
     public required int Entry { get; init; }
     /// <summary>Address of the endless loop reached when <c>main</c> returns.</summary>
+    /// <summary>The address main returns to; -1 for a binary, which has no main.</summary>
     public required int HaltAddress { get; init; }
     public required string Listing { get; init; }
     /// <summary>Variable and function addresses by name (locals as "function.name").</summary>
@@ -64,7 +65,7 @@ public static class TernCompiler
         if (!binary && layout.Program[0].First != platform.LoadAddress)
             throw new CompileError(program.Main.Pos,
                 $"A program with 'main' starts at ${platform.LoadAddress:X4}, where the {platform.Name.ToUpperInvariant()} BASIC line goes, but its first program area begins at ${layout.Program[0].First:X4}. " +
-                $"Start the first 'program' line of the memory block at ${platform.LoadAddress:X4}");
+                (layout.ProgramReplaced ? $"Start the first 'program' line of the memory block at ${platform.LoadAddress:X4}" : "Move the 'reserved' or 'region' range that covers it"));
         CheckFixedData(program, plan);
 
         var start = new Label("start");
@@ -121,7 +122,7 @@ public static class TernCompiler
             foreach (var (v, offset) in plan.ZeroedGlobals.Concat(plan.NoinitGlobals)) v.Address = bss.Address + offset;
             foreach (var (v, offset) in plan.FrameVariables) v.Address = bss.Address + offset;
         });
-        CheckFixedAddresses(program, platform, code);
+        CheckFixedAddresses(program, platform, code, plan);
 
         // The file covers every byte from the lowest to the highest address used; gaps are zeros.
         int loadAddress = code.Segments.Min(s => s.Address);
@@ -159,15 +160,33 @@ public static class TernCompiler
             entries.AddRange(table.Select(t => (t.Name, t.Address)));
 
             var fileRange = new AddressRange(loadAddress, fileEnd - 1);
+            // Every range the binary uses, once: a host may not reserve overlapping ranges.
             var others = new List<(string Prefix, string What, AddressRange Range)>();
-            if (code.Variables is { } vr && !fileRange.Contains(vr)) others.Add(("VARS", "variables, zeroed by setup", vr));
-            foreach (var (name, use2) in plan.RegionUse)
-                if (!fileRange.Contains(use2)) others.Add((name.ToUpperInvariant(), $"region {name}", use2));
+            var emitted = new List<AddressRange> { fileRange };
+            var counts = new Dictionary<string, int>();
+            void Emit(string prefix, string what, AddressRange range)
+            {
+                foreach (var piece in MemoryLayout.Subtract([range], emitted))
+                {
+                    int n = counts[prefix] = counts.GetValueOrDefault(prefix) + 1;
+                    others.Add((n == 1 ? prefix : prefix + n, what, piece));
+                    emitted.Add(piece);
+                }
+            }
+            if (code.Variables is { } vr) Emit("VARS", "variables, zeroed by setup", vr);
+            foreach (var (name, use2) in plan.RegionUse) Emit(name.ToUpperInvariant(), $"region {name}", use2);
             var zpUsed = program.Globals.Where(g => g.FixedAddress is null && g.Region is null)
                 .Concat(program.Functions.SelectMany(f => f.FrameVariables))
                 .Where(v => v.AliasOf is null && v.Address is >= 0 and < 0x100 && v.Register is null).ToList();
-            if (zpUsed.Count > 0)
-                others.Add(("ZP", "zero page used by the binary", new AddressRange(zpUsed.Min(v => v.Address), zpUsed.Max(v => v.Address + v.Type.Size - 1))));
+            foreach (var zr in layout.ZeroPage.OrderBy(r => r.First))
+            {
+                var inRange = zpUsed.Where(v => v.Address >= zr.First && v.Address <= zr.Last).ToList();
+                if (inRange.Count > 0)
+                    Emit("ZP", "zero page used by the binary", new AddressRange(inRange.Min(v => v.Address), inRange.Max(v => v.Address + v.Type.Size - 1)));
+            }
+            foreach (var g in program.Globals.Where(g => g.FixedAddress is not null && !g.IsData && !g.InVolatileArea).OrderBy(g => g.FixedAddress))
+                Emit("FIXED", $"'{g.Name}', at a fixed address", new AddressRange(g.FixedAddress!.Value, g.FixedAddress.Value + g.Type.Size - 1));
+            foreach (var r in layout.Reserved.OrderBy(r => r.First)) Emit("RESERVED", "reserved in the binary's memory block", r);
 
             string baseName = sourcePath is null ? "binary" : Path.GetFileNameWithoutExtension(sourcePath);
             apiName = baseName + "_api";
@@ -239,7 +258,7 @@ public static class TernCompiler
     /// places (spec 4); a growing program would otherwise overwrite it silently. Fixed-address
     /// variables may overlap each other.
     /// </summary>
-    private static void CheckFixedAddresses(CheckedProgram program, Platform platform, AssembledCode code)
+    private static void CheckFixedAddresses(CheckedProgram program, Platform platform, AssembledCode code, RamPlan plan)
     {
         var inZeroPage = program.Globals.Where(g => g.FixedAddress is null && g.Region is null)
             .Concat(program.Functions.SelectMany(f => f.FrameVariables))
@@ -257,6 +276,10 @@ public static class TernCompiler
                         $"'{g.Name}' at {range} overlaps the program and its variables at {used}. " +
                         $"Move '{g.Name}', or make the program smaller");
             }
+            foreach (var (regionName, use) in plan.RegionUse)
+                if (range.Overlaps(use))
+                    throw new CompileError(g.Pos,
+                        $"'{g.Name}' at {range} overlaps the variables the compiler placed in region '{regionName}' at {use}. Move '{g.Name}', or place it with the region");
             foreach (var section in code.Sections.Where(s => s.IsFixed && s.Size > 0))
                 if (range.Overlaps(new AddressRange(section.Address, section.Address + section.Size - 1)))
                     throw new CompileError(g.Pos,
@@ -298,7 +321,7 @@ public static class TernCompiler
         if (plan.ZeroedSize > 0)
             ClearBlock(items, plan.ZeroedSize, p => new LabelOperand(bss, p), "clear");
         foreach (var block in plan.RegionClears)
-            ClearBlock(items, block.Size, p => new AddrOperand(block.First + p), $"clear_{block.First:X4}");
+            ClearBlock(items, block.Size, p => new AddrOperand(block.First + p), $"clear_{block.First:X4}_");
         return items;
     }
 

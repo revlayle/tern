@@ -656,6 +656,9 @@ public sealed partial class Checker
                 if (addr is NameExpr region && _layout.Regions.ContainsKey(region.Name) && Lookup(region.Name) is null)
                 {
                     v.Region = region.Name;
+                    // A region that touches volatile memory is volatile as a whole: its addresses are not known yet.
+                    var span = _layout.Regions[region.Name];
+                    v.InVolatileArea = _layout.IsVolatile(span.First, span.Last) || _platform.IsVolatile(span.First, span.Last);
                     break;
                 }
                 CheckExpr(addr);
