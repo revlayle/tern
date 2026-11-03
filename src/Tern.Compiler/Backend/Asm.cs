@@ -80,3 +80,18 @@ public sealed record Padding(Func<int, int> SizeAt, string Reason) : AsmItem;
 public sealed record SourceLine(int Line, string Text, string? File = null) : AsmItem;
 
 public sealed record Comment(string Text) : AsmItem;
+
+/// <summary>
+/// Starts a section: the items up to the next <see cref="SectionStart"/> (or <see cref="Reserve"/>) are
+/// placed together in one program area, so a function is never split (spec 8.4). A section with
+/// <paramref name="FixedAddress"/> goes there instead (<c>data x @ $2000</c>).
+/// </summary>
+public sealed record SectionStart(string Name, int? FixedAddress = null) : AsmItem;
+
+/// <summary>
+/// Room for the variables the compiler places in the program's areas. The assembler picks the first
+/// area with enough space after its code and sets <paramref name="Label"/> to its start; nothing is
+/// written to the program file. Must be the last item.
+/// </summary>
+/// <param name="VectorOffsets">Offsets of <c>jmp (...)</c> vectors in the block; none may start at an address ending in $FF.</param>
+public sealed record Reserve(Label Label, int Size, IReadOnlyList<int> VectorOffsets) : AsmItem;

@@ -53,6 +53,7 @@ public sealed class CodeGen
         foreach (var f in _program.Functions.Where(f => f.FixedAddress is null && !f.IsInline))
         {
             GenFunction(f);
+            all.Add(new SectionStart(f.Name));
             // An interrupt handler's body is optimized before its saving code is added.
             if (!f.Declaration!.IsAsm && !(f.IsInterrupt && !f.IsPart)) Optimizer.Run(_out, f);
             all.AddRange(_out);

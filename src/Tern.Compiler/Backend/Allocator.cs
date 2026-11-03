@@ -20,6 +20,12 @@ public sealed class RamPlan
     /// <summary>Globals in zero page, initialized by the startup code.</summary>
     public List<VariableSymbol> ZeroPageGlobals { get; } = [];
     public string ZeroPageMap { get; set; } = "";
+    /// <summary>Data placed at a fixed address or in a region: part of the program file, at that address.</summary>
+    public List<VariableSymbol> FixedImageGlobals { get; } = [];
+    /// <summary>Blocks of zeroed variables in regions: cleared at startup.</summary>
+    public List<AddressRange> RegionClears { get; } = [];
+    /// <summary>Where the first and last variable in each region are, for the report.</summary>
+    public Dictionary<string, AddressRange> RegionUse { get; } = [];
 }
 
 /// <summary>
@@ -31,6 +37,7 @@ public static class Allocator
 {
     public static RamPlan Allocate(CheckedProgram program, Platform platform)
     {
+        var layout = program.Layout;
         var functions = program.Functions;
         var callers = functions.ToDictionary(f => f, _ => new List<FunctionSymbol>());
         foreach (var f in functions)
@@ -40,12 +47,14 @@ public static class Allocator
         foreach (var g in program.Globals)
             if (g.FixedAddress is int a) g.Address = a;
 
-        var placeable = program.Globals.Where(g => g.FixedAddress is null)
+        var placeable = program.Globals.Where(g => g.FixedAddress is null && g.Region is null)
             .Concat(functions.SelectMany(f => f.FrameVariables))
             .ToList();
         var inZp = new HashSet<VariableSymbol>();
 
-        int zpCapacity = platform.ZeroPage.Last - platform.ZeroPage.First + 1;
+        // The free zero-page bytes in address order; a variable must lie in consecutive ones.
+        var zeroPage = layout.ZeroPage.OrderBy(r => r.First).SelectMany(r => Enumerable.Range(r.First, r.Size)).ToList();
+        int zpCapacity = zeroPage.Count;
 
         int ZpNeeded()
         {
@@ -82,10 +91,19 @@ public static class Allocator
         var plan = new RamPlan();
 
         // Zero-page addresses: globals first, then the overlaid frames.
-        int zp = platform.ZeroPage.First;
+        int ZeroPageAddress(int index, VariableSymbol v)
+        {
+            int address = zeroPage[index];
+            if (zeroPage[index + v.Type.Size - 1] - address != v.Type.Size - 1)
+                throw new CompileError(v.Pos,
+                    $"'{v.QualifiedName}' ({v.Type.Size} bytes) would cross the end of a zero-page range at ${zeroPage[index + v.Type.Size - 1]:X2}. " +
+                    $"Zero-page ranges: {MemoryLayout.ListZeroPage(layout.ZeroPage)}. Join the ranges or reorder the variables");
+            return address;
+        }
+        int zp = 0;
         foreach (var g in program.Globals.Where(inZp.Contains))
         {
-            g.Address = zp;
+            g.Address = ZeroPageAddress(zp, g);
             zp += g.Type.Size;
             plan.ZeroPageGlobals.Add(g);
         }
@@ -95,14 +113,43 @@ public static class Allocator
             int at = zp + zpOffsets[f];
             foreach (var v in f.FrameVariables.Where(inZp.Contains))
             {
-                v.Address = at;
+                v.Address = ZeroPageAddress(at, v);
                 at += v.Type.Size;
             }
         }
 
+        // Variables and data placed in a region, in the order they are declared: zeroed variables first
+        // (one block to clear at startup), then noinit ones, then data.
+        foreach (var (name, range) in layout.Regions)
+        {
+            var inRegion = program.Globals.Where(g => g.Region == name).ToList();
+            int at = range.First;
+            void PlaceAll(IEnumerable<VariableSymbol> vars)
+            {
+                foreach (var g in vars)
+                {
+                    if (at + g.Type.Size - 1 > range.Last)
+                        throw new CompileError(g.Pos,
+                            $"Region '{name}' ({range}, {range.Size} bytes) is full: '{g.Name}' needs {g.Type.Size} bytes at ${at:X4}, " +
+                            $"{Math.Max(0, range.Last + 1 - at)} are left. Place it elsewhere or make the region larger");
+                    g.Address = at;
+                    at += g.Type.Size;
+                }
+            }
+            var zeroed = inRegion.Where(g => !g.IsData && !g.NoInit).ToList();
+            PlaceAll(zeroed);
+            if (at > range.First) plan.RegionClears.Add(new AddressRange(range.First, at - 1));
+            PlaceAll(inRegion.Where(g => !g.IsData && g.NoInit));
+            var data = inRegion.Where(g => g.IsData).ToList();
+            PlaceAll(data);
+            plan.FixedImageGlobals.AddRange(data);
+            if (at > range.First) plan.RegionUse[name] = new AddressRange(range.First, at - 1);
+        }
+        plan.FixedImageGlobals.AddRange(program.Globals.Where(g => g.FixedAddress is not null && g.IsData));
+
         // RAM after the program: zeroed globals, noinit globals, then the overlaid frames.
         int offset = 0;
-        var ram = program.Globals.Where(g => g.FixedAddress is null && !inZp.Contains(g)).ToList();
+        var ram = program.Globals.Where(g => g.FixedAddress is null && g.Region is null && !inZp.Contains(g)).ToList();
         plan.ImageGlobals.AddRange(ram.Where(g => g.InitialBytes is not null));
         foreach (var g in ram.Where(g => g.InitialBytes is null && !g.NoInit))
         {

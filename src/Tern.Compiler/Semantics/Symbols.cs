@@ -155,6 +155,8 @@ public sealed class VariableSymbol(string name, SourcePos pos, TernType type, Va
 
     /// <summary>Set for <c>@ $addr</c> variables.</summary>
     public int? FixedAddress { get; set; }
+    /// <summary>Set for <c>@ region</c> variables and data: the region's name. The allocator gives them an address in it.</summary>
+    public string? Region { get; set; }
     public bool RequireZeroPage { get; set; }
     /// <summary>Set for loop variables that live in a register (<c>using X</c>). They have no memory.</summary>
     public Register? Register { get; set; }

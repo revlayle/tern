@@ -1,20 +1,34 @@
 using System.Text;
+using Tern.Compiler.Semantics;
 using Tern.Compiler.Syntax;
 using Tern.Cpu;
 using Encoder = Tern.Cpu.Encoder;
 
 namespace Tern.Compiler.Backend;
 
-public sealed class AssembledCode(int origin, byte[] bytes, string listing)
+/// <summary>A section (a function, a global's initial value, the startup code) at the address it was placed.</summary>
+public sealed record PlacedSection(string Name, int Address, int Size, bool IsFixed);
+
+/// <summary>A stretch of a program area that code, data and variables were placed in.</summary>
+/// <param name="UsedEnd">The address after the last byte placed in <paramref name="Free"/>.</param>
+public sealed record PlacedArea(AddressRange Free, int UsedEnd, List<string> Names);
+
+public sealed class AssembledCode(
+    List<(int Address, byte[] Bytes)> segments, string listing, List<PlacedSection> sections, List<PlacedArea> areas, AddressRange? variables)
 {
-    public int Origin { get; } = origin;
-    public byte[] Bytes { get; } = bytes;
+    /// <summary>The bytes of the program file, in address order. Each segment is a run of adjacent sections.</summary>
+    public List<(int Address, byte[] Bytes)> Segments { get; } = segments;
     public string Listing { get; } = listing;
+    public List<PlacedSection> Sections { get; } = sections;
+    public List<PlacedArea> Areas { get; } = areas;
+    /// <summary>Where the program's variables (<see cref="Reserve"/>) were placed, or null if there are none.</summary>
+    public AddressRange? Variables { get; } = variables;
 }
 
 /// <summary>
-/// The built-in assembler. Places instructions at addresses, picks zero-page addressing where
-/// possible, turns out-of-range branches into an inverted branch over a <c>jmp</c>, and encodes.
+/// The built-in assembler. Places sections in the program areas (a section never crosses from one
+/// area into another), picks zero-page addressing where possible, turns out-of-range branches into an
+/// inverted branch over a <c>jmp</c>, and encodes.
 /// </summary>
 public static class Assembler
 {
@@ -27,12 +41,15 @@ public static class Assembler
         public bool LongBranch;
     }
 
+    private sealed record Section(int Start, int End, SectionStart Info);
+
+    /// <param name="areas">Where code and data may go, in the order they are filled.</param>
     /// <param name="beforeEncode">
-    /// Called with the end address once layout is done, before encoding. Variables placed after the
-    /// program get their addresses here. Variables without an address during layout are assumed to be
+    /// Called once layout is done, before encoding. Variables placed in the <see cref="Reserve"/> block
+    /// get their addresses here. Variables without an address during layout are assumed to be
     /// outside zero page.
     /// </param>
-    public static AssembledCode Assemble(IReadOnlyList<AsmItem> items, int origin, Action<int>? beforeEncode = null)
+    public static AssembledCode Assemble(IReadOnlyList<AsmItem> items, IReadOnlyList<AddressRange> areas, Action? beforeEncode = null)
     {
         var slots = items.Select(i => new Slot(i)).ToList();
 
@@ -40,18 +57,37 @@ public static class Assembler
             if (s.Item is Instr instr)
                 s.Mode = ChooseMode(instr);
 
-        // Layout: grow branches that do not reach until nothing changes. Branches only ever
-        // grow, so this always finishes.
-        bool changed;
-        do
+        // Sections: the slots from one SectionStart to the next. A Reserve ends the last one.
+        var sections = new List<Section>();
+        Reserve? reserve = null;
+        int reserveSlot = -1;
+        int start = 0;
+        var info = new SectionStart("code");
+        for (int i = 0; i <= slots.Count; i++)
         {
-            int pc = origin;
-            foreach (var s in slots)
+            bool boundary = i == slots.Count || slots[i].Item is SectionStart or Reserve;
+            if (!boundary) continue;
+            if (i > start) sections.Add(new Section(start, i, info));
+            if (i == slots.Count) break;
+            if (slots[i].Item is Reserve r)
             {
+                reserve = r;
+                reserveSlot = i;
+                break;
+            }
+            info = (SectionStart)slots[i].Item;
+            start = i;
+        }
+
+        int Lay(Section section, int pc)
+        {
+            for (int i = section.Start; i < section.End; i++)
+            {
+                var s = slots[i];
                 s.Address = pc;
                 s.Size = s.Item switch
                 {
-                    Instr i => s.LongBranch ? 5 : InstructionSet.OperandSize(s.Mode) + 1,
+                    Instr => s.LongBranch ? 5 : InstructionSet.OperandSize(s.Mode) + 1,
                     DataBytes d => d.Bytes.Length,
                     LabelTable t => t.Labels.Count,
                     Padding p => p.SizeAt(pc),
@@ -60,7 +96,70 @@ public static class Assembler
                 if (s.Item is LabelDef l) l.Label.Address = pc;
                 pc += s.Size;
             }
-            if (pc > 0x10000) throw new InvalidOperationException($"Program does not fit in memory (ends at ${pc:X})");
+            return pc;
+        }
+        int SizeOf(Section section) => slots[section.End - 1].Address + slots[section.End - 1].Size - slots[section.Start].Address;
+
+        List<PlacedArea> placedAreas = [];
+        AddressRange? variables = null;
+        (int From, int Size) variablePadding = (0, 0);
+
+        // Layout: place the sections, then grow branches that do not reach until nothing changes.
+        // Branches only ever grow, so this always finishes.
+        bool changed;
+        do
+        {
+            var fixedRanges = new List<AddressRange>();
+            foreach (var section in sections.Where(s => s.Info.FixedAddress is not null))
+            {
+                int at = section.Info.FixedAddress!.Value;
+                int end = Lay(section, at);
+                if (end > at) fixedRanges.Add(new AddressRange(at, end - 1));
+            }
+            var free = MemoryLayout.Subtract(areas, fixedRanges);
+            if (free.Count == 0)
+                throw new CompileError(new SourcePos(1, 1), $"No program area is left: the data placed with '@' fills {MemoryLayout.List(areas)}");
+            var used = free.Select(a => a.First).ToArray();
+            var names = free.Select(_ => new List<string>()).ToArray();
+
+            int cur = 0, pc = free[0].First;
+            foreach (var section in sections.Where(s => s.Info.FixedAddress is null))
+            {
+                int end = Lay(section, pc);
+                while (end > free[cur].Last + 1)
+                {
+                    if (++cur >= free.Count)
+                        throw NoRoom(section.Info.Name, end - slots[section.Start].Address, free, used, names);
+                    pc = free[cur].First;
+                    end = Lay(section, pc);
+                }
+                pc = used[cur] = end;
+                names[cur].Add(section.Info.Name);
+            }
+
+            variables = null;
+            variablePadding = (0, 0);
+            if (reserve is not null)
+            {
+                int placedAt = -1;
+                for (int a = 0; a < free.Count && placedAt < 0; a++)
+                {
+                    int at = used[a] + AvoidPageEnd(used[a], reserve.VectorOffsets);
+                    if (at + reserve.Size <= free[a].Last + 1)
+                    {
+                        placedAt = at;
+                        variablePadding = (used[a], at - used[a]);
+                        used[a] = at + reserve.Size;
+                        if (reserve.Size > 0) names[a].Add("variables");
+                    }
+                }
+                if (placedAt < 0)
+                    throw NoRoom("the variables", reserve.Size, free, used, names);
+                reserve.Label.Address = placedAt;
+                slots[reserveSlot].Address = placedAt;
+                if (reserve.Size > 0) variables = new AddressRange(placedAt, placedAt + reserve.Size - 1);
+            }
+            placedAreas = free.Select((a, i) => new PlacedArea(a, used[i], names[i])).ToList();
 
             changed = false;
             foreach (var s in slots)
@@ -77,17 +176,39 @@ public static class Assembler
             }
         } while (changed);
 
-        beforeEncode?.Invoke(slots.Count == 0 ? origin : slots[^1].Address + slots[^1].Size);
+        var placed = sections.Select(s => new PlacedSection(s.Info.Name, slots[s.Start].Address, SizeOf(s), s.Info.FixedAddress is not null)).ToList();
+        var fixedSections = placed.Where(p => p.IsFixed && p.Size > 0).ToList();
+        for (int a = 0; a < fixedSections.Count; a++)
+            for (int b = a + 1; b < fixedSections.Count; b++)
+            {
+                var (x, y) = (fixedSections[a], fixedSections[b]);
+                if (x.Address < y.Address + y.Size && y.Address < x.Address + x.Size)
+                    throw new CompileError(new SourcePos(1, 1),
+                        $"'{x.Name}' ({new AddressRange(x.Address, x.Address + x.Size - 1)}) and '{y.Name}' ({new AddressRange(y.Address, y.Address + y.Size - 1)}) are placed at overlapping addresses");
+            }
 
+        beforeEncode?.Invoke();
+
+        var segments = new List<(int Address, byte[] Bytes)>();
         var bytes = new List<byte>();
+        int segmentStart = 0;
+        void Flush()
+        {
+            if (bytes.Count > 0) segments.Add((segmentStart, bytes.ToArray()));
+            bytes.Clear();
+        }
         var listing = new StringBuilder();
         foreach (var s in slots)
         {
             switch (s.Item)
             {
+                case SectionStart:
+                    Flush();
+                    segmentStart = s.Address;
+                    break;
                 case Instr i:
                 {
-                    int start = bytes.Count;
+                    int begin = bytes.Count;
                     if (s.LongBranch)
                     {
                         // bne far  ->  beq +3 / jmp far
@@ -96,7 +217,7 @@ public static class Assembler
                     }
                     else
                         Encoder.Encode(i.Mnemonic, s.Mode, OperandValue(i, s.Mode), s.Address, bytes);
-                    ListInstruction(listing, s, i, bytes.Skip(start).ToArray());
+                    ListInstruction(listing, s, i, bytes.Skip(begin).ToArray());
                     break;
                 }
                 case DataBytes d:
@@ -136,7 +257,44 @@ public static class Assembler
                     break;
             }
         }
-        return new AssembledCode(origin, bytes.ToArray(), listing.ToString());
+        Flush();
+        if (variablePadding.Size > 0)
+            listing.AppendLine($"${variablePadding.From:X4}  {variablePadding.Size} byte(s) of padding: no jmp (...) vector may start at $xxFF (before the variables; not in the file)");
+
+        // Adjacent segments are one run of bytes.
+        var merged = new List<(int Address, byte[] Bytes)>();
+        foreach (var seg in segments.OrderBy(s => s.Address))
+        {
+            if (merged.Count > 0 && merged[^1].Address + merged[^1].Bytes.Length == seg.Address)
+                merged[^1] = (merged[^1].Address, merged[^1].Bytes.Concat(seg.Bytes).ToArray());
+            else
+                merged.Add(seg);
+        }
+        return new AssembledCode(merged, listing.ToString(), placed, placedAreas, variables);
+    }
+
+    /// <summary>
+    /// The number of bytes to skip at <paramref name="pc"/> so that no vector at <c>pc + skip + offset</c>
+    /// starts at an address ending in $FF. The NMOS 6502 reads the high byte of <c>jmp ($xxFF)</c> from $xx00.
+    /// </summary>
+    public static int AvoidPageEnd(int pc, IEnumerable<int> offsets)
+    {
+        var list = offsets.ToList();
+        for (int skip = 0; ; skip++)
+            if (list.All(o => ((pc + skip + o) & 0xFF) != 0xFF)) return skip;
+    }
+
+    /// <summary>The error for a section that fits in no program area, listing the areas and what is in them.</summary>
+    private static CompileError NoRoom(string what, int size, List<AddressRange> free, int[] used, List<string>[] names)
+    {
+        var areas = free.Select((a, i) =>
+        {
+            var shown = names[i].Count <= 6 ? string.Join(", ", names[i]) : string.Join(", ", names[i].Take(6)) + $" and {names[i].Count - 6} more";
+            return $"{a}: {used[i] - a.First} of {a.Size} bytes used" + (names[i].Count == 0 ? "" : $" ({shown})");
+        });
+        return new CompileError(new SourcePos(1, 1),
+            $"{(what == "the variables" ? "The variables need" : $"'{what}' needs")} {size} bytes, and no program area has room for them in one piece " +
+            $"(code is never split across areas). Areas: {string.Join("; ", areas)}");
     }
 
     /// <summary>Uses a zero-page mode when the operand is a zero-page address and the instruction has one.</summary>

@@ -12,6 +12,8 @@ public sealed class CheckedProgram(
     /// <summary>Functions reachable from <c>main</c>, then from each interrupt handler; callers before callees.</summary>
     public List<FunctionSymbol> Functions { get; } = functions;
     public FunctionSymbol Main { get; } = main;
+    /// <summary>The memory the program may use (spec 8.4).</summary>
+    public MemoryLayout Layout { get; init; } = null!;
 }
 
 /// <summary>
@@ -32,7 +34,13 @@ public sealed partial class Checker
     private int _hiddenCounter;
     private readonly Platform _platform;
 
-    private Checker(Platform platform) => _platform = platform;
+    private MemoryLayout _layout;
+
+    private Checker(Platform platform)
+    {
+        _platform = platform;
+        _layout = MemoryLayout.Default(platform);
+    }
 
     /// <param name="modules">The main file and its modules, each module before the files that import it.</param>
     public static CheckedProgram Check(List<Module> modules, Platform platform) => new Checker(platform).Run(modules);
@@ -50,6 +58,11 @@ public sealed partial class Checker
             foreach (var s in program.Structs) DeclareStruct(s);
             DeclareParameters(module, modules[^1]);
             foreach (var c in program.Consts) DeclareConst(c);
+            if (!module.IsMain && program.Memory is { } wrongMemory)
+                throw new CompileError(wrongMemory.Pos, $"Only the program's main file may have a memory block, since it describes the whole program; '{module.Name}' is a module");
+            if (!module.IsMain && program.Exports.Count > 0)
+                throw new CompileError(program.Exports[0].Pos, $"Only the program's main file may export functions; '{module.Name}' is a module");
+            if (module.IsMain && program.Memory is { } memory) _layout = EvaluateMemory(memory);
             foreach (var s in program.Structs) LayOut((StructSymbol)module.Scope[s.Name]);
             foreach (var f in program.Functions) DeclareFunction(f);
             foreach (var g in program.Globals) DeclareGlobal(g);
@@ -58,6 +71,9 @@ public sealed partial class Checker
             foreach (var a in program.Asserts) CheckAssert(a, module);
             module.Declared = true;
         }
+
+        foreach (var g in _globals)
+            if (g.FixedAddress is int fixedAt && _layout.IsVolatile(fixedAt, fixedAt + g.Type.Size - 1)) g.InVolatileArea = true;
 
         var mainModule = modules[^1];
         if (!mainModule.Scope.TryGetValue("main", out var m) || m is not FunctionSymbol main)
@@ -87,10 +103,20 @@ public sealed partial class Checker
         CheckPrivateGlobalsPerRoot(modules, reachable);
         MarkGlobalsUsedFromTwoRoots(reachable);
         var used = reachable.SelectMany(f => f.UsedGlobals).Concat(mainModule.Scope.Values.OfType<VariableSymbol>()).ToHashSet();
-        return new CheckedProgram(modules, _globals.Where(used.Contains).ToList(), reachable, main);
+        return new CheckedProgram(modules, _globals.Where(used.Contains).ToList(), reachable, main) { Layout = _layout };
     }
 
     // ---------- Declarations ----------
+
+    private MemoryLayout EvaluateMemory(MemoryDecl memory)
+    {
+        long Value(Expr e)
+        {
+            CheckExpr(e);
+            return e.ConstValue ?? throw new CompileError(e.Pos, "A memory range must be known at compile time: use numbers and constants");
+        }
+        return MemoryLayout.Build(_platform, memory.Lines.Select(l => (l, Value(l.First), Value(l.Last))).ToList());
+    }
 
     /// <param name="name">The name in this file's scope; for top-level declarations of a module, without the module name.</param>
     private void Declare(Symbol symbol, string? name = null)
@@ -471,8 +497,10 @@ public sealed partial class Checker
             throw new CompileError(decl.Init.Pos, "A struct cannot have an initial value. Assign its fields at the start of main");
         if (decl.Init is not null)
         {
-            if (v.FixedAddress is not null)
+            if (v.FixedAddress is not null && !decl.IsData)
                 throw new CompileError(decl.Init.Pos, "A variable at a fixed address cannot have an initial value");
+            if (v.Region is not null && !decl.IsData)
+                throw new CompileError(decl.Init.Pos, "A variable in a region cannot have an initial value: the region is not part of the program file. Assign it at the start of main");
             if (bytes is not null)
             {
                 if (!type.IsArray || type.Element!.Kind != TypeKind.U8)
@@ -575,6 +603,11 @@ public sealed partial class Checker
             case PlacementKind.Address:
                 if (!allowAddress) throw new CompileError(decl.Pos, "Only global variables can have a fixed address");
                 var addr = decl.Placement.Address!;
+                if (addr is NameExpr region && _layout.Regions.ContainsKey(region.Name) && Lookup(region.Name) is null)
+                {
+                    v.Region = region.Name;
+                    break;
+                }
                 CheckExpr(addr);
                 if (addr.ConstValue is not long a)
                     throw new CompileError(addr.Pos, "The address must be known at compile time");

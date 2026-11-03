@@ -22,7 +22,7 @@ public enum TokenKind
 
     // Keywords
     Const, Var, Data, Fn, Return, If, Else, While, For, In, Step, Using, Break, Continue,
-    True, False, As, Zp, Struct, Match, Bank, Linear, Inline, Interrupt, Asm, Noinit, Keeps, Import, Private, Volatile, Module, Assert,
+    True, False, As, Zp, Struct, Match, Bank, Linear, Inline, Interrupt, Asm, Noinit, Keeps, Import, Private, Volatile, Module, Assert, Export,
 
     // Punctuation and operators
     LParen, RParen, LBracket, RBracket, LBrace, RBrace, Comma, Colon, Semicolon,
@@ -63,7 +63,7 @@ public static class Lexer
         ["bank"] = TokenKind.Bank, ["linear"] = TokenKind.Linear, ["inline"] = TokenKind.Inline,
         ["interrupt"] = TokenKind.Interrupt, ["asm"] = TokenKind.Asm, ["noinit"] = TokenKind.Noinit,
         ["keeps"] = TokenKind.Keeps, ["import"] = TokenKind.Import, ["private"] = TokenKind.Private,
-        ["volatile"] = TokenKind.Volatile, ["module"] = TokenKind.Module, ["assert"] = TokenKind.Assert,
+        ["volatile"] = TokenKind.Volatile, ["module"] = TokenKind.Module, ["assert"] = TokenKind.Assert, ["export"] = TokenKind.Export,
     };
 
     // Longest operators first, so "<<=" wins over "<<" and "<".

@@ -111,6 +111,13 @@ public sealed class Parser
             ExpectEndOfStatement();
             SkipTerminators();
         }
+        MemoryDecl? memory = null;
+        if (IsMemoryBlock())
+        {
+            memory = ParseMemory();
+            SkipTerminators();
+        }
+        var exports = new List<ExportName>();
         var privateNames = new HashSet<string>();
         while (!At(TokenKind.Eof))
         {
@@ -126,7 +133,7 @@ public sealed class Parser
                 ParseDeclaration();
             SkipTerminators();
         }
-        return new ProgramSyntax(consts, globals, functions) { Header = header, Asserts = asserts, Imports = imports, Structs = structs, PrivateNames = privateNames };
+        return new ProgramSyntax(consts, globals, functions) { Header = header, Asserts = asserts, Imports = imports, Memory = memory, Exports = exports, Structs = structs, PrivateNames = privateNames };
 
         // Parses one top-level declaration and returns its name.
         string ParseDeclaration()
@@ -147,6 +154,19 @@ public sealed class Parser
                     asserts.Add(new AssertDecl(t.Pos, cond, msg.Text));
                     return "";
                 }
+                case TokenKind.Export:
+                {
+                    Advance();
+                    do
+                    {
+                        var f = Expect(TokenKind.Identifier, "a function name after 'export'");
+                        exports.Add(new ExportName(f.Pos, f.Text));
+                    } while (Accept(TokenKind.Comma));
+                    ExpectEndOfStatement();
+                    return "";
+                }
+                case TokenKind.Identifier when IsMemoryBlock():
+                    throw new CompileError(Current.Pos, "The memory block goes right after the imports, before other declarations, and there is only one");
                 case TokenKind.Const: { var d = ParseConst(); consts.Add(d); return d.Name; }
                 case TokenKind.Var: { var d = ParseVar(); globals.Add(d); return d.Name; }
                 case TokenKind.Linear: { var d = ParseLinearVar(); globals.Add(d); return d.Name; }
@@ -221,6 +241,40 @@ public sealed class Parser
         }
     }
 
+    private bool IsMemoryBlock() => At(TokenKind.Identifier) && Current.Text == "memory" && PeekAt(1).Kind == TokenKind.LBrace;
+
+    /// <summary><c>memory { first..=last kind [name] ... }</c> (spec 8.4). The kinds are words only inside the block.</summary>
+    private MemoryDecl ParseMemory()
+    {
+        var start = Advance();
+        Expect(TokenKind.LBrace, "'{'");
+        var lines = new List<MemoryLine>();
+        SkipTerminators();
+        while (!At(TokenKind.RBrace))
+        {
+            if (At(TokenKind.Eof)) throw new CompileError(start.Pos, "The memory block is not closed with '}'");
+            var first = ParseExpr();
+            if (At(TokenKind.DotDot))
+                throw new CompileError(Current.Pos, "A memory range includes its last address: write first..=last");
+            Expect(TokenKind.DotDotEq, "'..=' and the last address of the range");
+            var last = ParseExpr();
+            var kind = At(TokenKind.Volatile) ? Advance() : Expect(TokenKind.Identifier, "the kind of memory: program, zeropage, reserved, region, volatile or overlay");
+            if (kind.Text is not ("program" or "zeropage" or "reserved" or "region" or "volatile" or "overlay"))
+                throw new CompileError(kind.Pos, $"Unknown kind of memory '{kind.Text}'. Use program, zeropage, reserved, region, volatile or overlay");
+            string? name = null;
+            if (kind.Text is "region" or "overlay")
+                name = Expect(TokenKind.Identifier, $"a name after '{kind.Text}'").Text;
+            lines.Add(new MemoryLine(kind.Pos, first, last, kind.Text, name));
+            // The lexer ends no statement after the keyword 'volatile'.
+            if (kind.Kind == TokenKind.Volatile) Accept(TokenKind.Semicolon);
+            else ExpectEndOfStatement();
+            SkipTerminators();
+        }
+        Expect(TokenKind.RBrace, "'}'");
+        ExpectEndOfStatement();
+        return new MemoryDecl(start.Pos, lines);
+    }
+
     /// <summary><c>struct Name { field: type, field: type @ offset }</c>; fields are separated by ',' or line breaks.</summary>
     private StructDecl ParseStruct()
     {
@@ -272,20 +326,26 @@ public sealed class Parser
         var name = Expect(TokenKind.Identifier, "variable name");
         TypeSyntax? type = Accept(TokenKind.Colon) ? ParseType() : null;
 
-        var placement = Placement.None;
-        if (Accept(TokenKind.At))
-        {
-            if (Accept(TokenKind.Zp))
-                placement = new Placement(PlacementKind.ZeroPage);
-            else if (At(TokenKind.Bank))
-                throw new CompileError(Current.Pos, "'@ bank(n)' is not supported yet");
-            else
-                placement = new Placement(PlacementKind.Address, ParseExpr());
-        }
+        var placement = ParsePlacement(allowZeroPage: true);
 
         Expr? init = Accept(TokenKind.Eq) ? ParseExpr() : null;
         ExpectEndOfStatement();
         return new VarDecl(start.Pos, name.Text, type, placement, init);
+    }
+
+    /// <summary>The optional <c>@ zp</c>, <c>@ address</c> or <c>@ region</c> after a variable's type.</summary>
+    private Placement ParsePlacement(bool allowZeroPage)
+    {
+        if (!Accept(TokenKind.At)) return Placement.None;
+        if (At(TokenKind.Zp))
+        {
+            if (!allowZeroPage) throw new CompileError(Current.Pos, "Data is read-only and lives in the program; '@ zp' is for variables");
+            Advance();
+            return new Placement(PlacementKind.ZeroPage);
+        }
+        if (At(TokenKind.Bank))
+            throw new CompileError(Current.Pos, "'@ bank(n)' is not supported yet");
+        return new Placement(PlacementKind.Address, ParseExpr());
     }
 
     private VarDecl ParseData()
@@ -293,11 +353,11 @@ public sealed class Parser
         var start = Expect(TokenKind.Data, "'data'");
         var name = Expect(TokenKind.Identifier, "data name");
         TypeSyntax? type = Accept(TokenKind.Colon) ? ParseType() : null;
-        if (At(TokenKind.At)) throw new CompileError(Current.Pos, "'@' on data is not supported yet");
+        var placement = ParsePlacement(allowZeroPage: false);
         Expect(TokenKind.Eq, "'=' and the data's value");
         var init = ParseExpr();
         ExpectEndOfStatement();
-        return new VarDecl(start.Pos, name.Text, type, Placement.None, init) { IsData = true };
+        return new VarDecl(start.Pos, name.Text, type, placement, init) { IsData = true };
     }
 
     private FnDecl ParseFn(bool isAsm = false)
