@@ -188,7 +188,9 @@ Spec: 8.5.
 
 Follow-up first (settled 2026-11-02/03):
 
-- `math.min8`, `max8`, `clamp8` and the signed ones use their own private work byte instead of `math.w0` (spec 10.1). Test: `mul8` in main and `min8` in a handler compiles and both give correct results under `irqEvery`; `min8` from both main and a handler is still the private-variable error.
+- A module's function called only from the module's own `interrupt fn`s counts as its interrupt side for private variables (spec 8.1, question 48); `sprites.put` can become a plain `fn`. Tests: such a helper using a private variable shared with main-side functions compiles; the same helper also called from main is still the error.
+- Constant conditions folded before reachability (spec 2.2, question 49): an `if` on a constant compiles only the branch taken, and functions called only from the other branch are not compiled or allocated. Test: `sprites` without `FLICKER` has no `build_flicker` and no `shown`/`disp`; bytes before and after in the commit message.
+- A region named like a constant or other main-file symbol is an error (spec 8.4, question 51), with a test.
 - `{` on the line after a block header (spec 2), for every construct listed there; tests in `ErrorTests` or the parser tests for each, plus a `{` after a line break where no block is expected still being an error.
 
 Then:
