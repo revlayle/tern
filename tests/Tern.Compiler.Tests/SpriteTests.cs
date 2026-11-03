@@ -348,4 +348,27 @@ public sealed class SpriteTests
         var flicker = TernCompiler.Compile(string.Format(main, ", FLICKER = true"));
         Assert.True(plain.Image.Length < flicker.Image.Length);
     }
+
+    /// <summary>Cycle counts for docs/status.md; the limits are generous so only a large slowdown fails.</summary>
+    [Theory]
+    [InlineData(false, 9500)]
+    [InlineData(true, 21000)]
+    public void Update_of_32_sprites_costs(bool reversed, int limit)
+    {
+        var lib = new Library("import c64\nimport sprites(COUNT = 32)", "sprites.init()\nsprites.update()");
+        for (int i = 0; i < 32; i++)
+        {
+            int y = reversed ? 240 - i * 7 : 30 + i * 7;
+            lib.Set8($"sprites.ypos", y);   // placeholder, replaced below
+            lib.Ram.Bytes[lib.Address("sprites.ypos") + i] = (byte)y;
+            lib.Ram.Bytes[lib.Address("sprites.flags") + i] = Visible;
+            lib.Ram.Bytes[lib.Address("sprites.xpos") + i] = (byte)(i * 8);
+        }
+        lib.Call("sprites.init");
+        long first = lib.Call("sprites.update");
+        long second = lib.Call("sprites.update");
+        Console.WriteLine($"update(32 sprites, reversed={reversed}): first {first}, again {second} cycles");
+        Assert.True(first < limit, $"{first} cycles");
+        Assert.True(second < limit, $"{second} cycles");
+    }
 }

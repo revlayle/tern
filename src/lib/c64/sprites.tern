@@ -81,7 +81,6 @@ private var d_col: [u8; 2 * COUNT]
 private var d_msb: [u8; 2 * COUNT]      // the sprite's bit in $D010, or 0
 private var d_mc: [u8; 2 * COUNT]       // the sprite's bit in $D01C, or 0
 private var d_ex: [u8; 2 * COUNT]       // the sprite's bit in $D01D, or 0
-private var d_nbit: [u8; 2 * COUNT]     // all bits but the sprite's
 private var d_line: [u8; 2 * COUNT]     // raster line of the interrupt that writes the sprite
 
 // A finished display list waits in pend_* until the top of the next frame.
@@ -97,7 +96,10 @@ private var next: u8                // the next entry to write; 0 at the top of 
 
 private var tmp_s: u8
 private var tmp_bit: u8
-private var tmp_slot: u8
+private var tmp_y: u8
+private var tmp_e: u8
+private var tmp_n: u8
+private var tmp_p: u8
 
 private data BIT: [u8; 8] = [1, 2, 4, 8, 16, 32, 64, 128]
 private data NBIT: [u8; 8] = [$FE, $FD, $FB, $F7, $EF, $DF, $BF, $7F]
@@ -117,26 +119,46 @@ fn init() {
     next = 0
 }
 
-// Sorts the sprites by y. The order of the last call is the starting point, so a frame in which
-// the sprites hardly moved costs little.
-private fn sort() {
-    for p in 1..COUNT {
-        var s = order[p]
-        var ys = ypos[s]
-        var j = p
-        while j > 0 && ypos[order[j - 1]] > ys {
-            order[j] = order[j - 1]
-            j -= 1
-        }
-        order[j] = s
-    }
+// Sorts the sprites by y: insertion sort, stable. The order of the last call is the starting
+// point, so a frame in which the sprites hardly moved costs about 35 cycles per sprite.
+private asm fn sort() {
+    ldy #1
+.outer:
+    ldx order,y             // the next sprite
+    lda ypos,x
+    sta tmp_y
+    stx tmp_s
+    ldx order-1,y           // the one before it
+    cmp ypos,x
+    bcs .next               // not below it: in place
+    sty tmp_p
+.shift:
+    txa                     // the one before moves up
+    sta order,y
+    dey
+    beq .place
+    ldx order-1,y
+    lda tmp_y
+    cmp ypos,x
+    bcc .shift
+.place:
+    lda tmp_s
+    sta order,y
+    ldy tmp_p
+.next:
+    iny
+    cpy #COUNT
+    bne .outer
 }
 
 // Copies sprite s into entry e of the display list as hardware sprite slot.
 private asm fn emit(slot: u8 using A, s: u8 using X, e: u8 using Y) {
     sta d_slot,y
-    sta tmp_slot
     stx tmp_s
+    tax
+    lda BIT,x
+    sta tmp_bit
+    ldx tmp_s
     lda xpos,x
     sta d_x,y
     lda ypos,x
@@ -145,12 +167,6 @@ private asm fn emit(slot: u8 using A, s: u8 using X, e: u8 using Y) {
     sta d_ptr,y
     lda color,x
     sta d_col,y
-    ldx tmp_slot
-    lda NBIT,x
-    sta d_nbit,y
-    lda BIT,x
-    sta tmp_bit
-    ldx tmp_s
     lda xpos+COUNT,x
     and #1
     beq .msb
@@ -181,6 +197,74 @@ private asm fn emit(slot: u8 using A, s: u8 using X, e: u8 using Y) {
 .done:
 }
 
+// Builds the display list from the sorted sprites into the half that starts at entry tb: the
+// visible sprites in order, each on hardware sprite (number mod 8), leaving out a sprite whose
+// hardware sprite is still busy. Returns the number of entries.
+private asm fn build(tb: u8 using A) -> u8 using A {
+    sta tmp_e
+    lda #0
+    sta tmp_n
+    sta tmp_p
+.loop:
+    ldx tmp_p
+    lda order,x
+    tax                         // the sprite
+    lda flags,x
+    and #VISIBLE
+    beq .next
+    ldy tmp_e
+    lda tmp_n
+    cmp #8
+    bcc .emit
+    lda ypos,x                  // y of the sprite 8 entries back is d_y-8,y
+    sec
+    sbc d_y-8,y
+    cmp #GAP
+    bcc .next                   // the hardware sprite is still busy: leave this one out
+.emit:
+    lda tmp_n
+    and #7
+    jsr emit
+    inc tmp_n
+    inc tmp_e
+.next:
+    inc tmp_p
+    lda tmp_p
+    cmp #COUNT
+    bne .loop
+    lda tmp_n
+}
+
+// The same with FLICKER: a sprite that finds its hardware sprite busy takes the place of the
+// last entry if it has waited longer than that one, so the sprites in a crowd take turns.
+private fn build_flicker(tb: u8) -> u8 {
+    var n: u8 = 0
+    var last_s: u8 = 0
+    var last_old: u8 = 0
+    for p in 0..COUNT {
+        var s = order[p]
+        if flags[s] & VISIBLE != 0 {
+            if n >= 8 && ypos[s] - d_y[tb + n - 8] < GAP {
+                var age = updates - shown[s]
+                if age > last_old {
+                    shown[last_s] = updates - last_old
+                    emit((n - 1) & 7, s, tb + n - 1)
+                    shown[s] = updates
+                    last_s = s
+                    last_old = age
+                }
+            } else {
+                last_old = updates - shown[s]
+                shown[s] = updates
+                last_s = s
+                emit(n & 7, s, tb + n)
+                n += 1
+            }
+        }
+    }
+    return n
+}
+
 // Sorts the sprites and builds the display list for the next frame. Call it once per frame,
 // best straight after wait_frame().
 fn update() {
@@ -188,36 +272,12 @@ fn update() {
     sort()
     var tb: u8 = 0
     if base == 0 { tb = COUNT }
-    var n: u8 = 0
-    var last_s: u8 = 0
-    var last_old: u8 = 0
     updates += 1
-    for p in 0..COUNT {
-        var s = order[p]
-        if flags[s] & VISIBLE != 0 {
-            if n >= 8 && ypos[s] - d_y[tb + n - 8] < GAP {
-                // The hardware sprite is still busy. With FLICKER, the sprite that has waited
-                // longer takes the place of the last one on the list.
-                if FLICKER {
-                    var age = updates - shown[s]
-                    if age > last_old {
-                        shown[last_s] = updates - last_old
-                        emit((n - 1) & 7, s, tb + n - 1)
-                        shown[s] = updates
-                        last_s = s
-                        last_old = age
-                    }
-                }
-            } else {
-                if FLICKER {
-                    last_old = updates - shown[s]
-                    shown[s] = updates
-                    last_s = s
-                }
-                emit(n & 7, s, tb + n)
-                n += 1
-            }
-        }
+    var n: u8 = 0
+    if FLICKER {
+        n = build_flicker(tb)
+    } else {
+        n = build(tb)
     }
     var shown_count = n
     if n > 8 { shown_count = 8 }
@@ -259,6 +319,18 @@ private interrupt fn put(e: u8 using Y) {
         lda d_ptr,y
         sta SCREEN + $3F8,x
         sta SCREEN2 + $3F8,x
+        lda c64.vic.sprite_x_msb
+        and NBIT,x
+        ora d_msb,y
+        sta c64.vic.sprite_x_msb
+        lda c64.vic.sprite_multicolor
+        and NBIT,x
+        ora d_mc,y
+        sta c64.vic.sprite_multicolor
+        lda c64.vic.sprite_expand_x
+        and NBIT,x
+        ora d_ex,y
+        sta c64.vic.sprite_expand_x
         txa
         asl
         tax
@@ -266,18 +338,6 @@ private interrupt fn put(e: u8 using Y) {
         sta c64.vic.sprite0_x,x
         lda d_y,y
         sta c64.vic.sprite0_y,x
-        lda c64.vic.sprite_x_msb
-        and d_nbit,y
-        ora d_msb,y
-        sta c64.vic.sprite_x_msb
-        lda c64.vic.sprite_multicolor
-        and d_nbit,y
-        ora d_mc,y
-        sta c64.vic.sprite_multicolor
-        lda c64.vic.sprite_expand_x
-        and d_nbit,y
-        ora d_ex,y
-        sta c64.vic.sprite_expand_x
     }
 }
 
