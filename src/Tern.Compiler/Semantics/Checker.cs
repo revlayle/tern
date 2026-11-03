@@ -14,6 +14,9 @@ public sealed class CheckedProgram(
     public FunctionSymbol Main { get; } = main;
     /// <summary>The memory the program may use (spec 8.4).</summary>
     public MemoryLayout Layout { get; init; } = null!;
+    /// <summary>The exported functions of a binary without <c>main</c> (spec 12.3), in jump table order; empty for a program.</summary>
+    public List<FunctionSymbol> Exports { get; init; } = [];
+    public bool IsBinary => Exports.Count > 0;
 }
 
 /// <summary>
@@ -76,16 +79,33 @@ public sealed partial class Checker
             if (g.FixedAddress is int fixedAt && _layout.IsVolatile(fixedAt, fixedAt + g.Type.Size - 1)) g.InVolatileArea = true;
 
         var mainModule = modules[^1];
-        if (!mainModule.Scope.TryGetValue("main", out var m) || m is not FunctionSymbol main)
-            throw new CompileError(new SourcePos(1, 1, mainModule.Path), "The program has no 'fn main()'");
-        if (main.Parameters.Count > 0 || main.ReturnType.Kind != TypeKind.Void)
-            throw new CompileError(main.Pos, "'main' must have no parameters and no return value");
-        if (main.FixedAddress is not null)
-            throw new CompileError(main.Pos, "'main' must have a body");
-        if (main.IsInterrupt)
-            throw new CompileError(main.Pos, "'main' cannot be an interrupt handler; give the handler another name");
-        if (main.IsInline)
-            throw new CompileError(main.Pos, "'main' cannot be inline: nothing calls it");
+        var exports = new List<FunctionSymbol>();
+        FunctionSymbol main;
+        if (mainModule.Syntax.Exports.Count > 0)
+        {
+            // A binary for another program to call (spec 12.3): its entries are one root.
+            if (mainModule.Scope.TryGetValue("main", out var hasMain) && hasMain is FunctionSymbol)
+                throw new CompileError(mainModule.Syntax.Exports[0].Pos,
+                    "A program with 'main' cannot export functions: 'export' builds a binary for another program to call, which has no 'main'. Remove one of them");
+            exports = ResolveExports(mainModule);
+            main = new FunctionSymbol(EntriesRoot, mainModule.Syntax.Exports[0].Pos);
+            foreach (var e in exports) main.Callees.Add(e);
+        }
+        else
+        {
+            if (!mainModule.Scope.TryGetValue("main", out var m) || m is not FunctionSymbol realMain)
+                throw new CompileError(new SourcePos(1, 1, mainModule.Path),
+                    "The program has no 'fn main()'. A binary for another program to call has an 'export' line instead");
+            main = realMain;
+            if (main.Parameters.Count > 0 || main.ReturnType.Kind != TypeKind.Void)
+                throw new CompileError(main.Pos, "'main' must have no parameters and no return value");
+            if (main.FixedAddress is not null)
+                throw new CompileError(main.Pos, "'main' must have a body");
+            if (main.IsInterrupt)
+                throw new CompileError(main.Pos, "'main' cannot be an interrupt handler; give the handler another name");
+            if (main.IsInline)
+                throw new CompileError(main.Pos, "'main' cannot be inline: nothing calls it");
+        }
 
         foreach (var module in modules)
         {
@@ -100,10 +120,40 @@ public sealed partial class Checker
         // of a module cost nothing. The main file's globals are all kept.
         MarkParts(main, mainModule);
         var reachable = OrderRoots(main, mainModule);
+        if (exports.Count > 0) reachable.Remove(main);   // the root of a binary's entries has no code
         CheckPrivateGlobalsPerRoot(modules, reachable);
         MarkGlobalsUsedFromTwoRoots(reachable);
         var used = reachable.SelectMany(f => f.UsedGlobals).Concat(mainModule.Scope.Values.OfType<VariableSymbol>()).ToHashSet();
-        return new CheckedProgram(modules, _globals.Where(used.Contains).ToList(), reachable, main) { Layout = _layout };
+        return new CheckedProgram(modules, _globals.Where(used.Contains).ToList(), reachable, main) { Layout = _layout, Exports = exports };
+    }
+
+    /// <summary>The name of the root that stands for a binary's entries (spec 12.3); it has no code.</summary>
+    private const string EntriesRoot = "(entries)";
+
+    /// <summary>The functions named by <c>export</c> lines, in order. Each must be callable with registers alone.</summary>
+    private static List<FunctionSymbol> ResolveExports(Module mainModule)
+    {
+        var result = new List<FunctionSymbol>();
+        foreach (var e in mainModule.Syntax.Exports)
+        {
+            if (!mainModule.Scope.TryGetValue(e.Name, out var symbol) || symbol is not FunctionSymbol f)
+                throw new CompileError(e.Pos, mainModule.Scope.ContainsKey(e.Name) ? $"'{e.Name}' is not a function, so it cannot be exported" : $"'{e.Name}' is not declared; 'export' names functions of the main file");
+            if (e.Name == "setup")
+                throw new CompileError(e.Pos, "'setup' is the name of the binary's startup entry (entry 0 of the jump table). Rename the function");
+            if (result.Contains(f))
+                throw new CompileError(e.Pos, $"'{e.Name}' is exported twice");
+            if (f.IsInterrupt)
+                throw new CompileError(e.Pos, $"'{e.Name}' is an interrupt handler, which the CPU calls through a vector; it cannot be an entry of the jump table. Export a plain function that does the work");
+            if (f.IsInline)
+                throw new CompileError(e.Pos, $"'{e.Name}' is inline: it has no code of its own to put in the jump table. Remove 'inline'");
+            if (f.FixedAddress is not null)
+                throw new CompileError(e.Pos, $"'{e.Name}' is a routine at a fixed address, not part of this binary");
+            if (f.Parameters.FirstOrDefault(p => p.PassedIn is null) is { } memoryParam)
+                throw new CompileError(e.Pos,
+                    $"'{e.Name}' takes '{memoryParam.Name}' in memory, which the caller of a binary cannot set. Pass it in a register ({memoryParam.Name}: {memoryParam.Type} using A)");
+            result.Add(f);
+        }
+        return result;
     }
 
     // ---------- Declarations ----------
@@ -1723,7 +1773,8 @@ public sealed partial class Checker
                 "An interrupt handler takes no parameters and returns no value: the CPU calls it, not your code");
     }
 
-    private static string DescribeRoot(FunctionSymbol root) => root.IsInterrupt ? $"the interrupt handler '{root.Name}'" : "main";
+    private static string DescribeRoot(FunctionSymbol root) =>
+        root.IsInterrupt ? $"the interrupt handler '{root.Name}'" : root.Name == EntriesRoot ? "the binary's entries" : "main";
 
     /// <summary>
     /// A function reached from two roots (main and a handler, or two handlers) may run again while

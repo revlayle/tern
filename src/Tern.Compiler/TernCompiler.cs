@@ -27,6 +27,12 @@ public sealed class CompileResult
     public required IReadOnlyList<PlacedSection> Sections { get; init; }
     /// <summary>The program areas the compiler filled and how much of each is used.</summary>
     public required IReadOnlyList<PlacedArea> Areas { get; init; }
+    /// <summary>For a binary without <c>main</c>: the jump table, <c>setup</c> first, then the exports, each with its address.</summary>
+    public IReadOnlyList<(string Name, int Address)> Entries { get; init; } = [];
+    /// <summary>For a binary without <c>main</c>: the text of its interface module (spec 12.3), or null.</summary>
+    public string? ApiModule { get; init; }
+    /// <summary>The module's name, such as <c>player_api</c>; the file is <c>player_api.tern</c>.</summary>
+    public string? ApiModuleName { get; init; }
 }
 
 public static class TernCompiler
@@ -54,7 +60,8 @@ public static class TernCompiler
                         throw new CompileError(v.Pos, $"'{v.Name}' is used as jmp ({v.Name}{o:+0;-0;''}) and was placed so that the vector starts at $FF, where the 6502 reads it wrongly");
 
         var layout = program.Layout;
-        if (layout.Program[0].First != platform.LoadAddress)
+        bool binary = program.IsBinary;
+        if (!binary && layout.Program[0].First != platform.LoadAddress)
             throw new CompileError(program.Main.Pos,
                 $"A program with 'main' starts at ${platform.LoadAddress:X4}, where the {platform.Name.ToUpperInvariant()} BASIC line goes, but its first program area begins at ${layout.Program[0].First:X4}. " +
                 $"Start the first 'program' line of the memory block at ${platform.LoadAddress:X4}");
@@ -63,11 +70,27 @@ public static class TernCompiler
         var start = new Label("start");
         var halt = new Label("halt");
         var bss = new Label("bss");
-        var items = new List<AsmItem> { new SectionStart("startup"), new DataBytes(platform.Header), new LabelDef(start), new Comment("startup") };
-        items.AddRange(Startup(plan, bss, gen.LabelOf));
-        items.Add(new Instr(Jsr, Absolute, new LabelOperand(gen.LabelOf(program.Main))));
-        items.Add(new LabelDef(halt));
-        items.Add(new Instr(Jmp, Absolute, new LabelOperand(halt)));
+        var setup = new Label("setup");
+        List<AsmItem> items;
+        if (!binary)
+        {
+            items = [new SectionStart("startup"), new DataBytes(platform.Header), new LabelDef(start), new Comment("startup")];
+            items.AddRange(Startup(plan, bss, gen.LabelOf));
+            items.Add(new Instr(Jsr, Absolute, new LabelOperand(gen.LabelOf(program.Main))));
+            items.Add(new LabelDef(halt));
+            items.Add(new Instr(Jmp, Absolute, new LabelOperand(halt)));
+        }
+        else
+        {
+            // A binary starts with its jump table: setup, then the exports in the order they were listed (spec 12.3).
+            items = [new SectionStart("jump table"), new LabelDef(start), new Instr(Jmp, Absolute, new LabelOperand(setup))];
+            foreach (var export in program.Exports)
+                items.Add(new Instr(Jmp, Absolute, new LabelOperand(gen.LabelOf(export))));
+            items.Add(new SectionStart("setup"));
+            items.Add(new LabelDef(setup));
+            items.AddRange(Startup(plan, bss, gen.LabelOf));
+            items.Add(new Instr(Rts));
+        }
         items.AddRange(functionCode);
 
         var imageLabels = new Dictionary<VariableSymbol, Label>();
@@ -122,6 +145,35 @@ public static class TernCompiler
         foreach (var (name, address) in symbols.OrderBy(s => s.Value))
             vice.AppendLine($"al C:{address:x4} .{name}");
 
+        var entries = new List<(string Name, int Address)>();
+        string? apiModule = null, apiName = null;
+        if (binary)
+        {
+            var use = new RegisterUse(gen, program.Functions);
+            var setupChange = items.SkipWhile(i => i is not LabelDef { Label: var l } || l != setup).OfType<Instr>()
+                .TakeWhile(i => i.Mnemonic != Rts)
+                .Aggregate(CpuState.None, (acc, i) => acc | (AsmEffects.Of(i.Mnemonic, i.Mode).Writes & (CpuState.A | CpuState.X | CpuState.Y)));
+            var table = new List<(string Name, FunctionSymbol? Function, int Address, CpuState Changed)> { ("setup", null, start.Address, setupChange) };
+            for (int i = 0; i < program.Exports.Count; i++)
+                table.Add((program.Exports[i].Name, program.Exports[i], start.Address + 3 * (i + 1), use.Changed(program.Exports[i])));
+            entries.AddRange(table.Select(t => (t.Name, t.Address)));
+
+            var fileRange = new AddressRange(loadAddress, fileEnd - 1);
+            var others = new List<(string Prefix, string What, AddressRange Range)>();
+            if (code.Variables is { } vr && !fileRange.Contains(vr)) others.Add(("VARS", "variables, zeroed by setup", vr));
+            foreach (var (name, use2) in plan.RegionUse)
+                if (!fileRange.Contains(use2)) others.Add((name.ToUpperInvariant(), $"region {name}", use2));
+            var zpUsed = program.Globals.Where(g => g.FixedAddress is null && g.Region is null)
+                .Concat(program.Functions.SelectMany(f => f.FrameVariables))
+                .Where(v => v.AliasOf is null && v.Address is >= 0 and < 0x100 && v.Register is null).ToList();
+            if (zpUsed.Count > 0)
+                others.Add(("ZP", "zero page used by the binary", new AddressRange(zpUsed.Min(v => v.Address), zpUsed.Max(v => v.Address + v.Type.Size - 1))));
+
+            string baseName = sourcePath is null ? "binary" : Path.GetFileNameWithoutExtension(sourcePath);
+            apiName = baseName + "_api";
+            apiModule = BinaryInterface.Generate(baseName + ".prg", apiName, table, fileRange, others);
+        }
+
         var report = new StringBuilder();
         report.AppendLine($"Code and data: ${loadAddress:X4}-${fileEnd - 1:X4} ({image.Length} bytes)");
         report.AppendLine(code.Variables is { } vars
@@ -136,6 +188,11 @@ public static class TernCompiler
                 report.AppendLine(plan.RegionUse.TryGetValue(name, out var use)
                     ? $"  region {name} {range}: {use.Size} of {range.Size} bytes used"
                     : $"  region {name} {range}: unused");
+        }
+        if (binary)
+        {
+            report.AppendLine($"Jump table at ${start.Address:X4}:");
+            foreach (var (name, address) in entries) report.AppendLine($"  ${address:X4}  {name}");
         }
         report.AppendLine("Zero page:");
         report.Append(plan.ZeroPageMap);
@@ -153,6 +210,9 @@ public static class TernCompiler
             Report = report.ToString(),
             Sections = code.Sections,
             Areas = code.Areas,
+            Entries = entries,
+            ApiModule = apiModule,
+            ApiModuleName = apiName,
         };
     }
 

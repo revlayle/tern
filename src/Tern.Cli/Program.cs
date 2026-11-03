@@ -10,6 +10,9 @@ if (args.Length < 1 || args[0] is "-h" or "--help")
           <output>.prg   the program
           <output>.lst   listing with addresses, bytes and cycles
           <output>.vs    VICE label file (load in the monitor with: ll "<output>.vs")
+
+        A program with 'export' lines and no main is a binary for another program to call;
+        it also writes <name>_api.tern, the module a Tern program imports to call it.
         """);
     return args.Length < 1 ? 1 : 0;
 }
@@ -43,6 +46,12 @@ try
     File.WriteAllBytes(output, result.Prg);
     File.WriteAllText(Path.ChangeExtension(output, ".lst"), result.Listing);
     File.WriteAllText(Path.ChangeExtension(output, ".vs"), result.ViceLabels);
+    if (result.ApiModule is not null)
+    {
+        string api = Path.Combine(Path.GetDirectoryName(Path.GetFullPath(output))!, result.ApiModuleName + ".tern");
+        File.WriteAllText(api, result.ApiModule);
+        Console.WriteLine($"Wrote {api}");
+    }
     Console.WriteLine($"Wrote {output}");
     Console.Write(result.Report);
     return 0;
