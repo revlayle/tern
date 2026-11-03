@@ -30,7 +30,9 @@ Tern is a programming language for 6502-family processors. It aims to be easy to
 
 - UTF-8 files with the extension `.tern`.
 - Comments: `// to end of line` and `/* block */`.
-- Statements end at a newline or `;`. A newline inside `( )` or `[ ]` does not end a statement, so argument lists and tables can span lines. A `{` or `}` ends that rule.
+- Statements end at a newline or `;`. A `;` is optional at the end of a line, so `x = 1;` and `x = 1` are the same, and an empty statement (`;;`) is ignored. A newline inside `( )` or `[ ]` does not end a statement, so argument lists and tables can span lines. A `{` or `}` ends that rule.
+- Where a block must follow (after the header of `fn`, `asm fn`, `interrupt fn`, `if`, `else`, `while`, `for`, `match`, `struct`, `asm`, `memory`), newlines before the `{` are skipped, so a brace may go on its own line (C# style). An `else` may also start the line after the `}`.
+- Indentation has no meaning.
 - Identifiers: `[A-Za-z_][A-Za-z0-9_]*`. Case-sensitive.
 - A program can be split into modules, one per file. `import name` loads `name.tern` (2.2).
 
