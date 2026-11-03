@@ -241,12 +241,27 @@ public sealed class Parser
         }
     }
 
-    private bool IsMemoryBlock() => At(TokenKind.Identifier) && Current.Text == "memory" && PeekAt(1).Kind == TokenKind.LBrace;
+    private bool IsMemoryBlock()
+    {
+        if (!At(TokenKind.Identifier) || Current.Text != "memory") return false;
+        int i = 1;
+        while (PeekAt(i).Kind == TokenKind.Newline) i++;
+        return PeekAt(i).Kind == TokenKind.LBrace;
+    }
+
+    /// <summary>Where a block must follow a header, line breaks before the '{' are skipped (spec 2).</summary>
+    private void SkipBreaksBeforeBrace()
+    {
+        int i = 0;
+        while (PeekAt(i).Kind == TokenKind.Newline) i++;
+        if (PeekAt(i).Kind == TokenKind.LBrace) _pos += i;
+    }
 
     /// <summary><c>memory { first..=last kind [name] ... }</c> (spec 8.4). The kinds are words only inside the block.</summary>
     private MemoryDecl ParseMemory()
     {
         var start = Advance();
+        SkipBreaksBeforeBrace();
         Expect(TokenKind.LBrace, "'{'");
         var lines = new List<MemoryLine>();
         SkipTerminators();
@@ -280,6 +295,7 @@ public sealed class Parser
     {
         var start = Expect(TokenKind.Struct, "'struct'");
         var name = Expect(TokenKind.Identifier, "struct name");
+        SkipBreaksBeforeBrace();
         Expect(TokenKind.LBrace, "'{' after the struct name");
         var fields = new List<FieldSyntax>();
         while (true)
@@ -464,6 +480,7 @@ public sealed class Parser
 
     private BlockStmt ParseBlock()
     {
+        SkipBreaksBeforeBrace();
         var start = Expect(TokenKind.LBrace, "'{'");
         var statements = new List<Stmt>();
         SkipTerminators();
@@ -575,6 +592,7 @@ public sealed class Parser
     {
         var start = Expect(TokenKind.Match, "'match'");
         var subject = ParseExpr();
+        SkipBreaksBeforeBrace();
         var open = Expect(TokenKind.LBrace, "'{' after the match value");
         var arms = new List<MatchArm>();
         SkipTerminators();
@@ -646,6 +664,7 @@ public sealed class Parser
     /// <summary>The <c>{ ... }</c> of an asm block or asm fn: one instruction per line, and <c>.labels:</c>.</summary>
     private AsmStmt ParseAsmBody()
     {
+        SkipBreaksBeforeBrace();
         var start = Expect(TokenKind.LBrace, "'{' after 'asm'");
         var lines = new List<AsmLine>();
         _inAsm = true;
