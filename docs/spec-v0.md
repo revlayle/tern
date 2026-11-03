@@ -628,6 +628,7 @@ The tables below describe the library as written in M4, M5 and M10. Work variabl
 
 - Division computes the quotient and the remainder together, as in assembly. The remainder is left in a library variable (`math.remainder8`, `math.remainder16`) for the caller to read straight after the call.
 - Division by zero does not trap. The result is unspecified.
+- `min8`, `max8`, `clamp8` and the signed ones use their own private work byte, not the one the multiply and divide routines use, so a program may call `mul8` from main and `min8` from a handler. Calling one of them from both main and a handler is still an error (8.1).
 - Multiplying or dividing by a constant needs no library call: write the shifts and adds (`(w << 5) + (w << 3)` for `w × 40`), or `& 7` for "mod 8".
 - Memory parameters of `asm fn` routines are not named `a`, since `asl a` means the accumulator (9). Arguments are positional, so callers are not affected.
 
@@ -857,7 +858,7 @@ source → lexer → parser → AST
 Each item is decided when the feature it belongs to is built.
 
 1. **Bank switching** (NES mappers, C64 cartridges). Placement is `@ bank(n)`; the model follows overlays (8.5), with a bank area switched in by a mapper. Open: how calls between banks work. Likely direction: the compiler generates a small stub for each call into another bank, and direct access to another bank's data is an error.
-2. **Functions called from both main and interrupts.** v0: a compile error, except for functions with no memory of their own (8.1). Likely direction: the compiler makes a second copy of the function for the interrupt side, which costs ROM but no speed and needs no stack.
+2. **Functions called from both main and interrupts.** v0: a compile error, except for functions with no memory of their own (8.1). Likely direction: the compiler makes a second copy of the function for the interrupt side, which costs ROM but no speed and needs no stack. Microchip's XC8 compiler does this. A first step, planned (decisions 2026-11-02): an inline function's locals go in each caller's frame, as in C, so an `inline fn` or `inline asm fn` with locals can be used from any root; `var` lines allowed in an `inline asm fn` body.
 3. **`pha`/`pla` for temporaries.** `pha`/`pla` is 2 bytes and 7 cycles, against 4 bytes and 6 cycles for a zero-page temporary. Likely direction: the optimizer chooses, but never across a function call. Settle with benchmarks.
 4. **Overflow checks in debug builds.** Likely direction: no extra code in the program. The built-in emulator checks for overflow while running tests, using the compiler's debug information.
 5. **User-defined encodings,** e.g. for the NES, where each game decides which tile shows which character: a character-to-byte table declared in source. Built-in encodings are settled (2.1).
