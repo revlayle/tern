@@ -53,9 +53,10 @@ public static class Assembler
     /// get their addresses here. Variables without an address during layout are assumed to be
     /// outside zero page.
     /// </param>
+    /// <param name="overlayImports">Where each overlay module is imported, for the error when it does not fit.</param>
     /// <param name="overlayAreas">For each overlay module, the area its sections start in (spec 8.5). Each module is laid out from the start of its area.</param>
     public static AssembledCode Assemble(IReadOnlyList<AsmItem> items, IReadOnlyList<AddressRange> areas, Action? beforeEncode = null,
-        IReadOnlyDictionary<string, AddressRange>? overlayAreas = null)
+        IReadOnlyDictionary<string, AddressRange>? overlayAreas = null, IReadOnlyDictionary<string, SourcePos>? overlayImports = null)
     {
         var slots = items.Select(i => new Slot(i)).ToList();
 
@@ -174,7 +175,7 @@ public static class Assembler
                 int at = area.First;
                 foreach (var section in module) at = Lay(section, at);
                 if (at > area.Last + 1)
-                    throw new CompileError(new SourcePos(1, 1),
+                    throw new CompileError(overlayImports?.GetValueOrDefault(module.Key) ?? new SourcePos(1, 1),
                         $"The overlay '{module.Key}' needs {at - area.First} bytes, but its area {area} has {area.Size}. Make the area larger, or split the module");
             }
 

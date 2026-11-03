@@ -142,7 +142,7 @@ public static class TernCompiler
             foreach (var (g, label) in imageLabels) g.Address = label.Address;
             foreach (var (v, offset) in plan.ZeroedGlobals.Concat(plan.NoinitGlobals)) v.Address = bss.Address + offset;
             foreach (var (v, offset) in plan.FrameVariables) v.Address = bss.Address + offset;
-        }, overlayAreas);
+        }, overlayAreas, program.Modules.Where(m => m.ImportedBy is not null && m.OverlayArea is not null).ToDictionary(m => m.Name, m => m.ImportedBy!.Pos));
         CheckFixedAddresses(program, platform, code, plan);
 
         // The file covers every byte from the lowest to the highest address used; gaps are zeros.
@@ -314,6 +314,13 @@ public static class TernCompiler
                     throw new CompileError(g.Pos,
                         $"'{g.Name}' at {range} overlaps the program and its variables at {used}. " +
                         $"Move '{g.Name}', or make the program smaller");
+            }
+            foreach (var module in code.Sections.Where(s => s.Overlay is not null && s.Size > 0).GroupBy(s => s.Overlay!))
+            {
+                var file = new AddressRange(module.Min(s => s.Address), module.Max(s => s.Address + s.Size - 1));
+                if (range.Overlaps(file))
+                    throw new CompileError(g.Pos,
+                        $"'{g.Name}' at {range} overlaps the overlay {module.Key} at {file}, which is loaded there. Move '{g.Name}' out of the overlay's area");
             }
             foreach (var (regionName, use) in plan.RegionUse)
                 if (range.Overlaps(use))

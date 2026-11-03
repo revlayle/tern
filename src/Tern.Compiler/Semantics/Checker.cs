@@ -128,6 +128,7 @@ public sealed partial class Checker
             _module = module;
             foreach (var f in module.Syntax.Functions.Where(f => f.Address is null)) CheckFunctionBody(f);
         }
+        CheckInlineCallsBetweenOverlays();
         // Struct fields become plain variables, arrays and pointers for the code generator.
         foreach (var module in modules)
             foreach (var f in module.Syntax.Functions) Lowering.Apply(f.Body);
@@ -1643,6 +1644,39 @@ public sealed partial class Checker
         if (_function is not null) AddCall(_function, fn, c.Pos);
     }
 
+    /// <summary>Calls from an overlay's function to an inline function of another module, for <see cref="CheckInlineCallsBetweenOverlays"/>.</summary>
+    private readonly List<(FunctionSymbol Caller, FunctionSymbol Callee, SourcePos Pos)> _inlineCalls = [];
+
+    /// <summary>
+    /// An inline function is copied into its caller, so what its body uses must be there when the caller
+    /// runs: an inline function of another overlay in the same area may not use that overlay's variables
+    /// or call its functions (spec 8.5).
+    /// </summary>
+    private void CheckInlineCallsBetweenOverlays()
+    {
+        foreach (var (caller, callee, pos) in _inlineCalls)
+        {
+            var area = caller.OverlayArea;
+            if (callee.OverlayArea != area) continue;
+            var seen = new HashSet<FunctionSymbol>();
+            void Visit(FunctionSymbol inline)
+            {
+                if (!seen.Add(inline)) return;
+                foreach (var g in inline.UsedGlobals.Where(g => g.OverlayArea == area && g.Module != caller.Module && g.FixedAddress is null && g.Region is null))
+                    throw new CompileError(pos,
+                        $"'{caller.Name}' calls the inline function '{callee.Name}', which is copied into it and uses '{g.Name}', a variable of {g.Module!.Name}. " +
+                        $"{caller.Module!.Name} and {g.Module.Name} are both in the overlay area '{area}', never loaded together, and share their memory. Keep shared state in a resident module or the main file");
+                foreach (var next in inline.Callees)
+                    if (next.IsInline) Visit(next);
+                    else if (next.OverlayArea == area && next.Module != caller.Module)
+                        throw new CompileError(pos,
+                            $"'{caller.Name}' calls the inline function '{callee.Name}', which is copied into it and calls '{next.Name}'. " +
+                            $"{caller.Module!.Name} and {next.Module!.Name} are both in the overlay area '{area}', so they are never loaded together. Call between them from resident code");
+            }
+            Visit(callee);
+        }
+    }
+
     /// <summary>
     /// Records a call. Two overlays in the same area are never loaded together, so one cannot call
     /// the other (spec 8.5).
@@ -1650,6 +1684,7 @@ public sealed partial class Checker
     private void AddCall(FunctionSymbol caller, FunctionSymbol callee, SourcePos pos)
     {
         if (!_dead) caller.Callees.Add(callee);
+        if (!_dead && callee.IsInline && caller.OverlayArea is not null && callee.Module != caller.Module) _inlineCalls.Add((caller, callee, pos));
         if (caller.OverlayArea is { } area && callee.OverlayArea == area && callee.Module != caller.Module && !callee.IsInline)
             throw new CompileError(pos,
                 $"'{caller.Name}' calls '{callee.Name}', but the modules {caller.Module!.Name} and {callee.Module!.Name} are both in the overlay area '{area}', so they are never loaded together. " +

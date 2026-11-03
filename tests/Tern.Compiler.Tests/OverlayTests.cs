@@ -361,6 +361,88 @@ public class OverlayTests
         Assert.Contains("$6000-$6007 has 8", message);
     }
 
+    [Fact]
+    public void An_inline_function_of_another_overlay_may_not_use_that_overlays_variables()
+    {
+        var modules = new Dictionary<string, string>
+        {
+            ["level1"] = "import level2\nfn go() -> u8 using A { return level2.peek() }",
+            ["level2"] = "var lives: u8 = 3\ninline fn peek() -> u8 using A { return lives }\nfn run() { lives += 1 }",
+        };
+        var message = Message($$"""
+            {{Header}}
+            var r: u8
+            fn main() { load(1); r = level1.go(); load(2); level2.run() }
+            """, modules);
+        Assert.Contains("'level1.go' calls the inline function 'level2.peek', which is copied into it and uses 'level2.lives'", message);
+        Assert.Contains("overlay area 'levels'", message);
+    }
+
+    [Fact]
+    public void An_inline_function_of_another_overlay_may_not_call_that_overlays_functions()
+    {
+        var modules = new Dictionary<string, string>
+        {
+            ["level1"] = "import level2\nfn go() -> u8 using A { return level2.five() }",
+            ["level2"] = "fn real() -> u8 using A { return 5 }\ninline fn five() -> u8 using A { return real() }",
+        };
+        var message = Message($$"""
+            {{Header}}
+            var r: u8
+            fn main() { load(1); r = level1.go(); load(2); level2.five() }
+            """, modules);
+        Assert.Contains("calls the inline function 'level2.five', which is copied into it and calls 'level2.real'", message);
+    }
+
+    [Fact]
+    public void An_inline_function_of_another_overlay_that_uses_nothing_of_its_module_is_fine()
+    {
+        var modules = new Dictionary<string, string>
+        {
+            ["level1"] = "import level2\nvar own: u8 = 4\nfn go() -> u8 using A { return level2.five() + own }",
+            ["level2"] = "inline fn five() -> u8 using A { return 5 }\nfn run() { }",
+            ["util"] = Util,
+        };
+        var r = Compile($$"""
+            {{Header}}
+            var v: u8
+            fn main() { load(2); v = level1.go(); load(1); level2.run() }   // level2 is first in the list: level1 imports it
+            """, modules);
+        Assert.Equal(9, r.U8("v"));
+    }
+
+    [Fact]
+    public void A_fixed_address_variable_may_not_overlap_an_overlays_code()
+    {
+        var modules = new Dictionary<string, string> { ["l2"] = "fn run() { }" };
+        var message = Message("""
+            import l2 @ levels
+            memory {
+                $0801..=$5FFF  program
+                $6000..=$6FFF  overlay levels
+            }
+            var x: u8 @ $6000
+            fn main() { x = 1; l2.run() }
+            """, modules);
+        Assert.Contains("'x' at $6000 overlaps the overlay l2 at $6000", message);
+    }
+
+    [Fact]
+    public void The_overlay_that_does_not_fit_error_is_reported_at_its_import()
+    {
+        var e = With(Modules, path => Assert.Throws<CompileError>(() => TernCompiler.Compile("""
+            import level2
+            import level1 @ levels
+            memory {
+                $0801..=$5FFF  program
+                $6000..=$6007  overlay levels
+            }
+            fn main() { level1.run() }
+            """, sourcePath: path)));
+        Assert.Equal(2, e.Pos.Line);
+        Assert.Contains("The overlay 'level1' needs", e.Description);
+    }
+
     [Theory]
     [InlineData("import level2 @ nowhere\nmemory {\n $0801..=$5FFF program\n $6000..=$6FFF overlay levels\n}\nfn main() { level2.run() }", "The memory block has no overlay area 'nowhere'")]
     [InlineData("import level2 @ buf\nmemory {\n $0801..=$5FFF program\n $6000..=$6FFF region buf\n}\nfn main() { level2.run() }", "'buf' is a region, not an overlay area")]
