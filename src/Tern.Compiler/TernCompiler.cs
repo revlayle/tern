@@ -16,7 +16,6 @@ public sealed class CompileResult
     public required int LoadAddress { get; init; }
     /// <summary>Where execution starts.</summary>
     public required int Entry { get; init; }
-    /// <summary>Address of the endless loop reached when <c>main</c> returns.</summary>
     /// <summary>The address main returns to; -1 for a binary, which has no main.</summary>
     public required int HaltAddress { get; init; }
     public required string Listing { get; init; }

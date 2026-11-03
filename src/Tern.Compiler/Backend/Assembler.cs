@@ -125,6 +125,10 @@ public static class Assembler
                 if (firstEnd > areas[0].First)
                 {
                     var head = new AddressRange(areas[0].First, firstEnd - 1);
+                    string what = firstSection.Info.Name == "jump table" ? "jump table" : "BASIC line and startup code";
+                    if (firstEnd > areas[0].Last + 1)
+                        throw new CompileError(new SourcePos(1, 1),
+                            $"The {what} ({firstEnd - areas[0].First} bytes) must be at the start of the first program area, but it does not fit in {areas[0]}. Make the first area larger");
                     foreach (var section in sections.Where(s => s.Info.FixedAddress is not null))
                     {
                         int at = section.Info.FixedAddress!.Value;

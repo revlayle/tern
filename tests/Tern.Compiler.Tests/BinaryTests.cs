@@ -284,7 +284,6 @@ public class BinaryTests
 
     // ---------- A Tern host ----------
 
-
     private static T WithHost<T>(string binarySource, Func<string, CompileResult, T> work)
     {
         var dir = Directory.CreateTempSubdirectory("tern");
@@ -451,6 +450,7 @@ public class BinaryTests
     [InlineData("inline fn h() { }\nexport h", "'h' is inline")]
     [InlineData("fn chrout(c: u8 using A) @ $FFD2\nexport chrout", "'chrout' is a routine at a fixed address, not part of this binary")]
     [InlineData("fn f(n: u8) { }\nexport f", "'f' takes 'n' in memory, which the caller of a binary cannot set")]
+    [InlineData("memory { $C000..=$C003 program\n$C100..=$C1FF program }\nexport play\nfn play() { }", "The jump table (6 bytes) must be at the start of the first program area")]
     [InlineData("memory { $C000..=$CFFF program }\nexport play\ndata first: [u8; 3] @ $C000 = [1, 2, 3]\nfn play() { }", "overlaps the jump table at $C000-")]
     [InlineData("fn f() { }\nexport", "Expected a function name after 'export'")]
     [InlineData("fn f() { }", "The program has no 'fn main()'. A binary for another program to call has an 'export' line instead")]
