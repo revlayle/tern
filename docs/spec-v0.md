@@ -79,8 +79,8 @@ fn main() {
 - Everything declared at the top level of a module is used with the module name: `text.put`, `c64.SCREEN`. `.` still means "member of", as for fields and `.lo`/`.hi`. Names in different modules never clash.
 - **`private`** before a declaration (`private var w0: u8`, `private data TABLE ...`, `private fn helper()`, `private const`, `private struct`) makes it usable only inside its own module, including from assembly. Without it, a top-level declaration is public.
 - A module is loaded once, however many files import it. Modules may import each other.
-- Only the program's main file has `fn main()`.
-- Only functions reachable from `main` are compiled. A module's global variables and `data` are kept only if a compiled function names them (in Tern code or as an assembly operand). An imported module costs nothing for the parts that are not used. The main file's globals are always kept, since an unused one may reserve memory on purpose (e.g. `@ zp`).
+- Only the program's main file has `fn main()`. A main file with `export` and no `main` builds a binary that another program calls (12.3).
+- Only functions reachable from `main` (or from the exports, 12.3) are compiled. A module's global variables and `data` are kept only if a compiled function names them (in Tern code or as an assembly operand). An imported module costs nothing for the parts that are not used. The main file's globals are always kept, since an unused one may reserve memory on purpose (e.g. `@ zp`).
 - **Module parameters** are constants the program sets when it imports a module. The module declares them once, in a header that is the first line of the file (before its imports):
   ```
   // lib/c64/sprites.tern
@@ -497,6 +497,65 @@ Frames may overlap in zero page in the same way as in normal RAM, so zero page i
 
 The hardware stack is used only for return addresses, interrupt entry, and temporaries in a few runtime routines. Expression evaluation does not use it.
 
+### 8.4 Memory layout
+
+The platform gives a default memory map (12.2). The main file may declare what it changes in one `memory` block, after its imports. Only the main file may have one, since it describes the whole program.
+
+```
+memory {
+    $0801..=$1FFF  program
+    $2000..=$3FFF  reserved              // VIC bank 0: sprites, character set
+    $4000..=$9FFF  program
+    $C000..=$CFFF  region buffers
+    $D000..=$DFFF  volatile
+    $FB..=$FE      zeropage
+}
+```
+
+Each line is an inclusive range of constant expressions (constants from imported modules may be used) and a kind:
+
+| Kind | Meaning |
+|---|---|
+| `program` | Code, `data` and variables |
+| `zeropage` | Zero-page bytes the compiler may allocate (8.2) |
+| `reserved` | The compiler places nothing here, except what the program puts there with `@` |
+| `region name` | Placed only on request: `var map: [u8; 2048] @ buffers`, also for `data`. `@` stays a location |
+| `volatile` | Volatile memory (4), in addition to the platform's volatile areas |
+| `overlay name` | An overlay area (8.5) |
+
+- **Replacing or adding.** If the block has any `program` line, the `program` lines replace the platform's program and variable areas; the same for `zeropage` lines and the platform's free zero page. The other kinds add to the platform's map and take their range out of any program area. A block with only `reserved` lines keeps the platform's areas.
+- **Functions are placed whole.** A function never crosses from one area into another; the compiler never inserts a `jmp` to continue it elsewhere. Code that does not fit gives an error that lists the areas and what is in them.
+- Ranges may not overlap, except that a `volatile` range may lie in any other kind.
+- `memory`, and the kinds above, are words only inside the block, not reserved words.
+- A program with `main` starts at the platform's code start (C64: `$0801`, with the BASIC line), so its first `program` area must begin there.
+
+**`data` at a fixed address**: `data sprite @ $2000 = [...]` places the bytes there, in a `program` or `reserved` area (the usual case: VIC graphics in a reserved range). The program file covers every byte from its lowest to its highest used address, so a gap between areas is filled with zeros and makes the file longer; the report shows the file size.
+
+### 8.5 Overlays
+
+An overlay is a set of modules that is loaded into an overlay area when the program needs it, e.g. one level of a game from disk. Overlays in the same area replace each other. The main file places a module with `@` on its import:
+
+```
+memory {
+    $0801..=$5FFF  program
+    $6000..=$7FFF  overlay levels
+}
+import level1 @ levels
+import level2 @ levels
+```
+
+- **One build.** The whole program, overlays included, is compiled together, so the call graph, frame sharing (8.1) and zero-page allocation work as everywhere else.
+- **Output:** one file per overlay module, named after it (`level1.prg`), loading at the start of its area. It holds the module's code, `data` and global variables with their initial values (zeros included), so loading it also sets its variables. Startup code never touches an overlay's variables.
+- **What is in an overlay:** only the placed modules. Modules they import stay resident unless placed too. The main file cannot be in an overlay.
+- **Calls:**
+  - An overlay may call resident code, its own code and overlays in other areas.
+  - A call between two overlays in the same area is an error, since they are never loaded together.
+  - A call from resident code into an overlay is a plain `jsr`. Having that overlay loaded at that moment is the program's responsibility; the compiler cannot check it, and a check at run time would cost every call.
+- **Shared memory:** overlays in the same area are never present together, so their global variables (in the area, and in zero page) may share memory, as frames do.
+- An overlay that does not fit its area gives an error with its size.
+- **Loading** is a platform library function. C64: `c64.load(name, n, device)` loads a file to its own address through the KERNAL and returns the KERNAL's carry (true when loading failed); exact signature settled by the coding session.
+- Bank switching (14.1) will use the same model, with a bank area switched in by a mapper instead of loaded from disk.
+
 ## 9. Inline assembly
 
 ```
@@ -740,6 +799,25 @@ A platform description gives: CPU variant, free zero-page ranges, RAM ranges for
 
 **Planned:** NES (iNES, `ricoh2a03`, PRG/CHR banks), Commander X16 (`wdc65c02`), Apple II (binary for DOS 3.3/ProDOS), Atari 8-bit (`.xex`).
 
+### 12.3 Programs without `main`
+
+A main file with no `fn main()` and an `export` line builds a binary that another program loads and calls, such as a music player or a disk loader. It may be called by a Tern program or by code written any other way.
+
+```
+memory {
+    $C000..=$CFFF  program
+    $FB..=$FE      zeropage
+}
+export init, play, stop
+```
+
+- **Jump table.** The binary starts with a jump table at the beginning of its first `program` area: entry 0 is `jmp setup`, the compiler's startup code without the call to `main` (zero globals, copy initial values, `rts`); then one `jmp` per exported function in the order listed. The order is the binary's interface, so changing it is a visible change in the source. The host calls `setup` once, before any other entry.
+- **Exported functions** are functions of the main file with register parameters only (as for `addr(f)`, 6.5), since the caller cannot write their frames. Return values follow 6.1.
+- **One root.** `setup` and the exports count as one root (8.1): their frames may share memory, and they may share private variables. The host must call one entry at a time, never an entry from an interrupt while another entry is running. The compiler cannot check this; the developer guide documents it. An `interrupt fn` in the binary is a separate root as usual.
+- **Output:** a `.prg` loading at the start of the first `program` area, with no BASIC line.
+- **Interface module.** The compiler also writes `name_api.tern` (for `player.tern`, `player_api.tern`). It declares each entry as a routine at a fixed address (6.6) with a `keeps` list taken from the code, and constants for every range the binary uses (code, data, variables, zero page). A Tern host imports it and names those constants in its own `memory` block as `reserved` ranges, and leaves the binary's zero-page bytes out of its `zeropage` lines.
+- `export` is a reserved word.
+
 ## 13. Compiler design
 
 ```
@@ -778,7 +856,7 @@ source → lexer → parser → AST
 
 Each item is decided when the feature it belongs to is built.
 
-1. **Bank switching** (NES mappers, C64 cartridges). Placement is `@ bank(n)`. Open: how calls between banks work. Likely direction: the compiler generates a small stub for each call into another bank, and direct access to another bank's data is an error.
+1. **Bank switching** (NES mappers, C64 cartridges). Placement is `@ bank(n)`; the model follows overlays (8.5), with a bank area switched in by a mapper. Open: how calls between banks work. Likely direction: the compiler generates a small stub for each call into another bank, and direct access to another bank's data is an error.
 2. **Functions called from both main and interrupts.** v0: a compile error, except for functions with no memory of their own (8.1). Likely direction: the compiler makes a second copy of the function for the interrupt side, which costs ROM but no speed and needs no stack.
 3. **`pha`/`pla` for temporaries.** `pha`/`pla` is 2 bytes and 7 cycles, against 4 bytes and 6 cycles for a zero-page temporary. Likely direction: the optimizer chooses, but never across a function call. Settle with benchmarks.
 4. **Overflow checks in debug builds.** Likely direction: no extra code in the program. The built-in emulator checks for overflow while running tests, using the compiler's debug information.
@@ -786,17 +864,7 @@ Each item is decided when the feature it belongs to is built.
 6. **`using` on local variables** (`var count: u8 using Y`). Leave out until generated code shows a need. Deferred again 2026-11-02 (M8 question 40): `crc8` would keep `crc` in A, but A is needed by almost every expression, so the optimizer handles that case first (`x & $80 != 0` then `x << 1` as one `asl` and a carry test).
 7. **A general decorator syntax.** Only if modifier keywords grow past five or six.
 8. **Language name.** "Tern" is kept for now (2026-11-02). Rejected: "Moss"/"Mossy" (after MOS Technology), since "Moss" is already the name of several small languages and of Stanford's MOSS plagiarism checker.
-9. **`data` at a fixed address** (`data x @ $C000 = ...`). Not supported yet, since the program image is one block. Needed for fixed-address tables and for `@ bank(n)` (item 1).
+9. **`data` at a fixed address.** Settled 2026-11-02: section 8.4.
 10. **Fixed-address RAM that is not volatile.** Settled 2026-11-02: platform volatile areas plus a `volatile` keyword (section 4).
 11. **Arrays of structs as struct fields** (`parts: [Point; 4]`, or the VIC's interleaved sprite x/y). Not supported yet; a limited form is wanted eventually. Discuss after a first complete version. Notes so far: a constant index is always a fixed offset; stored as tables inside the record, a variable index costs nothing extra; a `linear` field (needed for hardware layouts) could allow a variable index only when the element size is 2, 4 or 8 (a shift, as for 16-bit pointers).
-12. **Memory layout declaration.** A declaration in source that describes the machine's memory: areas for the program, reserved areas the compiler never fills (e.g. VIC graphics at `$2000–$3FFF`), volatile ranges, named regions for placement (`var map: [u8; 2048] @ buffers`, keeping `@` a location), and later banks. The platform gives the default map; a program declares what it changes. Likely direction for the syntax (accepted 2026-11-02):
-    ```
-    memory {
-        $0801..=$1FFF  program
-        $2000..=$3FFF  reserved              // VIC bank 0: sprites, character set
-        $4000..=$9FFF  program
-        $C000..=$CFFF  region buffers
-        $D000..=$DFFF  volatile
-    }
-    ```
-    Open: whether a function may cross a gap (or the compiler inserts a `jmp`), where the declaration lives (main file or a shared file), and whether it replaces or adjusts the platform's map. Decide together with items 1 and 9.
+12. **Memory layout declaration.** Settled 2026-11-02: sections 8.4 (memory layout), 8.5 (overlays) and 12.3 (programs without `main`).

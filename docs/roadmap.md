@@ -169,6 +169,32 @@ Tests: the handler's register writes per raster line in the emulator (as the ras
 
 Done when: an example scrolls a character map in eight directions with at least 24 multiplexed sprites over it, without visible glitches in VICE, using `import sprites(COUNT = 24)` or more, with one program-owned handler calling both modules.
 
+## M12: Memory layout and binaries without `main`
+
+Spec: 8.4 (memory layout, `data` at a fixed address), 12.3 (programs without `main`).
+
+- `memory { ... }` in the main file: `program`, `zeropage`, `reserved`, `region name`, `volatile` (`overlay name` parsed, "not supported yet" until M13); constants from imports in ranges; replace/add rules as in 8.4; errors for a block outside the main file, overlapping ranges, a `main` program whose first area does not start at the platform's code start, code that does not fit (listing the areas)
+- `@ region` on `var` and `data`; `data x @ $addr` in a `program` or `reserved` area; the program file covers lowest to highest used address, gaps zero-filled, file size in the report
+- `export f, ...` without `main`: jump table (`jmp setup`, then the exports in order), `setup` without the call to `main`, `.prg` with no BASIC line; exports from the main file with register parameters only; all entries one root
+- `name_api.tern`: each entry as a routine at a fixed address with `keeps` from the code, constants for every range the binary uses
+
+Tests: placement in each kind of area, functions never crossing an area, a zero-filled gap, every new error; a binary called entry by entry in the emulator (`setup` first), its `_api` module imported by a host that reserves the binary's memory, and the host's calls checked; `keeps` in the `_api` file matching the code.
+
+Done when: a music player built as a binary at `$C000` (`init`, `play`) is loaded by a Tern host that calls `play` from its raster handler, checked in VICE; a game-style program places sprite data with `data ... @ $2000` in a reserved range.
+
+## M13: Overlays
+
+Spec: 8.5.
+
+- `overlay name` areas; `import m @ area` in the main file only; one file per overlay module, loading at its area's start, holding its code, `data` and variables with initial values
+- Errors: a call between overlays of the same area, the main file in an overlay, an overlay that does not fit (with its size), `@ area` outside the main file or naming a non-overlay area
+- Overlays in one area share their variables' memory (RAM and zero page)
+- `c64.load` through the KERNAL
+
+Tests: two overlays in one area loaded in turn in the emulator (stand-in for the KERNAL load), each finding its variables at their initial values; resident code calling each; shared memory shown in the report; every new error.
+
+Done when: an example loads two levels from disk into one area in turn and runs each, checked in VICE with a `.d64` image.
+
 ## Later (not yet ordered, except that new platforms come last)
 
 - Floats as a library with a 4-byte format, built on `wide` (not a priority)
@@ -185,7 +211,8 @@ Done when: an example scrolls a character map in eight directions with at least 
   - a variable `for` step of 0 never ends the loop; stepped loops stop when the step carries past the end of the type (5.1)
   - signed `>>` rounds down, not toward zero (3.1)
   - `keeps` on a fixed routine is a promise the compiler does not check (6.6); a function reached only through `addr()` has no known root (6.5, 8.1)
-- Memory layout declaration: reserved areas, volatile ranges, named regions (spec 14.12), with `data` at a fixed address (14.9) and banks
+  - a call into an overlay that is not loaded runs whatever is in the area (8.5)
+  - a binary's entries are one root: the host must not call one from an interrupt while another runs (12.3)
 
 New platforms, last:
 
