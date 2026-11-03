@@ -47,14 +47,22 @@ public sealed class CodeGen
 
     public Label LabelOf(FunctionSymbol f) => _functionLabels[f];
 
+    /// <summary>The code of each compiled function, after optimization (for the register use of a binary's entries).</summary>
+    public Dictionary<FunctionSymbol, List<AsmItem>> FunctionItems { get; } = [];
+
+    /// <summary>The function a label belongs to, or null for a label inside a function.</summary>
+    public FunctionSymbol? FunctionOf(Label label) => _functionLabels.FirstOrDefault(p => ReferenceEquals(p.Value, label)).Key;
+
     public List<AsmItem> GenerateFunctions()
     {
         var all = new List<AsmItem>();
         foreach (var f in _program.Functions.Where(f => f.FixedAddress is null && !f.IsInline))
         {
             GenFunction(f);
+            all.Add(new SectionStart(f.Name));
             // An interrupt handler's body is optimized before its saving code is added.
             if (!f.Declaration!.IsAsm && !(f.IsInterrupt && !f.IsPart)) Optimizer.Run(_out, f);
+            FunctionItems[f] = _out.ToList();
             all.AddRange(_out);
         }
         return all;

@@ -16,13 +16,23 @@ public sealed class CompileResult
     public required int LoadAddress { get; init; }
     /// <summary>Where execution starts.</summary>
     public required int Entry { get; init; }
-    /// <summary>Address of the endless loop reached when <c>main</c> returns.</summary>
+    /// <summary>The address main returns to; -1 for a binary, which has no main.</summary>
     public required int HaltAddress { get; init; }
     public required string Listing { get; init; }
     /// <summary>Variable and function addresses by name (locals as "function.name").</summary>
     public required IReadOnlyDictionary<string, int> Symbols { get; init; }
     public required string ViceLabels { get; init; }
     public required string Report { get; init; }
+    /// <summary>Every function, data item and the startup code, with the address it was placed at.</summary>
+    public required IReadOnlyList<PlacedSection> Sections { get; init; }
+    /// <summary>The program areas the compiler filled and how much of each is used.</summary>
+    public required IReadOnlyList<PlacedArea> Areas { get; init; }
+    /// <summary>For a binary without <c>main</c>: the jump table, <c>setup</c> first, then the exports, each with its address.</summary>
+    public IReadOnlyList<(string Name, int Address)> Entries { get; init; } = [];
+    /// <summary>For a binary without <c>main</c>: the text of its interface module (spec 12.3), or null.</summary>
+    public string? ApiModule { get; init; }
+    /// <summary>The module's name, such as <c>player_api</c>; the file is <c>player_api.tern</c>.</summary>
+    public string? ApiModuleName { get; init; }
 }
 
 public static class TernCompiler
@@ -49,14 +59,38 @@ public static class TernCompiler
                     if (((v.Address + o) & 0xFF) == 0xFF)
                         throw new CompileError(v.Pos, $"'{v.Name}' is used as jmp ({v.Name}{o:+0;-0;''}) and was placed so that the vector starts at $FF, where the 6502 reads it wrongly");
 
+        var layout = program.Layout;
+        bool binary = program.IsBinary;
+        if (!binary && layout.Program[0].First != platform.LoadAddress)
+            throw new CompileError(program.Main.Pos,
+                $"A program with 'main' starts at ${platform.LoadAddress:X4}, where the {platform.Name.ToUpperInvariant()} BASIC line goes, but its first program area begins at ${layout.Program[0].First:X4}. " +
+                (layout.ProgramReplaced ? $"Start the first 'program' line of the memory block at ${platform.LoadAddress:X4}" : "Move the 'reserved' or 'region' range that covers it"));
+        CheckFixedData(program, plan);
+
         var start = new Label("start");
         var halt = new Label("halt");
         var bss = new Label("bss");
-        var items = new List<AsmItem> { new LabelDef(start), new Comment("startup") };
-        items.AddRange(Startup(plan, bss, gen.LabelOf));
-        items.Add(new Instr(Jsr, Absolute, new LabelOperand(gen.LabelOf(program.Main))));
-        items.Add(new LabelDef(halt));
-        items.Add(new Instr(Jmp, Absolute, new LabelOperand(halt)));
+        var setup = new Label("setup");
+        List<AsmItem> items;
+        if (!binary)
+        {
+            items = [new SectionStart("startup"), new DataBytes(platform.Header), new LabelDef(start), new Comment("startup")];
+            items.AddRange(Startup(plan, bss, gen.LabelOf));
+            items.Add(new Instr(Jsr, Absolute, new LabelOperand(gen.LabelOf(program.Main))));
+            items.Add(new LabelDef(halt));
+            items.Add(new Instr(Jmp, Absolute, new LabelOperand(halt)));
+        }
+        else
+        {
+            // A binary starts with its jump table: setup, then the exports in the order they were listed (spec 12.3).
+            items = [new SectionStart("jump table"), new LabelDef(start), new Instr(Jmp, Absolute, new LabelOperand(setup))];
+            foreach (var export in program.Exports)
+                items.Add(new Instr(Jmp, Absolute, new LabelOperand(gen.LabelOf(export))));
+            items.Add(new SectionStart("setup"));
+            items.Add(new LabelDef(setup));
+            items.AddRange(Startup(plan, bss, gen.LabelOf));
+            items.Add(new Instr(Rts));
+        }
         items.AddRange(functionCode);
 
         var imageLabels = new Dictionary<VariableSymbol, Label>();
@@ -64,34 +98,37 @@ public static class TernCompiler
         {
             var label = new Label(g.Name);
             imageLabels[g] = label;
+            items.Add(new SectionStart(g.Name));
             if (g.JumpVectorOffsets.Count > 0)
-                items.Add(new Padding(pc => AvoidPageEnd(pc, g.JumpVectorOffsets), $"jmp ({g.Name}) must not read a vector at $xxFF"));
+                items.Add(new Padding(pc => Assembler.AvoidPageEnd(pc, g.JumpVectorOffsets), $"jmp ({g.Name}) must not read a vector at $xxFF"));
             items.Add(new LabelDef(label));
+            items.AddRange(ImageBytes(g, gen.LabelOf));
+        }
+        foreach (var g in plan.FixedImageGlobals)
+        {
+            items.Add(new SectionStart(g.Name, g.Address));
             items.AddRange(ImageBytes(g, gen.LabelOf));
         }
         // Variables after the program start at bss. Move them all, if needed, so that no jmp (...)
         // vector among them starts at an address ending in $FF.
         var ramVectors = plan.ZeroedGlobals.Concat(plan.NoinitGlobals).Concat(plan.FrameVariables)
             .SelectMany(e => e.Var.JumpVectorOffsets.Select(o => e.Offset + o)).ToList();
-        if (ramVectors.Count > 0)
-            items.Add(new Padding(pc => AvoidPageEnd(pc, ramVectors), "no jmp (...) vector may start at $xxFF"));
-        items.Add(new LabelDef(bss));
+        items.Add(new Reserve(bss, plan.TotalSize, ramVectors));
 
-        int ramEnd = 0;
-        var code = Assembler.Assemble(items, platform.CodeStart, end =>
+        var code = Assembler.Assemble(items, layout.Program, () =>
         {
             foreach (var (g, label) in imageLabels) g.Address = label.Address;
-            foreach (var (v, offset) in plan.ZeroedGlobals.Concat(plan.NoinitGlobals)) v.Address = end + offset;
-            foreach (var (v, offset) in plan.FrameVariables) v.Address = end + offset;
-            ramEnd = end + plan.TotalSize - 1;
-            if (ramEnd > platform.RamEnd)
-                throw new CompileError(new SourcePos(1, 1),
-                    $"Program and variables end at ${ramEnd:X4}, past the end of usable RAM (${platform.RamEnd:X4})");
+            foreach (var (v, offset) in plan.ZeroedGlobals.Concat(plan.NoinitGlobals)) v.Address = bss.Address + offset;
+            foreach (var (v, offset) in plan.FrameVariables) v.Address = bss.Address + offset;
         });
-        CheckFixedAddresses(program, platform, ramEnd);
+        CheckFixedAddresses(program, platform, code, plan);
 
-        var image = platform.Header.Concat(code.Bytes).ToArray();
-        var prg = new byte[] { (byte)platform.LoadAddress, (byte)(platform.LoadAddress >> 8) }.Concat(image).ToArray();
+        // The file covers every byte from the lowest to the highest address used; gaps are zeros.
+        int loadAddress = code.Segments.Min(s => s.Address);
+        int fileEnd = code.Segments.Max(s => s.Address + s.Bytes.Length);
+        var image = new byte[fileEnd - loadAddress];
+        foreach (var (address, bytes) in code.Segments) bytes.CopyTo(image, address - loadAddress);
+        var prg = new byte[] { (byte)loadAddress, (byte)(loadAddress >> 8) }.Concat(image).ToArray();
 
         var symbols = new Dictionary<string, int>();
         foreach (var g in program.Globals) symbols[g.Name] = g.Address;
@@ -108,9 +145,73 @@ public static class TernCompiler
         foreach (var (name, address) in symbols.OrderBy(s => s.Value))
             vice.AppendLine($"al C:{address:x4} .{name}");
 
+        var entries = new List<(string Name, int Address)>();
+        string? apiModule = null, apiName = null;
+        if (binary)
+        {
+            var use = new RegisterUse(gen, program.Functions);
+            var setupChange = items.SkipWhile(i => i is not LabelDef { Label: var l } || l != setup).OfType<Instr>()
+                .TakeWhile(i => i.Mnemonic != Rts)
+                .Aggregate(CpuState.None, (acc, i) => acc | (AsmEffects.Of(i.Mnemonic, i.Mode).Writes & (CpuState.A | CpuState.X | CpuState.Y)));
+            var table = new List<(string Name, FunctionSymbol? Function, int Address, CpuState Changed)> { ("setup", null, start.Address, setupChange) };
+            for (int i = 0; i < program.Exports.Count; i++)
+                table.Add((program.Exports[i].Name, program.Exports[i], start.Address + 3 * (i + 1), use.Changed(program.Exports[i])));
+            entries.AddRange(table.Select(t => (t.Name, t.Address)));
+
+            var fileRange = new AddressRange(loadAddress, fileEnd - 1);
+            // Every range the binary uses, once: a host may not reserve overlapping ranges.
+            var others = new List<(string Prefix, string What, AddressRange Range)>();
+            var emitted = new List<AddressRange> { fileRange };
+            var counts = new Dictionary<string, int>();
+            void Emit(string prefix, string what, AddressRange range)
+            {
+                foreach (var piece in MemoryLayout.Subtract([range], emitted))
+                {
+                    int n = counts[prefix] = counts.GetValueOrDefault(prefix) + 1;
+                    others.Add((n == 1 ? prefix : prefix + n, what, piece));
+                    emitted.Add(piece);
+                }
+            }
+            if (code.Variables is { } vr) Emit("VARS", "variables, zeroed by setup", vr);
+            foreach (var (name, use2) in plan.RegionUse) Emit(name.ToUpperInvariant(), $"region {name}", use2);
+            var zpUsed = program.Globals.Where(g => g.FixedAddress is null && g.Region is null)
+                .Concat(program.Functions.SelectMany(f => f.FrameVariables))
+                .Where(v => v.AliasOf is null && v.Address is >= 0 and < 0x100 && v.Register is null).ToList();
+            foreach (var zr in layout.ZeroPage.OrderBy(r => r.First))
+            {
+                var inRange = zpUsed.Where(v => v.Address >= zr.First && v.Address <= zr.Last).ToList();
+                if (inRange.Count > 0)
+                    Emit("ZP", "zero page used by the binary", new AddressRange(inRange.Min(v => v.Address), inRange.Max(v => v.Address + v.Type.Size - 1)));
+            }
+            foreach (var g in program.Globals.Where(g => g.FixedAddress is not null && !g.IsData && !g.InVolatileArea).OrderBy(g => g.FixedAddress))
+                Emit("FIXED", $"'{g.Name}', at a fixed address", new AddressRange(g.FixedAddress!.Value, g.FixedAddress.Value + g.Type.Size - 1));
+            foreach (var r in layout.Reserved.OrderBy(r => r.First)) Emit("RESERVED", "reserved in the binary's memory block", r);
+
+            string baseName = sourcePath is null ? "binary" : Path.GetFileNameWithoutExtension(sourcePath);
+            apiName = baseName + "_api";
+            apiModule = BinaryInterface.Generate(baseName + ".prg", apiName, table, fileRange, others);
+        }
+
         var report = new StringBuilder();
-        report.AppendLine($"Code and data: ${platform.LoadAddress:X4}-${platform.CodeStart + code.Bytes.Length - 1:X4} ({image.Length} bytes)");
-        report.AppendLine($"Variables after the program: {plan.TotalSize} bytes, up to ${ramEnd:X4}");
+        report.AppendLine($"Code and data: ${loadAddress:X4}-${fileEnd - 1:X4} ({image.Length} bytes)");
+        report.AppendLine(code.Variables is { } vars
+            ? $"Variables after the program: {plan.TotalSize} bytes, up to ${vars.Last:X4}"
+            : "Variables after the program: 0 bytes");
+        if (code.Areas.Count > 1 || layout.Regions.Count > 0)
+        {
+            report.AppendLine("Program areas:");
+            foreach (var a in code.Areas)
+                report.AppendLine($"  {a.Free}: {a.UsedEnd - a.Free.First} of {a.Free.Size} bytes used");
+            foreach (var (name, range) in layout.Regions)
+                report.AppendLine(plan.RegionUse.TryGetValue(name, out var use)
+                    ? $"  region {name} {range}: {use.Size} of {range.Size} bytes used"
+                    : $"  region {name} {range}: unused");
+        }
+        if (binary)
+        {
+            report.AppendLine($"Jump table at ${start.Address:X4}:");
+            foreach (var (name, address) in entries) report.AppendLine($"  ${address:X4}  {name}");
+        }
         report.AppendLine("Zero page:");
         report.Append(plan.ZeroPageMap);
 
@@ -118,14 +219,37 @@ public static class TernCompiler
         {
             Prg = prg,
             Image = image,
-            LoadAddress = platform.LoadAddress,
-            Entry = platform.CodeStart,
+            LoadAddress = loadAddress,
+            Entry = start.Address,
             HaltAddress = halt.Address,
             Listing = code.Listing,
             Symbols = symbols,
             ViceLabels = vice.ToString(),
             Report = report.ToString(),
+            Sections = code.Sections,
+            Areas = code.Areas,
+            Entries = entries,
+            ApiModule = apiModule,
+            ApiModuleName = apiName,
         };
+    }
+
+    /// <summary>
+    /// Data placed with <c>@ address</c> must lie in a program or reserved area (spec 8.4): anywhere
+    /// else is memory the program was not given.
+    /// </summary>
+    private static void CheckFixedData(CheckedProgram program, RamPlan plan)
+    {
+        var layout = program.Layout;
+        foreach (var g in plan.FixedImageGlobals.Where(g => g.FixedAddress is not null))
+        {
+            var range = new AddressRange(g.Address, g.Address + g.Type.Size - 1);
+            if (layout.Program.Concat(layout.Reserved).Any(a => a.Contains(range))) continue;
+            throw new CompileError(g.Pos,
+                $"'{g.Name}' at {range} is not in a program or reserved area. " +
+                $"Program areas: {MemoryLayout.List(layout.Program)}; reserved: {(layout.Reserved.Count == 0 ? "none" : MemoryLayout.List(layout.Reserved))}. " +
+                "Add a 'reserved' line for it to the memory block");
+        }
     }
 
     /// <summary>
@@ -133,36 +257,38 @@ public static class TernCompiler
     /// places (spec 4); a growing program would otherwise overwrite it silently. Fixed-address
     /// variables may overlap each other.
     /// </summary>
-    private static void CheckFixedAddresses(CheckedProgram program, Platform platform, int ramEnd)
+    private static void CheckFixedAddresses(CheckedProgram program, Platform platform, AssembledCode code, RamPlan plan)
     {
-        var inZeroPage = program.Globals.Where(g => g.FixedAddress is null)
+        var inZeroPage = program.Globals.Where(g => g.FixedAddress is null && g.Region is null)
             .Concat(program.Functions.SelectMany(f => f.FrameVariables))
             .Where(v => v.Address is >= 0 and < 0x100).ToList();
-        static string Range(int first, int last) => first == last ? $"${first:X4}" : $"${first:X4}-${last:X4}";
+        var zeroPage = program.Layout.ZeroPage;
         foreach (var g in program.Globals)
         {
-            if (g.FixedAddress is not int first) continue;
-            int last = first + g.Type.Size - 1;
-            if (first <= ramEnd && last >= platform.LoadAddress)
-                throw new CompileError(g.Pos,
-                    $"'{g.Name}' at {Range(first, last)} overlaps the program and its variables at {Range(platform.LoadAddress, ramEnd)}. " +
-                    $"Move '{g.Name}', or make the program smaller");
-            foreach (var v in inZeroPage)
-                if (first <= v.Address + v.Type.Size - 1 && last >= v.Address)
+            if (g.FixedAddress is not int first || g.IsData) continue;
+            var range = new AddressRange(first, first + g.Type.Size - 1);
+            foreach (var area in code.Areas)
+            {
+                var used = new AddressRange(area.Free.First, area.UsedEnd - 1);
+                if (area.UsedEnd > area.Free.First && range.Overlaps(used))
                     throw new CompileError(g.Pos,
-                        $"'{g.Name}' at {Range(first, last)} overlaps '{v.QualifiedName}' at {Range(v.Address, v.Address + v.Type.Size - 1)}, " +
-                        $"which the compiler placed in zero page. Move '{g.Name}' out of ${platform.ZeroPage.First:X2}-${platform.ZeroPage.Last:X2}");
+                        $"'{g.Name}' at {range} overlaps the program and its variables at {used}. " +
+                        $"Move '{g.Name}', or make the program smaller");
+            }
+            foreach (var (regionName, use) in plan.RegionUse)
+                if (range.Overlaps(use))
+                    throw new CompileError(g.Pos,
+                        $"'{g.Name}' at {range} overlaps the variables the compiler placed in region '{regionName}' at {use}. Move '{g.Name}', or place it with the region");
+            foreach (var section in code.Sections.Where(s => s.IsFixed && s.Size > 0))
+                if (range.Overlaps(new AddressRange(section.Address, section.Address + section.Size - 1)))
+                    throw new CompileError(g.Pos,
+                        $"'{g.Name}' at {range} overlaps the data '{section.Name}' at {new AddressRange(section.Address, section.Address + section.Size - 1)}. Move one of them");
+            foreach (var v in inZeroPage)
+                if (first <= v.Address + v.Type.Size - 1 && range.Last >= v.Address)
+                    throw new CompileError(g.Pos,
+                        $"'{g.Name}' at {range} overlaps '{v.QualifiedName}' at {new AddressRange(v.Address, v.Address + v.Type.Size - 1)}, " +
+                        $"which the compiler placed in zero page. Move '{g.Name}' out of {MemoryLayout.ListZeroPage(zeroPage)}");
         }
-    }
-
-    /// <summary>
-    /// The number of bytes to skip at <paramref name="pc"/> so that no vector at <c>pc + skip + offset</c>
-    /// starts at an address ending in $FF. The NMOS 6502 reads the high byte of <c>jmp ($xxFF)</c> from $xx00.
-    /// </summary>
-    private static int AvoidPageEnd(int pc, IEnumerable<int> offsets)
-    {
-        for (int skip = 0; ; skip++)
-            if (offsets.All(o => ((pc + skip + o) & 0xFF) != 0xFF)) return skip;
     }
 
     /// <summary>Startup code: set up zero-page globals and clear the uninitialized ones in RAM (except noinit ones).</summary>
@@ -173,7 +299,7 @@ public static class TernCompiler
         int? a = null;
         foreach (var g in plan.ZeroPageGlobals.Where(g => !g.NoInit))
         {
-            var bytes = MemoryLayout(g, g.InitialBytes ?? new byte[g.Type.Size]);
+            var bytes = ByteLayout(g, g.InitialBytes ?? new byte[g.Type.Size]);
             var functions = FunctionBytes(g);
             for (int i = 0; i < bytes.Length; i++)
             {
@@ -191,32 +317,36 @@ public static class TernCompiler
             }
         }
 
-        int size = plan.ZeroedSize;
-        if (size > 0)
-        {
-            items.Add(new Instr(Lda, Immediate, new Imm(0)));
-            int pages = size / 256;
-            for (int p = 0; p < pages; p++)
-            {
-                var loop = new Label($"clear{p}");
-                items.Add(new Instr(Ldx, Immediate, new Imm(0)));
-                items.Add(new LabelDef(loop));
-                items.Add(new Instr(Sta, AbsoluteX, new LabelOperand(bss, p * 256)));
-                items.Add(new Instr(Inx));
-                items.Add(new Instr(Bne, Relative, new LabelOperand(loop)));
-            }
-            int rest = size % 256;
-            if (rest > 0)
-            {
-                var loop = new Label("clear");
-                items.Add(new Instr(Ldx, Immediate, new Imm(rest)));
-                items.Add(new LabelDef(loop));
-                items.Add(new Instr(Sta, AbsoluteX, new LabelOperand(bss, pages * 256 - 1)));
-                items.Add(new Instr(Dex));
-                items.Add(new Instr(Bne, Relative, new LabelOperand(loop)));
-            }
-        }
+        if (plan.ZeroedSize > 0)
+            ClearBlock(items, plan.ZeroedSize, p => new LabelOperand(bss, p), "clear");
+        foreach (var block in plan.RegionClears)
+            ClearBlock(items, block.Size, p => new AddrOperand(block.First + p), $"clear_{block.First:X4}_");
         return items;
+    }
+
+    /// <summary>Zeroes <paramref name="size"/> bytes, 256 at a time; <paramref name="at"/> gives the address of byte <c>p</c>.</summary>
+    private static void ClearBlock(List<AsmItem> items, int size, Func<int, Operand> at, string name)
+    {
+        items.Add(new Instr(Lda, Immediate, new Imm(0)));
+        for (int p = 0; p < size / 256; p++)
+        {
+            var loop = new Label($"{name}{p}");
+            items.Add(new Instr(Ldx, Immediate, new Imm(0)));
+            items.Add(new LabelDef(loop));
+            items.Add(new Instr(Sta, AbsoluteX, at(p * 256)));
+            items.Add(new Instr(Inx));
+            items.Add(new Instr(Bne, Relative, new LabelOperand(loop)));
+        }
+        int rest = size % 256;
+        if (rest > 0)
+        {
+            var loop = new Label(name);
+            items.Add(new Instr(Ldx, Immediate, new Imm(rest)));
+            items.Add(new LabelDef(loop));
+            items.Add(new Instr(Sta, AbsoluteX, at(size / 256 * 256 - 1)));
+            items.Add(new Instr(Dex));
+            items.Add(new Instr(Bne, Relative, new LabelOperand(loop)));
+        }
     }
 
     /// <summary>
@@ -225,7 +355,7 @@ public static class TernCompiler
     /// </summary>
     private static IEnumerable<AsmItem> ImageBytes(VariableSymbol g, Func<FunctionSymbol, Label> labelOf)
     {
-        var bytes = MemoryLayout(g, g.InitialBytes!);
+        var bytes = ByteLayout(g, g.InitialBytes!);
         var functions = FunctionBytes(g);
         int start = 0;
         foreach (var (at, (function, high)) in functions.OrderBy(f => f.Key))
@@ -249,7 +379,7 @@ public static class TernCompiler
         return bytes;
     }
 
-    /// <summary>Where byte <paramref name="i"/> of a value is in its memory layout (see <see cref="MemoryLayout"/>).</summary>
+    /// <summary>Where byte <paramref name="i"/> of a value is in its memory layout (see <see cref="ByteLayout"/>).</summary>
     private static int LayoutIndex(VariableSymbol v, int i) =>
         !v.Type.IsArray || v.Type.Element!.Size == 1 || v.Type.Linear ? i
         : i % 2 == 0 ? i / 2 : v.Type.Length + i / 2;
@@ -258,7 +388,7 @@ public static class TernCompiler
     /// Converts a value's bytes (little endian, elements in order) to its layout in memory:
     /// arrays of 16-bit values are split into a low-byte table followed by a high-byte table.
     /// </summary>
-    private static byte[] MemoryLayout(VariableSymbol v, byte[] bytes)
+    private static byte[] ByteLayout(VariableSymbol v, byte[] bytes)
     {
         if (!v.Type.IsArray || v.Type.Element!.Size == 1 || v.Type.Linear) return bytes;
         int n = v.Type.Length;

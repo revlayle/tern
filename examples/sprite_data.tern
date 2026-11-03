@@ -1,0 +1,46 @@
+// Sprite data placed at a fixed address (spec 8.4). The memory block reserves $2000-$2FFF,
+// inside VIC bank 0, so the compiler puts no code or variables there; 'data ball @ $2000'
+// puts the 63 bytes of the shape there, and they are loaded with the program (the program
+// file covers $0801 to $203E, the gap filled with zeros). Sprite pointer 128 = $2000 / 64.
+import c64
+
+memory {
+    $2000..=$2FFF  reserved
+}
+
+const BLOCK = $2000 / 64
+
+var pointer0: u8 @ $07F8
+
+data ball: [u8; 63] @ $2000 = [
+    $00, $3C, $00,
+    $01, $FF, $80,
+    $07, $FF, $E0,
+    $0F, $FF, $F0,
+    $1F, $FF, $F8,
+    $3F, $FF, $FC,
+    $3F, $FF, $FC,
+    $7F, $FF, $FE,
+    $7F, $FF, $FE,
+    $7F, $FF, $FE,
+    $7F, $FF, $FE,
+    $7F, $FF, $FE,
+    $7F, $FF, $FE,
+    $7F, $FF, $FE,
+    $3F, $FF, $FC,
+    $3F, $FF, $FC,
+    $1F, $FF, $F8,
+    $0F, $FF, $F0,
+    $07, $FF, $E0,
+    $01, $FF, $80,
+    $00, $3C, $00
+]
+
+fn main() {
+    pointer0 = BLOCK
+    c64.vic.sprite0_x = 160
+    c64.vic.sprite0_y = 120
+    c64.vic.sprite_color[0] = c64.YELLOW
+    c64.vic.sprite_enable = 1
+    while true { }
+}

@@ -1,0 +1,47 @@
+// Calls the music player (player.tern) from a raster interrupt, 50 times a second.
+//
+// Build player.tern first: that writes player.prg and player_api.tern. The api module
+// names the memory the player uses; the memory block below reserves it, so nothing
+// of this program lands there. The player's code is then put into this program's file
+// at its own address with data: player.prg starts with its two-byte load address, so
+// the data begins two bytes below the player.
+import c64
+import text
+import player_api
+
+memory {
+    player_api.CODE_FIRST - 2..=player_api.CODE_LAST  reserved
+    player_api.ZP_FIRST..=player_api.ZP_LAST          reserved
+}
+
+data player @ player_api.CODE_FIRST - 2 = include_bytes("player.prg")
+
+const FRAME_LINE = 250
+
+var frames: u8
+
+data title = screen"MUSIC PLAYER   FRAME $"
+
+interrupt fn frame() {
+    c64.vic.irq_status = 1
+    player_api.play()
+    frames += 1
+}
+
+fn main() {
+    c64.kernal_off()                    // also holds interrupts off
+    c64.set_irq(addr(frame))
+    c64.vic.control1 = c64.vic.control1 & $7F
+    c64.vic.raster = FRAME_LINE
+    c64.vic.irq_enable = 1
+    c64.vic.irq_status = 1
+
+    player_api.setup()
+    player_api.init()
+    c64.interrupts_on()
+
+    text.put(c64.SCREEN + 12 * 40 + 8, addr(title), len(title))
+    while true {
+        text.hex8(c64.SCREEN + 12 * 40 + 29, frames)
+    }
+}

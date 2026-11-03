@@ -257,7 +257,7 @@ public class DataTests
     [InlineData("data d: [u16; 2] = [1, 2]\nfn main() { d[0].lo = 5 }", "'d' is data, which is read-only")]
     [InlineData("data d = 5\nfn main() { }", "Data must be an array or a string")]
     [InlineData("data d: [u8; 2]\nfn main() { }", "Expected '=' and the data's value")]
-    [InlineData("data d @ $C000 = \"A\"\nfn main() { }", "'@' on data is not supported yet")]
+    [InlineData("data d @ $C000 = \"A\"\nfn main() { }", "'d' at $C000 is not in a program or reserved area")]
     [InlineData("fn main() { data d = \"A\" }", "'data' must be declared outside functions")]
     [InlineData("data d: [u8; 3] = \"AB\"\nfn main() { }", "Expected 3 bytes, found 2")]
     [InlineData("data d: [u16; 2] = \"AB\"\nfn main() { }", "is a [u8; 2] array, but 'd' is [u16; 2]")]

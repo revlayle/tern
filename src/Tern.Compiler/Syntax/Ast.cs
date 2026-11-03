@@ -402,10 +402,37 @@ public sealed class ProgramSyntax(List<ConstDecl> consts, List<VarDecl> globals,
     public ModuleHeader? Header { get; init; }
     public List<AssertDecl> Asserts { get; init; } = [];
     public List<ImportDecl> Imports { get; init; } = [];
+    /// <summary>The <c>memory { ... }</c> block (spec 8.4), or null.</summary>
+    public MemoryDecl? Memory { get; init; }
+    /// <summary>Functions named by <c>export</c> lines, in order (spec 12.3).</summary>
+    public List<ExportName> Exports { get; init; } = [];
     public List<StructDecl> Structs { get; init; } = [];
     /// <summary>Top-level names declared <c>private</c>: usable only inside this file.</summary>
     public HashSet<string> PrivateNames { get; init; } = [];
     public List<ConstDecl> Consts { get; } = consts;
     public List<VarDecl> Globals { get; } = globals;
     public List<FnDecl> Functions { get; } = functions;
+}
+
+/// <summary>The <c>memory { ... }</c> block of the main file.</summary>
+public sealed class MemoryDecl(SourcePos pos, List<MemoryLine> lines) : Node(pos)
+{
+    public List<MemoryLine> Lines { get; } = lines;
+}
+
+/// <summary>One line of the memory block: <c>first..=last kind [name]</c>.</summary>
+public sealed class MemoryLine(SourcePos pos, Expr first, Expr last, string kind, string? name) : Node(pos)
+{
+    public Expr First { get; } = first;
+    public Expr Last { get; } = last;
+    /// <summary>program, zeropage, reserved, region, volatile or overlay.</summary>
+    public string Kind { get; } = kind;
+    /// <summary>The name after <c>region</c> or <c>overlay</c>.</summary>
+    public string? Name { get; } = name;
+}
+
+/// <summary>A function named in an <c>export</c> line.</summary>
+public sealed class ExportName(SourcePos pos, string name) : Node(pos)
+{
+    public string Name { get; } = name;
 }
