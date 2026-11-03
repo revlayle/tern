@@ -11,7 +11,7 @@ import c64
 import math
 import mem
 import scroll
-import sprites(COUNT = 24, FLICKER = true, SCREEN = $8000, SCREEN2 = $8400)
+import sprites(COUNT = 24, SCREEN = $8000, SCREEN2 = $8400)
 
 const MAP = $4000
 const MAP_W = 100

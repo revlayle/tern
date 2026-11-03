@@ -22,7 +22,8 @@ module scroll(SCREEN_A: u16 = $8000, SCREEN_B: u16 = $8400, COLORS: bool = false
 // Each move() call also does its share of the preparation (17 steps of about 1,000 cycles), spread
 // over the pixels left before the coarse step. A camera that moves at one pixel per frame does a
 // coarse step every 8 frames without a stall. A move that turns around, or the first one after
-// standing still, may have to do all of it at once (about 17,000 cycles).
+// standing still, finds the hidden screen not ready: the camera then waits (the move does nothing but
+// work, 4 steps per call) for up to 4 frames.
 //
 // A diagonal move needs both directions to reach their coarse step in the same frame, so it
 // first finishes the axis that is further from its step (up to 7 frames of a straight move) and then
@@ -257,6 +258,7 @@ fn move(dx: i8, dy: i8) {
             steps += 1
         }
         if left > 0 { steps += 1 }
+        if steps > 4 { steps = 4 }
         for _ in 0..steps { prepare() }
         if mx != 0 { fine_x = (fine_x as i8 + mx) as u8 }
         if my != 0 { fine_y = (fine_y as i8 + my) as u8 }
@@ -264,8 +266,15 @@ fn move(dx: i8, dy: i8) {
         return
     }
 
-    // A coarse step: show the hidden screen.
-    while prep_step < STEPS { prepare() }
+    // A coarse step: show the hidden screen. If it is not ready (the camera has just turned around or
+    // started), do part of the work and hold the camera until it is, so that a frame never takes
+    // more than a few steps.
+    var n: u8 = 0
+    while prep_step < STEPS && n < 4 {
+        prepare()
+        n += 1
+    }
+    if prep_step < STEPS { return }
     cell = next_cell()
     front = 1 - front
     if mx > 0 {

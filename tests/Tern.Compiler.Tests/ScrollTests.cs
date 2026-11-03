@@ -104,16 +104,18 @@ public sealed class ScrollTests
             r.Move(dx, dy);
             r.AssertConsistent($"move {i} ({dx},{dy})");
         }
-        // Straight moves cover all 40 pixels. A diagonal first finishes the axis that is further from its step.
+        // The camera may wait up to four frames for the hidden screen when a direction starts at a coarse step.
+        int moved = Math.Max(Math.Abs(r.PixelX - startX), Math.Abs(r.PixelY - startY));
+        Assert.InRange(moved, 33, 40);
         if (dx == 0 || dy == 0)
         {
-            Assert.Equal(startX + 40 * dx, r.PixelX);
-            Assert.Equal(startY + 40 * dy, r.PixelY);
+            Assert.Equal(dx * moved, r.PixelX - startX);
+            Assert.Equal(dy * moved, r.PixelY - startY);
         }
         else
         {
-            Assert.True(Math.Abs(r.PixelX - startX) >= 33 && Math.Abs(r.PixelY - startY) >= 33, $"moved {r.PixelX - startX},{r.PixelY - startY}");
-            Assert.True(Math.Abs(r.PixelX - startX) <= 40 && Math.Abs(r.PixelY - startY) <= 40);
+            Assert.InRange(Math.Abs(r.PixelX - startX), 28, 40);
+            Assert.InRange(Math.Abs(r.PixelY - startY), 28, 40);
         }
     }
 
@@ -177,6 +179,24 @@ public sealed class ScrollTests
         for (int i = 0; i < 64; i++) costs.Add(r.Move(1, 0));
         Console.WriteLine($"move(1,0): max {costs.Max()}, min {costs.Min()}, mean {costs.Average():F0}, coarse step {costs.Where((c, i) => (i + 1) % 8 == 0).Average():F0}");
         Assert.True(costs.Max() < 12000, $"max {costs.Max()}");
+    }
+
+    [Fact]
+    public void A_turn_costs_no_more_than_a_few_steps_in_any_one_call()
+    {
+        var r = new Rig();
+        r.Draw(40, 25);
+        long max = 0;
+        var rnd = new Random(7);
+        for (int i = 0; i < 300; i++)
+        {
+            int dx = (i / 11 % 3) - 1, dy = (i / 17 % 3) - 1;
+            if (rnd.Next(4) == 0) dx = -dx;
+            max = Math.Max(max, r.Move(dx, dy));
+            r.AssertConsistent($"move {i}");
+        }
+        Console.WriteLine($"move: most expensive call in a turning run {max} cycles");
+        Assert.True(max < 9000, $"{max} cycles");
     }
 
     [Fact]
