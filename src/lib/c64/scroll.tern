@@ -1,0 +1,319 @@
+module scroll(SCREEN_A: u16 = $8000, SCREEN_B: u16 = $8400, COLORS: bool = false)
+
+// Smooth character scrolling in eight directions on the C64.
+//
+// The map is a block of screen codes, `width` characters per row. The VIC-II shows 38 columns and
+// 24 rows; the fine scroll registers move the picture up to 7 pixels. When the picture has moved
+// 8 pixels, the screen has to move one character. That is done by showing the other one of two screen
+// buffers: while the picture scrolls, the hidden buffer is prepared (the visible one shifted by one
+// character, a new column or row from the map), and at the coarse step the program shows it by
+// writing $D018, together with the fine scroll registers, at the top of the next frame.
+//
+//     import scroll
+//     ...
+//     scroll.set_map(addr(level), 200)       // 200 characters per row
+//     scroll.draw(0, 0)                      // the screen shows the map from cell (0, 0)
+//     scroll.start()                         // or call scroll.top() from your own handler
+//     while true {
+//         scroll.wait_frame()
+//         scroll.move(1, 0)                  // one pixel to the right: -1, 0 or 1 in each direction
+//     }
+//
+// Each move() call also does a ninth of the preparation, so the work is spread over the frames. A
+// camera that moves at one pixel per frame does a coarse step every 8 frames without a stall. A
+// move that turns around, or the first one after standing still, may have to finish the
+// preparation at once (about 14,000 cycles).
+//
+// A diagonal move needs both directions to reach their coarse step in the same frame, so it
+// first finishes the axis that is further from its step (up to 7 frames of a straight move) and then
+// goes diagonally.
+//
+// The camera must stay inside the map: cell (0, 0) to (width - 41, height - 26).
+//
+// Colors: by default the color RAM is left alone (set it once, e.g. to one color). With
+// COLORS = true, set_color_map() gives a map of color numbers of the same size, and the color RAM is
+// redrawn from it at each coarse step by finish(), which the program calls straight after wait_frame().
+// The redraw is a race with the beam: it takes about 12,000 cycles and runs in the lines above the
+// screen and down it, ahead of the beam.
+//
+// Programs with sprites combine the two in one handler, see sprites.raster():
+//     interrupt fn frame() { if sprites.raster() { scroll.top() } }
+//
+// The screens must be in the same VIC bank (16 KB) and 1 KB aligned. The defaults are in bank 2
+// ($8000-$BFFF), which is free RAM (a program starts at $0801) and sees the ROM character set at
+// $9000; draw() selects the bank of SCREEN_A. Sprite pointers sit at SCREEN + $3F8, so pass the same
+// addresses to sprites as SCREEN and SCREEN2, and put the sprite data in the same bank.
+import c64
+import mem
+import math
+
+assert (SCREEN_A & $3FF) == 0 && (SCREEN_B & $3FF) == 0, "scroll.SCREEN_A and SCREEN_B must be multiples of $0400"
+assert (SCREEN_A >> 14) == (SCREEN_B >> 14), "scroll.SCREEN_A and SCREEN_B must be in the same 16 KB VIC bank"
+assert SCREEN_A != SCREEN_B, "scroll.SCREEN_A and SCREEN_B must be different screens"
+
+const SEL_A = (SCREEN_A & $3C00) >> 6
+const SEL_B = (SCREEN_B & $3C00) >> 6
+
+// The camera: the map cell shown at the top left, and how many pixels the picture is moved on from
+// the cell's edge (0-7).
+var cell_x: u16
+var cell_y: u16
+var fine_x: u8
+var fine_y: u8
+
+// Counts the frames: incremented by top().
+var frames: u8
+
+private var map: ptr u8
+private var cmap: ptr u8
+private var width: u16
+private var cell: ptr u8                // the map cell at the top left of the visible screen
+private var front: u8                   // 0: SCREEN_A is shown, 1: SCREEN_B
+private var key_x: i8                   // the direction the hidden screen is prepared for
+private var key_y: i8
+private var prep_step: u8               // 0-7: copy chunks done, 8: edge filled, 9: complete
+private var copy_pos: u16
+private var colors_due: bool
+// The register values top() writes.
+private var hw_xs: u8
+private var hw_ys: u8
+private var hw_sel: u8
+
+// The hidden screen is the shown one moved by `d` bytes (-41 to 41): hidden[i] = shown[i + d].
+// By key = 4 + dx + 3 * dy: where the copy starts in the shown screen, in the hidden one, and how long it is.
+private data SRC_OFF: [u16; 9] = [0, 0, 0, 0, 0, 1, 39, 40, 41]
+private data DST_OFF: [u16; 9] = [41, 40, 39, 1, 0, 0, 0, 0, 0]
+private data LEN: [u16; 9] = [959, 960, 961, 999, 1000, 999, 961, 960, 959]
+
+const CHUNK = 125
+
+// ---------- Setup ----------
+
+// The map to scroll over: `width` screen codes per row, row after row.
+fn set_map(m: ptr u8, w: u16) {
+    map = m
+    width = w
+}
+
+// The colors of the map's cells, same layout as the map. Only with COLORS = true.
+fn set_color_map(m: ptr u8) {
+    cmap = m
+}
+
+// Shows the map from cell (x, y) at the top left, without a fine scroll offset. Draws the screen
+// at once; with COLORS also the color RAM.
+fn draw(x: u16, y: u16) {
+    cell_x = x
+    cell_y = y
+    cell = map + math.mul16(y, width) + x
+    front = 0
+    fine_x = 0
+    fine_y = 0
+    key_x = 0
+    key_y = 0
+    prep_step = 0
+    c64.cia2.port_a = (c64.cia2.port_a & $FC) | (3 - (SCREEN_A >> 14)) as u8
+    var src = cell
+    var dst: ptr u8 = SCREEN_A as ptr u8
+    for _ in 0..25 {
+        mem.copy(dst, src, 40)
+        dst += 40
+        src += width
+    }
+    commit()
+    if COLORS { draw_colors() }
+}
+
+private fn draw_colors() {
+    var src = cmap + (cell - map)
+    var dst: ptr u8 = c64.COLOR
+    for _ in 0..25 {
+        mem.copy(dst, src, 40)
+        dst += 40
+        src += width
+    }
+}
+
+// ---------- Fine scroll registers ----------
+
+// Puts the registers for the current camera in the variables top() writes. Interrupts are held off
+// for the three stores, so that top() never sees half of them.
+private fn commit() {
+    asm {
+        php
+        sei
+    }
+    hw_xs = 7 - fine_x
+    hw_ys = 7 - fine_y
+    hw_sel = SEL_A as u8
+    if front != 0 { hw_sel = SEL_B as u8 }
+    asm {
+        plp
+    }
+}
+
+// Sets only the fine scroll (0-7 pixels), for a program that moves the screen contents itself.
+fn set_fine(x: u8, y: u8) {
+    fine_x = x
+    fine_y = y
+    commit()
+}
+
+// The part of the frame handler that must run before the screen starts: writes the fine scroll
+// registers, 38 columns and 24 rows, and the screen to show. A part of the program's handler (6.3).
+interrupt fn top() {
+    c64.vic.control2 = (c64.vic.control2 & $F0) | hw_xs
+    c64.vic.control1 = (c64.vic.control1 & $70) | hw_ys
+    c64.vic.memory = (c64.vic.memory & $0F) | hw_sel
+    frames += 1
+}
+
+private interrupt fn handler() {
+    c64.vic.irq_status = 1
+    top()
+}
+
+// Waits until top() has run for a new frame.
+fn wait_frame() {
+    var f = frames
+    while frames == f { }
+}
+
+// Turns the KERNAL off and installs a raster interrupt at line 0 that calls top(). For programs
+// without sprites.
+fn start() {
+    c64.kernal_off()
+    c64.set_irq(addr(handler))
+    c64.vic.control1 = c64.vic.control1 & $7F
+    c64.vic.raster = 0
+    c64.vic.irq_enable = 1
+    c64.vic.irq_status = 1
+    c64.interrupts_on()
+}
+
+// ---------- Moving ----------
+
+// Moves the camera by dx, dy pixels (each -1, 0 or 1). Call it once per frame at most.
+fn move(dx: i8, dy: i8) {
+    var mx: i8 = dx
+    var my: i8 = dy
+    if mx != 0 && my != 0 {
+        var dist_x: u8 = fine_x
+        if mx > 0 { dist_x = 7 - fine_x }
+        var dist_y: u8 = fine_y
+        if my > 0 { dist_y = 7 - fine_y }
+        if dist_x > dist_y {
+            my = 0
+        } else if dist_y > dist_x {
+            mx = 0
+        }
+    }
+    if mx == 0 && my == 0 { return }
+
+    var cross_x = (mx > 0 && fine_x == 7) || (mx < 0 && fine_x == 0)
+    var cross_y = (my > 0 && fine_y == 7) || (my < 0 && fine_y == 0)
+    if key_x != mx || key_y != my {
+        key_x = mx
+        key_y = my
+        prep_step = 0
+        copy_pos = 0
+    }
+
+    if !cross_x && !cross_y {
+        prepare()
+        if mx != 0 { fine_x = (fine_x as i8 + mx) as u8 }
+        if my != 0 { fine_y = (fine_y as i8 + my) as u8 }
+        commit()
+        return
+    }
+
+    // A coarse step: show the hidden screen.
+    while prep_step < 9 { prepare() }
+    cell = next_cell()
+    front = 1 - front
+    if mx > 0 {
+        cell_x += 1
+        if cross_x { fine_x = 0 } else { fine_x += 1 }
+    } else if mx < 0 {
+        cell_x -= 1
+        if cross_x { fine_x = 7 } else { fine_x -= 1 }
+    }
+    if my > 0 {
+        cell_y += 1
+        if cross_y { fine_y = 0 } else { fine_y += 1 }
+    } else if my < 0 {
+        cell_y -= 1
+        if cross_y { fine_y = 7 } else { fine_y -= 1 }
+    }
+    key_x = 0
+    key_y = 0
+    prep_step = 0
+    copy_pos = 0
+    colors_due = COLORS
+    commit()
+}
+
+// The map cell at the top left after the step in the prepared direction.
+private fn next_cell() -> ptr u8 {
+    var nc = cell
+    if key_x > 0 { nc += 1 }
+    if key_x < 0 { nc -= 1 }
+    if key_y > 0 { nc += width }
+    if key_y < 0 { nc -= width }
+    return nc
+}
+
+// One step of preparing the hidden screen: a chunk of the copy, then the new column and row.
+private fn prepare() {
+    if prep_step >= 9 { return }
+    var shown: ptr u8 = SCREEN_A as ptr u8
+    var hidden: ptr u8 = SCREEN_B as ptr u8
+    if front != 0 {
+        shown = SCREEN_B as ptr u8
+        hidden = SCREEN_A as ptr u8
+    }
+    if prep_step < 8 {
+        var k = (4 + key_x + key_y + key_y + key_y) as u8     // 4 + dx + 3 * dy
+        var len = LEN[k]
+        if copy_pos < len {
+            var count: u16 = len - copy_pos
+            if count > CHUNK { count = CHUNK }
+            mem.copy(hidden + DST_OFF[k] + copy_pos, shown + SRC_OFF[k] + copy_pos, count)
+        }
+        copy_pos += CHUNK
+    } else {
+        var nc = next_cell()
+        if key_x != 0 {
+            var src = nc
+            var dst = hidden
+            if key_x > 0 {
+                src += 39
+                dst += 39
+            }
+            for _ in 0..25 {
+                dst[0] = src[0]
+                src += width
+                dst += 40
+            }
+        }
+        if key_y != 0 {
+            var src = nc
+            var dst = hidden
+            if key_y > 0 {
+                src += (width << 4) + (width << 3)
+                dst += 960
+            }
+            mem.copy(dst, src, 40)
+        }
+    }
+    prep_step += 1
+}
+
+// With COLORS: redraws the color RAM after a coarse step. Call it straight after wait_frame(), so
+// that it runs ahead of the beam.
+fn finish() {
+    if colors_due {
+        colors_due = false
+        draw_colors()
+    }
+}
