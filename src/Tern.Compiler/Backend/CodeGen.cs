@@ -391,6 +391,13 @@ public sealed class CodeGen
 
     private void GenIf(IfStmt i)
     {
+        // A constant condition: only the branch taken exists (the checker did not keep what the other one uses).
+        if (i.Condition.ConstValue is long constant)
+        {
+            if (constant != 0) GenBlock(i.Then);
+            else if (i.Else is not null) GenStmt(i.Else);
+            return;
+        }
         var end = NewLabel("endif");
         if (i.Else is null)
         {

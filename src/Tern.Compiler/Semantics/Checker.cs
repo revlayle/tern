@@ -31,6 +31,8 @@ public sealed partial class Checker
     private Module _module = null!;
     private FunctionSymbol? _function;
     private int _loopDepth;
+    /// <summary>Inside a branch that a constant condition never takes: nothing in it keeps a function or variable in the program.</summary>
+    private bool _dead;
     private readonly HashSet<Register> _loopRegisters = [];
     /// <summary>The largest value of each enclosing loop counter whose bounds are constants (for index checks).</summary>
     private readonly Dictionary<VariableSymbol, long> _loopMax = [];
@@ -271,6 +273,7 @@ public sealed partial class Checker
             throw new CompileError(pos,
                 $"'{v.Name}' belongs to {v.Module!.Name}, which is in the same overlay area '{area}' as {_function.Module!.Name}. They are never loaded together and share their memory. " +
                 "Keep shared state in a resident module or the main file");
+        if (_dead) return;
         _function.UsedGlobals.Add(v);
         // A table of function addresses keeps those functions in the program.
         foreach (var (_, f) in v.Storage.FunctionAddresses) _function.UsedAddresses.Add(f);
@@ -833,16 +836,29 @@ public sealed partial class Checker
                 break;
             case BlockStmt b: CheckBlock(b); break;
             case IfStmt i:
+            {
+                // A constant condition compiles only the branch taken: calls, variables and addresses in the
+                // other one are checked but not recorded, so what only it uses is left out of the program (spec 2.2).
                 CheckCondition(i.Condition);
+                bool wasDead = _dead;
+                _dead = wasDead || i.Condition.ConstValue == 0;
                 CheckBlock(i.Then);
+                _dead = wasDead || i.Condition.ConstValue is not null and not 0;
                 if (i.Else is not null) CheckStmt(i.Else);
+                _dead = wasDead;
                 break;
+            }
             case WhileStmt w:
+            {
                 CheckCondition(w.Condition);
+                bool wasDead = _dead;
+                _dead = wasDead || w.Condition.ConstValue == 0;
                 _loopDepth++;
                 CheckBlock(w.Body);
                 _loopDepth--;
+                _dead = wasDead;
                 break;
+            }
             case ForStmt f: CheckFor(f); break;
             case MatchStmt m: CheckMatch(m); break;
             case AsmStmt a: CheckAsm(a); break;
@@ -1508,10 +1524,10 @@ public sealed partial class Checker
             throw new CompileError(pos,
                 $"'{f.Name}' takes '{memoryParam.Name}' in memory, which a call through an address cannot set. " +
                 $"Pass it in a register ({memoryParam.Name}: {memoryParam.Type} using A)");
-        f.AddressTaken = true;
+        if (!_dead) f.AddressTaken = true;
         c.FunctionAddress = f;
         c.Type = TernType.U16;
-        _function?.UsedAddresses.Add(f);
+        if (!_dead) _function?.UsedAddresses.Add(f);
     }
 
     /// <summary><c>addr(player.name)</c>: a field of a struct variable or of a struct at a fixed address.</summary>
@@ -1631,9 +1647,9 @@ public sealed partial class Checker
     /// Records a call. Two overlays in the same area are never loaded together, so one cannot call
     /// the other (spec 8.5).
     /// </summary>
-    private static void AddCall(FunctionSymbol caller, FunctionSymbol callee, SourcePos pos)
+    private void AddCall(FunctionSymbol caller, FunctionSymbol callee, SourcePos pos)
     {
-        caller.Callees.Add(callee);
+        if (!_dead) caller.Callees.Add(callee);
         if (caller.OverlayArea is { } area && callee.OverlayArea == area && callee.Module != caller.Module && !callee.IsInline)
             throw new CompileError(pos,
                 $"'{caller.Name}' calls '{callee.Name}', but the modules {caller.Module!.Name} and {callee.Module!.Name} are both in the overlay area '{area}', so they are never loaded together. " +

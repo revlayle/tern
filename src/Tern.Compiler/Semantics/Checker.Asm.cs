@@ -238,7 +238,7 @@ public sealed partial class Checker
                 throw new CompileError(ins.Operand!.Pos,
                     $"'{handler.Name}' is an interrupt handler: it ends with rti, so jsr cannot call it. Install its address instead: lda #{handler.Name}.lo");
             // Naming a handler (to install it) keeps it in the program, as a root of its own.
-            _function!.UsedInterrupts.Add(handler);
+            if (!_dead) _function!.UsedInterrupts.Add(handler);
         }
         else if (v?.Function is { IsInline: true } inlined)
             throw new CompileError(ins.Operand!.Pos,
@@ -247,8 +247,11 @@ public sealed partial class Checker
         {
             // #f.lo / #f.hi takes the function's address, as addr(f) does (spec 6.5). Assembly may
             // take it even with memory parameters: it can set them itself before calling.
-            named.AddressTaken = true;
-            _function!.UsedAddresses.Add(named);
+            if (!_dead)
+            {
+                named.AddressTaken = true;
+                _function!.UsedAddresses.Add(named);
+            }
         }
         else if (v?.Function is { } f && (f != _function || ins.Mnemonic == Mnemonic.Jsr))
             AddCall(_function!, f, ins.Operand!.Pos);
