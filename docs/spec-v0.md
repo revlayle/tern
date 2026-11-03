@@ -251,7 +251,7 @@ data msg = "GAME OVER"
   - it is read or written through a pointer, since the compiler cannot know where a pointer points.
 
   All other memory is ordinary: its values may be kept in registers, and redundant reads and writes removed. An asm block, and a call to a routine at a fixed address, make the optimizer forget the values it holds for ordinary memory. There is no way to mark memory inside a volatile area as ordinary; a memory layout declaration may add one later (14.12).
-- **A fixed-address variable must not overlap the program**, its data, or the variables the compiler places. That is a compile error that names the variable and both address ranges. Fixed-address variables are often graphics data that the VIC must find in a given 16 KB bank; move the data or make the program smaller. Fixed-address variables may overlap each other.
+- **A fixed-address variable must not overlap the program**, its data, or the variables the compiler places. That is a compile error that names the variable and both address ranges. Fixed-address variables are often graphics data that the VIC must find in a given 16 KB bank; move the data or make the program smaller. Fixed-address variables may overlap each other. The one exception is the memory an overlay loads (8.5): a fixed-address variable marked `volatile` may overlap an overlay's file.
 - Global variables without an initializer are zeroed at startup. A global variable can be marked `noinit` to skip that. It is a prefix like `linear`: `noinit var buf: [u8; 256]`. It is an error with an initial value, at a fixed address (never zeroed anyway), on `data` and on locals.
 - Local variables (other than arrays) must have an initial value. Their memory is shared with other functions (8.1), so it holds no useful value on entry.
 
@@ -591,6 +591,15 @@ import level2 @ levels
   - A call between two overlays in the same area is an error, since they are never loaded together.
   - A call from resident code into an overlay is a plain `jsr`. Having that overlay loaded at that moment is the program's responsibility; the compiler cannot check it, and a check at run time would cost every call.
 - **Shared memory:** overlays in the same area are never present together, so their global variables (in the area, and in zero page) may share memory, as frames do.
+- **Fixed-address variables over an overlay.** A fixed-address variable that overlaps an overlay's file is an error, as for the resident program (4), unless it is marked `volatile`. The keyword states that the overlap is intended: the variable reads and writes whatever the loaded overlay holds at that address, e.g. a level header that every level puts in the same place:
+  ```
+  volatile var header: LevelHeader @ $6000
+  ```
+  - Without `volatile`, the error names the variable, the overlay and both ranges, and says to add `volatile` if the overlap is intended, or to name the overlay's variable (`level2.lives`), whose address follows the overlay when it changes.
+  - Every access is volatile (4). A write to the variable counts as a write through a pointer: the optimizer forgets what it holds for every variable, so an overlay variable at the same address is never read stale from a register.
+  - The compiler does not check what is at that address, which overlay is loaded, or whether one is loaded at all. Addresses inside an overlay's file move when its code or data change; a fixed layout is the program's responsibility.
+  - A fixed-address variable in the part of an overlay area that no overlay's file covers needs no keyword.
+  - Overlapping the resident program stays an error with or without `volatile`.
 - An overlay that does not fit its area gives an error with its size.
 - **Loading** is a platform library function. C64: `c64.load(name, n, device)` loads a file to its own address through the KERNAL and returns the KERNAL's carry (true when loading failed); exact signature settled by the coding session.
 - Bank switching (14.1) will use the same model, with a bank area switched in by a mapper instead of loaded from disk.

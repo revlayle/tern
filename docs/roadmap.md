@@ -204,6 +204,13 @@ Tests: two overlays in one area loaded in turn in the emulator (stand-in for the
 
 Done when: an example loads two levels from disk into one area in turn and runs each, checked in VICE with a `.d64` image.
 
+## M13 follow-up (small, at the start of the next coding session)
+
+Spec: 4, 8.5. Settled 2026-11-03, after the M13 re-review.
+
+- A `volatile` fixed-address variable may overlap an overlay's file (M13 review finding 3 made every such overlap an error). Without `volatile` the error stays, and its message suggests `volatile` for an intended overlap or naming the overlay's variable. A write to such a variable makes the optimizer forget every variable, as a write through a pointer does. Overlapping the resident program stays an error with `volatile` too.
+- Tests in `OverlayTests`: with `volatile`, the variable reads a value the overlay loaded and a write changes the overlay's variable, which the overlay then reads (both overlays loaded in turn); without it, the error and its message; `volatile` over the resident program is still the error; an optimizer test that a resident function reading an overlay variable, writing the aliased fixed variable, then reading the overlay variable again reloads it.
+
 ## Later (not yet ordered, except that new platforms come last)
 
 - Floats as a library with a 4-byte format, built on `wide` (not a priority)
@@ -224,6 +231,7 @@ Done when: an example loads two levels from disk into one area in turn and runs 
   - `keeps` on a fixed routine is a promise the compiler does not check (6.6); a function reached only through `addr()` has no known root (6.5, 8.1)
   - a handler that leaves through an asm `jmp` gets `cld` only if its own code has `adc`, `sbc` or `jsr`; code it jumps to runs in decimal mode if main was in it, unless the asm block clears it (6.3)
   - a call into an overlay that is not loaded runs whatever is in the area (8.5)
+  - a `volatile` fixed-address variable over an overlay reads whatever overlay is loaded; addresses inside an overlay's file move when the overlay changes (8.5)
   - a binary's entries are one root: the host must not call one from an interrupt while another runs (12.3)
 
 New platforms, last:
