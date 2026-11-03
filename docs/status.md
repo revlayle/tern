@@ -4,9 +4,9 @@ Owned by the coding session. Updated at the end of every coding session.
 
 ## Current
 
-- **Milestone:** M13 (overlays). Everything on the roadmap list is built and tested; the "done when" example runs in VICE with a `.d64` image (`examples/levels.tern`: level1, level2 and level1 loaded in turn into one area from drive 8; the top half shows 'A' and "4", the bottom half 'B' and "8", which shows that the second load of level1 reset its variable). Ready for `/review`.
-- **Branch:** `m13-overlays` (from `main` after the M12 merge). 1308 tests pass (36 CPU, 1272 compiler). `BenchmarkTests` unchanged. The first review (`docs/reviews/m13.md`, findings 1-4 and 6) is fixed; finding 5 is question 58.
-- **Next step:** re-review of M13, then merge. After that the roadmap's "Later" list (nothing is scheduled yet; the spec session orders it).
+- **Milestone:** M13 (overlays) is done and merged to `main` (2026-11-03, `c49d88a`) after a clean re-review. The "done when" example runs in VICE with a `.d64` image (`examples/levels.tern`: level1, level2 and level1 loaded in turn into one area from drive 8; the top half shows 'A' and "4", the bottom half 'B' and "8", which shows that the second load of level1 reset its variable).
+- **Branch:** `main`. 1308 tests pass (36 CPU, 1272 compiler). `BenchmarkTests` unchanged. Review finding 5 is question 58.
+- **Next step:** the "M13 follow-up" in `docs/roadmap.md` (a `volatile` fixed-address variable may overlap an overlay's file; settled 2026-11-03), on a new branch from `main`. After that the roadmap's "Later" list (nothing is scheduled yet; the spec session orders it).
 
 ## Done
 
