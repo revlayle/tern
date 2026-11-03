@@ -214,17 +214,53 @@ Spec: 4, 8.4, 8.5. Settled 2026-11-03, after the M13 re-review.
 - Fixed zero-page addresses in an overlay (spec 8.5, question 55): `var p: ptr u8 @ $FB` works in an overlay module, is not part of its file, and can be dereferenced; the main program naming the same address shares it. The `@ zp` error message suggests a local variable or a fixed address. Tests in `OverlayTests`.
 - Tests in `OverlayTests`: with `volatile`, the variable reads a value the overlay loaded and a write changes the overlay's variable, which the overlay then reads (both overlays loaded in turn); without it, the error and its message; `volatile` over the resident program is still the error; an optimizer test that a resident function reading an overlay variable, writing the aliased fixed variable, then reading the overlay variable again reloads it.
 
+## M14: C64 device I/O library
+
+Spec: 10.1, 6.6. No language change (decision 2026-11-03).
+
+- `lib/c64/io.tern` (working name `io`; the coding session may propose another): the KERNAL routines `SETLFS`, `SETNAM`, `OPEN`, `CLOSE`, `CHKIN`, `CHKOUT`, `CLRCHN`, `CHRIN`, `CHROUT`, `READST`, `LOAD`, `SAVE` as routines at a fixed address
+- Whole files: `load(name, device, address)` and `save(name, device, first, last)`
+- Sequential files: open, read and write bytes or blocks, close
+- The drive's command channel (15): send a command (scratch, rename, ...), read the status message
+- Errors from `READST` and the KERNAL's carry
+- `c64.load` built on the same routines (same signature and behavior, spec 8.5)
+- Needs the KERNAL banked in (not after `kernal_off()`); the module header says so. Fast loaders are out of scope.
+- Signatures in spec 10.1 as built
+
+Tests: KERNAL stand-ins in the emulator (`Run.Program` traps) checking arguments, call order and error results for each function.
+
+Done when: an example saves a high-score file to disk, reads it back and shows the drive's status message, checked in VICE with a `.d64` image.
+
+## M15: Indexing small linear struct arrays
+
+Spec: 3.3 (planned; decision 2026-11-03).
+
+- `list[i].field` on a `linear` array of structs whose whole size is at most 256 bytes: shifts for struct sizes 1, 2, 4, 8; otherwise a compile-time table of `i * sizeof(T)` (n bytes, only when indexed with a variable); a constant index is a fixed address
+- Larger arrays stay an error, with a message giving the size and the limit
+
+Tests: listing tests for both shapes, the table's bytes in the report, every element and field against C#, the error.
+
+Done when: the tests pass and the spec 3.3 text describes the feature as built.
+
+## M16: Locals of inline functions in each caller's frame
+
+Spec: 6.2, 14.2 (decision 2026-11-02, M10 review finding 5).
+
+- An inline function's locals and parameters go in each caller's frame, so an inline helper with locals can be called from any root
+- `var` lines in an `inline asm fn` body
+- Move the `math` inline helpers' work byte into a local
+
+Tests: one inline helper with a local called from main and from a handler under `irqEvery`, both results correct; frames of two callers holding separate copies; `BenchmarkTests` (bytes and cycles in the commit message).
+
+Done when: `math.min8` in main and in a handler compiles and runs correctly.
+
 ## Later (not yet ordered, except that new platforms come last)
 
 - Floats as a library with a 4-byte format, built on `wide` (not a priority)
-- **C64 device I/O library** (`lib/c64/io.tern`, name to settle): files on disk, datasette, printer and other serial-bus devices through the KERNAL (`SETLFS`, `SETNAM`, `OPEN`, `CLOSE`, `CHKIN`, `CHKOUT`, `CLRCHN`, `CHRIN`, `CHROUT`, `READST`, `LOAD`, `SAVE`), all as routines at a fixed address. On top: `load(name, device, address)` and `save(name, device, first, last)` for whole files; open, read and write bytes or blocks, close, for sequential files; the drive's command channel (15) to send a command (scratch, rename, ...) and read its status message; errors returned from `READST` and the KERNAL's carry. Needs the KERNAL banked in (not after `kernal_off()`). M13's `c64.load` should use the same routines. Fast loaders are out of scope. Tests with KERNAL stand-ins in the emulator, plus a VICE check with a `.d64` image.
-
 - **Plug-ins against a fixed interface** (spec 12.3, planned): `export module` in a binary (exports matched by name to the module's fixed-address routines, with checks on parameters, return, `keeps`, the interface's fixed variables defined as `data`, `setup` at entry 0) and `export f, g @ addr` in a program with `main` (a jump table at a fixed address, `name_api.tern` written). Tests: two level binaries built against one interface module, exported in different source orders, loaded in turn into one reserved slot and called by a host; a level calling the host's table; each error. Example: a game with levels on disk plus one built separately, checked in VICE
 - Signed loop variables
-- Indexing small `linear` struct arrays (spec 3.3, planned): `list[i].field` when the whole array is at most 256 bytes; shifts for struct sizes 1, 2, 4, 8, otherwise a compile-time table of `i * sizeof(T)` (n bytes, only when indexed with a variable); a constant index is a fixed address; larger arrays stay an error. Listing tests for both shapes, the table's bytes in the report, every element and field against C#
 - `const fn` with compile-time `int` and `real`, array-building syntax, and code generators with `emit` and `label()` (spec 4.1); plan as one milestone, since generators are most of the reason to build `const fn`
 - `using` on local variables (spec 14.6)
-- Locals of inline functions in each caller's frame, with `var` in `inline asm fn` bodies, so inline helpers can be used from any root (spec 6.2, 14.2); then move the `math` inline helpers' work byte into a local
 - Overflow checking and array index checking in the emulator for test runs (spec 14.4, 3.2)
 - Doc comments (`///` before a declaration) and a Tern language server (LSP) that shows them, e.g. that `set_irq` needs an `interrupt fn`
 - **Developer guide**: user documentation that explains how the language behaves on the machine, with examples; it informs and does not forbid. It grows out of the quick guide in `docs/guide.md`, whose section 6 lists these behaviors briefly. It must cover each behavior below. The spec session adds to this list whenever a decision leaves a behavior that the programmer may rely on, or that may surprise them:
