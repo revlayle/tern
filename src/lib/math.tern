@@ -384,97 +384,103 @@ asm fn divs8(a: i8 using A, b: i8 using X) -> i8 {
     lda w4
 }
 
+// Work bytes of min8, max8, clamp8 and the signed versions. They are not the multiply and divide
+// routines' bytes, so main may call mul8 while a handler calls min8.
+private var n0: u8
+private var n1: u8
+private var n2: u8
+
 // The smaller of a and b (unsigned).
 inline asm fn min8(a: u8 using A, b: u8 using X) -> u8 {
-    stx w0
-    cmp w0
+    stx n0
+    cmp n0
     bcc .done
-    lda w0
+    lda n0
 .done:
 }
 
 // The larger of a and b (unsigned).
 inline asm fn max8(a: u8 using A, b: u8 using X) -> u8 {
-    stx w0
-    cmp w0
+    stx n0
+    cmp n0
     bcs .done
-    lda w0
+    lda n0
 .done:
 }
 
 // x limited to lo..=hi (unsigned). lo must not be above hi.
 inline asm fn clamp8(x: u8 using A, lo: u8 using X, hi: u8 using Y) -> u8 {
-    stx w0
-    cmp w0
+    stx n0
+    cmp n0
     bcs .above_lo
-    lda w0
+    lda n0
 .above_lo:
-    sty w0
-    cmp w0
+    sty n0
+    cmp n0
     bcc .done
-    lda w0
+    lda n0
 .done:
 }
 
 // The smaller of a and b (signed).
 inline asm fn mins8(a: i8 using A, b: i8 using X) -> i8 {
-    sta w1
-    stx w0
+    sta n1
+    stx n0
     sec
-    sbc w0
+    sbc n0
     bvc .no_overflow
     eor #$80
 .no_overflow:
     bmi .first
-    lda w0
+    lda n0
     jmp .done
 .first:
-    lda w1
+    lda n1
 .done:
 }
 
 // The larger of a and b (signed).
 inline asm fn maxs8(a: i8 using A, b: i8 using X) -> i8 {
-    sta w1
-    stx w0
+    sta n1
+    stx n0
     sec
-    sbc w0
+    sbc n0
     bvc .no_overflow
     eor #$80
 .no_overflow:
     bmi .second
-    lda w1
+    lda n1
     jmp .done
 .second:
-    lda w0
+    lda n0
 .done:
 }
 
 // x limited to lo..=hi (signed). lo must not be above hi.
 inline asm fn clamps8(x: i8 using A, lo: i8 using X, hi: i8 using Y) -> i8 {
-    sta w1
-    stx w0
-    sty w2
+    sta n1
+    stx n0
+    sty n2
     sec
-    sbc w0              // x - lo
+    sbc n0              // x - lo
     bvc .lo_no_overflow
     eor #$80
 .lo_no_overflow:
     bpl .above_lo
-    lda w0
-    sta w1
+    lda n0
+    sta n1
 .above_lo:
-    lda w2
+    lda n2
     sec
-    sbc w1              // hi - x
+    sbc n1              // hi - x
     bvc .hi_no_overflow
     eor #$80
 .hi_no_overflow:
     bpl .below_hi
-    lda w2
+    lda n2
     jmp .done
 .below_hi:
-    lda w1
+    lda n1
 .done:
 }
 

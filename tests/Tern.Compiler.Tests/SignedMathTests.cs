@@ -205,4 +205,50 @@ public class SignedMathTests
                     if (Math.Ram.Bytes[Base + i] != expected[i]) Assert.Fail($"count {count}, offset {offset}: byte {i} is {Math.Ram.Bytes[Base + i]}, expected {expected[i]}");
             }
     }
+
+    [Fact]
+    public void Min8_in_a_handler_and_mul8_in_main_do_not_share_a_work_byte()
+    {
+        var r = Run.Program("""
+            import math
+            var lo: u8
+            var prod: u16
+            var bad: u8
+            interrupt fn h() {
+                lo = math.min8(lo + 7, 100)
+                lo = math.maxs8(lo as i8, -3) as u8
+            }
+            fn main() {
+                asm {
+                    sei
+                    lda #h.lo
+                    sta $FFFE
+                    lda #h.hi
+                    sta $FFFF
+                    cli
+                }
+                var want: u16 = 0
+                for i in 0..=200 {
+                    prod = math.mul8(i, 201)
+                    if prod != want { bad += 1 }
+                    want += 201
+                }
+            }
+            """, maxCycles: 2_000_000, irqEvery: 97);
+        Assert.True(r.Interrupts > 50);
+        Assert.Equal(0, r.U8("bad"));
+    }
+
+    [Fact]
+    public void Min8_from_main_and_a_handler_is_an_error()
+    {
+        var e = Assert.Throws<Syntax.CompileError>(() => TernCompiler.Compile("""
+            import math
+            var a: u8
+            var b: u8
+            interrupt fn h() { b = math.min8(b, 5) }
+            fn main() { a = math.min8(a, 3) }
+            """));
+        Assert.Contains("a private variable of its module", e.Description);
+    }
 }
