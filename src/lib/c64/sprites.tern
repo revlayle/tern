@@ -423,12 +423,14 @@ interrupt fn raster() -> bool using carry {
         if line > c64.vic.raster {
             c64.vic.raster = line
             if line > c64.vic.raster { return top }
+            c64.vic.irq_status = 1          // the raster reached the line as it was set: that interrupt is not needed
         }
         put(e)
         next += 1
     }
     next = 0
     c64.vic.raster = TOP_LINE
+    c64.vic.irq_status = 1                  // an interrupt raised by the writes above would look like a new frame
     return top
 }
 

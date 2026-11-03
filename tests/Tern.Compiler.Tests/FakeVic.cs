@@ -59,7 +59,11 @@ public sealed class FakeVic : IBus
         {
             int r = address - 0xD000;
             Writes.Add((Line, (int)(Cpu.Cycles % CyclesPerLine), r, value));
-            if (r == 0x12) _compare = _compare & 0x100 | value;
+            if (r == 0x12)
+            {
+                _compare = _compare & 0x100 | value;
+                if (_compare == RasterLine) _status |= 1;   // as in VICE: writing the current line raises the interrupt
+            }
             else if (r == 0x11) { _compare = _compare & 0xFF | (value & 0x80) << 1; _regs[r] = value; }
             else if (r == 0x19) _status &= ~value;
             else _regs[r] = value;
@@ -83,14 +87,16 @@ public sealed class FakeVic : IBus
         {
             // Bad lines take the bus for about 40 cycles; each sprite line fetches 2-3 bytes.
             bool badLine = raster is >= 0x30 and <= 0xF7 && (raster & 7) == (_regs[0x11] & 7) && (_regs[0x11] & 0x10) != 0;
-            int stolen = badLine ? 40 : 0;
-            if (Seen.TryGetValue(line, out var shown)) stolen += shown.Count * 2;
+            int stolen = badLine ? BadLineSteal : 0;
+            if (Seen.TryGetValue(line, out var shown)) stolen += shown.Count * SpriteSteal;
             Cpu.Cycles += stolen;
         }
     }
 
     /// <summary>When set, bad lines and sprite fetches take cycles from the CPU, as on a real C64.</summary>
     public bool StealCycles { get; set; }
+    public int SpriteSteal { get; set; } = 2;
+    public int BadLineSteal { get; set; } = 40;
 
     /// <summary>True while an enabled interrupt is waiting.</summary>
     public bool IrqPending => (_status & _regs[0x1A]) != 0;
