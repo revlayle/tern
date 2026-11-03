@@ -1,0 +1,439 @@
+// Sprite multiplexer for the C64: COUNT virtual sprites on the 8 hardware sprites.
+//
+// Main fills the public tables (xpos, ypos, frame, color, flags) and calls update() once per
+// frame. update() sorts the sprites by y and builds the display list for the next frame. The raster
+// interrupt writes the registers of the first eight sprites at the top of the frame, then of each
+// further sprite just before its line, reusing the hardware sprite (i mod 8) once the sprite that
+// used it before has been drawn.
+//
+//     import sprites(COUNT = 24)
+//     ...
+//     sprites.start()                  // KERNAL off, installs the handler
+//     sprites.xpos[0] = 100
+//     sprites.ypos[0] = 80
+//     sprites.frame[0] = 64            // sprite data at 64 * 64 in the VIC bank
+//     sprites.color[0] = c64.WHITE
+//     sprites.flags[0] = sprites.VISIBLE
+//     while true {
+//         sprites.wait_frame()
+//         ... move sprites ...
+//         sprites.update()
+//     }
+//
+// A program with its own handler calls init() instead of start(), and the raster code from it:
+//
+//     interrupt fn frame() { if sprites.raster() { scroll.top() } }
+//
+// Rules for the sprites on screen:
+//   - A sprite may start no sooner than GAP (30) lines after the sprite that used its hardware
+//     sprite before: at most 8 sprites cover any one line. A sprite that does not fit is left out
+//     of that frame, or, with FLICKER, the sprites in the crowd take turns.
+//   - The first eight sprites on screen are written during the first 14 lines of the frame, so
+//     their y should be at least 24.
+//   - A sprite is written as soon as the one before it on the same hardware sprite has been drawn.
+//     The writes take about 100 cycles per sprite, so a group of sprites that start together on the
+//     same line is drawn whole up to five sprites; from the sixth, the registers are written late.
+//   - Sprite y positions of 252 and more are not multiplexed reliably (the handler would run
+//     past raster line 255).
+//
+// Needs the VIC raster interrupt, which start() sets up. Sprite pointers are written to
+// SCREEN + $3F8 and, for programs that switch between two screens, SCREEN2 + $3F8.
+module sprites(COUNT: u8 = 32, FLICKER: bool = false, SCREEN: u16 = $0400, SCREEN2: u16 = $0400)
+
+import c64
+
+assert COUNT >= 8 && COUNT <= 64, "sprites.COUNT must be 8 to 64"
+
+// Flags of a virtual sprite.
+const VISIBLE = 1
+const MULTICOLOR = 2
+const EXPAND_X = 4
+
+// The distance in lines two sprites on the same hardware sprite must keep: 21 lines of picture
+// plus 9 for the raster code to write the next one, about 5 sprites' worth.
+const GAP = 30
+const TOP_LINE = 0
+
+// ---------- The virtual sprites (main writes these) ----------
+
+var xpos: [u16; COUNT]              // 0-511; 24 is the left edge of the 40-column screen
+var ypos: [u8; COUNT]               // 50 is the top edge of the screen
+var frame: [u8; COUNT]              // sprite pointer: data at frame * 64 in the VIC bank
+var color: [u8; COUNT]
+var flags: [u8; COUNT]              // VISIBLE, MULTICOLOR, EXPAND_X
+
+// Counts the frames: incremented at the top of each one by the raster code.
+var frames: u8
+
+// ---------- Private state ----------
+
+private var order: [u8; COUNT]      // virtual sprite numbers, sorted by y between frames
+private var shown: [u8; COUNT]      // FLICKER: the update() count when each last made the display list
+private var disp: [u8; COUNT]       // FLICKER: the sprites on the display list being built
+private var updates: u8
+
+// The display list, in two halves of COUNT entries; one is being built, one is shown. The
+// registers of a sprite are worked out when the list is built, so the raster code only copies.
+private var d_slot: [u8; 2 * COUNT]     // hardware sprite 0-7
+private var d_x: [u8; 2 * COUNT]
+private var d_y: [u8; 2 * COUNT]
+private var d_ptr: [u8; 2 * COUNT]
+private var d_col: [u8; 2 * COUNT]
+private var d_msb: [u8; 2 * COUNT]      // the sprite's bit in $D010, or 0
+private var d_mc: [u8; 2 * COUNT]       // the sprite's bit in $D01C, or 0
+private var d_ex: [u8; 2 * COUNT]       // the sprite's bit in $D01D, or 0
+private var d_line: [u8; 2 * COUNT]     // raster line of the interrupt that writes the sprite
+
+// A finished display list waits in pend_* until the top of the next frame.
+private var ready: bool
+private var pend_base: u8
+private var pend_count: u8
+private var pend_enable: u8
+// The list being shown.
+private var base: u8
+private var count: u8
+private var enable: u8
+private var next: u8                // the next entry to write; 0 at the top of the frame
+
+private var tmp_s: u8
+private var tmp_bit: u8
+private var tmp_y: u8
+private var tmp_e: u8
+private var tmp_n: u8
+private var tmp_ls: u8
+private var tmp_a: u8
+private var tmp_p: u8
+
+private data BIT: [u8; 8] = [1, 2, 4, 8, 16, 32, 64, 128]
+private data NBIT: [u8; 8] = [$FE, $FD, $FB, $F7, $EF, $DF, $BF, $7F]
+private data ENABLE: [u8; 9] = [0, 1, 3, 7, 15, 31, 63, 127, 255]
+
+// ---------- Main side ----------
+
+// Prepares the tables: the sprites sorted as they are, nothing shown.
+fn init() {
+    for i in 0..COUNT {
+        order[i] = i
+    }
+    ready = false
+    base = 0
+    count = 0
+    enable = 0
+    next = 0
+}
+
+// Sorts the sprites by y: insertion sort, stable. The order of the last call is the starting
+// point, so a frame in which the sprites hardly moved costs about 35 cycles per sprite.
+private asm fn sort() {
+    ldy #1
+.outer:
+    ldx order,y             // the next sprite
+    lda ypos,x
+    sta tmp_y
+    stx tmp_s
+    ldx order-1,y           // the one before it
+    cmp ypos,x
+    bcs .next               // not below it: in place
+    sty tmp_p
+.shift:
+    txa                     // the one before moves up
+    sta order,y
+    dey
+    beq .place
+    ldx order-1,y
+    lda tmp_y
+    cmp ypos,x
+    bcc .shift
+.place:
+    lda tmp_s
+    sta order,y
+    ldy tmp_p
+.next:
+    iny
+    cpy #COUNT
+    bne .outer
+}
+
+// Copies sprite s into entry e of the display list as hardware sprite slot.
+private asm fn emit(slot: u8 using A, s: u8 using X, e: u8 using Y) {
+    sta d_slot,y
+    stx tmp_s
+    tax
+    lda BIT,x
+    sta tmp_bit
+    ldx tmp_s
+    lda xpos,x
+    sta d_x,y
+    lda ypos,x
+    sta d_y,y
+    lda frame,x
+    sta d_ptr,y
+    lda color,x
+    sta d_col,y
+    lda xpos+COUNT,x
+    and #1
+    beq .msb
+    lda tmp_bit
+.msb:
+    sta d_msb,y
+    lda flags,x
+    and #MULTICOLOR
+    beq .mc
+    lda tmp_bit
+.mc:
+    sta d_mc,y
+    lda flags,x
+    and #EXPAND_X
+    beq .ex
+    lda tmp_bit
+.ex:
+    sta d_ex,y
+    tya                         // the line the hardware sprite is free: the sprite 8 entries back ends
+    sec
+    sbc #8
+    bcc .done
+    tax
+    lda d_y,x
+    clc
+    adc #22
+    sta d_line,y
+.done:
+}
+
+// Builds the display list from the sorted sprites into the half that starts at entry tb: the
+// visible sprites in order, each on hardware sprite (number mod 8), leaving out a sprite whose
+// hardware sprite is still busy. Returns the number of entries.
+private asm fn build(tb: u8 using A) -> u8 using A {
+    sta tmp_e
+    lda #0
+    sta tmp_n
+    sta tmp_p
+.loop:
+    ldx tmp_p
+    lda order,x
+    tax                         // the sprite
+    lda flags,x
+    and #VISIBLE
+    beq .next
+    ldy tmp_e
+    lda tmp_n
+    cmp #8
+    bcc .emit
+    lda ypos,x                  // y of the sprite 8 entries back is d_y-8,y
+    sec
+    sbc d_y-8,y
+    cmp #GAP
+    bcc .next                   // the hardware sprite is still busy: leave this one out
+.emit:
+    lda tmp_n
+    and #7
+    jsr emit
+    inc tmp_n
+    inc tmp_e
+.next:
+    inc tmp_p
+    lda tmp_p
+    cmp #COUNT
+    bne .loop
+    lda tmp_n
+}
+
+// The same with FLICKER: a sprite that finds its hardware sprite busy takes the place of the last
+// entry if it has gone without being shown longer than that one (the ages are counted in update()
+// calls), so the sprites in a crowd take turns. Sprites shown are stamped with the call number
+// at the end.
+private asm fn build_flicker(tb: u8 using A) -> u8 using A {
+    sta tmp_e
+    lda #0
+    sta tmp_n
+    sta tmp_p
+    sta tmp_ls
+.loop:
+    ldx tmp_p
+    lda order,x
+    tax                         // the sprite
+    lda flags,x
+    and #VISIBLE
+    beq .next
+    ldy tmp_e
+    lda tmp_n
+    cmp #8
+    bcc .emit
+    lda ypos,x
+    sec
+    sbc d_y-8,y
+    cmp #GAP
+    bcs .emit
+    lda updates                 // busy: has this one waited longer than the last on the list?
+    sec
+    sbc shown,x
+    sta tmp_a
+    ldx tmp_ls
+    lda updates
+    sec
+    sbc shown,x
+    cmp tmp_a
+    bcs .next                   // no: leave it out
+    ldx tmp_p
+    lda order,x
+    tax
+    stx tmp_ls
+    ldy tmp_n
+    dey
+    txa
+    sta disp,y
+    tya
+    and #7                      // the last entry's hardware sprite
+    ldy tmp_e
+    dey
+    jsr emit
+    jmp .next
+.emit:
+    stx tmp_ls
+    ldy tmp_n
+    txa
+    sta disp,y
+    tya
+    and #7
+    ldy tmp_e
+    jsr emit
+    inc tmp_n
+    inc tmp_e
+.next:
+    inc tmp_p
+    lda tmp_p
+    cmp #COUNT
+    bne .loop
+    ldy #0
+    cpy tmp_n
+    beq .done
+.stamp:
+    ldx disp,y
+    lda updates
+    sta shown,x
+    iny
+    cpy tmp_n
+    bne .stamp
+.done:
+    lda tmp_n
+}
+
+// Sorts the sprites and builds the display list for the next frame. Call it once per frame,
+// best straight after wait_frame().
+fn update() {
+    ready = false                       // the raster code keeps what it has until this is done
+    sort()
+    var tb: u8 = 0
+    if base == 0 { tb = COUNT }
+    updates += 1
+    var n: u8 = 0
+    if FLICKER {
+        n = build_flicker(tb)
+    } else {
+        n = build(tb)
+    }
+    var shown_count = n
+    if n > 8 { shown_count = 8 }
+    pend_base = tb
+    pend_count = n
+    pend_enable = ENABLE[shown_count]
+    ready = true
+}
+
+// Waits until the raster code has started a new frame.
+fn wait_frame() {
+    var f = frames
+    while frames == f { }
+}
+
+// Turns the KERNAL off and installs the raster interrupt for the multiplexer. Use it when the
+// multiplexer is all the program does in interrupts; otherwise call init() and write the
+// handler (see the top of the file).
+fn start() {
+    init()
+    c64.kernal_off()
+    c64.set_irq(addr(handler))
+    c64.vic.control1 = c64.vic.control1 & $7F       // bit 8 of the raster line: 0
+    c64.vic.raster = TOP_LINE
+    c64.vic.irq_enable = 1
+    c64.vic.irq_status = 1
+    c64.interrupts_on()
+}
+
+// ---------- Raster side ----------
+
+// Writes the registers of display list entry e to its hardware sprite. An interrupt fn, so that
+// it is a part of raster() and may use the private tables (6.3).
+private interrupt fn put(e: u8 using Y) {
+    asm {
+        ldx d_slot,y
+        lda d_col,y
+        sta c64.vic.sprite_color,x
+        lda d_ptr,y
+        sta SCREEN + $3F8,x
+        sta SCREEN2 + $3F8,x
+        lda c64.vic.sprite_x_msb
+        and NBIT,x
+        ora d_msb,y
+        sta c64.vic.sprite_x_msb
+        lda c64.vic.sprite_multicolor
+        and NBIT,x
+        ora d_mc,y
+        sta c64.vic.sprite_multicolor
+        lda c64.vic.sprite_expand_x
+        and NBIT,x
+        ora d_ex,y
+        sta c64.vic.sprite_expand_x
+        txa
+        asl
+        tax
+        lda d_x,y
+        sta c64.vic.sprite0_x,x
+        lda d_y,y
+        sta c64.vic.sprite0_y,x
+    }
+}
+
+// The raster code, a part of the program's handler. Each interrupt writes the sprites that are
+// due and sets the raster line of the next interrupt. Returns true at the top of the frame, when
+// the program may write the registers that must be set before the screen starts (6.3).
+interrupt fn raster() -> bool using carry {
+    c64.vic.irq_status = 1
+    var top = false
+    if next == 0 {
+        top = true
+        if ready {
+            base = pend_base
+            count = pend_count
+            enable = pend_enable
+            ready = false
+        }
+        c64.vic.sprite_enable = enable
+        frames += 1
+        var first = count
+        if first > 8 { first = 8 }
+        for i in 0..first {
+            put(base + i)
+        }
+        next = first
+    }
+    while next < count {
+        var e = base + next
+        var line = d_line[e]
+        if line > c64.vic.raster {
+            c64.vic.raster = line
+            if line > c64.vic.raster { return top }
+            c64.vic.irq_status = 1          // the raster reached the line as it was set: that interrupt is not needed
+        }
+        put(e)
+        next += 1
+    }
+    next = 0
+    c64.vic.raster = TOP_LINE
+    c64.vic.irq_status = 1                  // an interrupt raised by the writes above would look like a new frame
+    return top
+}
+
+private interrupt fn handler() {
+    raster()
+}
