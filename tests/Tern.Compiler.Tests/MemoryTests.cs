@@ -342,6 +342,9 @@ public class MemoryTests
     [InlineData("memory { $0800..=$9FFF reserved }\nfn main() { }", "No program area is left")]
     [InlineData("memory { $0801..=$0830 program }\n" + Functions, "no program area has room for them in one piece")]
     [InlineData("memory { $0801..=$0830 program }\n" + Functions, "$0801-$0830:")]
+    [InlineData("memory { $0801..=$0830 program }\n" + Functions, "(startup")]                       // what is in the area
+    [InlineData("memory { $0801..=$09FF program }\nvar a: [u8; 200]\nvar b: [u8; 200]\nvar c: [u8; 200]\nvar d: [u8; 200]\nfn main() { a[0] = 1 }", "The variables need 800 bytes")]
+    [InlineData("memory { $0801..=$0810 program }\ndata d: [u8; 16] @ $0801 = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]\nfn main() { }", "No program area is left")]
     [InlineData("memory { $C000..=$C00F region small }\nvar big: [u8; 32] @ small\nfn main() { }", "Region 'small' ($C000-$C00F, 16 bytes) is full: 'big' needs 32 bytes")]
     [InlineData("memory { $C000..=$C00F region small }\nvar v: u8 @ small = 5\nfn main() { }", "A variable in a region cannot have an initial value")]
     [InlineData("var v: u8 @ nowhere\nfn main() { }", "'nowhere' is not declared")]

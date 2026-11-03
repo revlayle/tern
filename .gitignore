@@ -13,3 +13,4 @@ tests/benchmarks/*/*.prg
 tests/benchmarks/*/*.lbl
 tests/benchmarks/*/*.map
 tests/benchmarks/*/*.bin
+examples/player_api.tern

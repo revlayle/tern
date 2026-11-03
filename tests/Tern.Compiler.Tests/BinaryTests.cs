@@ -338,6 +338,78 @@ public class BinaryTests
         Assert.True(run.U8("frames") >= 5);
     }
 
+
+    // ---------- The examples ----------
+
+    /// <summary>Runs a program that never ends for a number of cycles, with an IRQ every <paramref name="irqEvery"/> cycles.</summary>
+    private static Ram Emulate(CompileResult result, long cycles, long irqEvery, Action<Ram>? onIrq = null)
+    {
+        var ram = new Ram();
+        ram.Load((ushort)result.LoadAddress, result.Image);
+        var cpu = new Cpu6502(ram) { PC = (ushort)result.Entry, SP = 0xFF, I = true };
+        long nextIrq = irqEvery;
+        while (cpu.Cycles < cycles)
+        {
+            if (irqEvery > 0 && cpu.Cycles >= nextIrq && cpu.Irq())
+            {
+                nextIrq = cpu.Cycles + irqEvery;
+                onIrq?.Invoke(ram);
+            }
+            cpu.Step();
+        }
+        return ram;
+    }
+
+    [Fact]
+    public void The_music_player_example_plays_a_scale_when_the_host_calls_it_from_the_raster_handler()
+    {
+        var dir = Directory.CreateTempSubdirectory("tern");
+        try
+        {
+            foreach (var name in new[] { "player.tern", "player_host.tern" })
+                File.Copy(AsmTests.FindExample(name), Path.Combine(dir.FullName, name));
+            var player = TernCompiler.Compile(File.ReadAllText(Path.Combine(dir.FullName, "player.tern")), sourcePath: Path.Combine(dir.FullName, "player.tern"));
+            File.WriteAllBytes(Path.Combine(dir.FullName, "player.prg"), player.Prg);
+            File.WriteAllText(Path.Combine(dir.FullName, player.ApiModuleName + ".tern"), player.ApiModule);
+            string hostPath = Path.Combine(dir.FullName, "player_host.tern");
+            var host = TernCompiler.Compile(File.ReadAllText(hostPath), sourcePath: hostPath);
+
+            Assert.Equal(0xC000, player.LoadAddress);
+            Assert.Equal(new[] { "setup", "init", "play" }, player.Entries.Select(e => e.Name));
+            // The host's file holds the player at its own address, after a zero-filled gap.
+            Assert.Equal(0x0801, host.LoadAddress);
+            Assert.Equal(player.Image, host.Image[(0xC000 - 0x0801)..]);
+
+            var notes = new List<int>();
+            var ram = Emulate(host, 3_000_000, irqEvery: 20_000, onIrq: ram =>
+            {
+                int freq = ram.Bytes[0xD400] | (ram.Bytes[0xD401] << 8);
+                if (freq != 0 && (notes.Count == 0 || notes[^1] != freq)) notes.Add(freq);
+            });
+            Assert.Equal(new[] { 4455, 5001, 5613, 5947, 6675, 7493, 8410, 8910, 4455 }, notes.Take(9));
+            Assert.Equal(15, ram.Bytes[0xD418]);                              // init set the volume
+            Assert.Equal(0x11, ram.Bytes[0xD404] & 0xFF);                     // gate on
+            Assert.True(ram.Bytes[host.Symbols["frames"]] > 100);
+        }
+        finally { dir.Delete(recursive: true); }
+    }
+
+    [Fact]
+    public void The_sprite_data_example_loads_its_shape_at_the_fixed_address()
+    {
+        var path = AsmTests.FindExample("sprite_data.tern");
+        var result = TernCompiler.Compile(File.ReadAllText(path), sourcePath: path);
+        var ram = Emulate(result, 200_000, irqEvery: 0);
+        Assert.Equal(0x0801, result.LoadAddress);
+        Assert.Equal(0x203F - 0x0801, result.Image.Length);
+        Assert.Equal(0x00, ram.Bytes[0x2000]);
+        Assert.Equal(0x3C, ram.Bytes[0x2001]);
+        Assert.Equal(0xFF, ram.Bytes[0x2000 + 3 * 10 + 1]);
+        Assert.Equal(128, ram.Bytes[0x07F8]);                                // sprite pointer: $2000 / 64
+        Assert.Equal(1, ram.Bytes[0xD015]);
+        Assert.Equal(63, result.Sections.Single(s => s.Name == "ball").Size);
+    }
+
     // ---------- Errors ----------
 
     [Theory]

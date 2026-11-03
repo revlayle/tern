@@ -1,0 +1,39 @@
+// A tiny music player built as a binary (spec 12.3): no main, an 'export' line instead.
+// The compiler writes player.prg, loading at $C000 with a jump table (setup, init, play),
+// and player_api.tern, the module a Tern program imports to call it. See player_host.tern.
+//
+// play() runs once per frame: every 12 frames it starts the next note of a C major scale
+// on SID voice 1.
+import c64
+
+memory {
+    $C000..=$CFFF  program
+    $FB..=$FE      zeropage          // the player's own zero page; the host leaves it alone
+}
+
+// SID frequencies for C4 to C5 (PAL).
+data notes: [u16; 8] = [4455, 5001, 5613, 5947, 6675, 7493, 8410, 8910]
+
+var pos: u8
+var tick: u8
+
+fn init() {
+    c64.sid.volume = 15
+    c64.sid.voice1.attack_decay = $09
+    c64.sid.voice1.sustain_release = $00
+    pos = 0
+    tick = 0
+}
+
+fn play() {
+    if tick == 0 {
+        c64.sid.voice1.control = $10            // gate off
+        c64.sid.voice1.freq = notes[pos]
+        c64.sid.voice1.control = $11            // triangle wave, gate on
+        pos = (pos + 1) & 7
+    }
+    tick += 1
+    if tick == 12 { tick = 0 }
+}
+
+export init, play
