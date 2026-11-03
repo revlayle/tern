@@ -161,8 +161,6 @@ Done when: an example keeps a 32-bit score with `wide` and a BCD score with `bcd
 
 Spec: 10.1 ("Planned for M11"), 6.3 (parts).
 
-M10 follow-up first: `math.min8`, `max8`, `clamp8` and the signed ones use their own private work byte instead of `math.w0` (spec 10.1). Test: `mul8` in main and `min8` in a handler compiles and both give correct results under `irqEvery`; `min8` from both main and a handler is still the private-variable error.
-
 - `lib/c64/sprites.tern` with `module sprites(COUNT: u8 = 32, FLICKER: bool = false)` and asserts on `COUNT`
 - `lib/c64/scroll.tern`: fine scroll helpers, double-buffered eight-way character scrolling, color RAM fixed or shifted, filling from a character map
 - Cycle budgets recorded in `docs/status.md`: `update()` for 32 sorted and unsorted sprites, the raster handler per group, a coarse scroll step
@@ -188,6 +186,13 @@ Done when: a music player built as a binary at `$C000` (`init`, `play`) is loade
 
 Spec: 8.5.
 
+Follow-up first (settled 2026-11-02/03):
+
+- `math.min8`, `max8`, `clamp8` and the signed ones use their own private work byte instead of `math.w0` (spec 10.1). Test: `mul8` in main and `min8` in a handler compiles and both give correct results under `irqEvery`; `min8` from both main and a handler is still the private-variable error.
+- `{` on the line after a block header (spec 2), for every construct listed there; tests in `ErrorTests` or the parser tests for each, plus a `{` after a line break where no block is expected still being an error.
+
+Then:
+
 - `overlay name` areas; `import m @ area` in the main file only; one file per overlay module, loading at its area's start, holding its code, `data` and variables with initial values
 - Errors: a call between overlays of the same area, the main file in an overlay, an overlay that does not fit (with its size), `@ area` outside the main file or naming a non-overlay area
 - Overlays in one area share their variables' memory (RAM and zero page)
@@ -202,7 +207,7 @@ Done when: an example loads two levels from disk into one area in turn and runs 
 - Floats as a library with a 4-byte format, built on `wide` (not a priority)
 
 - Signed loop variables
-- `const fn` with compile-time `int` and `real`, array-building syntax (spec 4.1)
+- `const fn` with compile-time `int` and `real`, array-building syntax, and code generators with `emit` and `label()` (spec 4.1); plan as one milestone, since generators are most of the reason to build `const fn`
 - `using` on local variables (spec 14.6)
 - Locals of inline functions in each caller's frame, with `var` in `inline asm fn` bodies, so inline helpers can be used from any root (spec 6.2, 14.2); then move the `math` inline helpers' work byte into a local
 - Overflow checking and array index checking in the emulator for test runs (spec 14.4, 3.2)
@@ -223,3 +228,7 @@ New platforms, last:
 - 65C02 CPU variant and Commander X16 platform
 - NES: iNES output, `@ bank(n)`, calls between banks (spec 14.1)
 - Apple II and Atari 8-bit platforms
+
+After the compiler is complete (far off, not planned):
+
+- A standalone assembler extracted from Tern: the asm syntax, `emit` generators, the memory block and the listing, for `.asm` files with no Tern code
