@@ -1876,7 +1876,10 @@ public sealed partial class Checker
         bool OwnHandler(FunctionSymbol root, VariableSymbol g) =>
             root.IsInterrupt && moduleOf[g].Scope.Values.Contains(root);
         // Or through an interrupt fn of the module that is called as a part (decision 34).
-        bool OwnPart(FunctionSymbol f, VariableSymbol g) => f.IsInterrupt && moduleOf[g].Scope.Values.Contains(f);
+        // A function of the module that only the module's own interrupt fns call is on that side too (spec 8.1).
+        var handlerSide = HandlerSideFunctions(ordered);
+        bool OwnPart(FunctionSymbol f, VariableSymbol g) =>
+            (f.IsInterrupt || handlerSide.Contains(f)) && moduleOf[g].Scope.Values.Contains(f);
 
         var firstUser = new Dictionary<VariableSymbol, (FunctionSymbol Function, FunctionSymbol Root)>();
         foreach (var f in ordered.Where(f => f.FixedAddress is null))
@@ -1884,7 +1887,7 @@ public sealed partial class Checker
                 foreach (var used in f.UsedGlobals)
                 {
                     var g = used.AliasOf ?? used;
-                    if (!privateGlobals.Contains(g) || OwnHandler(root, g) || OwnPart(f, g)) continue;
+                    if (!privateGlobals.Contains(g) || OwnPart(f, g) || (OwnHandler(root, g) && handlerSide.Contains(f))) continue;
                     if (!firstUser.TryGetValue(g, out var first))
                         firstUser[g] = (f, root);
                     else if (first.Root != root)
@@ -1897,6 +1900,34 @@ public sealed partial class Checker
                             $"Call functions of this module from only main or only one interrupt handler");
                     }
                 }
+    }
+
+    /// <summary>
+    /// The functions that only interrupt fns of their own module call, directly or through other such
+    /// functions: they run on the handler side of their module (spec 8.1). A function whose address is taken
+    /// may be called from anywhere, so it is not one of them.
+    /// </summary>
+    private static HashSet<FunctionSymbol> HandlerSideFunctions(List<FunctionSymbol> ordered)
+    {
+        var callers = ordered.ToDictionary(f => f, _ => new List<FunctionSymbol>());
+        foreach (var f in ordered)
+            foreach (var callee in f.Callees)
+                if (callers.TryGetValue(callee, out var list)) list.Add(f);
+        var side = new HashSet<FunctionSymbol>();
+        bool changed;
+        do
+        {
+            changed = false;
+            foreach (var f in ordered)
+            {
+                if (f.IsInterrupt || f.FixedAddress is not null || f.AddressTaken || f.Module is null || side.Contains(f)) continue;
+                var from = callers[f];
+                if (from.Count == 0 || !from.All(c => c.Module == f.Module && (c.IsInterrupt || side.Contains(c)))) continue;
+                side.Add(f);
+                changed = true;
+            }
+        } while (changed);
+        return side;
     }
 
     /// <summary>
