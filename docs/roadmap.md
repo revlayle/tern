@@ -215,7 +215,7 @@ Done when: an example loads two levels from disk into one area in turn and runs 
 - Locals of inline functions in each caller's frame, with `var` in `inline asm fn` bodies, so inline helpers can be used from any root (spec 6.2, 14.2); then move the `math` inline helpers' work byte into a local
 - Overflow checking and array index checking in the emulator for test runs (spec 14.4, 3.2)
 - Doc comments (`///` before a declaration) and a Tern language server (LSP) that shows them, e.g. that `set_irq` needs an `interrupt fn`
-- **Developer guide**: user documentation that explains how the language behaves on the machine, with examples; it informs and does not forbid. It must cover each behavior below. The spec session adds to this list whenever a decision leaves a behavior that the programmer may rely on, or that may surprise them:
+- **Developer guide**: user documentation that explains how the language behaves on the machine, with examples; it informs and does not forbid. It grows out of the quick guide in `docs/guide.md`, whose section 6 lists these behaviors briefly. It must cover each behavior below. The spec session adds to this list whenever a decision leaves a behavior that the programmer may rely on, or that may surprise them:
   - all arithmetic wraps, including index expressions: `buf[head + 1]` with `head = 255` is `buf[0]` (3.1, 3.2); when the optimizer folds a constant offset into the address
   - an index outside the array is not checked, and the optimizer assumes it does not happen (3.2)
   - flags after an `asm` block: `if f()`, `while f()` (first test, and each later test when the body ends with an `asm` block) and `v = f()` with an empty-body flag function; after compiled Tern code the flags are unspecified (7)

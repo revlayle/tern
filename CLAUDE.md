@@ -11,6 +11,7 @@ Tern (working name) is a small, readable language that compiles to efficient 650
 | `docs/roadmap.md` | Milestones: scope, spec sections, "done when" criteria. | spec session |
 | `docs/status.md` | Current state, handoff notes, known limitations, questions for the spec session. | coding session |
 | `docs/reviews/` | Review findings, one file per milestone. | review session |
+| `docs/guide.md` | User guide: how to use the language and compiler, with examples. | spec session |
 | `docs/workflow.md` | How the spec, coding and review sessions work together. | spec session |
 
 Each session edits only the files it owns (see `docs/workflow.md`). Start a session with `/spec`, `/code`, `/review` or `/merge`.
