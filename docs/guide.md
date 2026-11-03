@@ -4,7 +4,7 @@ A quick guide to the Tern language and compiler as built today (through mileston
 
 ## 1. What Tern is
 
-Tern is a small language for the 6502 that compiles to code close to what you would write by hand in assembly. The first target is the Commodore 64.
+Tern is a small language for the 6502 that compiles to compact, predictable machine code. Carefully hand-written assembly is still smaller and faster (on the benchmarks, Tern's code is about 30% larger and 54% slower), so Tern makes it cheap to write the routines that need it in assembly. The first target is the Commodore 64.
 
 A few rules shape everything else:
 

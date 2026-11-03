@@ -1,6 +1,6 @@
 # Tern
 
-Tern is a small, readable programming language for 6502 processors that compiles to code close to what a skilled assembly programmer would write. The compiler is written in C# and has its own assembler and cycle-exact 6502 emulator. The first target is the Commodore 64.
+Tern is a small, readable programming language for 6502 processors that compiles to compact, predictable machine code. It does not match carefully hand-written assembly, but it narrows the gap and makes it easy to drop into assembly where a routine needs it. The compiler is written in C# and has its own assembler and cycle-exact 6502 emulator. The first target is the Commodore 64.
 
 *Tern is a working name.*
 
@@ -34,7 +34,7 @@ $0816  8D 20 D0  sta c64.vic+32        ; 4
 - **Assembly mixes in cheaply.** Inline `asm` blocks and `asm fn` are parsed by the compiler, can name Tern variables and struct fields, and are never changed.
 - **Whole-machine control.** Interrupt handlers that save only what they use, a `memory` block for the layout, binaries without `main` (a music player at `$C000` with a generated interface module), and overlays loaded from disk.
 
-On nine benchmark tasks Tern is within about 30% of hand-written assembly in bytes, and smaller and faster than Prog8 and cc65 (`tests/benchmarks/comparison.md`):
+On nine benchmark tasks, Tern's code is about 30% larger and 54% slower than hand-written assembly, and smaller and faster than Prog8 and cc65 (`tests/benchmarks/comparison.md`). Hand-written assembly is still the way to go for the tightest inner loops; Tern lets you write those as `asm` inside a Tern program.
 
 | | Tern | Assembly | Prog8 | cc65 |
 |---|--:|--:|--:|--:|
