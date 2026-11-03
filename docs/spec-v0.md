@@ -598,7 +598,11 @@ import level2 @ levels
   - An overlay may call resident code, its own code and overlays in other areas.
   - A call between two overlays in the same area is an error, since they are never loaded together.
   - A call from resident code into an overlay is a plain `jsr`. Having that overlay loaded at that moment is the program's responsibility; the compiler cannot check it, and a check at run time would cost every call.
-- **Shared memory:** overlays in the same area are never present together, so their global variables (in the area, and in zero page) may share memory, as frames do.
+- **Shared memory:** overlays in the same area are never present together, so their global variables may share memory, as frames do. They are in the overlay's file, so loading it sets them.
+- **Zero page.** An overlay's global variables are never placed in zero page, since loading a file cannot set it. A global that must be there (`@ zp`, or a pointer that is dereferenced) is an error; the message suggests a local variable or a fixed address. Locals and parameters of overlay functions are in the usual frames, zero page included.
+  - An overlay may name zero-page bytes at a fixed address (`var p: ptr u8 @ $FB`). Like any fixed-address variable it is a name for memory, not part of the file, and the overlay sets it itself. The main program may name the same address to share the byte; the same rules for overlapping apply as everywhere (4). A resident module's zero-page global, used by its qualified name, is the other way to share.
+- **Other uses between overlays of one area** are errors too, since the other overlay is never loaded: using its global variables or `data`, and `addr()` of its functions or `data`. Resident code may take addresses in any overlay.
+- An overlay may declare `interrupt fn`s. Installing one is the program's responsibility, and so is removing it before the overlay is replaced.
 - **Fixed-address variables over an overlay.** A fixed-address variable that overlaps an overlay's file is an error, as for the resident program (4), unless it is marked `volatile`. The keyword states that the overlap is intended: the variable reads and writes whatever the loaded overlay holds at that address, e.g. a level header that every level puts in the same place:
   ```
   volatile var header: LevelHeader @ $6000
@@ -617,7 +621,7 @@ import level2 @ levels
   - Overlays of the same area may put data at the same address, since they are never loaded together.
   - Errors: fixed data overlapping the module's other fixed data or fixed variables; an overlay module's fixed data outside its own area (in another overlay area, or in a program or reserved area: put resident data in the main file or a resident module); a resident module's fixed data in an overlay area.
 - An overlay that does not fit its area gives an error with its size.
-- **Loading** is a platform library function. C64: `c64.load(name, n, device)` loads a file to its own address through the KERNAL and returns the KERNAL's carry (true when loading failed); exact signature settled by the coding session.
+- **Loading** is a platform library function. C64: `c64.load(name: ptr u8, n: u8, device: u8) -> bool` loads a file to its own address through the KERNAL (logical file 1, secondary address 1) and returns the KERNAL's carry (true when loading failed). The drive's error channel is not read. An overlay's file is named after its module (`level1.prg`); the name on the disk is the program's choice, passed as a PETSCII string (`data NAME = "LEVEL1"`, then `c64.load(addr(NAME), len(NAME), 8)`).
 - Bank switching (14.1) will use the same model, with a bank area switched in by a mapper instead of loaded from disk.
 
 ## 9. Inline assembly

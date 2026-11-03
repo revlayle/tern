@@ -210,6 +210,8 @@ Spec: 4, 8.4, 8.5. Settled 2026-11-03, after the M13 re-review.
 
 - A `volatile` fixed-address variable may overlap an overlay's file (M13 review finding 3 made every such overlap an error). Without `volatile` the error stays, and its message suggests `volatile` for an intended overlap or naming the overlay's variable. A write to such a variable makes the optimizer forget every variable, as a write through a pointer does. Overlapping the resident program stays an error with `volatile` too.
 - Fixed `data` in an overlay module (spec 8.5, question 58): `data x @ addr` inside the module's own area goes in its file, with the module's code, data and variables laid out around it. Errors: overlap with the module's other fixed data or fixed variables; an overlay module's fixed data outside its own area; a resident module's fixed data in an overlay area. Tests: two levels in one area, each with a header at the area's start and code after it, loaded in turn and read by resident code through a `volatile` fixed variable; the file's bytes (data at its address, gap zero-filled); each error.
+- Uses of a sibling overlay (spec 8.5, question 56): `addr()` of a function or `data` of another overlay in the same area is an error, as using its `data` is; resident code may still take such addresses. Error tests for each.
+- Fixed zero-page addresses in an overlay (spec 8.5, question 55): `var p: ptr u8 @ $FB` works in an overlay module, is not part of its file, and can be dereferenced; the main program naming the same address shares it. The `@ zp` error message suggests a local variable or a fixed address. Tests in `OverlayTests`.
 - Tests in `OverlayTests`: with `volatile`, the variable reads a value the overlay loaded and a write changes the overlay's variable, which the overlay then reads (both overlays loaded in turn); without it, the error and its message; `volatile` over the resident program is still the error; an optimizer test that a resident function reading an overlay variable, writing the aliased fixed variable, then reading the overlay variable again reloads it.
 
 ## Later (not yet ordered, except that new platforms come last)
@@ -234,6 +236,8 @@ Spec: 4, 8.4, 8.5. Settled 2026-11-03, after the M13 re-review.
   - `keeps` on a fixed routine is a promise the compiler does not check (6.6); a function reached only through `addr()` has no known root (6.5, 8.1)
   - a handler that leaves through an asm `jmp` gets `cld` only if its own code has `adc`, `sbc` or `jsr`; code it jumps to runs in decimal mode if main was in it, unless the asm block clears it (6.3)
   - a call into an overlay that is not loaded runs whatever is in the area (8.5)
+  - an interrupt handler installed from an overlay must be removed before that overlay is replaced (8.5)
+  - an overlay's zero-page bytes at a fixed address hold whatever was there before it loaded; the overlay sets them (8.5)
   - a `volatile` fixed-address variable over an overlay reads whatever overlay is loaded; addresses inside an overlay's file move when the overlay changes (8.5)
   - a binary's entries are one root: the host must not call one from an interrupt while another runs (12.3)
 
