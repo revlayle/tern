@@ -11,7 +11,7 @@ import c64
 import math
 import mem
 import scroll
-import sprites(COUNT = 24, SCREEN = $8000, SCREEN2 = $8400)
+import sprites(COUNT = 24, FLICKER = true, SCREEN = $8000, SCREEN2 = $8400)
 
 const MAP = $4000
 const MAP_W = 100
@@ -70,13 +70,14 @@ interrupt fn frame() {
     }
 }
 
-// The sprites' paths, worked out once: an ellipse for x and a sine for y.
+// The sprites' paths, worked out once: an ellipse for x and a triangle wave for y.
 var path_x: [u16; 256]
 var path_y: [u8; 256]
 
 fn build_paths() {
     for i in 0..=255 {
-        var v: u8 = (math.sin8(i) as u8) ^ $80      // 0-255
+        var v: u8 = i << 1                          // a triangle wave, 0-254: sprites spread evenly
+        if i >= 128 { v = (255 - i) << 1 }
         path_x[i] = 40 + (((math.cos8(i) as u8) ^ $80) as u16)
         path_y[i] = 44 + v - (v >> 2)               // 44-235
     }
@@ -89,7 +90,7 @@ fn move_sprites() {
         sprites.xpos[i] = path_x[a]
         sprites.ypos[i] = path_y[b]
         a += 10
-        b += 16
+        b += 11
     }
 }
 
