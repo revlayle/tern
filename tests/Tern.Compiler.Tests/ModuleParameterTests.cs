@@ -145,6 +145,45 @@ public sealed class ModuleParameterTests : IDisposable
     }
 
     [Fact]
+    public void A_failed_assert_on_a_constant_computed_from_a_parameter_names_the_import_line()
+    {
+        Write("sized.tern", "module sized(COUNT: u8 = 8)\nconst SIZE = COUNT * 4\nconst MORE = SIZE + 1\nassert MORE <= 129, \"sized.COUNT must be 32 or less\"");
+        var e = Fail("\nimport sized(COUNT = 40)\nfn main() { }");
+        Assert.Equal(2, e.Pos.Line);
+        Assert.Equal(Path.Combine(Src, "main.tern"), e.Pos.File);
+        Assert.Contains("sized.COUNT must be 32 or less", e.Description);
+    }
+
+    [Fact]
+    public void A_parameter_value_can_use_a_main_file_constant_with_sizeof()
+    {
+        Write("sprites.tern", Sprites);
+        var r = RunMain("""
+            import sprites(COUNT = S)
+            struct Enemy { x: u8, y: u8 }
+            const S = sizeof(Enemy) * 4
+            var a: u8
+            fn main() { a = sprites.COUNT }
+            """);
+        Assert.Equal(8, r.U8("a"));
+    }
+
+    [Fact]
+    public void A_parameter_value_naming_a_constant_that_needs_data_says_why()
+    {
+        Write("sprites.tern", Sprites);
+        var e = Fail("import sprites(COUNT = S)\ndata t: [u8; 9] = [1, 2, 3, 4, 5, 6, 7, 8, 9]\nconst S = len(t)\nfn main() { }");
+        Assert.Contains("'S' cannot be used in a parameter value", e.Description);
+        Assert.Contains("'t'", e.Description);
+    }
+
+    [Fact]
+    public void Assert_inside_a_function_says_where_it_goes()
+    {
+        Assert.Contains("put it outside the function", Fail("fn main() {\n assert true, \"x\"\n}").Description);
+    }
+
+    [Fact]
     public void A_failed_assert_unrelated_to_parameters_is_reported_in_the_module()
     {
         Write("m.tern", "module m(A: u8 = 1)\nconst K = 3\nassert K == 4, \"K must be 4\"");

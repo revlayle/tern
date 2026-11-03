@@ -106,6 +106,8 @@ public sealed class ConstSymbol(string name, SourcePos pos, TernType type, long 
 {
     public TernType Type { get; } = type;
     public long Value { get; } = value;
+    /// <summary>The module parameters this value was computed from, for reporting a failed assert at the import.</summary>
+    public HashSet<string> UsedParameters { get; init; } = [];
 }
 
 /// <summary>A field of a struct: its type and its offset from the start of the struct.</summary>

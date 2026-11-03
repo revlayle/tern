@@ -1,7 +1,8 @@
 // A score of two kinds, a sprite on a circle and random notes.
 //
 // SCORE is a 32-bit number (wide.U32). Adding to it is cheap, but turning it into digits
-// takes thousands of cycles, so the digits are made only when the score has changed.
+// takes thousands of cycles. This example does it every frame because the score changes every
+// frame; a game would convert only when the score changes.
 // BONUS is a packed decimal counter (bcd): adding to it is as cheap, and it already is digits.
 // The sprite goes round a circle with sin8 and cos8; random picks the points added to SCORE
 // and the notes played on the SID.
@@ -91,7 +92,7 @@ fn main() {
         bcd.add(addr(bonus), addr(bonus_step), 3)
         frame += 1
 
-        // The score changed: show it, 10 digits with leading zeros.
+        // Show the score, 10 digits with leading zeros (the score changed this frame).
         wide.dec32z(c64.SCREEN + 2 * ROW + 9, addr(score), 10)
         bcd.digits(c64.SCREEN + 4 * ROW + 9, addr(bonus), 3)
         text.hex16(c64.SCREEN + 6 * ROW + 9, note)

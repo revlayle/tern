@@ -209,6 +209,41 @@ public sealed class InterruptPartTests : IDisposable
     }
 
     [Fact]
+    public void A_handler_called_only_by_an_uncompiled_module_handler_is_still_a_handler()
+    {
+        Write("timer.tern", "var ticks: u8\ninterrupt fn tick() { ticks += 1 }\ninterrupt fn both() {\n    tick()\n    ticks += 2\n}");
+        var r = RunMain("""
+            import timer
+            fn main() {
+                asm {
+                    lda #timer.tick.lo
+                    sta $FFFE
+                    lda #timer.tick.hi
+                    sta $FFFF
+                }
+            }
+            """);
+        Assert.Equal("rti", Code(r, "timer.tick")[^1]);
+        Assert.DoesNotContain("\ntimer.both:", r.Result.Listing);
+    }
+
+    [Fact]
+    public void A_handler_called_by_a_compiled_module_handler_is_a_part_and_cannot_also_be_installed()
+    {
+        Write("timer.tern", "var ticks: u8\ninterrupt fn tick() { ticks += 1 }\ninterrupt fn both() {\n    tick()\n}");
+        var e = Fail("""
+            import timer
+            fn main() {
+                asm {
+                    lda #timer.both.lo
+                    lda #timer.tick.lo
+                }
+            }
+            """);
+        Assert.Contains("is called by another interrupt fn", e.Description);
+    }
+
+    [Fact]
     public void A_private_variable_of_a_module_is_still_an_error_when_a_plain_function_reaches_it_from_a_handler()
     {
         Write("m.tern", """

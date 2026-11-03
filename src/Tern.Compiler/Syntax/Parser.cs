@@ -462,6 +462,10 @@ public sealed class Parser
                 throw new CompileError(Current.Pos, "'asm fn' must be declared outside functions");
             case TokenKind.Interrupt:
                 throw new CompileError(Current.Pos, "'interrupt fn' must be declared outside functions");
+            case TokenKind.Assert:
+                throw new CompileError(Current.Pos, "'assert' is a top-level declaration checked at compile time; put it outside the function");
+            case TokenKind.Module:
+                throw new CompileError(Current.Pos, "'module' must be the first line of the file, outside functions");
             case TokenKind.Noinit:
                 throw new CompileError(Current.Pos, "'noinit' is for global variables; local variables are never zeroed");
             case TokenKind.Volatile:
