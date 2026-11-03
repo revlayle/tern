@@ -1,0 +1,42 @@
+// Overlays (spec 8.5): two levels share one area of memory and are loaded from disk when needed.
+//
+// level1 and level2 are compiled with this program, but each goes into its own file (level1.prg,
+// level2.prg) that loads at the start of the area $6000. Loading a file also sets the module's
+// variables to their initial values. This program is first on the disk (see the commands below);
+// it loads level1, level2 and level1 again from drive 8.
+//
+// To try it in VICE:
+//   dotnet run --project src/Tern.Cli -- examples/levels.tern
+//   c1541 -format levels,01 d64 examples/levels.d64 -write examples/levels.prg levels
+//         -write examples/level1.prg level1 -write examples/level2.prg level2
+//   x64sc -default -warp -autostart examples/levels.d64
+//
+// Result: the top half of the screen shows 'A' and "4" (level1.lives was 3, then drawn once; the
+// second load of level1 set it back to 3 before the second draw), the bottom half 'B' and "8".
+import c64
+import level1 @ levels
+import level2 @ levels
+
+memory {
+    $0801..=$5FFF  program
+    $6000..=$7FFF  overlay levels
+}
+
+data NAME1 = "LEVEL1"
+data NAME2 = "LEVEL2"
+
+fn load(name: ptr u8, n: u8) {
+    if c64.load(name, n, 8) {
+        c64.vic.border = c64.RED        // loading failed
+        while true { }
+    }
+}
+
+fn main() {
+    load(addr(NAME1), len(NAME1))
+    level1.draw()
+    load(addr(NAME2), len(NAME2))
+    level2.draw()
+    load(addr(NAME1), len(NAME1))
+    level1.draw()
+}

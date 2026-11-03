@@ -1,0 +1,12 @@
+// The second level of the overlay example (levels.tern). It shares its memory with level1.
+import mem
+
+var lives: u8 = 7
+
+// Fill the bottom half of the screen with 'B' and show the lives in its first row.
+fn draw() {
+    lives += 1
+    mem.fill($0400 as ptr u8 + 480, screen'B', 520)
+    var screen: ptr u8 = $0400 as ptr u8 + 480
+    screen[0] = screen'0' + lives
+}

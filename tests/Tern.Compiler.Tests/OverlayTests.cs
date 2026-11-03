@@ -213,6 +213,88 @@ public class OverlayTests
         Assert.Equal(27, r.U8("total"));
     }
 
+    // ---------- c64.load ----------
+
+    /// <summary>Stand-ins for SETNAM, SETLFS and LOAD that record their inputs and load the overlay whose name, in capitals, is the file name.</summary>
+    private sealed class FakeKernal
+    {
+        public string Name = "";
+        public int Device = -1, Secondary = -1, LogicalFile = -1, LoadA = -1;
+
+        public IReadOnlyDictionary<int, Action<Run>> Traps => new Dictionary<int, Action<Run>>
+        {
+            [0xFFBD] = run =>
+            {
+                int at = run.Cpu.X | run.Cpu.Y << 8;
+                Name = string.Concat(Enumerable.Range(0, run.Cpu.A).Select(i => (char)run.Ram.Bytes[at + i]));
+            },
+            [0xFFBA] = run => (LogicalFile, Device, Secondary) = (run.Cpu.A, run.Cpu.X, run.Cpu.Y),
+            [0xFFD5] = run =>
+            {
+                LoadA = run.Cpu.A;
+                var file = run.Result.Overlays.FirstOrDefault(o => o.Name.ToUpperInvariant() == Name);
+                run.Cpu.C = file is null;
+                if (file is not null) run.Ram.Load((ushort)file.LoadAddress, file.Image);
+            },
+        };
+    }
+
+    private const string LoadProgram = """
+        import c64
+        import level1 @ levels
+        memory {
+            $0801..=$5FFF  program
+            $6000..=$6FFF  overlay levels
+        }
+        data GOOD = "LEVEL1"
+        data BAD = "NOPE"
+        var failed: bool
+        var failed2: bool
+        var v: u8
+        fn main() {
+            failed = c64.load(addr(GOOD), len(GOOD), 8)
+            if !failed { v = level1.run() }
+            failed2 = c64.load(addr(BAD), len(BAD), 9)
+        }
+        """;
+
+    [Fact]
+    public void C64_load_calls_the_KERNAL_and_returns_its_carry()
+    {
+        var kernal = new FakeKernal();
+        var r = With(Modules, path => Run.Program(LoadProgram, sourcePath: path, traps: kernal.Traps));
+        Assert.False(r.U8("failed") != 0);
+        Assert.Equal(20, r.U8("v"));           // level1 was loaded by the call and ran
+        Assert.True(r.U8("failed2") != 0);     // the second load failed
+        Assert.Equal("NOPE", kernal.Name);
+        Assert.Equal(9, kernal.Device);
+        Assert.Equal(1, kernal.Secondary);     // load to the address in the file
+        Assert.Equal(1, kernal.LogicalFile);
+        Assert.Equal(0, kernal.LoadA);         // LOAD, not VERIFY
+    }
+
+    [Fact]
+    public void C64_load_is_a_direct_sequence_of_KERNAL_calls()
+    {
+        var r = With(Modules, path => Run.Program(LoadProgram, sourcePath: path, traps: new FakeKernal().Traps));
+        Assert.Contains("jsr $FFBD", r.Result.Listing);
+        Assert.Contains("jsr $FFBA", r.Result.Listing);
+        Assert.Contains("jsr $FFD5", r.Result.Listing);
+    }
+
+    [Fact]
+    public void The_levels_example_loads_two_levels_in_turn_and_a_reload_resets_the_variables()
+    {
+        var path = AsmTests.FindExample("levels.tern");
+        var r = Run.Program(File.ReadAllText(path), sourcePath: path, traps: new FakeKernal().Traps);
+        var screen = r.Ram.Bytes;
+        Assert.Equal(0x34, screen[0x0400]);           // '4': level1.lives is 3 after each load, 4 after drawing
+        Assert.All(Enumerable.Range(1, 479), i => Assert.Equal(1, screen[0x0400 + i]));          // 'A'
+        Assert.Equal(0x38, screen[0x0400 + 480]);     // '8': level2.lives 7, then 8
+        Assert.All(Enumerable.Range(481, 519), i => Assert.Equal(2, screen[0x0400 + i]));        // 'B'
+        Assert.Equal(["level1", "level2"], r.Result.Overlays.Select(o => o.Name).Order());
+    }
+
     // ---------- Errors ----------
 
     [Fact]
