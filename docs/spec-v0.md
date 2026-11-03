@@ -891,6 +891,11 @@ export init, play, stop
 - **Interface module.** The compiler also writes `name_api.tern` (for `player.tern`, `player_api.tern`). It declares each entry as a routine at a fixed address (6.6) with a `keeps` list taken from the code, and constants for every range the binary uses: `CODE_FIRST`/`CODE_LAST` (the whole program file, gaps included), `VARS_FIRST`/`VARS_LAST`, `<REGION>_FIRST`/`_LAST`, and `ZP_FIRST`/`ZP_LAST` (one range from the lowest to the highest zero-page byte used). Ranges inside the file's span are not repeated. `setup` cannot be an export's name. A Tern host imports it and names those constants in its own `memory` block as `reserved` ranges, and leaves the binary's zero-page bytes out of its `zeropage` lines.
 - `export` is a reserved word.
 
+**Planned: plug-ins against a fixed interface.** Use: a game that loads any number of levels with the same entries, including levels built later or outside Tern (an add-on disk). The interface is an ordinary hand-written module of routines at fixed addresses (6.6), fixed `data` and constants for the slot's memory; each level is a binary (above) whose `memory` block uses those constants, and the game reserves the slot, loads a file, calls `setup`, then the entries.
+
+- **`export` naming a module** (`export level_api`) exports one function per routine in that module, matched by name and placed at the routine's address, instead of in the order of the line. Errors: a routine with no function; different register parameters or return; a function that changes a register the routine's `keeps` promises; the module's fixed `data` not defined at its address; `setup` not at entry 0. The binary's memory is limited by its own `memory` block, not checked against the interface.
+- **`export` in a program with `main`**, with the table's address given: `export play_sound, spawn @ $0900`. The table holds one `jmp` per function in the order listed (no `setup` entry); the compiler writes `name_api.tern` for plug-in authors, as for a binary. The table stays valid across versions of the program while its address and order stay the same; new entries go at the end. The entries are called from the plug-in, so they count as an unknown root, as functions whose address is taken (6.5).
+
 ## 13. Compiler design
 
 ```
