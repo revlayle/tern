@@ -1,5 +1,5 @@
 // Scrolling map with 24 multiplexed sprites over it. The camera turns through the eight
-// directions, 64 frames each, at one pixel per frame; the sprites circle over the map.
+// directions, 64 loops (128 frames) each, at one pixel per 2 frames; the sprites circle over the map.
 //
 // One raster handler of the program's own calls the sprite multiplexer, which says when the frame
 // starts, and then the scroller, which writes the fine scroll registers before the screen begins.
@@ -49,6 +49,7 @@ data DX: [i8; 8] = [1, 1, 0, -1, -1, -1, 0, 1]
 data DY: [i8; 8] = [0, 1, 1, 1, 0, -1, -1, -1]
 
 var t: u8
+var dir: u8
 
 // Grid lines every 8 characters; letters in between.
 fn build_map() {
@@ -120,12 +121,19 @@ fn main() {
     c64.vic.irq_status = 1
     c64.interrupts_on()
 
+    // One frame has about 17,000 cycles for the program (the VIC-II takes the rest). The sprites'
+    // update and the scroller's preparation each take a good part of it, so they take turns:
+    // the sprites move in one frame, the camera in the next, 25 times a second each.
+    dir = 7
     while true {
         sprites.wait_frame()
-        move_sprites()
-        sprites.update()
-        var d = (t >> 6) & 7
-        scroll.move(DX[d], DY[d])
+        if (t & 127) == 0 { dir = (dir + 1) & 7 }      // the next direction every 128 frames
+        if (t & 1) == 0 {
+            move_sprites()
+            sprites.update()
+        } else {
+            scroll.move(DX[dir], DY[dir])
+        }
         t += 1
     }
 }

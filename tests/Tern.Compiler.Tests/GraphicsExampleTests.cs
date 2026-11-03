@@ -16,13 +16,20 @@ public sealed class GraphicsExampleTests
         var tops = new List<TopSnapshot>();
         int seenWrites = 0;
         const int Frames = 140;
-        var marks = new List<string>();
+        int quiet = 0;
         var rig = new SpriteTests.Rig(source, (Frames + 40) * 312 * 63, pointerBase: 0x83F8, stealCycles: true, onStep: r =>
         {
-            if (marks.Count < 400 && r.Cpu.Cycles > 20L * 312 * 63)
+            // Where the main loop waits for the next frame, the camera, the screen and the registers agree.
+            if (r.Cpu.PC == r.Address("sprites.wait_frame") && r.U8("sprites.frames") > 0)
             {
-                foreach (var (name, label) in new[] { ("move", "scroll.move"), ("update", "sprites.update"), ("wait", "sprites.wait_frame"), ("msprites", "move_sprites"), ("sort", "sprites.sort"), ("bf", "sprites.build_flicker") })
-                    if (r.Cpu.PC == r.Address(label)) marks.Add($"{name}@{r.Cpu.Cycles}");
+                var ram = r.Ram.Bytes;
+                int front = r.U8("scroll.front");
+                int cx = r.U8("scroll.cell_x"), cy = r.U8("scroll.cell_y");
+                for (int row = 0; row < 25; row++)
+                    for (int c = 0; c < 40; c++)
+                        Assert.True(ram[0x4000 + (cy + row) * 100 + cx + c] == ram[(front == 0 ? 0x8000 : 0x8400) + row * 40 + c], $"cell ({cx},{cy}) front {front} row {row} col {c}");
+                Assert.Equal(7 - r.U8("scroll.fine_x"), r.U8("scroll.hw_xs"));
+                quiet++;
             }
             // The top of a frame: the multiplexer writes $D015, then the scroller its registers.
             var w = r.Vic.Writes;
@@ -41,7 +48,6 @@ public sealed class GraphicsExampleTests
             }
         });
 
-        Console.WriteLine("marks: " + string.Join(" ", marks.Take(60)));
         Assert.True(tops.Count >= Frames, $"{tops.Count} frames");
         // One top per frame, early in the frame.
         for (int i = 1; i < tops.Count; i++)
@@ -66,32 +72,27 @@ public sealed class GraphicsExampleTests
         Assert.True(checkedFrames > 100);
         Assert.True(tops.Skip(3).All(t => t.List.Count >= 20), "most of the 24 sprites are on screen");
 
-        // The scroll registers: one pixel to the right per frame in the first 64 frames: the x scroll counts down,
-        // and the screen is swapped when it wraps from 0 to 7.
-        Console.WriteLine("xs: " + string.Join(" ", tops.Take(80).Select(t => (t.Control2 & 7) + "@" + (t.Line / 312) + "/" + (t.Line % 312))));
-        int swaps = 0;
-        for (int i = 6; i < 56; i++)
+        // The scroll registers: one pixel to the right every second frame in the first 128 frames: the x scroll counts
+        // down, and the screen is swapped when it wraps from 0 to 7.
+        var steps = new List<(int Xs, int Screen, int Control1)>();
+        foreach (var t in tops.Skip(4).Take(100))
         {
-            int xs0 = tops[i].Control2 & 7, xs1 = tops[i + 1].Control2 & 7;
-            Assert.Equal((xs0 + 7) & 7, xs1);
-            if (xs1 == 7)
-            {
-                Assert.NotEqual(tops[i].Memory & 0xF0, tops[i + 1].Memory & 0xF0);
-                swaps++;
-            }
-            else Assert.Equal(tops[i].Memory, tops[i + 1].Memory);
-            Assert.Equal(tops[i].Control1, tops[i + 1].Control1);
-            Assert.Equal(0, tops[i].Control2 & 8);      // 38 columns
-            Assert.Equal(0, tops[i].Control1 & 8);      // 24 rows
+            var s = (t.Control2 & 7, t.Memory & 0xF0, t.Control1);
+            if (steps.Count == 0 || steps[^1] != s) steps.Add(s);
+            Assert.Equal(0, t.Control2 & 8);      // 38 columns
+            Assert.Equal(0, t.Control1 & 8);      // 24 rows
         }
+        int swaps = 0;
+        for (int i = 0; i + 1 < steps.Count; i++)
+        {
+            Assert.Equal((steps[i].Xs + 7) & 7, steps[i + 1].Xs);
+            Assert.Equal(steps[i].Control1, steps[i + 1].Control1);
+            if (steps[i + 1].Xs == 7) { Assert.NotEqual(steps[i].Screen, steps[i + 1].Screen); swaps++; }
+            else Assert.Equal(steps[i].Screen, steps[i + 1].Screen);
+        }
+        Assert.InRange(steps.Count, 45, 51);      // 100 frames, a pixel every 2 frames
         Assert.InRange(swaps, 5, 7);
 
-        // The shown screen is the map window of the camera, at the end of the run.
-        var ram = rig.Ram.Bytes;
-        int front = rig.U8("scroll.front");
-        int cx = rig.U8("scroll.cell_x"), cy = rig.U8("scroll.cell_y");
-        for (int r = 0; r < 25; r++)
-            for (int c = 0; c < 40; c++)
-                Assert.Equal(ram[0x4000 + (cy + r) * 100 + cx + c], ram[(front == 0 ? 0x8000 : 0x8400) + r * 40 + c]);
+        Assert.True(quiet > 100, $"{quiet} checks");
     }
 }
