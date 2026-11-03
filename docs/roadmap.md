@@ -211,6 +211,7 @@ Done when: an example loads two levels from disk into one area in turn and runs 
   - a variable `for` step of 0 never ends the loop; stepped loops stop when the step carries past the end of the type (5.1)
   - signed `>>` rounds down, not toward zero (3.1)
   - `keeps` on a fixed routine is a promise the compiler does not check (6.6); a function reached only through `addr()` has no known root (6.5, 8.1)
+  - a handler that leaves through an asm `jmp` gets `cld` only if its own code has `adc`, `sbc` or `jsr`; code it jumps to runs in decimal mode if main was in it, unless the asm block clears it (6.3)
   - a call into an overlay that is not loaded runs whatever is in the area (8.5)
   - a binary's entries are one root: the host must not call one from an interrupt while another runs (12.3)
 
