@@ -287,3 +287,7 @@ Decided:
 ## 2026-11-03: braces on their own line
 
 - **A `{` may go on the line after a block header** (spec 2): newlines are skipped where a block must follow (`fn`, `if`, `else`, `while`, `for`, `match`, `struct`, `asm`, `memory`). Reason: a header such as `if x == 0` is never a complete statement, so the line break has no other meaning; many Tern users come from C#, C and assembly, and refusing a common brace style gains nothing in the code. Rejected: one brace style only (as Go), which needs a formatter culture Tern does not have. Unchanged and now written down: `;` is optional at line ends, empty statements are ignored, indentation has no meaning.
+
+## 2026-11-03: a C64 device I/O library (planned)
+
+- **A C64 library for device I/O** through the KERNAL's serial and tape routines (roadmap, Later): whole-file load and save, sequential files, the drive's command channel, KERNAL error status. Reason: programs need to save high scores, settings and levels, and the KERNAL routines are the standard, device-independent way (disk, datasette, printer). Built on routines at a fixed address (6.6), so it needs no language change. Not scheduled; scope and name settled when it is.

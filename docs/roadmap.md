@@ -205,6 +205,7 @@ Done when: an example loads two levels from disk into one area in turn and runs 
 ## Later (not yet ordered, except that new platforms come last)
 
 - Floats as a library with a 4-byte format, built on `wide` (not a priority)
+- **C64 device I/O library** (`lib/c64/io.tern`, name to settle): files on disk, datasette, printer and other serial-bus devices through the KERNAL (`SETLFS`, `SETNAM`, `OPEN`, `CLOSE`, `CHKIN`, `CHKOUT`, `CLRCHN`, `CHRIN`, `CHROUT`, `READST`, `LOAD`, `SAVE`), all as routines at a fixed address. On top: `load(name, device, address)` and `save(name, device, first, last)` for whole files; open, read and write bytes or blocks, close, for sequential files; the drive's command channel (15) to send a command (scratch, rename, ...) and read its status message; errors returned from `READST` and the KERNAL's carry. Needs the KERNAL banked in (not after `kernal_off()`). M13's `c64.load` should use the same routines. Fast loaders are out of scope. Tests with KERNAL stand-ins in the emulator, plus a VICE check with a `.d64` image.
 
 - Signed loop variables
 - `const fn` with compile-time `int` and `real`, array-building syntax, and code generators with `emit` and `label()` (spec 4.1); plan as one milestone, since generators are most of the reason to build `const fn`
