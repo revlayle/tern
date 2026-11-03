@@ -1,6 +1,6 @@
 # Tern user guide
 
-A quick guide to the Tern language and compiler as built today (milestone M12). The full rules are in `docs/spec-v0.md`; this guide shows how to use them. Every example here compiles with the current compiler.
+A quick guide to the Tern language and compiler as built today (through milestone M13). The full rules are in `docs/spec-v0.md`; this guide shows how to use them. Every example here compiles with the current compiler.
 
 ## 1. What Tern is
 
@@ -31,6 +31,7 @@ For `game.tern` the compiler writes, next to the source (or the `-o` path):
 | `game.lst` | Listing: every source line with its addresses, bytes and cycle counts |
 | `game.vs` | VICE label file; load it in the VICE monitor with `ll "game.vs"` |
 | `game_api.tern` | Only for a binary without `main` (section 3.11): the module a host imports |
+| `level1.prg`, ... | One file per overlay module (section 3.12), named after the module |
 
 It also prints a report: where code and variables went, and the zero-page map. Errors look like `game.tern:12:5: error: ...` and say how to fix the problem.
 
@@ -56,7 +57,21 @@ The standard library sits in `lib/` next to the compiler (source in `src/lib/`).
 
 - Files are UTF-8 with the extension `.tern`. Comments are `//` and `/* */`.
 - A statement ends at a newline; `;` is optional. A newline inside `( )` or `[ ]` does not end a statement, so argument lists and tables can span lines.
-- Indentation has no meaning. For now, a block's `{` goes on the same line as its header (`if x == 0 {`); braces on their own line arrive with M13.
+- Indentation has no meaning. A block's `{` may go on the same line as its header or on the next line, so both brace styles work:
+
+```
+fn main() {
+    if x == 0 { reset() }
+}
+
+fn main()
+{
+    if x == 0
+    {
+        reset()
+    }
+}
+```
 
 ### 3.2 Types and arithmetic
 
@@ -244,6 +259,15 @@ fn main() {
 - `import name` loads `name.tern` from the platform library (`lib/c64/`), the standard library (`lib/`), then your program's folder. Names are always used with the module name: `text.put`.
 - `private` before a declaration hides it from other modules.
 - Only what your program reaches is compiled: an unused import adds no bytes.
+- An `if` on a constant compiles only the branch taken, and a function called only from the other branch is left out entirely, with no code and no memory. So a module option that is off costs nothing:
+
+```
+const DEBUG = false
+
+fn main() {
+    if DEBUG { show_timings() }    // no code, and show_timings is not compiled
+}
+```
 - A module can take parameters in a header line, `module sprites(COUNT: u8 = 32, FLICKER: bool = false)`, and check them with `assert COUNT >= 8, "message"` at compile time.
 
 ### 3.11 Memory layout and binaries without `main`
@@ -259,11 +283,32 @@ memory {
 data ball: [u8; 63] @ $2000 = [ ... ]   // loaded with the program, at that address
 ```
 
-Other kinds are `program`, `zeropage` and `volatile`. `program` and `zeropage` lines replace the platform's areas; the others add to them. A function is never split across areas.
+Other kinds are `program`, `zeropage`, `volatile` and `overlay` (3.12). `program` and `zeropage` lines replace the platform's areas; the others add to them. A function is never split across areas.
 
 A main file with `export` and no `main` builds a **binary** for another program to call, such as a music player. It starts with a jump table (`setup`, then the exports in order), and the compiler also writes `name_api.tern` for the host to import (example 4.4).
 
-### 3.12 Built-ins
+### 3.12 Overlays
+
+An overlay is a module that is loaded from disk into a shared area when the program needs it, such as one level of a game. Overlays in the same area replace each other. The main file declares the area and places modules in it with `@`:
+
+```
+memory {
+    $0801..=$5FFF  program
+    $6000..=$7FFF  overlay levels
+}
+
+import level1 @ levels
+import level2 @ levels
+```
+
+- **One build.** The whole program is compiled together, but each overlay module goes into its own file (`level1.prg`), loading at the start of its area. The report shows each area and how full it is.
+- **Variables come with the file.** An overlay's global variables are stored in its file with their initial values, so every load resets them. They are never in zero page; an overlay that needs a zero-page pointer uses a local variable.
+- **Loading** is `c64.load(name, len, device)`, which returns `true` if loading failed.
+- **Calls:** resident code calls into an overlay with a plain `jsr`, and an overlay may call resident code and overlays in other areas. Two overlays of the same area cannot call each other or use each other's variables (they are never loaded together); that is a compile error.
+- Making sure the right overlay is loaded before calling it is your job: the compiler cannot check it, and a check on every call would cost every call.
+- A fixed-address variable over an overlay's file is an error. The spec now allows it when the variable is marked `volatile` (to read memory an overlay loads on purpose, e.g. a level header); that is built in the next coding session.
+
+### 3.13 Built-ins
 
 `addr(x)` (pointer to a variable, field or array; address of a function), `sizeof(T)`, `len(a)` (array length, at compile time).
 
@@ -411,7 +456,54 @@ fn main() {
 }
 ```
 
-More in `examples/`: `library.tern` (KERNAL printing, numbers), `structs.tern`, `arcade.tern` (32-bit and BCD scores, `sin8`, random sound), `scroller.tern` (eight-way scrolling under 24 multiplexed sprites), `sprite_data.tern`, `player.tern` with `player_host.tern`.
+### 4.5 Levels loaded from disk
+
+`level1.tern`, an overlay module (`level2.tern` is the same with `'B'` on the bottom half):
+
+```
+import mem
+
+var lives: u8 = 3                  // set again by every load of the file
+
+fn draw() {
+    lives += 1
+    mem.fill($0400 as ptr u8, screen'A', 480)
+}
+```
+
+The main program:
+
+```
+import c64
+import level1 @ levels
+import level2 @ levels
+
+memory {
+    $0801..=$5FFF  program
+    $6000..=$7FFF  overlay levels
+}
+
+data NAME1 = "LEVEL1"
+data NAME2 = "LEVEL2"
+
+fn load(name: ptr u8, n: u8) {
+    if c64.load(name, n, 8) {
+        c64.vic.border = c64.RED        // loading failed
+        while true { }
+    }
+}
+
+fn main() {
+    load(addr(NAME1), len(NAME1))
+    level1.draw()
+    load(addr(NAME2), len(NAME2))
+    level2.draw()
+}
+```
+
+Compiling writes `levels.prg`, `level1.prg` and `level2.prg`. Put them on a disk image to run it; the commands are in the header of `examples/levels.tern`.
+
+More in `examples/`: `library.tern` (KERNAL printing, numbers), `structs.tern`, `arcade.tern` (32-bit and BCD scores, `sin8`, random sound), `scroller.tern` (eight-way scrolling under 24 multiplexed sprites), `sprite_data.tern`, `player.tern` with `player_host.tern`, `levels.tern` (overlays).
 
 ## 5. Standard library
 
@@ -423,7 +515,7 @@ More in `examples/`: `library.tern` (KERNAL printing, numbers), `structs.tern`, 
 | `wide` | 24- and 32-bit unsigned numbers (`U24`, `U32`): add, subtract, compare, multiply, divide, decimal and hex output |
 | `bcd` | Packed decimal counters of 1-4 bytes, for scores: add, subtract, compare, digits |
 | `random` | 8- and 16-bit xorshift, `below(n)` |
-| `c64` | Screen and color addresses, the 16 colors, KERNAL `chrout`/`print`/`getin`/`cursor`, register structs `vic`, `sid`, `cia1`, `cia2`, interrupt setup |
+| `c64` | Screen and color addresses, the 16 colors, KERNAL `chrout`/`print`/`getin`/`cursor`, `load` (for overlays), register structs `vic`, `sid`, `cia1`, `cia2`, interrupt setup |
 | `sprites` (C64) | Sprite multiplexer, 8 to 64 sprites, optional flicker |
 | `scroll` (C64) | Smooth eight-way character scrolling with two screens |
 
@@ -439,19 +531,21 @@ Tern trusts you and does not add hidden checks. These are deliberate and often u
 - **A `for` loop with a variable step of 0 never ends.** Stepped loops stop when the step carries past the end of the type.
 - **Flags after compiled code are unspecified.** An empty `inline asm fn ... -> bool using carry {}` reads the flag an `asm` block just left, when used right after that block.
 - **`keeps` is a promise** from the routine's documentation; the compiler does not check it.
+- **A call into an overlay that is not loaded** runs whatever is in the area.
+- **Loading an overlay resets its variables** to their initial values; keep anything that must survive in resident memory.
 - **A binary's entries are one root.** The host must not call one entry from an interrupt while another is running.
 - **Division by zero** in the library gives an unspecified result.
 
 ## 7. Not supported yet
 
-Signed loop variables; `match` on 16-bit values (match on `.lo` / `.hi`); arrays of structs inside structs; a function with a body at a fixed address; `{` on the line after a header; overlays; bank switching. Each gives a clear error rather than a confusing one.
+Signed loop variables; `match` on 16-bit values (match on `.lo` / `.hi`); arrays of structs inside structs; a function with a body at a fixed address; fixed-address `data` inside an overlay (under discussion); bank switching. Each gives a clear error rather than a confusing one.
 
 ## 8. The future
 
-### Next: M13, overlays
+### Next
 
-- **Overlays**: modules loaded from disk into a shared memory area when needed, such as one level of a game at a time. `import level1 @ levels` places a module in an overlay area; each overlay becomes its own file, and overlays in one area share their variables' memory. `c64.load` loads them through the KERNAL.
-- Small follow-ups: braces on their own line, constant `if` conditions that drop unused code entirely (so a module option that is off costs nothing), and simpler rules for a module's interrupt-side helpers.
+- **M13 follow-up**: a `volatile` fixed-address variable may overlap an overlay's file, so the resident program can read what an overlay loads on purpose (3.12).
+- Nothing else is scheduled yet. The next milestone is picked from the list below.
 
 ### Later highlights
 
