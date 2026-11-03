@@ -106,6 +106,8 @@ public sealed class ConstSymbol(string name, SourcePos pos, TernType type, long 
 {
     public TernType Type { get; } = type;
     public long Value { get; } = value;
+    /// <summary>The module parameters this value was computed from, for reporting a failed assert at the import.</summary>
+    public HashSet<string> UsedParameters { get; init; } = [];
 }
 
 /// <summary>A field of a struct: its type and its offset from the start of the struct.</summary>
@@ -236,6 +238,8 @@ public sealed class FunctionSymbol(string name, SourcePos pos) : Symbol(name, po
     public FnDecl? Declaration { get; set; }
     /// <summary>An <c>interrupt fn</c>: a root of the call graph, with frames of its own.</summary>
     public bool IsInterrupt { get; set; }
+    /// <summary>An interrupt fn that another interrupt fn calls: compiled as a part (ends with rts, saves nothing). Set by the checker.</summary>
+    public bool IsPart { get; set; }
     /// <summary>An <c>inline fn</c>: copied into each caller. It keeps its frame, but has no code of its own.</summary>
     public bool IsInline { get; set; }
     /// <summary>Assembly writes into this function's code (<c>sta f+1</c>): the optimizer trusts none of its instructions.</summary>

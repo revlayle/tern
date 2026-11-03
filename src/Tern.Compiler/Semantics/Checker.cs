@@ -48,12 +48,14 @@ public sealed partial class Checker
                 throw new CompileError(wrongMain.Pos, $"Only the program's main file has 'fn main()'; '{module.Name}' is a module");
             // Struct names first, so that types can name structs declared further down.
             foreach (var s in program.Structs) DeclareStruct(s);
+            DeclareParameters(module, modules[^1]);
             foreach (var c in program.Consts) DeclareConst(c);
             foreach (var s in program.Structs) LayOut((StructSymbol)module.Scope[s.Name]);
             foreach (var f in program.Functions) DeclareFunction(f);
             foreach (var g in program.Globals) DeclareGlobal(g);
             // After the globals, so that a variable named as an address gets the right error.
             foreach (var f in program.Functions.Where(f => f.Address is not null)) DeclareRoutine(f, f.Symbol!);
+            foreach (var a in program.Asserts) CheckAssert(a, module);
             module.Declared = true;
         }
 
@@ -80,6 +82,7 @@ public sealed partial class Checker
 
         // Only what main and the interrupt handlers can reach goes into the program, so unused parts
         // of a module cost nothing. The main file's globals are all kept.
+        MarkParts(main, mainModule);
         var reachable = OrderRoots(main, mainModule);
         CheckPrivateGlobalsPerRoot(modules, reachable);
         MarkGlobalsUsedFromTwoRoots(reachable);
@@ -178,6 +181,124 @@ public sealed partial class Checker
         foreach (var (_, f) in v.Storage.FunctionAddresses) _function.UsedAddresses.Add(f);
     }
 
+    /// <summary>The main file with the constants it can declare without any import, for evaluating module parameter values.</summary>
+    private Module? _parameterScope;
+    /// <summary>Constants of the main file that a parameter value cannot use, with the reason.</summary>
+    private readonly Dictionary<string, string> _unusableConstants = [];
+
+    /// <summary>Declares a module's parameters as constants, using the values from the main file's import or the defaults.</summary>
+    private void DeclareParameters(Module module, Module main)
+    {
+        var header = module.Syntax.Header;
+        var import = module.ImportedBy;
+        if (header is not null && module.IsMain)
+            throw new CompileError(header.Pos, "The main file has no module header; 'module' is only for modules that have parameters");
+        if (header is not null && header.Name != module.Name)
+            throw new CompileError(header.Pos, $"The module header says '{header.Name}' but the file is {module.Name}.tern; the name must match the file");
+        var parameters = header?.Parameters ?? [];
+        if (import is not null)
+        {
+            var seen = new HashSet<string>();
+            foreach (var arg in import.Args)
+            {
+                if (parameters.All(p => p.Name != arg.Name))
+                    throw new CompileError(arg.Pos, header is null
+                        ? $"Module '{module.Name}' has no parameters (it has no 'module {module.Name}(...)' header)"
+                        : $"Module '{module.Name}' has no parameter '{arg.Name}'; its parameters are {string.Join(", ", parameters.Select(p => p.Name))}");
+                if (!seen.Add(arg.Name))
+                    throw new CompileError(arg.Pos, $"Parameter '{arg.Name}' is set twice");
+            }
+        }
+        var saved = _module;
+        foreach (var p in parameters)
+        {
+            var type = ResolveType(p.Type);
+            if (!(type.IsInteger || type.Kind == TypeKind.Bool))
+                throw new CompileError(p.Type.Pos, "A module parameter is an integer type or bool");
+            var arg = import?.Args.FirstOrDefault(a => a.Name == p.Name);
+            Expr value = arg?.Value ?? p.Default;
+            if (arg is not null)
+            {
+                // The value may use literals and the main file's constants that need no import.
+                _parameterScope ??= ParameterScope(main);
+                _module = _parameterScope;
+                try { CheckExpr(value); }
+                catch (CompileError e)
+                {
+                    var m = System.Text.RegularExpressions.Regex.Match(e.Description, "^'([^']+)' is not declared");
+                    if (m.Success && _unusableConstants.TryGetValue(m.Groups[1].Value, out var why))
+                        throw new CompileError(e.Pos, $"'{m.Groups[1].Value}' cannot be used in a parameter value, since it does not check without the rest of the program: {why}");
+                    throw new CompileError(e.Pos, e.Description + ". A parameter value uses literals and the main file's constants that do not depend on imported modules");
+                }
+                finally { _module = saved; }
+            }
+            else
+                CheckExpr(value);
+            if (value.ConstValue is not long v)
+                throw new CompileError(value.Pos, $"The value of parameter '{p.Name}' is not known at compile time");
+            Coerce(value, type);
+            Declare(new ConstSymbol(p.Name, p.Pos, type, v) { UsedParameters = [p.Name] });
+        }
+    }
+
+    private Module ParameterScope(Module main)
+    {
+        // A fresh copy of the main file, so that checking its constants here changes nothing in the real syntax tree.
+        var scope = new Module
+        {
+            Name = "", Path = main.Path, Directory = main.Directory, Source = main.Source,
+            Syntax = Parser.Parse(main.Source, main.Path),
+        };
+        var saved = _module;
+        _module = scope;
+        // Structs first, so that sizeof works. One that needs an import is left out.
+        foreach (var st in scope.Syntax.Structs)
+        {
+            try { DeclareStruct(st); LayOut((StructSymbol)scope.Scope[st.Name]); }
+            catch (CompileError) { scope.Scope.Remove(st.Name); }
+        }
+        foreach (var c in scope.Syntax.Consts)
+        {
+            try { DeclareConst(c); }
+            catch (CompileError e) { _unusableConstants[c.Name] = e.Description; } // needs an import, data or a later constant
+        }
+        _module = saved;
+        return scope;
+    }
+
+    private void CheckAssert(AssertDecl a, Module module)
+    {
+        CheckExpr(a.Condition);
+        if (a.Condition.Type.Kind != TypeKind.Bool)
+            throw new CompileError(a.Condition.Pos, "An assert condition is a bool, e.g. COUNT <= 64");
+        if (a.Condition.ConstValue is not long v)
+            throw new CompileError(a.Condition.Pos, "An assert condition must be known at compile time: use constants, sizeof and len");
+        if (v != 0) return;
+        // A wrong parameter is reported where the main file set it, also when the condition only
+        // uses constants computed from it.
+        var import = module.ImportedBy;
+        var used = new HashSet<string>();
+        CollectNames(a.Condition, used);
+        var parameters = used.SelectMany(n => module.Scope.GetValueOrDefault(n) is ConstSymbol c ? c.UsedParameters : []).ToHashSet();
+        if (import is not null && import.Args.Any(arg => parameters.Contains(arg.Name)))
+            throw new CompileError(import.Pos, $"{a.Message} (assert at {a.Pos})");
+        throw new CompileError(a.Pos, a.Message);
+    }
+
+    private static void CollectNames(Expr e, HashSet<string> names)
+    {
+        switch (e)
+        {
+            case NameExpr n: names.Add(n.Name); break;
+            case UnaryExpr u: CollectNames(u.Operand, names); break;
+            case BinaryExpr b: CollectNames(b.Left, names); CollectNames(b.Right, names); break;
+            case CallExpr c: foreach (var x in c.Args) CollectNames(x, names); break;
+            case CastExpr c: CollectNames(c.Operand, names); break;
+            case IndexExpr i: CollectNames(i.Target, names); CollectNames(i.Index, names); break;
+            case MemberExpr m: CollectNames(m.Target, names); break;
+        }
+    }
+
     private void DeclareConst(ConstDecl decl)
     {
         CheckExpr(decl.Value);
@@ -190,7 +311,12 @@ public sealed partial class Checker
             if (!type.IsScalar) throw new CompileError(decl.Pos, "Constants must be numbers or bool");
             Coerce(decl.Value, type);
         }
-        Declare(new ConstSymbol(decl.Name, decl.Pos, type, decl.Value.ConstValue!.Value));
+        var names = new HashSet<string>();
+        CollectNames(decl.Value, names);
+        Declare(new ConstSymbol(decl.Name, decl.Pos, type, decl.Value.ConstValue!.Value)
+        {
+            UsedParameters = names.SelectMany(n => _module.Scope.GetValueOrDefault(n) is ConstSymbol c ? c.UsedParameters : []).ToHashSet(),
+        });
     }
 
     private void DeclareFunction(FnDecl decl)
@@ -199,8 +325,6 @@ public sealed partial class Checker
             throw new CompileError(decl.Pos, $"'{decl.Name}' is a built-in function; choose another name");
         var fn = new FunctionSymbol(_module.Qualify(decl.Name), decl.Pos) { Declaration = decl, IsInterrupt = decl.IsInterrupt, IsInline = decl.IsInline };
         decl.Symbol = fn;
-        if (decl.IsInterrupt && (decl.Parameters.Count > 0 || decl.ReturnType is not null))
-            throw new CompileError(decl.Pos, "An interrupt handler takes no parameters and returns no value: the CPU calls it, not your code");
 
         var usedRegisters = new HashSet<char>();
         foreach (var p in decl.Parameters)
@@ -1127,7 +1251,8 @@ public sealed partial class Checker
                 else
                 {
                     var t = Unify(b.Left, b.Right, b.Pos);
-                    if (t.Kind == TypeKind.IntLiteral) { Coerce(b.Left, DefaultType(b.Left)); Coerce(b.Right, b.Left.Type); }
+                    // Two constants are compared as plain numbers: sizeof(T) * 32 <= 256 must not wrap to u8.
+                    if (t.Kind == TypeKind.IntLiteral && !(l is not null && r is not null)) { Coerce(b.Left, DefaultType(b.Left)); Coerce(b.Right, b.Left.Type); }
                 }
                 b.Type = TernType.Bool;
                 if (l is not null && r is not null)
@@ -1371,8 +1496,11 @@ public sealed partial class Checker
         if (symbol is not FunctionSymbol fn)
             throw new CompileError(c.Pos, $"'{c.Name}' is not a function");
         if (fn.IsInterrupt)
-            throw new CompileError(c.Pos,
-                $"'{c.Name}' is an interrupt handler, which only the CPU calls (it ends with rti). Install its address in the interrupt vector");
+        {
+            if (_function is not { IsInterrupt: true })
+                throw new CompileError(c.Pos,
+                    $"'{c.Name}' is an interrupt fn, which only the CPU or another interrupt fn calls. Install its address in the interrupt vector, or call it from an interrupt fn");
+        }
         if (c.Args.Count != fn.Parameters.Count)
             throw new CompileError(c.Pos, $"'{fn.Name}' takes {fn.Parameters.Count} argument(s), not {c.Args.Count}");
         for (int i = 0; i < c.Args.Count; i++)
@@ -1485,12 +1613,20 @@ public sealed partial class Checker
         var all = new List<FunctionSymbol>();
         var seen = new HashSet<FunctionSymbol>();
         var roots = new List<FunctionSymbol> { main };
-        roots.AddRange(mainModule.Scope.Values.OfType<FunctionSymbol>().Where(f => f.IsInterrupt).OrderBy(f => f.Pos.Line));
+        roots.AddRange(mainModule.Scope.Values.OfType<FunctionSymbol>().Where(f => f.IsInterrupt && !f.IsPart).OrderBy(f => f.Pos.Line));
+        foreach (var h in roots.Skip(1)) CheckInstallable(h);
         var addressTaken = new List<FunctionSymbol>();
 
         void Named(FunctionSymbol f)
         {
-            if (f.IsInterrupt) { if (!roots.Contains(f)) roots.Add(f); }
+            if (f.IsInterrupt)
+            {
+                if (f.IsPart)
+                    throw new CompileError(f.Pos,
+                        $"'{f.Name}' is called by another interrupt fn (so it is compiled as a part, ending with rts) and its address is also used to install it (which needs rti). Use it one way, or write a second interrupt fn for the other");
+                CheckInstallable(f);
+                if (!roots.Contains(f)) roots.Add(f);
+            }
             else if (!addressTaken.Contains(f)) addressTaken.Add(f);
         }
         // The main file's globals are all kept, so the functions in their initial values are too.
@@ -1516,6 +1652,42 @@ public sealed partial class Checker
             else Add(addressTaken[a++], isRoot: false);
         }
         return all;
+    }
+
+    /// <summary>
+    /// An interrupt fn is a part if a function that is compiled calls it (spec 6.3). Callers that are
+    /// never compiled, such as a module's handler that nothing installs, do not count.
+    /// </summary>
+    private static void MarkParts(FunctionSymbol main, Module mainModule)
+    {
+        var visited = new HashSet<FunctionSymbol>();
+        var compiled = new HashSet<FunctionSymbol>();
+        void Visit(FunctionSymbol f)
+        {
+            if (!visited.Add(f)) return;
+            foreach (var c in f.Callees)
+            {
+                if (c.IsInterrupt) { c.IsPart = true; Compiled(c); }
+                else Visit(c);
+            }
+            foreach (var h in f.UsedInterrupts) Compiled(h);
+            foreach (var a in f.UsedAddresses) Named(a);
+        }
+        void Compiled(FunctionSymbol f) { if (compiled.Add(f)) Visit(f); }
+        void Named(FunctionSymbol f) { if (f.IsInterrupt) Compiled(f); else Visit(f); }
+        Visit(main);
+        foreach (var f in mainModule.Scope.Values.OfType<FunctionSymbol>().Where(f => f.IsInterrupt)) Compiled(f);
+        foreach (var g in mainModule.Scope.Values.OfType<VariableSymbol>())
+            foreach (var (_, f) in g.FunctionAddresses) Named(f);
+    }
+
+    /// <summary>A handler is entered by the CPU, with nothing to pass: only a part may have parameters or a return value.</summary>
+    private static void CheckInstallable(FunctionSymbol f)
+    {
+        if (f.Parameters.Count > 0 || f.ReturnType.Kind != TypeKind.Void)
+            throw new CompileError(f.Pos,
+                $"'{f.Name}' has {(f.Parameters.Count > 0 ? "parameters" : "a return value")}, so it can only be called as a part of another interrupt fn. " +
+                "An interrupt handler takes no parameters and returns no value: the CPU calls it, not your code");
     }
 
     private static string DescribeRoot(FunctionSymbol root) => root.IsInterrupt ? $"the interrupt handler '{root.Name}'" : "main";
@@ -1566,6 +1738,8 @@ public sealed partial class Checker
         // A module's own handler may share the module's private variables (spec 8.1): its author wrote both sides.
         bool OwnHandler(FunctionSymbol root, VariableSymbol g) =>
             root.IsInterrupt && moduleOf[g].Scope.Values.Contains(root);
+        // Or through an interrupt fn of the module that is called as a part (decision 34).
+        bool OwnPart(FunctionSymbol f, VariableSymbol g) => f.IsInterrupt && moduleOf[g].Scope.Values.Contains(f);
 
         var firstUser = new Dictionary<VariableSymbol, (FunctionSymbol Function, FunctionSymbol Root)>();
         foreach (var f in ordered.Where(f => f.FixedAddress is null))
@@ -1573,7 +1747,7 @@ public sealed partial class Checker
                 foreach (var used in f.UsedGlobals)
                 {
                     var g = used.AliasOf ?? used;
-                    if (!privateGlobals.Contains(g) || OwnHandler(root, g)) continue;
+                    if (!privateGlobals.Contains(g) || OwnHandler(root, g) || OwnPart(f, g)) continue;
                     if (!firstUser.TryGetValue(g, out var first))
                         firstUser[g] = (f, root);
                     else if (first.Root != root)

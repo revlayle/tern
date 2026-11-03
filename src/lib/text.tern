@@ -2,6 +2,7 @@
 // Digits are screen codes, which are the same as PETSCII for 0-9.
 
 private data DIGITS = screen"0123456789ABCDEF"
+private const MINUS = $2D   // screen code of "-"
 private data POWERS: [u16; 4] = [10000, 1000, 100, 10]
 
 // Copy n bytes of text to dst, e.g. a screen"..." string to screen memory.
@@ -87,4 +88,48 @@ fn find(s: ptr u8, n: u8, ch: u8) -> u8 {
         }
     }
     return $FF
+}
+
+// Write value in decimal at dst, with a minus sign for a negative value, and no leading zeros.
+// Returns the number of characters (1 to 4).
+fn dec8s(dst: ptr u8, value: i8) -> u8 {
+    if value < 0 {
+        dst[0] = MINUS
+        var magnitude: u8 = (0 - (value as u8))
+        return dec8(dst + 1, magnitude) + 1
+    }
+    return dec8(dst, value as u8)
+}
+
+// Write value in decimal at dst, with a minus sign for a negative value, and no leading zeros.
+// Returns the number of characters (1 to 6).
+fn dec16s(dst: ptr u8, value: i16) -> u8 {
+    if value < 0 {
+        dst[0] = MINUS
+        var magnitude: u16 = (0 - (value as u16))
+        return dec16(dst + 1, magnitude) + 1
+    }
+    return dec16(dst, value as u16)
+}
+
+// Write value as exactly `width` decimal digits at dst, with leading zeros (width 1 to 5).
+// The value must fit in that many digits; if it does not, the digits written are unspecified.
+fn dec16z(dst: ptr u8, value: u16, width: u8) {
+    for k in (5 - width)..4 {
+        var power: u16 = POWERS[k]
+        var d: u8 = 0
+        while value >= power {
+            value -= power
+            d += 1
+        }
+        dst[0] = DIGITS[d]
+        dst += 1
+    }
+    dst[0] = DIGITS[value.lo]
+}
+
+// Write value as exactly `width` decimal digits at dst, with leading zeros (width 1 to 3).
+// The value must fit in that many digits.
+fn dec8z(dst: ptr u8, value: u8, width: u8) {
+    dec16z(dst, value as u16, width)
 }

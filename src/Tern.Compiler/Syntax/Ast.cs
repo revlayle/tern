@@ -349,6 +349,37 @@ public sealed class FnDecl(
 public sealed class ImportDecl(SourcePos pos, string name) : Node(pos)
 {
     public string Name { get; } = name;
+    /// <summary>Module parameters set by <c>import name(P = value)</c>.</summary>
+    public List<ImportArg> Args { get; init; } = [];
+}
+
+/// <summary>One <c>P = value</c> in an import.</summary>
+public sealed class ImportArg(SourcePos pos, string name, Expr value) : Node(pos)
+{
+    public string Name { get; } = name;
+    public Expr Value { get; } = value;
+}
+
+/// <summary>A module parameter in the header: <c>COUNT: u8 = 32</c>.</summary>
+public sealed class ModuleParam(SourcePos pos, string name, TypeSyntax type, Expr defaultValue) : Node(pos)
+{
+    public string Name { get; } = name;
+    public TypeSyntax Type { get; } = type;
+    public Expr Default { get; } = defaultValue;
+}
+
+/// <summary>The <c>module name(P: type = default, ...)</c> line at the top of a module.</summary>
+public sealed class ModuleHeader(SourcePos pos, string name, List<ModuleParam> parameters) : Node(pos)
+{
+    public string Name { get; } = name;
+    public List<ModuleParam> Parameters { get; } = parameters;
+}
+
+/// <summary>A top-level <c>assert condition, "message"</c>, checked at compile time.</summary>
+public sealed class AssertDecl(SourcePos pos, Expr condition, string message) : Node(pos)
+{
+    public Expr Condition { get; } = condition;
+    public string Message { get; } = message;
 }
 
 /// <summary>A struct field: <c>name: type</c>, optionally <c>@ offset</c>.</summary>
@@ -368,6 +399,8 @@ public sealed class StructDecl(SourcePos pos, string name, List<FieldSyntax> fie
 /// <summary>One source file: a program's main file or a module.</summary>
 public sealed class ProgramSyntax(List<ConstDecl> consts, List<VarDecl> globals, List<FnDecl> functions)
 {
+    public ModuleHeader? Header { get; init; }
+    public List<AssertDecl> Asserts { get; init; } = [];
     public List<ImportDecl> Imports { get; init; } = [];
     public List<StructDecl> Structs { get; init; } = [];
     /// <summary>Top-level names declared <c>private</c>: usable only inside this file.</summary>

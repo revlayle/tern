@@ -149,7 +149,7 @@ public static class Allocator
             // A routine at a fixed address has no frame; it may be called from main and from handlers.
             // So may a function with no memory (checked by Checker.CheckSharedFunctions), whose callers
             // in a later root are not placed yet.
-            offsets[f] = f.IsInterrupt || f.Isolated ? end
+            offsets[f] = (f.IsInterrupt && !f.IsPart) || f.Isolated ? end
                 : f.FixedAddress is not null || f.Roots.Count > 1 || callers[f].Count == 0 ? 0
                 : callers[f].Max(c => offsets[c] + size(c));
             end = Math.Max(end, offsets[f] + size(f));

@@ -54,7 +54,7 @@ public sealed class CodeGen
         {
             GenFunction(f);
             // An interrupt handler's body is optimized before its saving code is added.
-            if (!f.Declaration!.IsAsm && !f.IsInterrupt) Optimizer.Run(_out, f);
+            if (!f.Declaration!.IsAsm && !(f.IsInterrupt && !f.IsPart)) Optimizer.Run(_out, f);
             all.AddRange(_out);
         }
         return all;
@@ -154,10 +154,11 @@ public sealed class CodeGen
             return;
         }
 
-        var kept = f.IsInterrupt ? null : KeptRegister(f);
+        bool handler = f.IsInterrupt && !f.IsPart;
+        var kept = handler ? null : KeptRegister(f);
         StoreRegisterParameters(f);
 
-        if (f.IsInterrupt)
+        if (handler)
         {
             GenInterrupt(f);
             return;
@@ -337,6 +338,9 @@ public sealed class CodeGen
         if (x) { save.Add(new Instr(Txa)); save.Add(new Instr(Pha)); }
         if (y) { save.Add(new Instr(Tya)); save.Add(new Instr(Pha)); }
         if (save.Count > 0) save.Insert(0, new Comment($"save {string.Join(", ", new[] { a ? "A" : null, x ? "X" : null, y ? "Y" : null }.OfType<string>())}"));
+        // Main may be in decimal mode when the interrupt arrives, and only adc and sbc care (spec 6.3).
+        if (_out.Skip(start).OfType<Instr>().Any(i => i.Mnemonic is Mnemonic.Adc or Mnemonic.Sbc or Mnemonic.Jsr))
+            save.Insert(0, new Instr(Mnemonic.Cld));
         _out.InsertRange(start, save);
 
         Place(_interruptExit);

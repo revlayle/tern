@@ -1,0 +1,70 @@
+import math
+
+// Pseudo-random numbers: xorshift generators. The state is private to the module, so main and an
+// interrupt handler must not both use it (spec 8.1); a handler that needs random numbers calls
+// from only one side, or you copy this module for it.
+// Both generators start at state 1; seed changes it.
+
+private var state8: u8 = 1
+private var state16: u16 = 1
+
+// Set both generators from v. A state of 0 would stay 0, so 0 is replaced by 1.
+fn seed(v: u16) {
+    state16 = v
+    if v == 0 { state16 = 1 }
+    state8 = v.lo ^ v.hi
+    if state8 == 0 { state8 = 1 }
+}
+
+// The next 8-bit value, 1 to 255. Xorshift with shifts 3, 5, 4: all 255 values come once before the sequence repeats.
+asm fn next8() -> u8 {
+    lda state8
+    asl
+    asl
+    asl
+    eor state8
+    sta state8
+    lsr
+    lsr
+    lsr
+    lsr
+    lsr
+    eor state8
+    sta state8
+    asl
+    asl
+    asl
+    asl
+    eor state8
+    sta state8
+}
+
+// The next 16-bit value, 1 to 65535. Xorshift with shifts 7, 9, 8: all 65535 values come once before the sequence repeats.
+asm fn next16() -> u16 {
+    lda state16+1       // x ^= x << 7
+    lsr
+    lda state16
+    ror                 // the high byte of x << 7
+    eor state16+1
+    sta state16+1
+    lda #0
+    ror                 // the low byte of x << 7
+    eor state16
+    sta state16
+    lda state16+1       // x ^= x >> 9
+    lsr
+    eor state16
+    sta state16
+    lda state16         // x ^= x << 8
+    eor state16+1
+    sta state16+1
+    ldx state16+1
+    lda state16
+}
+
+// A value from 0 to n - 1 (0 if n is 0): the high byte of next8() * n. The values are
+// not exactly equally likely unless n divides 255.
+fn below(n: u8) -> u8 {
+    var p: u16 = math.mul8(next8(), n)
+    return p.hi
+}
