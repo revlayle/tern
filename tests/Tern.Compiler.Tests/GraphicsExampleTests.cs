@@ -62,7 +62,7 @@ public sealed class GraphicsExampleTests
             for (int l = 30; l < 250; l++)
             {
                 rig.Vic.Seen.TryGetValue(frame * 312 + l, out var got);
-                var want = t.List.Where(s => s.Y <= l && l < s.Y + 21)
+                var want = t.List.Where(s => s.Y < l && l <= s.Y + 21)
                     .Select(s => new FakeVic.Shown(s.Slot, s.X, s.Pointer, s.Color, s.Mc, s.Ex)).OrderBy(x => x.Slot).ToList();
                 var have = (got ?? []).OrderBy(x => x.Slot).ToList();
                 Assert.True(have.SequenceEqual(want), $"frame {frame} line {l}: got [{string.Join(", ", have)}] want [{string.Join(", ", want)}]");
@@ -93,6 +93,7 @@ public sealed class GraphicsExampleTests
         Assert.InRange(steps.Count, 45, 51);      // 100 frames, a pixel every 2 frames
         Assert.InRange(swaps, 5, 7);
 
+        Assert.Empty(rig.Vic.BadWrites);
         Assert.True(quiet > 100, $"{quiet} checks");
     }
 

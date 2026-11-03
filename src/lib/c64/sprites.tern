@@ -32,7 +32,7 @@
 //     their y should be at least 24.
 //   - A sprite is written as soon as the one before it on the same hardware sprite has been drawn.
 //     The writes take about 100 cycles per sprite, so a group of sprites that start together on the
-//     same line is drawn whole up to four sprites; from the fifth, the registers are written late.
+//     same line is drawn whole up to five sprites; from the sixth, the registers are written late.
 //   - Sprite y positions of 252 and more are not multiplexed reliably (the handler would run
 //     past raster line 255).
 //
@@ -50,7 +50,7 @@ const MULTICOLOR = 2
 const EXPAND_X = 4
 
 // The distance in lines two sprites on the same hardware sprite must keep: 21 lines of picture
-// plus 9 for the raster code to write the next one, about 4 sprites' worth.
+// plus 9 for the raster code to write the next one, about 5 sprites' worth.
 const GAP = 30
 const TOP_LINE = 0
 
@@ -195,7 +195,7 @@ private asm fn emit(slot: u8 using A, s: u8 using X, e: u8 using Y) {
     tax
     lda d_y,x
     clc
-    adc #21
+    adc #22
     sta d_line,y
 .done:
 }

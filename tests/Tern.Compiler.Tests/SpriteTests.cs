@@ -112,7 +112,7 @@ public sealed class SpriteTests
         for (int n = 0; n < display.Count; n++)
         {
             var v = s[display[n]];
-            for (int l = v.Y; l < v.Y + 21 && l < 256; l++)
+            for (int l = v.Y + 1; l <= v.Y + 21 && l < 256; l++)
             {
                 if (!lines.TryGetValue(l, out var list)) lines[l] = list = [];
                 list.Add(new FakeVic.Shown(n & 7, v.X, v.Frame, v.Color & 15, (v.Flags & Multicolor) != 0, (v.Flags & ExpandX) != 0));

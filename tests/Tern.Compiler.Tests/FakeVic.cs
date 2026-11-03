@@ -21,6 +21,7 @@ public sealed class FakeVic : IBus
     private int _compare;
     private int _status;
     private readonly int[] _remaining = new int[8];
+    private readonly bool[] _drawing = new bool[8];
     private int _lastLine = -1;
 
     public Cpu6502 Cpu { get; set; } = null!;
@@ -66,13 +67,32 @@ public sealed class FakeVic : IBus
             }
             else if (r == 0x11) { _compare = _compare & 0xFF | (value & 0x80) << 1; _regs[r] = value; }
             else if (r == 0x19) _status &= ~value;
-            else _regs[r] = value;
+            else
+            {
+                CheckWrite(r, value);
+                _regs[r] = value;
+            }
             return;
         }
         _ram.Write(address, value);
     }
 
     public int Reg(int r) => _regs[r];
+
+    /// <summary>
+    /// Writes to the x, color or x-high, multicolor or expand bit of a sprite on a line where it is drawn. The chip reads
+    /// those while it draws the line, so such a write can change part of that line.
+    /// </summary>
+    public List<(long Line, int Cycle, int Reg, int Sprite)> BadWrites { get; } = [];
+
+    private void CheckWrite(int r, byte value)
+    {
+        for (int k = 0; k < 8; k++)
+        {
+            bool affects = r == 2 * k || r == 0x27 + k || (r is 0x10 or 0x1C or 0x1D && ((_regs[r] ^ value) >> k & 1) != 0);
+            if (affects && _drawing[k]) BadWrites.Add((Line, (int)(Cpu.Cycles % CyclesPerLine), r, k));
+        }
+    }
 
     /// <summary>Call after each CPU step: new raster lines draw sprites and may raise the interrupt.</summary>
     public void Tick()
@@ -106,11 +126,16 @@ public sealed class FakeVic : IBus
         var list = new List<Shown>();
         for (int k = 0; k < 8; k++)
         {
+            _drawing[k] = false;
             if (_remaining[k] == 0 && (_regs[0x15] >> k & 1) != 0 && _regs[1 + 2 * k] == raster && raster < 256)
-                _remaining[k] = 21;
+            {
+                _remaining[k] = 21;     // as on the chip: compared on line Y, drawn on lines Y+1 to Y+21
+                continue;
+            }
             if (_remaining[k] > 0)
             {
                 _remaining[k]--;
+                _drawing[k] = true;
                 int x = _regs[2 * k] | (_regs[0x10] >> k & 1) << 8;
                 list.Add(new Shown(k, x, _ram.Bytes[_pointerBase + k], _regs[0x27 + k] & 15,
                     (_regs[0x1C] >> k & 1) != 0, (_regs[0x1D] >> k & 1) != 0));
