@@ -374,7 +374,7 @@ inline fn wait_frame() { ... }
 - The handler starts with `cld`, since main may be in decimal mode (the `bcd` library, or an asm block with `sed`) when the interrupt arrives. Decimal mode only changes `adc` and `sbc`, so `cld` is left out when the handler executes neither: no `adc` or `sbc` in its code or asm blocks, and no `jsr`.
 - Code the compiler cannot follow, such as an asm `jmp` out of the handler, saves and restores registers itself.
 - A handler cannot be called from ordinary code, neither from Tern nor with `jsr`. Naming it in assembly (`lda #raster.lo`) or with `addr(raster)` is not a call.
-- **An `interrupt fn` may be called from another `interrupt fn`.** The called one is then compiled as a *part*: its body ending in `rts`, with no register saving and no `rti`; the installed (outer) handler saves registers once and ends with the one `rti`. Each `interrupt fn` is compiled in the forms that are used: as a handler if its address is taken, as a part if it is called. This lets a program combine library interrupt code (a sprite multiplexer, a scroller) in one handler it installs itself:
+- **An `interrupt fn` may be called from another `interrupt fn`.** The called one is then compiled as a *part*: its body ending in `rts`, with no register saving and no `rti`; the installed (outer) handler saves registers once and ends with the one `rti`. Each `interrupt fn` has one form: a part if it is called, otherwise a handler. Calling one and also installing it (its address taken) is an error. A library that offers both writes a small handler that calls the part (`interrupt fn handler() { top() }`), which costs one `jsr`/`rts`. This lets a program combine library interrupt code (a sprite multiplexer, a scroller) in one handler it installs itself:
   ```
   interrupt fn frame() {
       if sprites.raster() { scroll.top() }
@@ -544,7 +544,7 @@ The standard library is ordinary Tern and `asm fn` source in the compiler's `lib
 
 **Strings and memory blocks are passed as a pointer plus a length**, matching `len()` on literals. The library has no zero-terminated variants.
 
-The tables below describe the library as written in M4 and M5. Work variables and tables that callers should not use are `private` (2.2).
+The tables below describe the library as written in M4, M5 and M10. Work variables and tables that callers should not use are `private` (2.2).
 
 **`math`**: cycle-heavy arithmetic (the operators only work on constants, 3.1)
 
@@ -557,12 +557,20 @@ The tables below describe the library as written in M4 and M5. Work variables an
 | `div16` | `(n: u16, d: u16) -> u16` | Shift-and-subtract loop. Also sets `math.remainder16` |
 | `shl8`, `shr8` | `(x: u8 using A, n: u8 using X) -> u8` | Loop of `n` shifts |
 | `shl16`, `shr16` | `(x: u16 using AX, n: u8 using Y) -> u16` | Loop of `n` shifts |
+| `abs8` | `(x: i8 using A) -> u8 using A` | Absolute value; `abs8(-128)` is 128 |
+| `abs16` | `(x: i16 using AX) -> u16 using AX` | Absolute value |
+| `muls8` | `(a: i8 using A, b: i8 using X) -> i16` | Signed multiply |
+| `divs8` | `(a: i8 using A, b: i8 using X) -> i8` | Signed divide, rounding towards zero. `math.remainder8` has the sign of `a`. -128 / -1 is -128 |
+| `min8`, `max8` | `(a: u8 using A, b: u8 using X) -> u8` | `inline asm fn`: no `jsr` |
+| `mins8`, `maxs8` | `(a: i8 using A, b: i8 using X) -> i8` | `inline asm fn` |
+| `clamp8` | `(x: u8 using A, lo: u8 using X, hi: u8 using Y) -> u8` | `inline asm fn` |
+| `clamps8` | `(x: i8 using A, lo: i8 using X, hi: i8 using Y) -> i8` | `inline asm fn` |
+| `sin8`, `cos8` | `(x: u8 using A) -> i8` | `inline asm fn`; 256 steps per circle, results -127..127 (`round(127 * sin(2 pi x / 256))`); one shared 256-byte table, included only when used |
 
 - Division computes the quotient and the remainder together, as in assembly. The remainder is left in a library variable (`math.remainder8`, `math.remainder16`) for the caller to read straight after the call.
 - Division by zero does not trap. The result is unspecified.
 - Multiplying or dividing by a constant needs no library call: write the shifts and adds (`(w << 5) + (w << 3)` for `w × 40`), or `& 7` for "mod 8".
 - Memory parameters of `asm fn` routines are not named `a`, since `asl a` means the accumulator (9). Arguments are positional, so callers are not affected.
-- Signed versions (`muls8`, `divs8`, ...) will follow the same pattern; they are added when a program needs them.
 
 **`mem`**: memory blocks
 
@@ -570,6 +578,7 @@ The tables below describe the library as written in M4 and M5. Work variables an
 |---|---|---|
 | `copy` | `(dst: ptr u8, src: ptr u8, count: u16)` | Copy forward. Overlapping blocks work only when `dst` is below `src` |
 | `fill` | `(dst: ptr u8, value: u8, count: u16)` | Fill a block |
+| `copy_back` | `(dst: ptr u8, src: ptr u8, count: u16)` | Copy last byte first, for overlapping blocks with `dst` above `src` |
 
 **`text`**: text in memory, platform independent
 
@@ -577,11 +586,64 @@ The tables below describe the library as written in M4 and M5. Work variables an
 |---|---|---|
 | `put` | `(dst: ptr u8, src: ptr u8, n: u8)` | Copy text to memory, e.g. a `screen"..."` string to screen memory |
 | `dec8`, `dec16` | `(dst: ptr u8, value: u8 or u16) -> u8` | Write a number in decimal, without leading zeros; returns the number of digits. Uses repeated subtraction, no division |
+| `dec8s`, `dec16s` | `(dst: ptr u8, value: i8 or i16) -> u8` | Signed decimal, with `-` for negative values; returns the number of characters written |
+| `dec8z`, `dec16z` | `(dst: ptr u8, value: u8 or u16, width: u8)` | Exactly `width` digits, with leading zeros. The value must fit, otherwise the digits are unspecified; nothing is written past `width` |
 | `hex8`, `hex16` | `(dst: ptr u8, value: u8 or u16)` | Write a number as 2 or 4 hex digits |
 | `equal` | `(a: ptr u8, b: ptr u8, n: u8) -> bool` | Compare two texts |
 | `find` | `(s: ptr u8, n: u8, ch: u8) -> u8` | Index of the first `ch`, or `$FF` if not found |
 
 Digits are written as screen codes, which are the same as PETSCII for `0`-`9`. Hex letters are screen codes too.
+
+**`wide`**: 24- and 32-bit unsigned numbers
+
+`struct U32 { lo: u16, hi: u16 }` and `struct U24 { lo: u16, hi: u8 }`, little-endian. The 16-bit halves are plain fields, so no cast or overlay is needed: `score.hi` is a `u16` (`lda score+2` / `ldx score+3`), and single bytes are `score.lo.hi` and so on. There are no 24- or 32-bit primitive types. Struct parameters are not allowed (3.3), so every function takes pointers, and the result goes into the first operand, as in assembly: `wide.add32(addr(score), addr(bonus))`.
+
+Each function exists for both widths: `W` is `24` or `32`, and `UW` is `U24` or `U32`.
+
+| Function | Signature | Purpose |
+|---|---|---|
+| `setW` | `(p: ptr UW, v: u16)` | Set from a `u16` |
+| `copyW` | `(dst: ptr UW, src: ptr UW)` | Copy |
+| `addW`, `subW` | `(p: ptr UW, q: ptr UW)` | `p = p + q`, `p = p - q`, wrapping |
+| `addW_u16`, `subW_u16` | `(p: ptr UW, v: u16)` | Add or subtract a `u16` |
+| `incW` | `(p: ptr UW)` | Add 1 |
+| `lessW` | `(p: ptr UW, q: ptr UW) -> bool using carry` | `p < q` |
+| `equalW` | `(p: ptr UW, q: ptr UW) -> bool using carry` | `p == q` |
+| `is_zeroW` | `(p: ptr UW) -> bool using zero` | `p == 0` |
+| `mulW` | `(p: ptr UW, q: ptr UW)` | Low W bits of the product; shift-and-add |
+| `divW` | `(p: ptr UW, q: ptr UW)` | Quotient; shift-and-subtract. Also sets `wide.remainderW` |
+| `decW` | `(dst: ptr u8, p: ptr UW) -> u8` | Decimal without leading zeros; returns the number of digits (up to 8 or 10) |
+| `decWz` | `(dst: ptr u8, p: ptr UW, width: u8)` | Fixed-width decimal with leading zeros, as `text.dec16z` |
+| `hexW` | `(dst: ptr u8, p: ptr UW)` | 6 or 8 hex digits |
+
+Decimal output converts a copy to BCD (doubling in decimal mode) and costs thousands of cycles: convert when the value changes, or keep a displayed-only score in `bcd`.
+
+**`bcd`**: packed decimal counters of `n` bytes (two digits per byte, low byte first), passed as pointers; for scores
+
+| Function | Signature | Purpose |
+|---|---|---|
+| `clear` | `(p: ptr u8, n: u8)` | Set to 0 |
+| `add`, `sub` | `(p: ptr u8, q: ptr u8, n: u8 using X)` | `p = p + q`, `p = p - q` |
+| `add_byte`, `sub_byte` | `(p: ptr u8, n: u8 using X, v: u8 using A)` | Add or subtract `v`, two packed digits (`$25` is 25) |
+| `inc`, `dec` | `(p: ptr u8, n: u8 using X)` | Add or subtract 1 |
+| `less` | `(p: ptr u8, q: ptr u8, n: u8 using X) -> bool using carry` | `p < q` |
+| `equal` | `(p: ptr u8, q: ptr u8, n: u8 using Y) -> bool using carry` | `p == q` |
+| `is_zero` | `(p: ptr u8, n: u8 using Y) -> bool using zero` | `p == 0` |
+| `digits` | `(dst: ptr u8, p: ptr u8, n: u8)` | All `2n` digits, with leading zeros |
+| `text` | `(dst: ptr u8, p: ptr u8, n: u8) -> u8` | Without leading zeros; returns the number of digits. Needs room for `2n` at `dst` |
+
+Values wrap modulo 10^(2n). The routines use `sed` and always leave decimal mode off; interrupt handlers clear decimal mode (6.3).
+
+**`random`**: xorshift generators
+
+| Function | Signature | Purpose |
+|---|---|---|
+| `seed` | `(v: u16)` | Set both generators; 0 becomes 1 |
+| `next8` | `() -> u8` | 8-bit xorshift (3, 5, 4): values 1-255, period 255 |
+| `next16` | `() -> u16` | 16-bit xorshift (7, 9, 8): period 65535 |
+| `below` | `(n: u8) -> u8` | A value in `0..n`: the high byte of `next8() * n` (uses `math.mul8`). Not exactly uniform. 0 for `n = 0` |
+
+The state is private and starts at 1, so using `random` from main and a handler is an error (8.1); a handler that needs random numbers uses its own generator.
 
 **`c64`**: Commodore 64 only
 
@@ -602,14 +664,6 @@ Digits are written as screen codes, which are the same as PETSCII for `0`-`9`. H
 
 - **`sprites`**, a sprite multiplexer: `module sprites(COUNT: u8 = 32, FLICKER: bool = false)`. A public table of `COUNT` virtual sprites (`x: u16`, `y`, `frame` (sprite pointer), `color`, flags for visible, multicolor and expand-X; no expand-Y), which main writes; `update()` once per frame sorts by Y (continuous insertion sort, kept between frames) into the next frame's table (double-buffered); `start()` turns the KERNAL off and installs its handler; `wait_frame()` waits for the handler's frame counter. Hardware sprite *i mod 8* shows sorted sprite *i*. More than 8 sprites on a line: the extra ones are skipped that frame, or, with `FLICKER`, which ones are skipped rotates each frame. Its raster code is an `interrupt fn raster() -> bool using carry` (true at the top of the frame), callable as a part from the program's own handler (6.3): `interrupt fn frame() { if sprites.raster() { scroll.top() } }`.
 - **`scroll`**, smooth character scrolling in eight directions: fine scroll and 38-column/24-row helpers on `c64.vic`; two screen buffers in one VIC bank, the hidden one shifted by one character spread over the 8 fine steps, swapped with `$D018`; color RAM either fixed or shifted at the swap (in asm, racing the beam); new columns and rows filled from a character map (`ptr u8` plus width). Tile maps later. `interrupt fn top()` writes the scroll registers at the top of the frame, as a part of the program's handler; `scroll.start()` installs a minimal handler for programs without the multiplexer. The copy loops are unrolled asm.
-
-**Planned for M10** (cross-platform; the coding session settles exact signatures following the rules above and records them in this section):
-
-- **`wide`**: 24- and 32-bit unsigned numbers as structs, `wide.U32 { lo: u16, hi: u16 }` and `wide.U24 { lo: u16, hi: u8 }` (little-endian). The 16-bit halves are plain fields, so no cast or overlay is needed: `score.hi` is a `u16` (`lda score+2` / `ldx score+3`), and single bytes are `score.lo.hi` and so on. There are no 24- or 32-bit primitive types. Struct parameters are not allowed (3.3), so every function takes pointers, and the result goes into the first operand, as in assembly: `wide.add32(addr(score), addr(bonus))`. Functions for each width (`add24`, `add32`, ...): `set_u16`, `copy`, `add`, `sub`, `add_u16`, `sub_u16`, `inc`; `less`, `equal`, `is_zero` returning flags; `mul` (the low 24/32 bits, shift-and-add), `div` by shift-and-subtract (remainder in a library variable, as `math.div16`); `dec` (optionally fixed width with leading zeros) and `hex` into memory. Simple loops like `math`; nothing beyond these. Converting to decimal costs thousands of cycles: convert when the value changes, or keep a displayed-only score in `bcd`.
-- **`bcd`**: packed decimal counters of 1 to 4 bytes (two digits per byte) for scores: add, subtract, compare, write as digits. Uses `sed`/`cld`; interrupt handlers clear decimal mode (6.3).
-- **`math`**: signed `muls8`, `divs8`, `abs8`, `abs16`; `min`, `max`, `clamp` for `u8` and `i8` (`inline asm fn`, no `jsr`); `sin8`/`cos8` (256 steps per circle, results −127..127, one shared table).
-- **`random`**: 8- and 16-bit xorshift generators, a seed function and a value below `n`. Its state is a private variable, so using it from main and a handler is an error (8.1); a handler that needs random numbers uses its own generator.
-- **`text`**: signed decimal (`dec8s`, `dec16s`) and fixed-width decimal with leading zeros. **`mem`**: `copy_back` for overlapping blocks where `dst` is above `src`.
 
 Example: `c64.vic.border = c64.BLACK` is `lda #0` / `sta $D020`.
 
