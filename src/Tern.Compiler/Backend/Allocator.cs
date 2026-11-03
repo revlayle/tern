@@ -22,6 +22,8 @@ public sealed class RamPlan
     public string ZeroPageMap { get; set; } = "";
     /// <summary>Data placed at a fixed address or in a region: part of the program file, at that address.</summary>
     public List<VariableSymbol> FixedImageGlobals { get; } = [];
+    /// <summary>Variables and data of overlay modules: part of the overlay's file, with initial values (spec 8.5).</summary>
+    public List<VariableSymbol> OverlayGlobals { get; } = [];
     /// <summary>Blocks of zeroed variables in regions: cleared at startup.</summary>
     public List<AddressRange> RegionClears { get; } = [];
     /// <summary>Where the first and last variable in each region are, for the report.</summary>
@@ -47,7 +49,15 @@ public static class Allocator
         foreach (var g in program.Globals)
             if (g.FixedAddress is int a) g.Address = a;
 
-        var placeable = program.Globals.Where(g => g.FixedAddress is null && g.Region is null)
+        // An overlay's variables are part of its file, in the area with its code; loading the file sets them.
+        // A zero-page variable cannot be set that way.
+        foreach (var g in program.Globals.Where(g => g.IsOverlayImage))
+            if (g.RequireZeroPage || g.ForcedZeroPage)
+                throw new CompileError(g.Pos,
+                    $"'{g.Name}' must be in zero page, but it belongs to the overlay {g.Module!.Name}, whose variables are set by loading its file, and zero page is not part of the file. " +
+                    "Use a local variable in the function that needs it, or move the variable to the main file");
+
+        var placeable = program.Globals.Where(g => g.FixedAddress is null && g.Region is null && !g.IsOverlayImage)
             .Concat(functions.SelectMany(f => f.FrameVariables))
             .ToList();
         var inZp = new HashSet<VariableSymbol>();
@@ -146,10 +156,11 @@ public static class Allocator
             if (at > range.First) plan.RegionUse[name] = new AddressRange(range.First, at - 1);
         }
         plan.FixedImageGlobals.AddRange(program.Globals.Where(g => g.FixedAddress is not null && g.IsData));
+        plan.OverlayGlobals.AddRange(program.Globals.Where(g => g.IsOverlayImage));
 
         // RAM after the program: zeroed globals, noinit globals, then the overlaid frames.
         int offset = 0;
-        var ram = program.Globals.Where(g => g.FixedAddress is null && g.Region is null && !inZp.Contains(g)).ToList();
+        var ram = program.Globals.Where(g => g.FixedAddress is null && g.Region is null && !g.IsOverlayImage && !inZp.Contains(g)).ToList();
         plan.ImageGlobals.AddRange(ram.Where(g => g.InitialBytes is not null));
         foreach (var g in ram.Where(g => g.InitialBytes is null && !g.NoInit))
         {

@@ -46,7 +46,7 @@ public sealed partial class Checker
                                 ? $"'{n.Name}' is passed in register {v.Register}; use the register directly"
                                 : $"'{n.Name}' lives in register {v.Register}; use the register directly");
                         n.Symbol = v;
-                        UseGlobal(v);
+                        UseGlobal(v, n.Pos);
                         v.Weight += Weight();
                         return new AsmValue(0, Variable: v);
                 }
@@ -251,7 +251,7 @@ public sealed partial class Checker
             _function!.UsedAddresses.Add(named);
         }
         else if (v?.Function is { } f && (f != _function || ins.Mnemonic == Mnemonic.Jsr))
-            _function!.Callees.Add(f);
+            AddCall(_function!, f, ins.Operand!.Pos);
         // Assembly cannot write a function's memory parameters (they are not names outside it).
         if (v?.Function is { FixedAddress: null } callee && callee != _function && v.High is null
             && ins.Mnemonic is Mnemonic.Jsr or Mnemonic.Jmp && ins.Mode == Absolute

@@ -25,6 +25,8 @@ public sealed class MemoryLayout
     public List<AddressRange> Reserved { get; } = [];
     /// <summary>Named areas where variables and data are placed on request (<c>@ name</c>).</summary>
     public Dictionary<string, AddressRange> Regions { get; } = [];
+    /// <summary>Areas modules are loaded into on request (<c>import m @ name</c>, spec 8.5).</summary>
+    public Dictionary<string, AddressRange> Overlays { get; } = [];
     /// <summary>Volatile ranges added by the memory block, in addition to the platform's.</summary>
     public List<AddressRange> Volatile { get; } = [];
 
@@ -47,6 +49,7 @@ public sealed class MemoryLayout
         var zeroPage = new List<AddressRange>();
         var reserved = new List<AddressRange>();
         var regions = new Dictionary<string, AddressRange>();
+        var overlays = new Dictionary<string, AddressRange>();
         var volatileRanges = new List<AddressRange>();
         // Every range that may not overlap another, with the line that declared it.
         var claimed = new List<(AddressRange Range, MemoryLine Line)>();
@@ -68,12 +71,14 @@ public sealed class MemoryLayout
                     break;
                 case "reserved": reserved.Add(range); break;
                 case "region":
-                    if (!regions.TryAdd(line.Name!, range))
+                    if (overlays.ContainsKey(line.Name!) || !regions.TryAdd(line.Name!, range))
                         throw new CompileError(line.Pos, $"The region '{line.Name}' is declared twice. Give each region its own name");
                     break;
                 case "volatile": volatileRanges.Add(range); break;
                 case "overlay":
-                    throw new CompileError(line.Pos, "'overlay' is not supported yet");
+                    if (!overlays.TryAdd(line.Name!, range) || regions.ContainsKey(line.Name!))
+                        throw new CompileError(line.Pos, $"The overlay area '{line.Name}' is declared twice. Give each area its own name");
+                    break;
             }
             if (line.Kind != "volatile")
             {
@@ -86,7 +91,7 @@ public sealed class MemoryLayout
         }
 
         // Memory the compiler may not use is taken out of the platform's areas, when the block does not replace them.
-        var taken = reserved.Concat(regions.Values).ToList();
+        var taken = reserved.Concat(regions.Values).Concat(overlays.Values).ToList();
         var programAreas = program.Count > 0 ? program : Subtract([new AddressRange(platform.LoadAddress, platform.RamEnd)], taken);
         if (programAreas.Count == 0)
             throw new CompileError(lines[0].Line.Pos, $"No program area is left: the reserved and region ranges cover all of ${platform.LoadAddress:X4}-${platform.RamEnd:X4}. Leave room for the program");
@@ -98,6 +103,7 @@ public sealed class MemoryLayout
         };
         layout.Reserved.AddRange(reserved);
         foreach (var (name, range) in regions) layout.Regions[name] = range;
+        foreach (var (name, range) in overlays) layout.Overlays[name] = range;
         layout.Volatile.AddRange(volatileRanges);
         return layout;
     }

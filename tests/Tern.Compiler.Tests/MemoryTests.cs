@@ -332,7 +332,6 @@ public class MemoryTests
     [InlineData("memory { $2000..=$2FFF region a\n$2000..=$2FFF reserved }\nfn main() { }", "(reserved) overlaps $2000-$2FFF (region a, line 1)")]
     [InlineData("memory { $100..=$1FF zeropage }\nfn main() { }", "A zeropage range must lie in $00-$FF")]
     [InlineData("memory { $2000..=$20FF region r\n$3000..=$30FF region r }\nfn main() { }", "The region 'r' is declared twice")]
-    [InlineData("memory { $2000..=$2FFF overlay level }\nfn main() { }", "'overlay' is not supported yet")]
     [InlineData("memory { $2000..=$2FFF weird }\nfn main() { }", "Unknown kind of memory 'weird'")]
     [InlineData("memory { $2000..=$2FFF region }\nfn main() { }", "Expected a name after 'region'")]
     [InlineData("memory { $2000..=$2FFF reserved", "The memory block is not closed with '}'")]

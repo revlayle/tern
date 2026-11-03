@@ -13,7 +13,8 @@ public sealed class Run
     /// <summary>The number of IRQs the CPU took.</summary>
     public int Interrupts { get; }
 
-    private Run(string source, long maxCycles, string? sourcePath, Action<Ram>? setup, string? libraryDirectory, long irqEvery)
+    private Run(string source, long maxCycles, string? sourcePath, Action<Ram>? setup, string? libraryDirectory, long irqEvery,
+        IReadOnlyDictionary<int, Action<Run>>? traps)
     {
         Result = TernCompiler.Compile(source, sourcePath: sourcePath, libraryDirectory: libraryDirectory);
         Ram.Load((ushort)Result.LoadAddress, Result.Image);
@@ -31,6 +32,15 @@ public sealed class Run
                     nextIrq = Cpu.Cycles + irqEvery;
                 }
             }
+            if (traps is not null && traps.TryGetValue(Cpu.PC, out var trap))
+            {
+                // A stand-in for a ROM routine: do its work, then return as an rts would.
+                trap(this);
+                ushort low = Ram.Bytes[0x100 + (byte)(Cpu.SP + 1)], high = Ram.Bytes[0x100 + (byte)(Cpu.SP + 2)];
+                Cpu.SP += 2;
+                Cpu.PC = (ushort)((high << 8 | low) + 1);
+                continue;
+            }
             Cpu.Step();
             if (Cpu.Cycles > maxCycles)
                 throw new Xunit.Sdk.XunitException($"Program did not finish within {maxCycles} cycles (PC=${Cpu.PC:X4})\n{Result.Listing}");
@@ -39,9 +49,10 @@ public sealed class Run
 
     /// <param name="setup">Prepares memory after loading the program, e.g. with stand-ins for ROM routines.</param>
     /// <param name="irqEvery">If set, raises an IRQ this many cycles after the last one was taken (taken once interrupts are enabled).</param>
+    /// <param name="traps">Stand-ins for ROM routines: when the CPU reaches the address, the action runs and the routine returns without executing.</param>
     public static Run Program(string source, long maxCycles = 5_000_000, string? sourcePath = null, Action<Ram>? setup = null,
-        string? libraryDirectory = null, long irqEvery = 0) =>
-        new(source, maxCycles, sourcePath, setup, libraryDirectory, irqEvery);
+        string? libraryDirectory = null, long irqEvery = 0, IReadOnlyDictionary<int, Action<Run>>? traps = null) =>
+        new(source, maxCycles, sourcePath, setup, libraryDirectory, irqEvery, traps);
 
     public int Address(string name) =>
         Result.Symbols.TryGetValue(name, out var a) ? a : throw new KeyNotFoundException($"No symbol '{name}'");

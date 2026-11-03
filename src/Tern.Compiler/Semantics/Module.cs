@@ -20,6 +20,8 @@ public sealed class Module
     public Dictionary<string, Symbol> Scope { get; } = new();
     /// <summary>The <c>import</c> in the main file that loads this module (its arguments set the module's parameters), or null.</summary>
     public ImportDecl? ImportedBy { get; set; }
+    /// <summary>The overlay area the main file places this module in (<c>import name @ area</c>), or null for a resident module.</summary>
+    public string? OverlayArea => ImportedBy?.Area;
     /// <summary>Set by the checker once the file's top-level declarations are in <see cref="Scope"/>.</summary>
     public bool Declared { get; set; }
 
@@ -48,6 +50,9 @@ public static class ModuleLoader
         {
             foreach (var import in m.Syntax.Imports)
             {
+                if (import.Area is not null && !m.IsMain)
+                    throw new CompileError(import.AreaPos,
+                        $"Only the program's main file places modules in overlay areas, since the areas belong to the whole program. Import '{import.Name}' plainly here and write 'import {import.Name} @ {import.Area}' in the main file");
                 if (import.Args.Count > 0 && !m.IsMain)
                     throw new CompileError(import.Args[0].Pos,
                         $"Only the program's main file can set the parameters of '{import.Name}', since a module is loaded once. Import it plainly here and set {import.Args[0].Name} in the main file");

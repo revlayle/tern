@@ -86,7 +86,8 @@ public sealed record Comment(string Text) : AsmItem;
 /// placed together in one program area, so a function is never split (spec 8.4). A section with
 /// <paramref name="FixedAddress"/> goes there instead (<c>data x @ $2000</c>).
 /// </summary>
-public sealed record SectionStart(string Name, int? FixedAddress = null) : AsmItem;
+/// <param name="Overlay">The module whose overlay file the section goes into (spec 8.5); it is placed in that module's area.</param>
+public sealed record SectionStart(string Name, int? FixedAddress = null, string? Overlay = null) : AsmItem;
 
 /// <summary>
 /// Room for the variables the compiler places in the program's areas. The assembler picks the first

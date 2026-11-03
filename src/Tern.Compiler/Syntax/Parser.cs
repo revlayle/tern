@@ -107,7 +107,15 @@ public sealed class Parser
                 }
                 Expect(TokenKind.RParen, "')'");
             }
-            imports.Add(new ImportDecl(name.Pos, name.Text) { Args = args });
+            string? area = null;
+            var areaPos = default(SourcePos);
+            if (Accept(TokenKind.At))
+            {
+                var areaName = Expect(TokenKind.Identifier, "the name of an overlay area after '@'");
+                area = areaName.Text;
+                areaPos = areaName.Pos;
+            }
+            imports.Add(new ImportDecl(name.Pos, name.Text) { Args = args, Area = area, AreaPos = areaPos });
             ExpectEndOfStatement();
             SkipTerminators();
         }

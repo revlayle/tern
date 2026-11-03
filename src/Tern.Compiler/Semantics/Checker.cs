@@ -75,6 +75,14 @@ public sealed partial class Checker
             module.Declared = true;
         }
 
+        foreach (var import in modules[^1].Syntax.Imports.Where(i => i.Area is not null))
+        {
+            if (_layout.Overlays.ContainsKey(import.Area!)) continue;
+            throw new CompileError(import.AreaPos, _layout.Regions.ContainsKey(import.Area!)
+                ? $"'{import.Area}' is a region, not an overlay area; '@' on an import names an area declared with 'overlay {import.Area}' in the memory block"
+                : $"The memory block has no overlay area '{import.Area}'. Add a line 'first..=last overlay {import.Area}' to it");
+        }
+
         foreach (var g in _globals)
             if (g.FixedAddress is int fixedAt && _layout.IsVolatile(fixedAt, fixedAt + g.Type.Size - 1)) g.InVolatileArea = true;
 
@@ -249,9 +257,14 @@ public sealed partial class Checker
     }
 
     /// <summary>Records that the function being checked uses a global, so it is kept in the program.</summary>
-    private void UseGlobal(VariableSymbol v)
+    private void UseGlobal(VariableSymbol v, SourcePos pos)
     {
         if (v.Kind != VariableKind.Global || _function is null) return;
+        // Overlays in one area share their memory: another one's variables are not there while this one runs.
+        if (_function.OverlayArea is { } area && v.OverlayArea == area && v.Module != _function.Module && v.FixedAddress is null && v.Region is null)
+            throw new CompileError(pos,
+                $"'{v.Name}' belongs to {v.Module!.Name}, which is in the same overlay area '{area}' as {_function.Module!.Name}. They are never loaded together and share their memory. " +
+                "Keep shared state in a resident module or the main file");
         _function.UsedGlobals.Add(v);
         // A table of function addresses keeps those functions in the program.
         foreach (var (_, f) in v.Storage.FunctionAddresses) _function.UsedAddresses.Add(f);
@@ -401,6 +414,7 @@ public sealed partial class Checker
             throw new CompileError(decl.Pos, $"'{decl.Name}' is a built-in function; choose another name");
         var fn = new FunctionSymbol(_module.Qualify(decl.Name), decl.Pos) { Declaration = decl, IsInterrupt = decl.IsInterrupt, IsInline = decl.IsInline };
         decl.Symbol = fn;
+        fn.Module = _module;
 
         var usedRegisters = new HashSet<char>();
         foreach (var p in decl.Parameters)
@@ -533,6 +547,7 @@ public sealed partial class Checker
             IsData = decl.IsData, NoInit = decl.IsNoinit, DeclaredVolatile = decl.IsVolatile,
         };
         decl.Symbol = v;
+        v.Module = _module;
         ApplyPlacement(decl, v, allowAddress: true);
         if (decl.IsNoinit && decl.Init is not null)
             throw new CompileError(decl.Init.Pos, $"'{decl.Name}' is noinit, so it cannot have an initial value. Leave out one or the other");
@@ -1160,7 +1175,7 @@ public sealed partial class Checker
                         break;
                     case VariableSymbol v:
                         n.Symbol = v;
-                        UseGlobal(v);
+                        UseGlobal(v, n.Pos);
                         e.Type = v.Type;
                         v.Weight += Weight();
                         if (v.Type.IsStruct) e.Place = new StructPlace(PlaceKind.Memory, 0, Base: v);
@@ -1558,7 +1573,7 @@ public sealed partial class Checker
                         if (!v.InMemory) throw new CompileError(name.Pos, $"'{name.Name}' lives in a register and has no address");
                         name.Symbol = v;
                         name.Type = v.Type;
-                        UseGlobal(v);
+                        UseGlobal(v, name.Pos);
                         if (v.Type.IsStructArray && !v.Type.Linear)
                             throw new CompileError(name.Pos,
                                 $"'{name.Name}' is stored as one table per field, so there is no record to point to. Declare it 'linear var' to store whole records");
@@ -1603,7 +1618,20 @@ public sealed partial class Checker
                 throw new CompileError(c.Pos, $"'{fn.Name}' takes a fixed input in {reg}, which holds the loop variable. Remove 'using {reg}' from the loop");
         c.Function = fn;
         c.Type = fn.ReturnType;
-        _function?.Callees.Add(fn);
+        if (_function is not null) AddCall(_function, fn, c.Pos);
+    }
+
+    /// <summary>
+    /// Records a call. Two overlays in the same area are never loaded together, so one cannot call
+    /// the other (spec 8.5).
+    /// </summary>
+    private static void AddCall(FunctionSymbol caller, FunctionSymbol callee, SourcePos pos)
+    {
+        caller.Callees.Add(callee);
+        if (caller.OverlayArea is { } area && callee.OverlayArea == area && callee.Module != caller.Module && !callee.IsInline)
+            throw new CompileError(pos,
+                $"'{caller.Name}' calls '{callee.Name}', but the modules {caller.Module!.Name} and {callee.Module!.Name} are both in the overlay area '{area}', so they are never loaded together. " +
+                "Call between them from resident code, or put one of them in another area");
     }
 
     // ---------- Type rules ----------
