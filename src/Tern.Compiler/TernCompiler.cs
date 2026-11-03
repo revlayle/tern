@@ -7,6 +7,13 @@ using static Tern.Cpu.Mnemonic;
 
 namespace Tern.Compiler;
 
+/// <summary>One overlay module's file (spec 8.5): its code, data and variables with initial values, loading at the start of its area.</summary>
+public sealed record OverlayFile(string Name, string Area, int LoadAddress, byte[] Image)
+{
+    /// <summary>The file: 2-byte load address followed by <see cref="Image"/>.</summary>
+    public byte[] Prg => new byte[] { (byte)LoadAddress, (byte)(LoadAddress >> 8) }.Concat(Image).ToArray();
+}
+
 public sealed class CompileResult
 {
     /// <summary>The program file: 2-byte load address followed by <see cref="Image"/>.</summary>
@@ -27,6 +34,8 @@ public sealed class CompileResult
     public required IReadOnlyList<PlacedSection> Sections { get; init; }
     /// <summary>The program areas the compiler filled and how much of each is used.</summary>
     public required IReadOnlyList<PlacedArea> Areas { get; init; }
+    /// <summary>One file for each module placed in an overlay area that has code or data in the program; the file is <c>name.prg</c>.</summary>
+    public IReadOnlyList<OverlayFile> Overlays { get; init; } = [];
     /// <summary>For a binary without <c>main</c>: the jump table, <c>setup</c> first, then the exports, each with its address.</summary>
     public IReadOnlyList<(string Name, int Address)> Entries { get; init; } = [];
     /// <summary>For a binary without <c>main</c>: the text of its interface module (spec 12.3), or null.</summary>
@@ -109,18 +118,31 @@ public static class TernCompiler
             items.Add(new SectionStart(g.Name, g.Address));
             items.AddRange(ImageBytes(g, gen.LabelOf));
         }
+        // Overlay modules: their variables are bytes of the file, zeros where there is no initial value.
+        foreach (var g in plan.OverlayGlobals)
+        {
+            var label = new Label(g.Name);
+            imageLabels[g] = label;
+            items.Add(new SectionStart(g.Name, Overlay: g.Module!.Name));
+            if (g.JumpVectorOffsets.Count > 0)
+                items.Add(new Padding(pc => Assembler.AvoidPageEnd(pc, g.JumpVectorOffsets), $"jmp ({g.Name}) must not read a vector at $xxFF"));
+            items.Add(new LabelDef(label));
+            items.AddRange(ImageBytes(g, gen.LabelOf));
+        }
         // Variables after the program start at bss. Move them all, if needed, so that no jmp (...)
         // vector among them starts at an address ending in $FF.
         var ramVectors = plan.ZeroedGlobals.Concat(plan.NoinitGlobals).Concat(plan.FrameVariables)
             .SelectMany(e => e.Var.JumpVectorOffsets.Select(o => e.Offset + o)).ToList();
         items.Add(new Reserve(bss, plan.TotalSize, ramVectors));
 
+        var overlayAreas = program.Modules.Where(m => m.OverlayArea is not null)
+            .ToDictionary(m => m.Name, m => layout.Overlays[m.OverlayArea!]);
         var code = Assembler.Assemble(items, layout.Program, () =>
         {
             foreach (var (g, label) in imageLabels) g.Address = label.Address;
             foreach (var (v, offset) in plan.ZeroedGlobals.Concat(plan.NoinitGlobals)) v.Address = bss.Address + offset;
             foreach (var (v, offset) in plan.FrameVariables) v.Address = bss.Address + offset;
-        });
+        }, overlayAreas, program.Modules.Where(m => m.ImportedBy is not null && m.OverlayArea is not null).ToDictionary(m => m.Name, m => m.ImportedBy!.Pos));
         CheckFixedAddresses(program, platform, code, plan);
 
         // The file covers every byte from the lowest to the highest address used; gaps are zeros.
@@ -192,6 +214,16 @@ public static class TernCompiler
             apiModule = BinaryInterface.Generate(baseName + ".prg", apiName, table, fileRange, others);
         }
 
+        var overlayFiles = new List<OverlayFile>();
+        foreach (var module in program.Modules.Where(m => m.OverlayArea is not null))
+        {
+            if (!code.Overlays.TryGetValue(module.Name, out var segments)) continue;
+            int first = segments.Min(s => s.Address);
+            var overlayImage = new byte[segments.Max(s => s.Address + s.Bytes.Length) - first];
+            foreach (var (address, bytes) in segments) bytes.CopyTo(overlayImage, address - first);
+            overlayFiles.Add(new OverlayFile(module.Name, module.OverlayArea!, first, overlayImage));
+        }
+
         var report = new StringBuilder();
         report.AppendLine($"Code and data: ${loadAddress:X4}-${fileEnd - 1:X4} ({image.Length} bytes)");
         report.AppendLine(code.Variables is { } vars
@@ -206,6 +238,13 @@ public static class TernCompiler
                 report.AppendLine(plan.RegionUse.TryGetValue(name, out var use)
                     ? $"  region {name} {range}: {use.Size} of {range.Size} bytes used"
                     : $"  region {name} {range}: unused");
+        }
+        foreach (var area in layout.Overlays)
+        {
+            var inArea = overlayFiles.Where(o => o.Area == area.Key).ToList();
+            report.AppendLine($"Overlay area {area.Key} {area.Value}" + (inArea.Count == 0 ? ": no overlay" : ":"));
+            foreach (var o in inArea)
+                report.AppendLine($"  {o.Name}.prg: {o.Image.Length} of {area.Value.Size} bytes (${o.LoadAddress:X4}-${o.LoadAddress + o.Image.Length - 1:X4})");
         }
         if (binary)
         {
@@ -229,6 +268,7 @@ public static class TernCompiler
             Sections = code.Sections,
             Areas = code.Areas,
             Entries = entries,
+            Overlays = overlayFiles,
             ApiModule = apiModule,
             ApiModuleName = apiName,
         };
@@ -274,6 +314,13 @@ public static class TernCompiler
                     throw new CompileError(g.Pos,
                         $"'{g.Name}' at {range} overlaps the program and its variables at {used}. " +
                         $"Move '{g.Name}', or make the program smaller");
+            }
+            foreach (var module in code.Sections.Where(s => s.Overlay is not null && s.Size > 0).GroupBy(s => s.Overlay!))
+            {
+                var file = new AddressRange(module.Min(s => s.Address), module.Max(s => s.Address + s.Size - 1));
+                if (range.Overlaps(file))
+                    throw new CompileError(g.Pos,
+                        $"'{g.Name}' at {range} overlaps the overlay {module.Key} at {file}, which is loaded there. Move '{g.Name}' out of the overlay's area");
             }
             foreach (var (regionName, use) in plan.RegionUse)
                 if (range.Overlaps(use))
@@ -355,7 +402,7 @@ public static class TernCompiler
     /// </summary>
     private static IEnumerable<AsmItem> ImageBytes(VariableSymbol g, Func<FunctionSymbol, Label> labelOf)
     {
-        var bytes = ByteLayout(g, g.InitialBytes!);
+        var bytes = ByteLayout(g, g.InitialBytes ?? new byte[g.Type.Size]);
         var functions = FunctionBytes(g);
         int start = 0;
         foreach (var (at, (function, high)) in functions.OrderBy(f => f.Key))

@@ -351,6 +351,9 @@ public sealed class ImportDecl(SourcePos pos, string name) : Node(pos)
     public string Name { get; } = name;
     /// <summary>Module parameters set by <c>import name(P = value)</c>.</summary>
     public List<ImportArg> Args { get; init; } = [];
+    /// <summary>The overlay area in <c>import name @ area</c> (spec 8.5), or null.</summary>
+    public string? Area { get; init; }
+    public SourcePos AreaPos { get; init; }
 }
 
 /// <summary>One <c>P = value</c> in an import.</summary>

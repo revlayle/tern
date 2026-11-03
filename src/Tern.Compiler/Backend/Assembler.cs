@@ -7,15 +7,19 @@ using Encoder = Tern.Cpu.Encoder;
 namespace Tern.Compiler.Backend;
 
 /// <summary>A section (a function, a global's initial value, the startup code) at the address it was placed.</summary>
-public sealed record PlacedSection(string Name, int Address, int Size, bool IsFixed);
+/// <param name="Overlay">The overlay module the section is part of, or null.</param>
+public sealed record PlacedSection(string Name, int Address, int Size, bool IsFixed, string? Overlay = null);
 
 /// <summary>A stretch of a program area that code, data and variables were placed in.</summary>
 /// <param name="UsedEnd">The address after the last byte placed in <paramref name="Free"/>.</param>
 public sealed record PlacedArea(AddressRange Free, int UsedEnd, List<string> Names);
 
 public sealed class AssembledCode(
-    List<(int Address, byte[] Bytes)> segments, string listing, List<PlacedSection> sections, List<PlacedArea> areas, AddressRange? variables)
+    List<(int Address, byte[] Bytes)> segments, string listing, List<PlacedSection> sections, List<PlacedArea> areas, AddressRange? variables,
+    Dictionary<string, List<(int Address, byte[] Bytes)>> overlays)
 {
+    /// <summary>The bytes of each overlay module's file, by module name.</summary>
+    public Dictionary<string, List<(int Address, byte[] Bytes)>> Overlays { get; } = overlays;
     /// <summary>The bytes of the program file, in address order. Each segment is a run of adjacent sections.</summary>
     public List<(int Address, byte[] Bytes)> Segments { get; } = segments;
     public string Listing { get; } = listing;
@@ -49,7 +53,10 @@ public static class Assembler
     /// get their addresses here. Variables without an address during layout are assumed to be
     /// outside zero page.
     /// </param>
-    public static AssembledCode Assemble(IReadOnlyList<AsmItem> items, IReadOnlyList<AddressRange> areas, Action? beforeEncode = null)
+    /// <param name="overlayImports">Where each overlay module is imported, for the error when it does not fit.</param>
+    /// <param name="overlayAreas">For each overlay module, the area its sections start in (spec 8.5). Each module is laid out from the start of its area.</param>
+    public static AssembledCode Assemble(IReadOnlyList<AsmItem> items, IReadOnlyList<AddressRange> areas, Action? beforeEncode = null,
+        IReadOnlyDictionary<string, AddressRange>? overlayAreas = null, IReadOnlyDictionary<string, SourcePos>? overlayImports = null)
     {
         var slots = items.Select(i => new Slot(i)).ToList();
 
@@ -118,7 +125,7 @@ public static class Assembler
             }
             // The first section (the BASIC line and startup code, or a binary's jump table) must be at the
             // start of the first area: data placed there with '@' would push it away.
-            var firstSection = sections.FirstOrDefault(s => s.Info.FixedAddress is null);
+            var firstSection = sections.FirstOrDefault(s => s.Info.FixedAddress is null && s.Info.Overlay is null);
             if (firstSection is not null && areas.Count > 0)
             {
                 int firstEnd = Lay(firstSection, areas[0].First);
@@ -147,7 +154,7 @@ public static class Assembler
             var names = free.Select(_ => new List<string>()).ToArray();
 
             int cur = 0, pc = free[0].First;
-            foreach (var section in sections.Where(s => s.Info.FixedAddress is null))
+            foreach (var section in sections.Where(s => s.Info.FixedAddress is null && s.Info.Overlay is null))
             {
                 int end = Lay(section, pc);
                 while (end > free[cur].Last + 1)
@@ -159,6 +166,17 @@ public static class Assembler
                 }
                 pc = used[cur] = end;
                 names[cur].Add(section.Info.Name);
+            }
+
+            // Overlay modules: each one from the start of its area, so overlays in one area overlap.
+            foreach (var module in sections.Where(s => s.Info.Overlay is not null).GroupBy(s => s.Info.Overlay!))
+            {
+                var area = overlayAreas![module.Key];
+                int at = area.First;
+                foreach (var section in module) at = Lay(section, at);
+                if (at > area.Last + 1)
+                    throw new CompileError(overlayImports?.GetValueOrDefault(module.Key) ?? new SourcePos(1, 1),
+                        $"The overlay '{module.Key}' needs {at - area.First} bytes, but its area {area} has {area.Size}. Make the area larger, or split the module");
             }
 
             variables = null;
@@ -200,7 +218,7 @@ public static class Assembler
             }
         } while (changed);
 
-        var placed = sections.Select(s => new PlacedSection(s.Info.Name, slots[s.Start].Address, SizeOf(s), s.Info.FixedAddress is not null)).ToList();
+        var placed = sections.Select(s => new PlacedSection(s.Info.Name, slots[s.Start].Address, SizeOf(s), s.Info.FixedAddress is not null, s.Info.Overlay)).ToList();
         var fixedSections = placed.Where(p => p.IsFixed && p.Size > 0).ToList();
         for (int a = 0; a < fixedSections.Count; a++)
             for (int b = a + 1; b < fixedSections.Count; b++)
@@ -214,11 +232,21 @@ public static class Assembler
         beforeEncode?.Invoke();
 
         var segments = new List<(int Address, byte[] Bytes)>();
+        var overlaySegments = new Dictionary<string, List<(int Address, byte[] Bytes)>>();
         var bytes = new List<byte>();
         int segmentStart = 0;
+        string? overlay = null;
         void Flush()
         {
-            if (bytes.Count > 0) segments.Add((segmentStart, bytes.ToArray()));
+            if (bytes.Count > 0)
+            {
+                if (overlay is null) segments.Add((segmentStart, bytes.ToArray()));
+                else
+                {
+                    if (!overlaySegments.TryGetValue(overlay, out var list)) overlaySegments[overlay] = list = [];
+                    list.Add((segmentStart, bytes.ToArray()));
+                }
+            }
             bytes.Clear();
         }
         var listing = new StringBuilder();
@@ -226,9 +254,10 @@ public static class Assembler
         {
             switch (s.Item)
             {
-                case SectionStart:
+                case SectionStart begin:
                     Flush();
                     segmentStart = s.Address;
+                    overlay = begin.Overlay;
                     break;
                 case Instr i:
                 {
@@ -286,15 +315,20 @@ public static class Assembler
             listing.AppendLine($"${variablePadding.From:X4}  {variablePadding.Size} byte(s) of padding: no jmp (...) vector may start at $xxFF (before the variables; not in the file)");
 
         // Adjacent segments are one run of bytes.
-        var merged = new List<(int Address, byte[] Bytes)>();
-        foreach (var seg in segments.OrderBy(s => s.Address))
+        static List<(int Address, byte[] Bytes)> Merge(List<(int Address, byte[] Bytes)> segments)
         {
-            if (merged.Count > 0 && merged[^1].Address + merged[^1].Bytes.Length == seg.Address)
-                merged[^1] = (merged[^1].Address, merged[^1].Bytes.Concat(seg.Bytes).ToArray());
-            else
-                merged.Add(seg);
+            var merged = new List<(int Address, byte[] Bytes)>();
+            foreach (var seg in segments.OrderBy(s => s.Address))
+            {
+                if (merged.Count > 0 && merged[^1].Address + merged[^1].Bytes.Length == seg.Address)
+                    merged[^1] = (merged[^1].Address, merged[^1].Bytes.Concat(seg.Bytes).ToArray());
+                else
+                    merged.Add(seg);
+            }
+            return merged;
         }
-        return new AssembledCode(merged, listing.ToString(), placed, placedAreas, variables);
+        return new AssembledCode(Merge(segments), listing.ToString(), placed, placedAreas, variables,
+            overlaySegments.ToDictionary(p => p.Key, p => Merge(p.Value)));
     }
 
     /// <summary>

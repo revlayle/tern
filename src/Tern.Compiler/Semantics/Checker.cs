@@ -31,6 +31,8 @@ public sealed partial class Checker
     private Module _module = null!;
     private FunctionSymbol? _function;
     private int _loopDepth;
+    /// <summary>Inside a branch that a constant condition never takes: nothing in it keeps a function or variable in the program.</summary>
+    private bool _dead;
     private readonly HashSet<Register> _loopRegisters = [];
     /// <summary>The largest value of each enclosing loop counter whose bounds are constants (for index checks).</summary>
     private readonly Dictionary<VariableSymbol, long> _loopMax = [];
@@ -75,6 +77,20 @@ public sealed partial class Checker
             module.Declared = true;
         }
 
+        // "@ name" means a region or an address, never either depending on other declarations (spec 8.4).
+        foreach (var line in modules[^1].Syntax.Memory?.Lines.Where(l => l.Kind == "region") ?? [])
+            if (modules[^1].Scope.TryGetValue(line.Name!, out var clash) || modules[^1].Imports.ContainsKey(line.Name!))
+                throw new CompileError(line.Pos,
+                    $"The region '{line.Name}' has the name of {(clash is null ? "an imported module" : $"a {KindName(clash)} of the main file (line {clash.Pos.Line})")}, so '@ {line.Name}' would be ambiguous. Rename the region");
+
+        foreach (var import in modules[^1].Syntax.Imports.Where(i => i.Area is not null))
+        {
+            if (_layout.Overlays.ContainsKey(import.Area!)) continue;
+            throw new CompileError(import.AreaPos, _layout.Regions.ContainsKey(import.Area!)
+                ? $"'{import.Area}' is a region, not an overlay area; '@' on an import names an area declared with 'overlay {import.Area}' in the memory block"
+                : $"The memory block has no overlay area '{import.Area}'. Add a line 'first..=last overlay {import.Area}' to it");
+        }
+
         foreach (var g in _globals)
             if (g.FixedAddress is int fixedAt && _layout.IsVolatile(fixedAt, fixedAt + g.Type.Size - 1)) g.InVolatileArea = true;
 
@@ -112,6 +128,7 @@ public sealed partial class Checker
             _module = module;
             foreach (var f in module.Syntax.Functions.Where(f => f.Address is null)) CheckFunctionBody(f);
         }
+        CheckInlineCallsBetweenOverlays();
         // Struct fields become plain variables, arrays and pointers for the code generator.
         foreach (var module in modules)
             foreach (var f in module.Syntax.Functions) Lowering.Apply(f.Body);
@@ -249,9 +266,15 @@ public sealed partial class Checker
     }
 
     /// <summary>Records that the function being checked uses a global, so it is kept in the program.</summary>
-    private void UseGlobal(VariableSymbol v)
+    private void UseGlobal(VariableSymbol v, SourcePos pos)
     {
         if (v.Kind != VariableKind.Global || _function is null) return;
+        // Overlays in one area share their memory: another one's variables are not there while this one runs.
+        if (_function.OverlayArea is { } area && v.OverlayArea == area && v.Module != _function.Module && v.FixedAddress is null && v.Region is null)
+            throw new CompileError(pos,
+                $"'{v.Name}' belongs to {v.Module!.Name}, which is in the same overlay area '{area}' as {_function.Module!.Name}. They are never loaded together and share their memory. " +
+                "Keep shared state in a resident module or the main file");
+        if (_dead) return;
         _function.UsedGlobals.Add(v);
         // A table of function addresses keeps those functions in the program.
         foreach (var (_, f) in v.Storage.FunctionAddresses) _function.UsedAddresses.Add(f);
@@ -401,6 +424,7 @@ public sealed partial class Checker
             throw new CompileError(decl.Pos, $"'{decl.Name}' is a built-in function; choose another name");
         var fn = new FunctionSymbol(_module.Qualify(decl.Name), decl.Pos) { Declaration = decl, IsInterrupt = decl.IsInterrupt, IsInline = decl.IsInline };
         decl.Symbol = fn;
+        fn.Module = _module;
 
         var usedRegisters = new HashSet<char>();
         foreach (var p in decl.Parameters)
@@ -533,6 +557,7 @@ public sealed partial class Checker
             IsData = decl.IsData, NoInit = decl.IsNoinit, DeclaredVolatile = decl.IsVolatile,
         };
         decl.Symbol = v;
+        v.Module = _module;
         ApplyPlacement(decl, v, allowAddress: true);
         if (decl.IsNoinit && decl.Init is not null)
             throw new CompileError(decl.Init.Pos, $"'{decl.Name}' is noinit, so it cannot have an initial value. Leave out one or the other");
@@ -812,16 +837,29 @@ public sealed partial class Checker
                 break;
             case BlockStmt b: CheckBlock(b); break;
             case IfStmt i:
+            {
+                // A constant condition compiles only the branch taken: calls, variables and addresses in the
+                // other one are checked but not recorded, so what only it uses is left out of the program (spec 2.2).
                 CheckCondition(i.Condition);
+                bool wasDead = _dead;
+                _dead = wasDead || i.Condition.ConstValue == 0;
                 CheckBlock(i.Then);
+                _dead = wasDead || i.Condition.ConstValue is not null and not 0;
                 if (i.Else is not null) CheckStmt(i.Else);
+                _dead = wasDead;
                 break;
+            }
             case WhileStmt w:
+            {
                 CheckCondition(w.Condition);
+                bool wasDead = _dead;
+                _dead = wasDead || w.Condition.ConstValue == 0;
                 _loopDepth++;
                 CheckBlock(w.Body);
                 _loopDepth--;
+                _dead = wasDead;
                 break;
+            }
             case ForStmt f: CheckFor(f); break;
             case MatchStmt m: CheckMatch(m); break;
             case AsmStmt a: CheckAsm(a); break;
@@ -1160,7 +1198,7 @@ public sealed partial class Checker
                         break;
                     case VariableSymbol v:
                         n.Symbol = v;
-                        UseGlobal(v);
+                        UseGlobal(v, n.Pos);
                         e.Type = v.Type;
                         v.Weight += Weight();
                         if (v.Type.IsStruct) e.Place = new StructPlace(PlaceKind.Memory, 0, Base: v);
@@ -1487,10 +1525,10 @@ public sealed partial class Checker
             throw new CompileError(pos,
                 $"'{f.Name}' takes '{memoryParam.Name}' in memory, which a call through an address cannot set. " +
                 $"Pass it in a register ({memoryParam.Name}: {memoryParam.Type} using A)");
-        f.AddressTaken = true;
+        if (!_dead) f.AddressTaken = true;
         c.FunctionAddress = f;
         c.Type = TernType.U16;
-        _function?.UsedAddresses.Add(f);
+        if (!_dead) _function?.UsedAddresses.Add(f);
     }
 
     /// <summary><c>addr(player.name)</c>: a field of a struct variable or of a struct at a fixed address.</summary>
@@ -1558,7 +1596,7 @@ public sealed partial class Checker
                         if (!v.InMemory) throw new CompileError(name.Pos, $"'{name.Name}' lives in a register and has no address");
                         name.Symbol = v;
                         name.Type = v.Type;
-                        UseGlobal(v);
+                        UseGlobal(v, name.Pos);
                         if (v.Type.IsStructArray && !v.Type.Linear)
                             throw new CompileError(name.Pos,
                                 $"'{name.Name}' is stored as one table per field, so there is no record to point to. Declare it 'linear var' to store whole records");
@@ -1603,7 +1641,54 @@ public sealed partial class Checker
                 throw new CompileError(c.Pos, $"'{fn.Name}' takes a fixed input in {reg}, which holds the loop variable. Remove 'using {reg}' from the loop");
         c.Function = fn;
         c.Type = fn.ReturnType;
-        _function?.Callees.Add(fn);
+        if (_function is not null) AddCall(_function, fn, c.Pos);
+    }
+
+    /// <summary>Calls from an overlay's function to an inline function of another module, for <see cref="CheckInlineCallsBetweenOverlays"/>.</summary>
+    private readonly List<(FunctionSymbol Caller, FunctionSymbol Callee, SourcePos Pos)> _inlineCalls = [];
+
+    /// <summary>
+    /// An inline function is copied into its caller, so what its body uses must be there when the caller
+    /// runs: an inline function of another overlay in the same area may not use that overlay's variables
+    /// or call its functions (spec 8.5).
+    /// </summary>
+    private void CheckInlineCallsBetweenOverlays()
+    {
+        foreach (var (caller, callee, pos) in _inlineCalls)
+        {
+            var area = caller.OverlayArea;
+            if (callee.OverlayArea != area) continue;
+            var seen = new HashSet<FunctionSymbol>();
+            void Visit(FunctionSymbol inline)
+            {
+                if (!seen.Add(inline)) return;
+                foreach (var g in inline.UsedGlobals.Where(g => g.OverlayArea == area && g.Module != caller.Module && g.FixedAddress is null && g.Region is null))
+                    throw new CompileError(pos,
+                        $"'{caller.Name}' calls the inline function '{callee.Name}', which is copied into it and uses '{g.Name}', a variable of {g.Module!.Name}. " +
+                        $"{caller.Module!.Name} and {g.Module.Name} are both in the overlay area '{area}', never loaded together, and share their memory. Keep shared state in a resident module or the main file");
+                foreach (var next in inline.Callees)
+                    if (next.IsInline) Visit(next);
+                    else if (next.OverlayArea == area && next.Module != caller.Module)
+                        throw new CompileError(pos,
+                            $"'{caller.Name}' calls the inline function '{callee.Name}', which is copied into it and calls '{next.Name}'. " +
+                            $"{caller.Module!.Name} and {next.Module!.Name} are both in the overlay area '{area}', so they are never loaded together. Call between them from resident code");
+            }
+            Visit(callee);
+        }
+    }
+
+    /// <summary>
+    /// Records a call. Two overlays in the same area are never loaded together, so one cannot call
+    /// the other (spec 8.5).
+    /// </summary>
+    private void AddCall(FunctionSymbol caller, FunctionSymbol callee, SourcePos pos)
+    {
+        if (!_dead) caller.Callees.Add(callee);
+        if (!_dead && callee.IsInline && caller.OverlayArea is not null && callee.Module != caller.Module) _inlineCalls.Add((caller, callee, pos));
+        if (caller.OverlayArea is { } area && callee.OverlayArea == area && callee.Module != caller.Module && !callee.IsInline)
+            throw new CompileError(pos,
+                $"'{caller.Name}' calls '{callee.Name}', but the modules {caller.Module!.Name} and {callee.Module!.Name} are both in the overlay area '{area}', so they are never loaded together. " +
+                "Call between them from resident code, or put one of them in another area");
     }
 
     // ---------- Type rules ----------
@@ -1826,7 +1911,10 @@ public sealed partial class Checker
         bool OwnHandler(FunctionSymbol root, VariableSymbol g) =>
             root.IsInterrupt && moduleOf[g].Scope.Values.Contains(root);
         // Or through an interrupt fn of the module that is called as a part (decision 34).
-        bool OwnPart(FunctionSymbol f, VariableSymbol g) => f.IsInterrupt && moduleOf[g].Scope.Values.Contains(f);
+        // A function of the module that only the module's own interrupt fns call is on that side too (spec 8.1).
+        var handlerSide = HandlerSideFunctions(ordered);
+        bool OwnPart(FunctionSymbol f, VariableSymbol g) =>
+            (f.IsInterrupt || handlerSide.Contains(f)) && moduleOf[g].Scope.Values.Contains(f);
 
         var firstUser = new Dictionary<VariableSymbol, (FunctionSymbol Function, FunctionSymbol Root)>();
         foreach (var f in ordered.Where(f => f.FixedAddress is null))
@@ -1834,7 +1922,7 @@ public sealed partial class Checker
                 foreach (var used in f.UsedGlobals)
                 {
                     var g = used.AliasOf ?? used;
-                    if (!privateGlobals.Contains(g) || OwnHandler(root, g) || OwnPart(f, g)) continue;
+                    if (!privateGlobals.Contains(g) || OwnPart(f, g) || (OwnHandler(root, g) && handlerSide.Contains(f))) continue;
                     if (!firstUser.TryGetValue(g, out var first))
                         firstUser[g] = (f, root);
                     else if (first.Root != root)
@@ -1847,6 +1935,34 @@ public sealed partial class Checker
                             $"Call functions of this module from only main or only one interrupt handler");
                     }
                 }
+    }
+
+    /// <summary>
+    /// The functions that only interrupt fns of their own module call, directly or through other such
+    /// functions: they run on the handler side of their module (spec 8.1). A function whose address is taken
+    /// may be called from anywhere, so it is not one of them.
+    /// </summary>
+    private static HashSet<FunctionSymbol> HandlerSideFunctions(List<FunctionSymbol> ordered)
+    {
+        var callers = ordered.ToDictionary(f => f, _ => new List<FunctionSymbol>());
+        foreach (var f in ordered)
+            foreach (var callee in f.Callees)
+                if (callers.TryGetValue(callee, out var list)) list.Add(f);
+        var side = new HashSet<FunctionSymbol>();
+        bool changed;
+        do
+        {
+            changed = false;
+            foreach (var f in ordered)
+            {
+                if (f.IsInterrupt || f.FixedAddress is not null || f.AddressTaken || f.Module is null || side.Contains(f)) continue;
+                var from = callers[f];
+                if (from.Count == 0 || !from.All(c => c.Module == f.Module && (c.IsInterrupt || side.Contains(c)))) continue;
+                side.Add(f);
+                changed = true;
+            }
+        } while (changed);
+        return side;
     }
 
     /// <summary>

@@ -100,6 +100,10 @@ public abstract class Symbol(string name, SourcePos pos)
 {
     public string Name { get; } = name;
     public SourcePos Pos { get; } = pos;
+    /// <summary>The file a function or global variable is declared in; null for other symbols and for locals.</summary>
+    public Module? Module { get; set; }
+    /// <summary>The overlay area of that file (spec 8.5), or null for resident code and data.</summary>
+    public string? OverlayArea => Module?.OverlayArea;
 }
 
 public sealed class ConstSymbol(string name, SourcePos pos, TernType type, long value) : Symbol(name, pos)
@@ -158,6 +162,8 @@ public sealed class VariableSymbol(string name, SourcePos pos, TernType type, Va
     /// <summary>Set for <c>@ region</c> variables and data: the region's name. The allocator gives them an address in it.</summary>
     public string? Region { get; set; }
     public bool RequireZeroPage { get; set; }
+    /// <summary>A global of an overlay module that is placed with the module's code (not at a fixed address or in a region).</summary>
+    public bool IsOverlayImage => Kind == VariableKind.Global && OverlayArea is not null && FixedAddress is null && Region is null;
     /// <summary>Set for loop variables that live in a register (<c>using X</c>). They have no memory.</summary>
     public Register? Register { get; set; }
     /// <summary>Set for parameters passed in a register. The function stores them into its frame on entry.</summary>

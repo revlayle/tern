@@ -362,9 +362,9 @@ fn start() {
 
 // ---------- Raster side ----------
 
-// Writes the registers of display list entry e to its hardware sprite. An interrupt fn, so that
-// it is a part of raster() and may use the private tables (6.3).
-private interrupt fn put(e: u8 using Y) {
+// Writes the registers of display list entry e to its hardware sprite. Only raster() calls it, so it
+// is on the handler side of this module and may use the private tables (spec 8.1).
+private fn put(e: u8 using Y) {
     asm {
         ldx d_slot,y
         lda d_col,y

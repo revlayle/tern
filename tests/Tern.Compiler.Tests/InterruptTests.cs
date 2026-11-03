@@ -221,6 +221,79 @@ public class InterruptTests
         Assert.Equal(r.Interrupts, r.U16("seen"));
     }
 
+    private const string Main48 = """
+        import c64
+        import timer
+        var seen: u16
+        fn main() {
+            c64.kernal_off()
+            c64.set_irq(addr(timer.tick))
+            c64.interrupts_on()
+            for _ in 0..200 { seen = timer.now() }
+        }
+        """;
+
+    [Fact]
+    public void A_helper_called_only_from_the_modules_handler_is_on_the_handler_side()
+    {
+        // Spec 8.1: bump and bump2 are plain functions, called only from tick, so they may use the private variable.
+        var r = RunWithModules(Main48, [("timer", """
+            private var ticks: u16
+            private fn bump2() { ticks += 1 }
+            private fn bump() { bump2() }
+            interrupt fn tick() { bump() }
+            fn now() -> u16 { return ticks }
+            """)], irqEvery: 300);
+        Assert.True(r.Interrupts > 2);
+        Assert.Equal(r.Interrupts, r.U16("seen"));
+    }
+
+    [Theory]
+    [InlineData("""
+        private var ticks: u16
+        private fn bump() { ticks += 1 }
+        interrupt fn tick() { bump() }
+        fn poke() { bump() }
+        fn now() -> u16 { return ticks }
+        """)]                                           // the helper is also called from main-side code
+    [InlineData("""
+        private var ticks: u16
+        fn bump() { ticks += 1 }
+        interrupt fn tick() { bump() }
+        fn now() -> u16 { return ticks }
+        """)]                                           // a public helper that the main file calls too (below)
+    public void A_helper_also_called_from_main_is_still_an_error(string timer)
+    {
+        // Main also calls the module's helper: a function reached from both sides is not on the handler side.
+        string call = timer.Contains("fn poke") ? "timer.poke()" : "timer.bump()";
+        string main = Main48.Replace("seen = timer.now() }", "seen = timer.now(); " + call + " }");
+        var e = Assert.Throws<CompileError>(() => WithModules([("timer", timer)], path => TernCompiler.Compile(main, null, path, "lib")));
+        Assert.Contains("a private variable of its module", e.Description);
+        Assert.Contains("'timer.ticks'", e.Description);
+    }
+
+    [Fact]
+    public void A_helper_called_by_the_modules_handler_and_by_a_handler_of_another_file_is_still_an_error()
+    {
+        var e = Assert.Throws<CompileError>(() => WithModules([("timer", """
+            private var ticks: u16
+            fn bump() { ticks += 1 }
+            interrupt fn tick() { bump() }
+            fn now() -> u16 { return ticks }
+            """)], path => TernCompiler.Compile("""
+            import c64
+            import timer
+            var seen: u16
+            interrupt fn frame() { timer.bump() }
+            fn main() {
+                c64.kernal_off()
+                c64.set_irq(addr(frame))
+                seen = timer.now()
+            }
+            """, null, path, "lib")));
+        Assert.Contains("a private variable of its module", e.Description);
+    }
+
     [Fact]
     public void A_handler_of_another_module_may_not_share_a_private_variable()
     {

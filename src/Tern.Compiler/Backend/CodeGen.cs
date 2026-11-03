@@ -59,7 +59,7 @@ public sealed class CodeGen
         foreach (var f in _program.Functions.Where(f => f.FixedAddress is null && !f.IsInline))
         {
             GenFunction(f);
-            all.Add(new SectionStart(f.Name));
+            all.Add(new SectionStart(f.Name, Overlay: f.OverlayArea is null ? null : f.Module!.Name));
             // An interrupt handler's body is optimized before its saving code is added.
             if (!f.Declaration!.IsAsm && !(f.IsInterrupt && !f.IsPart)) Optimizer.Run(_out, f);
             FunctionItems[f] = _out.ToList();
@@ -391,6 +391,13 @@ public sealed class CodeGen
 
     private void GenIf(IfStmt i)
     {
+        // A constant condition: only the branch taken exists (the checker did not keep what the other one uses).
+        if (i.Condition.ConstValue is long constant)
+        {
+            if (constant != 0) GenBlock(i.Then);
+            else if (i.Else is not null) GenStmt(i.Else);
+            return;
+        }
         var end = NewLabel("endif");
         if (i.Else is null)
         {

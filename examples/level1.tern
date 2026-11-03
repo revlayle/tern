@@ -1,0 +1,13 @@
+// The first level of the overlay example (levels.tern). It is loaded into the overlay area from disk.
+// 'lives' has an initial value, which loading the file sets again every time.
+import mem
+
+var lives: u8 = 3
+
+// Fill the top half of the screen with 'A' and show the lives in the corner.
+fn draw() {
+    lives += 1
+    mem.fill($0400 as ptr u8, screen'A', 480)
+    var screen: ptr u8 = $0400 as ptr u8
+    screen[0] = screen'0' + lives
+}

@@ -46,6 +46,12 @@ try
     File.WriteAllBytes(output, result.Prg);
     File.WriteAllText(Path.ChangeExtension(output, ".lst"), result.Listing);
     File.WriteAllText(Path.ChangeExtension(output, ".vs"), result.ViceLabels);
+    foreach (var overlay in result.Overlays)
+    {
+        string file = Path.Combine(Path.GetDirectoryName(Path.GetFullPath(output))!, overlay.Name + ".prg");
+        File.WriteAllBytes(file, overlay.Prg);
+        Console.WriteLine($"Wrote {file}");
+    }
     if (result.ApiModule is not null)
     {
         string api = Path.Combine(Path.GetDirectoryName(Path.GetFullPath(output))!, result.ApiModuleName + ".tern");
