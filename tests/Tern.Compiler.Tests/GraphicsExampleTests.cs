@@ -95,4 +95,35 @@ public sealed class GraphicsExampleTests
 
         Assert.True(quiet > 100, $"{quiet} checks");
     }
+
+    /// <summary>Cycles of the program's handler, from the interrupt to its rti, for docs/status.md.</summary>
+    [Fact]
+    public void Handler_cycles_at_the_top_of_the_frame_and_per_group()
+    {
+        var path = AsmTests.FindExample("scroller.tern");
+        var source = File.ReadAllText(path);
+        var tops = new List<long>();
+        var groups = new List<long>();
+        long start = -1;
+        bool isTop = false;
+        int handler = 0, interrupts = 0;
+        _ = new SpriteTests.Rig(source, 120L * 312 * 63, pointerBase: 0x83F8, stealCycles: false, onStep: r =>
+        {
+            if (handler == 0) handler = r.Address("frame");
+            if (r.Interrupts != interrupts)
+            {
+                interrupts = r.Interrupts;
+                start = r.Cpu.Cycles;
+                isTop = r.Vic.RasterLine < 40 && r.U8("sprites.next") == 0;
+            }
+            else if (start >= 0 && r.Ram.Bytes[r.Cpu.PC] == 0x40 && r.Cpu.PC >= handler && r.Cpu.PC < handler + 200)
+            {
+                (isTop ? tops : groups).Add(r.Cpu.Cycles + 6 - start);
+                start = -1;
+            }
+        });
+        Console.WriteLine($"handler: top of frame (8 sprites + scroll.top) {tops.Skip(2).Average():F0} cycles, {groups.Count} other interrupts, mean {groups.Average():F0}, max {groups.Max()}");
+        Assert.True(tops.Count > 50);
+        Assert.True(tops.Skip(2).Max() < 2500, $"{tops.Max()}");
+    }
 }
