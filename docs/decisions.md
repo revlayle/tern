@@ -278,3 +278,8 @@ Decided:
 - **Labels:** an `emit`'s local labels are its own; labels shared between fragments are compile-time values (`label()`), the one new piece of machinery.
 - **No Tern-statement generation, no macros, no textual preprocessor.** Generators, module parameters and `assert` are the compile-time tools. Reason: generated Tern statements would be type checked after expansion, which makes errors hard to follow, and functions (`inline fn`) already cover reuse in Tern code.
 - **No `unroll`.** Rejected: a compile-time repeat statement in Tern and asm (as Prog8's `unroll`), built before generators. A generator does everything it does, and two ways to repeat code would be one too many. M11's scroller writes its unrolled copies by hand in asm, as spec 10.1 already says.
+
+## 2026-11-03: Tern's purpose, and a standalone assembler far off
+
+- **Tern is a language first; its assembler serves the mixed use.** A whole program could be written as asm, but that is not the purpose: readable code that compiles to efficient 6502 code, with assembly where a routine needs it (goals 1 and 6). An assembler feature is added when Tern programs mixing in asm need it (generators for speedcode, alignment for tables), not because standalone assemblers have it; macros stay out.
+- **A standalone assembler extracted from Tern is a far-off goal**, after the compiler is complete (roadmap, last). Not planned.

@@ -223,3 +223,7 @@ New platforms, last:
 - 65C02 CPU variant and Commander X16 platform
 - NES: iNES output, `@ bank(n)`, calls between banks (spec 14.1)
 - Apple II and Atari 8-bit platforms
+
+After the compiler is complete (far off, not planned):
+
+- A standalone assembler extracted from Tern: the asm syntax, `emit` generators, the memory block and the listing, for `.asm` files with no Tern code
