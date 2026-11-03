@@ -28,37 +28,27 @@ public sealed class SpriteTests
             }
             _updates = (_updates + 1) & 255;
             var list = new List<int>();
-            int lastOld = 0, lastS = 0;
+            int last = 0;
             foreach (int v in Order)
             {
                 if ((s[v].Flags & Visible) == 0) continue;
                 int n = list.Count;
                 if (n >= 8 && ((s[v].Y - s[list[n - 8]].Y) & 255) < Gap)
                 {
-                    if (flicker)
+                    // Busy: with flicker, the sprite that has waited longer takes the last entry's place.
+                    if (flicker && ((_updates - _shown[v]) & 255) > ((_updates - _shown[last]) & 255))
                     {
-                        int age = (_updates - _shown[v]) & 255;
-                        if (age > lastOld)
-                        {
-                            _shown[lastS] = (_updates - lastOld) & 255;
-                            list[n - 1] = v;
-                            _shown[v] = _updates;
-                            lastS = v;
-                            lastOld = age;
-                        }
+                        list[n - 1] = v;
+                        last = v;
                     }
                 }
                 else
                 {
-                    if (flicker)
-                    {
-                        lastOld = (_updates - _shown[v]) & 255;
-                        _shown[v] = _updates;
-                        lastS = v;
-                    }
                     list.Add(v);
+                    last = v;
                 }
             }
+            if (flicker) foreach (int v in list) _shown[v] = _updates;
             return list;
         }
     }
@@ -72,7 +62,7 @@ public sealed class SpriteTests
         public Cpu6502 Cpu { get; }
         public int Interrupts { get; private set; }
 
-        public Rig(string source, long cycles, int pointerBase = 0x07F8)
+        public Rig(string source, long cycles, int pointerBase = 0x07F8, Action<Rig>? onStep = null)
         {
             Result = TernCompiler.Compile(source);
             Ram.Load((ushort)Result.LoadAddress, Result.Image);
@@ -84,6 +74,7 @@ public sealed class SpriteTests
                 Cpu.Step();
                 Vic.Tick();
                 if (Vic.IrqPending && Cpu.Irq()) Interrupts++;
+                onStep?.Invoke(this);
             }
         }
 
@@ -333,7 +324,7 @@ public sealed class SpriteTests
     }
 
     [Fact]
-    public void Without_flicker_the_flicker_code_is_left_out()
+    public void Update_calls_the_flicker_build_only_with_FLICKER()
     {
         const string Main = """
             import c64
@@ -346,10 +337,27 @@ public sealed class SpriteTests
         string main = Main;
         var plain = TernCompiler.Compile(string.Format(main, ""));
         var flicker = TernCompiler.Compile(string.Format(main, ", FLICKER = true"));
-        Assert.True(plain.Image.Length < flicker.Image.Length);
+        Assert.DoesNotContain("jsr sprites.build_flicker", plain.Listing);
+        Assert.Contains("jsr sprites.build_flicker", flicker.Listing);
     }
 
     /// <summary>Cycle counts for docs/status.md; the limits are generous so only a large slowdown fails.</summary>
+    [Fact]
+    public void Update_of_32_sprites_with_flicker_costs()
+    {
+        var lib = new Library("import c64\nimport sprites(COUNT = 32, FLICKER = true)", "sprites.init()\nsprites.update()");
+        for (int i = 0; i < 32; i++)
+        {
+            lib.Ram.Bytes[lib.Address("sprites.ypos") + i] = (byte)(30 + i * 7);
+            lib.Ram.Bytes[lib.Address("sprites.flags") + i] = Visible;
+        }
+        lib.Call("sprites.init");
+        lib.Call("sprites.update");
+        long again = lib.Call("sprites.update");
+        Console.WriteLine($"update(32 sprites, FLICKER): {again} cycles");
+        Assert.True(again < 16000, $"{again} cycles");
+    }
+
     [Theory]
     [InlineData(false, 9500)]
     [InlineData(true, 21000)]

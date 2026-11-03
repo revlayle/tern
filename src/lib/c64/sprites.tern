@@ -69,6 +69,7 @@ var frames: u8
 
 private var order: [u8; COUNT]      // virtual sprite numbers, sorted by y between frames
 private var shown: [u8; COUNT]      // FLICKER: the update() count when each last made the display list
+private var disp: [u8; COUNT]       // FLICKER: the sprites on the display list being built
 private var updates: u8
 
 // The display list, in two halves of COUNT entries; one is being built, one is shown. The
@@ -99,6 +100,8 @@ private var tmp_bit: u8
 private var tmp_y: u8
 private var tmp_e: u8
 private var tmp_n: u8
+private var tmp_ls: u8
+private var tmp_a: u8
 private var tmp_p: u8
 
 private data BIT: [u8; 8] = [1, 2, 4, 8, 16, 32, 64, 128]
@@ -235,34 +238,84 @@ private asm fn build(tb: u8 using A) -> u8 using A {
     lda tmp_n
 }
 
-// The same with FLICKER: a sprite that finds its hardware sprite busy takes the place of the
-// last entry if it has waited longer than that one, so the sprites in a crowd take turns.
-private fn build_flicker(tb: u8) -> u8 {
-    var n: u8 = 0
-    var last_s: u8 = 0
-    var last_old: u8 = 0
-    for p in 0..COUNT {
-        var s = order[p]
-        if flags[s] & VISIBLE != 0 {
-            if n >= 8 && ypos[s] - d_y[tb + n - 8] < GAP {
-                var age = updates - shown[s]
-                if age > last_old {
-                    shown[last_s] = updates - last_old
-                    emit((n - 1) & 7, s, tb + n - 1)
-                    shown[s] = updates
-                    last_s = s
-                    last_old = age
-                }
-            } else {
-                last_old = updates - shown[s]
-                shown[s] = updates
-                last_s = s
-                emit(n & 7, s, tb + n)
-                n += 1
-            }
-        }
-    }
-    return n
+// The same with FLICKER: a sprite that finds its hardware sprite busy takes the place of the last
+// entry if it has gone without being shown longer than that one (the ages are counted in update()
+// calls), so the sprites in a crowd take turns. Sprites shown are stamped with the call number
+// at the end.
+private asm fn build_flicker(tb: u8 using A) -> u8 using A {
+    sta tmp_e
+    lda #0
+    sta tmp_n
+    sta tmp_p
+    sta tmp_ls
+.loop:
+    ldx tmp_p
+    lda order,x
+    tax                         // the sprite
+    lda flags,x
+    and #VISIBLE
+    beq .next
+    ldy tmp_e
+    lda tmp_n
+    cmp #8
+    bcc .emit
+    lda ypos,x
+    sec
+    sbc d_y-8,y
+    cmp #GAP
+    bcs .emit
+    lda updates                 // busy: has this one waited longer than the last on the list?
+    sec
+    sbc shown,x
+    sta tmp_a
+    ldx tmp_ls
+    lda updates
+    sec
+    sbc shown,x
+    cmp tmp_a
+    bcs .next                   // no: leave it out
+    ldx tmp_p
+    lda order,x
+    tax
+    stx tmp_ls
+    ldy tmp_n
+    dey
+    txa
+    sta disp,y
+    tya
+    and #7                      // the last entry's hardware sprite
+    ldy tmp_e
+    dey
+    jsr emit
+    jmp .next
+.emit:
+    stx tmp_ls
+    ldy tmp_n
+    txa
+    sta disp,y
+    tya
+    and #7
+    ldy tmp_e
+    jsr emit
+    inc tmp_n
+    inc tmp_e
+.next:
+    inc tmp_p
+    lda tmp_p
+    cmp #COUNT
+    bne .loop
+    ldy #0
+    cpy tmp_n
+    beq .done
+.stamp:
+    ldx disp,y
+    lda updates
+    sta shown,x
+    iny
+    cpy tmp_n
+    bne .stamp
+.done:
+    lda tmp_n
 }
 
 // Sorts the sprites and builds the display list for the next frame. Call it once per frame,

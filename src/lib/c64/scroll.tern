@@ -19,10 +19,10 @@ module scroll(SCREEN_A: u16 = $8000, SCREEN_B: u16 = $8400, COLORS: bool = false
 //         scroll.move(1, 0)                  // one pixel to the right: -1, 0 or 1 in each direction
 //     }
 //
-// Each move() call also does a ninth of the preparation, so the work is spread over the frames. A
-// camera that moves at one pixel per frame does a coarse step every 8 frames without a stall. A
-// move that turns around, or the first one after standing still, may have to finish the
-// preparation at once (about 14,000 cycles).
+// Each move() call also does its share of the preparation (17 steps of about 1,000 cycles), spread
+// over the pixels left before the coarse step. A camera that moves at one pixel per frame does a
+// coarse step every 8 frames without a stall. A move that turns around, or the first one after
+// standing still, may have to do all of it at once (about 17,000 cycles).
 //
 // A diagonal move needs both directions to reach their coarse step in the same frame, so it
 // first finishes the axis that is further from its step (up to 7 frames of a straight move) and then
@@ -71,7 +71,7 @@ private var cell: ptr u8                // the map cell at the top left of the v
 private var front: u8                   // 0: SCREEN_A is shown, 1: SCREEN_B
 private var key_x: i8                   // the direction the hidden screen is prepared for
 private var key_y: i8
-private var prep_step: u8               // 0-7: copy chunks done, 8: edge filled, 9: complete
+private var prep_step: u8               // 0-15: copy chunks done, 16: edge filled, 17: complete
 private var copy_pos: u16
 private var colors_due: bool
 // The register values top() writes.
@@ -85,7 +85,31 @@ private data SRC_OFF: [u16; 9] = [0, 0, 0, 0, 0, 1, 39, 40, 41]
 private data DST_OFF: [u16; 9] = [41, 40, 39, 1, 0, 0, 0, 0, 0]
 private data LEN: [u16; 9] = [959, 960, 961, 999, 1000, 999, 961, 960, 959]
 
-const CHUNK = 125
+// The hidden screen is prepared in COPY_STEPS chunks of CHUNK bytes and one step for the new column
+// and row.
+const CHUNK = 64
+const COPY_STEPS = 16
+const STEPS = 17
+
+// Copies groups * 4 bytes (at most 252), first byte first, 14 cycles a byte.
+private asm fn copy4(dst: ptr u8, src: ptr u8, groups: u8 using X) {
+    ldy #0
+.loop:
+    lda (src),y
+    sta (dst),y
+    iny
+    lda (src),y
+    sta (dst),y
+    iny
+    lda (src),y
+    sta (dst),y
+    iny
+    lda (src),y
+    sta (dst),y
+    iny
+    dex
+    bne .loop
+}
 
 // ---------- Setup ----------
 
@@ -220,7 +244,20 @@ fn move(dx: i8, dy: i8) {
     }
 
     if !cross_x && !cross_y {
-        prepare()
+        // The pixels left before the step; the preparation is spread evenly over them.
+        var dist: u8 = 255
+        if mx > 0 { dist = 7 - fine_x }
+        if mx < 0 { dist = fine_x }
+        if my > 0 && 7 - fine_y < dist { dist = 7 - fine_y }
+        if my < 0 && fine_y < dist { dist = fine_y }
+        var left: u8 = STEPS - prep_step
+        var steps: u8 = 0
+        while left >= dist {
+            left -= dist
+            steps += 1
+        }
+        if left > 0 { steps += 1 }
+        for _ in 0..steps { prepare() }
         if mx != 0 { fine_x = (fine_x as i8 + mx) as u8 }
         if my != 0 { fine_y = (fine_y as i8 + my) as u8 }
         commit()
@@ -228,7 +265,7 @@ fn move(dx: i8, dy: i8) {
     }
 
     // A coarse step: show the hidden screen.
-    while prep_step < 9 { prepare() }
+    while prep_step < STEPS { prepare() }
     cell = next_cell()
     front = 1 - front
     if mx > 0 {
@@ -265,20 +302,29 @@ private fn next_cell() -> ptr u8 {
 
 // One step of preparing the hidden screen: a chunk of the copy, then the new column and row.
 private fn prepare() {
-    if prep_step >= 9 { return }
+    if prep_step >= STEPS { return }
     var shown: ptr u8 = SCREEN_A as ptr u8
     var hidden: ptr u8 = SCREEN_B as ptr u8
     if front != 0 {
         shown = SCREEN_B as ptr u8
         hidden = SCREEN_A as ptr u8
     }
-    if prep_step < 8 {
+    if prep_step < COPY_STEPS {
         var k = (4 + key_x + key_y + key_y + key_y) as u8     // 4 + dx + 3 * dy
         var len = LEN[k]
         if copy_pos < len {
             var count: u16 = len - copy_pos
             if count > CHUNK { count = CHUNK }
-            mem.copy(hidden + DST_OFF[k] + copy_pos, shown + SRC_OFF[k] + copy_pos, count)
+            var to = hidden + DST_OFF[k] + copy_pos
+            var from = shown + SRC_OFF[k] + copy_pos
+            var n = count as u8
+            if n >= 4 { copy4(to, from, n >> 2) }
+            var rest = n & 3
+            if rest != 0 {
+                to += (n & $FC) as u16
+                from += (n & $FC) as u16
+                for i in 0..rest using Y { to[i] = from[i] }
+            }
         }
         copy_pos += CHUNK
     } else {

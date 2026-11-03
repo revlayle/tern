@@ -1,0 +1,131 @@
+// Scrolling map with 24 multiplexed sprites over it. The camera turns through the eight
+// directions, 64 frames each, at one pixel per frame; the sprites circle over the map.
+//
+// One raster handler of the program's own calls the sprite multiplexer, which says when the frame
+// starts, and then the scroller, which writes the fine scroll registers before the screen begins.
+//
+// Screens and sprite data live in VIC bank 2 ($8000-$BFFF): the program itself starts at $0801,
+// and the VIC-II still sees the ROM character set there, at $9000. The map (100 x 60 characters)
+// is built at $4000.
+import c64
+import math
+import mem
+import scroll
+import sprites(COUNT = 24, FLICKER = true, SCREEN = $8000, SCREEN2 = $8400)
+
+const MAP = $4000
+const MAP_W = 100
+const MAP_H = 60
+const SPRITE_DATA = $8800               // sprite pointer 32 in bank 2
+
+// A round ball, 24 x 21 pixels.
+data ball: [u8; 64] = [
+    $00, $7E, $00,
+    $03, $FF, $C0,
+    $0F, $FF, $F0,
+    $1F, $FF, $F8,
+    $3F, $FF, $FC,
+    $7F, $FF, $FE,
+    $7F, $FF, $FE,
+    $FF, $FF, $FF,
+    $FF, $FF, $FF,
+    $FF, $FF, $FF,
+    $FF, $FF, $FF,
+    $FF, $FF, $FF,
+    $FF, $FF, $FF,
+    $FF, $FF, $FF,
+    $7F, $FF, $FE,
+    $7F, $FF, $FE,
+    $3F, $FF, $FC,
+    $1F, $FF, $F8,
+    $0F, $FF, $F0,
+    $03, $FF, $C0,
+    $00, $7E, $00,
+    $00
+]
+
+// Camera directions: right, down-right, down, down-left, left, up-left, up, up-right.
+data DX: [i8; 8] = [1, 1, 0, -1, -1, -1, 0, 1]
+data DY: [i8; 8] = [0, 1, 1, 1, 0, -1, -1, -1]
+
+var t: u8
+
+// Grid lines every 8 characters; letters in between.
+fn build_map() {
+    var row: ptr u8 = MAP
+    for y in 0..MAP_H {
+        for x in 0..MAP_W {
+            var c: u8 = 1 + ((x + y) & 15)
+            if (x & 7) == 0 || (y & 7) == 0 { c = $66 }
+            row[x] = c
+        }
+        row += MAP_W
+    }
+}
+
+interrupt fn frame() {
+    if sprites.raster() {
+        scroll.top()
+    }
+}
+
+// The sprites' paths, worked out once: an ellipse for x and a sine for y.
+var path_x: [u16; 256]
+var path_y: [u8; 256]
+
+fn build_paths() {
+    for i in 0..=255 {
+        var v: u8 = (math.sin8(i) as u8) ^ $80      // 0-255
+        path_x[i] = 40 + (((math.cos8(i) as u8) ^ $80) as u16)
+        path_y[i] = 44 + v - (v >> 2)               // 44-235
+    }
+}
+
+fn move_sprites() {
+    var a: u8 = t << 1
+    var b: u8 = t
+    for i in 0..24 {
+        sprites.xpos[i] = path_x[a]
+        sprites.ypos[i] = path_y[b]
+        a += 10
+        b += 16
+    }
+}
+
+fn main() {
+    c64.vic.border = c64.BLACK
+    c64.vic.background = c64.BLUE
+    mem.fill(c64.COLOR, c64.LIGHT_BLUE, 1000)
+    mem.copy(SPRITE_DATA, addr(ball), 64)
+    build_map()
+    build_paths()
+    scroll.set_map(MAP, MAP_W)
+    scroll.draw(8, 8)
+
+    sprites.init()
+    for i in 0..24 {
+        sprites.frame[i] = 32
+        sprites.color[i] = 1 + (i & 7)
+        sprites.flags[i] = sprites.VISIBLE
+    }
+    c64.vic.sprite_priority = 0
+    move_sprites()
+    sprites.update()
+
+    c64.kernal_off()
+    c64.set_irq(addr(frame))
+    c64.vic.control1 = c64.vic.control1 & $7F
+    c64.vic.raster = 0
+    c64.vic.irq_enable = 1
+    c64.vic.irq_status = 1
+    c64.interrupts_on()
+
+    while true {
+        sprites.wait_frame()
+        move_sprites()
+        sprites.update()
+        var d = (t >> 6) & 7
+        scroll.move(DX[d], DY[d])
+        t += 1
+    }
+}
