@@ -202,7 +202,7 @@ Done when: an example loads two levels from disk into one area in turn and runs 
 - Floats as a library with a 4-byte format, built on `wide` (not a priority)
 
 - Signed loop variables
-- `const fn` with compile-time `int` and `real`, array-building syntax (spec 4.1)
+- `const fn` with compile-time `int` and `real`, array-building syntax, and code generators with `emit` and `label()` (spec 4.1); plan as one milestone, since generators are most of the reason to build `const fn`
 - `using` on local variables (spec 14.6)
 - Locals of inline functions in each caller's frame, with `var` in `inline asm fn` bodies, so inline helpers can be used from any root (spec 6.2, 14.2); then move the `math` inline helpers' work byte into a local
 - Overflow checking and array index checking in the emulator for test runs (spec 14.4, 3.2)

@@ -267,12 +267,46 @@ data rows: [u16; 25] = [row_addr(i) for i in 0..25]
 ```
 
 - Allowed: all statements, integer math including `*`, `/`, `%`, local arrays, and calls to other `const fn`.
-- Not allowed: program variables, `@` addresses, assembly, and calls to normal functions.
+- Not allowed: program variables, `@` addresses, running assembly, and calls to normal functions. A `const fn` may *emit* assembly (below).
 - Callable only at compile time: from `const` declarations, `data` initializers and other `const fn`. Calling one from runtime code is an error.
 - Compile time has its own number types: `int` (whole numbers with no size limit) and `real` (decimal numbers, with `sin`, `cos`, `sqrt`, `round` and similar). Neither exists at runtime. When a value leaves compile time into a `u8`, `u16` or `data` table, the compiler checks that it fits and reports an error if not.
 - Array-building syntax: `[expr for i in range]`.
 - A step limit stops a `const fn` that never finishes, with an error.
 - A `const fn` can live in an imported module (2.2), so table generators can be shared between programs as Tern scripts: `import tables` … `data sine = tables.sine(256)`. Reading files from compile-time code (e.g. converting an image into sprite data) is a possible later extension.
+
+**Planned: code generators (`emit`).** A `const fn` may build assembly with all of its control flow (`while`, `if`, nested loops, its own variables). Each `emit { ... }` adds instructions to the asm block or `asm fn` that called the generator. This is for generated "speedcode": unrolled copies, plotters, sprite clearing, any repeated code whose shape depends on parameters.
+
+```
+const fn copy_rows(src: int, dst: int, rows: int, skip: int) {
+    var r = 0
+    while r < rows {
+        if r != skip {
+            emit {
+                lda src + r * 40, x
+                sta dst + r * 40, x
+            }
+        }
+        r += 1
+    }
+}
+
+asm fn shift_left() {
+    ldx #0
+.loop:
+    copy_rows(SCREEN + 1, BACK, 25, 12)     // 24 row copies placed here
+    inx
+    cpx #39
+    bne .loop
+}
+```
+
+- **Instructions, not text.** An `emit` fragment is parsed like an asm block when the `const fn` is read, so a typo is reported at the `emit` line even if that line never runs. Its operands are compile-time expressions, which may use the generator's variables and parameters and call other `const fn`. No string pasting.
+- **Called only inside assembly**: an asm block or `asm fn` body names the generator on a line of its own. A generator call in Tern code is an error, so a Tern statement never expands into generated code. A `const fn` that emits returns no value; one that returns a value cannot emit.
+- The finished block is ordinary assembly: the compiler computes its register, flag and variable effects (9), and it is never changed afterwards.
+- **Labels.** The local `.labels` of one `emit` are its own, so a loop emitting `.skip:` gets a fresh label each time. A label shared between fragments is a compile-time value: `var top = label()` makes one, `emit { top: }` places it, `emit { bne top }` refers to it. Placing it twice, or never when it is used, is an error. Labels of the calling block are not visible inside the generator; pass a `label()` value as a parameter instead.
+- **Listing and errors.** Each generated instruction shows the `emit` line it came from and the call that ran the generator. An error in the generated code (a branch out of range) names both, as module asserts name the import line (4.1).
+- A generator may call other generators, and may live in an imported module (2.2), so generators can be shared between programs.
+- Tern statements cannot be generated: there are no macros and no textual preprocessor. Generators, module parameters (2.2) and `assert` are the compile-time tools.
 
 **Compile-time `assert`**: a top-level declaration that generates no code and fails compilation with its message when the condition is false:
 
