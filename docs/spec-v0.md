@@ -576,7 +576,7 @@ Each line is an inclusive range of constant expressions (constants from imported
 - `memory`, and the kinds above, are words only inside the block, not reserved words.
 - A program with `main` starts at the platform's code start (C64: `$0801`, with the BASIC line), so its first `program` area must begin there.
 
-**`data` at a fixed address**: `data sprite @ $2000 = [...]` places the bytes there, in a `program` or `reserved` area (the usual case: VIC graphics in a reserved range). The program file covers every byte from its lowest to its highest used address, so a gap between areas is filled with zeros and makes the file longer; the report shows the file size.
+**`data` at a fixed address**: `data sprite @ $2000 = [...]` places the bytes there, in a `program` or `reserved` area (the usual case: VIC graphics in a reserved range), or, for a module placed in an overlay area, in that area (8.5). The program file covers every byte from its lowest to its highest used address, so a gap between areas is filled with zeros and makes the file longer; the report shows the file size.
 
 ### 8.5 Overlays
 
@@ -608,6 +608,14 @@ import level2 @ levels
   - The compiler does not check what is at that address, which overlay is loaded, or whether one is loaded at all. Addresses inside an overlay's file move when its code or data change; a fixed layout is the program's responsibility.
   - A fixed-address variable in the part of an overlay area that no overlay's file covers needs no keyword.
   - Overlapping the resident program stays an error with or without `volatile`.
+- **Fixed data in an overlay.** An overlay module may place `data` at a fixed address inside its own area, e.g. a level's header and tables at the addresses the resident code expects:
+  ```
+  // level1.tern, imported with `import level1 @ levels`
+  data header: LevelHeader @ $6000 = LevelHeader { ... }
+  ```
+  - The bytes are part of that module's file. Its code, other `data` and variables go around them, as in a program area (8.4); a gap between them is zero-filled, and the file still starts at the area's start.
+  - Overlays of the same area may put data at the same address, since they are never loaded together.
+  - Errors: fixed data overlapping the module's other fixed data or fixed variables; an overlay module's fixed data outside its own area (in another overlay area, or in a program or reserved area: put resident data in the main file or a resident module); a resident module's fixed data in an overlay area.
 - An overlay that does not fit its area gives an error with its size.
 - **Loading** is a platform library function. C64: `c64.load(name, n, device)` loads a file to its own address through the KERNAL and returns the KERNAL's carry (true when loading failed); exact signature settled by the coding session.
 - Bank switching (14.1) will use the same model, with a bank area switched in by a mapper instead of loaded from disk.
