@@ -34,8 +34,11 @@ module scroll(SCREEN_A: u16 = $8000, SCREEN_B: u16 = $8400, COLORS: bool = false
 // Colors: by default the color RAM is left alone (set it once, e.g. to one color). With
 // COLORS = true, set_color_map() gives a map of color numbers of the same size, and the color RAM is
 // redrawn from it at each coarse step by finish(), which the program calls straight after wait_frame().
-// The redraw is a race with the beam: it takes about 12,000 cycles and runs in the lines above the
-// screen and down it, ahead of the beam.
+// The redraw is a race with the beam: it takes about 12,000 cycles and has to stay ahead of the beam
+// down the screen. On its own it does, with a margin of about 2,000 cycles; with the sprite
+// multiplexer's interrupts (about 5,000 cycles a frame) and sprite fetches it can be overtaken in the
+// lower rows, which then show for one frame the new characters with the old colors. Use COLORS with
+// the multiplexer only if that is acceptable. (Not tested: the stand-in VIC does not read color RAM.)
 //
 // Programs with sprites combine the two in one handler, see sprites.raster():
 //     interrupt fn frame() { if sprites.raster() { scroll.top() } }
@@ -239,9 +242,17 @@ fn move(dx: i8, dy: i8) {
 
     var cross_x = (mx > 0 && fine_x == 7) || (mx < 0 && fine_x == 0)
     var cross_y = (my > 0 && fine_y == 7) || (my < 0 && fine_y == 0)
-    if key_x != mx || key_y != my {
-        key_x = mx
-        key_y = my
+    // The hidden screen is prepared for the move that was asked for: while a diagonal aligns its axes,
+    // the coarse step it works towards is the diagonal one.
+    var want_x: i8 = dx
+    var want_y: i8 = dy
+    if cross_x || cross_y {
+        want_x = mx
+        want_y = my
+    }
+    if key_x != want_x || key_y != want_y {
+        key_x = want_x
+        key_y = want_y
         prep_step = 0
         copy_pos = 0
     }
@@ -281,17 +292,17 @@ fn move(dx: i8, dy: i8) {
     front = 1 - front
     if mx > 0 {
         cell_x += 1
-        if cross_x { fine_x = 0 } else { fine_x += 1 }
+        fine_x = 0
     } else if mx < 0 {
         cell_x -= 1
-        if cross_x { fine_x = 7 } else { fine_x -= 1 }
+        fine_x = 7
     }
     if my > 0 {
         cell_y += 1
-        if cross_y { fine_y = 0 } else { fine_y += 1 }
+        fine_y = 0
     } else if my < 0 {
         cell_y -= 1
-        if cross_y { fine_y = 7 } else { fine_y -= 1 }
+        fine_y = 7
     }
     key_x = 0
     key_y = 0

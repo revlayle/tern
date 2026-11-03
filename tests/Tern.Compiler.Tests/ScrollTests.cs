@@ -138,6 +138,23 @@ public sealed class ScrollTests
     }
 
     [Fact]
+    public void A_diagonal_that_has_to_align_first_prepares_the_diagonal_screen_and_never_holds_the_camera()
+    {
+        var r = new Rig();
+        r.Draw(30, 20);
+        r.Lib.Set8("scroll.set_fine.x", 3);
+        r.Lib.Set8("scroll.set_fine.y", 0);      // 4 pixels to the next step to the right, 7 down
+        r.Lib.Call("scroll.set_fine");
+        for (int i = 0; i < 24; i++)
+        {
+            int x = r.PixelX, y = r.PixelY;
+            r.Move(1, 1);
+            r.AssertConsistent($"move {i}");
+            Assert.True(r.PixelX + r.PixelY > x + y, $"move {i} held the camera");
+        }
+    }
+
+    [Fact]
     public void Turning_around_in_the_middle_of_a_phase_and_stopping_keep_the_screen_right()
     {
         var r = new Rig();
