@@ -283,6 +283,21 @@ memory {
 data ball: [u8; 63] @ $2000 = [ ... ]   // loaded with the program, at that address
 ```
 
+A `reserved` range is also the plain way to keep memory for your own use. Name its start once and point into it:
+
+```
+const MAP: u16 = $4000
+
+memory {
+    MAP..=MAP + $07FF  reserved     // 2 KB, never touched by the compiler or startup
+}
+
+var p: ptr u8 = (MAP + 256) as ptr u8
+p[44] = 1                           // byte 300 of the map: sta (p),y
+```
+
+The range is not cleared at startup.
+
 Other kinds are `program`, `zeropage`, `volatile` and `overlay` (3.12). `program` and `zeropage` lines replace the platform's areas; the others add to them. A function is never split across areas.
 
 A main file with `export` and no `main` builds a **binary** for another program to call, such as a music player. It starts with a jump table (`setup`, then the exports in order), and the compiler also writes `name_api.tern` for the host to import (example 4.4).
