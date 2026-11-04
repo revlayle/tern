@@ -543,7 +543,7 @@ The hardware stack is used only for return addresses, interrupt entry, and tempo
 
 ### 8.4 Memory layout
 
-The platform gives a default memory map (12.2). The main file may declare what it changes in one `memory` block, after its imports. Only the main file may have one, since it describes the whole program.
+The platform gives a default memory map (12.2). The main file may declare what it changes in one `memory` block, after its imports. Only `const` declarations may come between the imports and the block, so the constants its ranges use can stand above it (constants declared further down may be used too). Only the main file may have one, since it describes the whole program.
 
 ```
 memory {

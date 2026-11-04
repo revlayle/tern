@@ -290,7 +290,7 @@ memory {
     MAP..=MAP + $07FF  reserved     // 2 KB, never touched by the compiler or startup
 }
 
-const MAP: u16 = $4000              // the block comes first; its ranges may use constants declared below
+const MAP: u16 = $4000              // below the block for now; constants above it are planned
 
 var p: ptr u8 = (MAP + 256) as ptr u8
 p[44] = 1                           // byte 300 of the map: sta (p),y

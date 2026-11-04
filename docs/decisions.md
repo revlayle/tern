@@ -339,3 +339,7 @@ Decided:
 
 - **A `var` array of one-byte elements may be longer than 256** (spec 3.2), with no initial value (zeroed or `noinit`), and like long `data` it is used only through `addr()`; indexing it is an error that suggests a pointer. Reason: regions and reserved memory are mostly for large buffers (maps, decompression space, sound data), and the spec's own region example (`var map: [u8; 2048] @ buffers`) was invalid. It extends the existing long-`data` exception into one rule: an array over 256 bytes is reached through a pointer. Multi-byte elements stay at most 256, since a long split array has no clear pointer.
 - **No window syntax.** To reach byte 300 the developer steps a pointer (`addr(map) + 256`, then `p[44]`), which already exists and shows the cost ((zp),Y). Rejected: a constant-offset window (`x[256..]`), new syntax for what a pointer or fixed one-page arrays already do.
+
+## 2026-11-04: constants before the memory block
+
+- **`const` declarations may come between the imports and the `memory` block** (spec 8.4); nothing else may. Reason: the constants a range uses read best directly above it, and the checker already evaluates the block after all constants, so only the parser rule changes, at no cost in the program. Rejected: the block anywhere at the top level, which could put the memory map at the bottom of a long file, below the variables that use its regions.
