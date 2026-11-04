@@ -286,11 +286,11 @@ data ball: [u8; 63] @ $2000 = [ ... ]   // loaded with the program, at that addr
 A `reserved` range is also the plain way to keep memory for your own use. Name its start once and point into it:
 
 ```
-const MAP: u16 = $4000
-
 memory {
     MAP..=MAP + $07FF  reserved     // 2 KB, never touched by the compiler or startup
 }
+
+const MAP: u16 = $4000              // the block comes first; its ranges may use constants declared below
 
 var p: ptr u8 = (MAP + 256) as ptr u8
 p[44] = 1                           // byte 300 of the map: sta (p),y
