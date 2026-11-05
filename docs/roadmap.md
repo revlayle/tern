@@ -256,6 +256,24 @@ Tests: one inline helper with a local called from main and from a handler under 
 
 Done when: `math.min8` in main and in a handler compiles and runs correctly.
 
+## M17: Analysis of the gap to hand-written assembly
+
+Spec: 11 (code shapes); no language change in this milestone. Decision 2026-11-05.
+
+The result is a report, `tests/benchmarks/analysis.md`, not features. The spec session reads it and schedules the fixes as later milestones.
+
+- **Benchmarks**: for each of the nine tasks in `comparison.md`, compare Tern's listing with the assembly version instruction by instruction, and account for the difference in bytes and cycles. Start with the largest gaps (`bubble`, `fib16`, `enemies`, `copy`, `sum16`).
+- **Library**: pick at least six asm routines in `src/lib` (from `math`, `wide`, `bcd`, `text` and `sprites`), write each in plain Tern, and compare bytes and cycles with the asm version. These are measurements and stay out of the library.
+- **Classify every difference** as one of:
+  1. *optimizer*: the compiler could produce the better code from the same source, with no language change;
+  2. *how the Tern is written*: a different way to write the source already gives the better code. These become advice for the guide;
+  3. *language*: a feature would let the source say what the assembly does, e.g. a value kept in a register across a loop or call, or a carry passed between statements. Each one is checked against the design rules;
+  4. *assembly only*: a trick that should stay in asm, e.g. self-modifying code, unusual uses of flags, or a layout chosen for one task.
+- For each difference: bytes and cycles, the listing lines on both sides, and an estimate of what fixing it would save on the benchmark totals.
+- Ranked summary: the changes worth making, the largest saving first, with their class.
+
+Done when the report covers every benchmark and the chosen library routines, the class totals add up to the measured gap, and the spec session has a ranked list to schedule from.
+
 ## Later (not yet ordered, except that new platforms come last)
 
 - Floats as a library with a 4-byte format, built on `wide` (not a priority)

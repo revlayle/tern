@@ -343,3 +343,7 @@ Decided:
 ## 2026-11-04: constants before the memory block
 
 - **`const` declarations may come between the imports and the `memory` block** (spec 8.4); nothing else may. Reason: the constants a range uses read best directly above it, and the checker already evaluates the block after all constants, so only the parser rule changes, at no cost in the program. Rejected: the block anywhere at the top level, which could put the memory map at the bottom of a long file, below the variables that use its regions.
+
+## 2026-11-05: an analysis of the gap to assembly (M17)
+
+- **After M16, a milestone that measures and explains the gap to hand-written assembly** instead of adding features. The benchmarks and a set of library asm routines rewritten in plain Tern are compared line by line, and every difference is classified as optimizer, how the Tern is written, language, or assembly only. Reason: at 77% of the bytes and 65% of the cycles, the remaining gap is spread over many small causes, and fixing them one by one without a full account risks work on the wrong ones. The aim is to get closer while keeping the language's conveniences, not to match hand-written assembly. Language features found this way still go through the design rules; "how the Tern is written" findings go into the guide.
