@@ -274,6 +274,18 @@ The result is a report, `tests/benchmarks/analysis.md`, not features. The spec s
 
 Done when the report covers every benchmark and the chosen library routines, the class totals add up to the measured gap, and the spec session has a ranked list to schedule from.
 
+## M18: Tools and skills for coding agents
+
+Decision 2026-11-05. Tern is new, so a model has seen no Tern code; what it needs must come from a skill and from tools that answer quickly and exactly. Scope to confirm when scheduled.
+
+- **A Tern skill** (a Claude Code skill in this repository, usable as a plugin elsewhere): the language in brief, with the restrictions an agent would not guess (no recursion, arrays of at most 256, one-byte indexes, `using` registers, roots and private variables, flags as values); the cost of each construct; the "how the Tern is written" advice from M17; common errors and their fixes; when to use an `asm` block.
+- **Agent-friendly compiler output**: diagnostics as JSON (`tern --json`: file, line, column, message, suggestion); a listing that links each source line to its instructions, bytes and cycles.
+- **A measuring tool**: compile a snippet or a function, run it in the built-in emulator, and report bytes, cycles and chosen memory, so an agent can compare two ways of writing the same code. It should be a `tern` subcommand, such as `tern bench`, not a separate script.
+- **A run tool**: run a program in the emulator for n cycles or until `main` returns, and dump memory ranges or the screen as text, so an agent can check behavior without VICE.
+- Tests: each tool's output format; the skill's examples compile and give the stated costs (checked by a test, so the skill cannot drift from the compiler).
+
+Done when an agent with only the skill and tools can write, check and measure a small program (e.g. a sprite moving under joystick control), and the skill's examples are checked by the test suite.
+
 ## Later (not yet ordered, except that new platforms come last)
 
 - Floats as a library with a 4-byte format, built on `wide` (not a priority)
