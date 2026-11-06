@@ -351,3 +351,7 @@ Decided:
 ## 2026-11-05: tools and skills for coding agents (M18)
 
 - **After M17, a milestone for coding agents**: a Tern skill (language rules an agent would not guess, the cost of each construct, M17's advice on writing fast Tern), JSON diagnostics, a listing that links source lines to bytes and cycles, and `tern` subcommands to measure a snippet and to run a program and dump memory. Reason: no model has been trained on Tern, so an agent depends on documentation it is given and on tools that answer exactly; a 6502 target makes exact costs especially worth having. It comes after M17 because the analysis is what the skill's advice on writing fast code is built from. The skill's examples are checked by tests so they cannot drift from the compiler. Relates to the planned language server (Later), which would share the diagnostics format.
+
+## 2026-11-06: llvm-mos in the comparison
+
+- **The llvm-mos C compiler joins the benchmark comparison** at the start of M17, built from the same C sources as cc65 with `-Os`. Reason: it is the 6502 compiler most often used to judge how good compiled 6502 code can be (an LLVM backend with zero-page "imaginary registers" and whole-program static allocation of locals, close to Tern's frames), so it is a stronger comparison than cc65, and its output may show techniques the analysis should consider. Same C sources, so the two C columns differ only by compiler. An external tool like the others; no NuGet dependency, and normal test runs do not need it.

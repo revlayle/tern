@@ -262,6 +262,7 @@ Spec: 11 (code shapes); no language change in this milestone. Decision 2026-11-0
 
 The result is a report, `tests/benchmarks/analysis.md`, not features. The spec session reads it and schedules the fixes as later milestones.
 
+- **llvm-mos first**: add the llvm-mos C compiler (`mos-c64-clang`, from the llvm-mos SDK) to `ComparisonTests` as a fifth column, built from the same C sources as cc65 so the two C columns compare compilers, not programs. Flags `-Os` (stated in the report, as cc65's are); the path set with an environment variable like the other tools (`MOS_CLANG`), and nothing runs without `TERN_COMPARE=1`. Bytes counted from `main` on, with the runtime routines it calls (e.g. multiply) and without its startup code; cycles from `main` to its return. If its code reveals a technique none of the others use, it goes into the analysis below like an asm difference.
 - **Benchmarks**: for each of the nine tasks in `comparison.md`, compare Tern's listing with the assembly version instruction by instruction, and account for the difference in bytes and cycles. Start with the largest gaps (`bubble`, `fib16`, `enemies`, `copy`, `sum16`).
 - **Library**: pick at least six asm routines in `src/lib` (from `math`, `wide`, `bcd`, `text` and `sprites`), write each in plain Tern, and compare bytes and cycles with the asm version. These are measurements and stay out of the library.
 - **Classify every difference** as one of:
