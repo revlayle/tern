@@ -280,9 +280,39 @@ Done when the report covers every benchmark and the chosen library routines, the
 
 ## M18: Fixes from the analysis
 
-Spec: 11; decision 2026-11-07. Scope set by the spec session from M17's ranked list: the optimizer changes, and any language changes it approves, with the largest savings first. Each change with its benchmark delta in the commit message, as in M9.
+Spec: 3.2, 11; decisions 2026-11-07. All class 1 (optimizer) items from `tests/benchmarks/analysis.md` section 7; no language change. Three parts, each reviewed before the next starts; the `F` numbers are the report's findings, with its estimated savings (cycles / bytes over the nine benchmarks).
 
-Done when: the scheduled fixes are in, `comparison.md` has the new totals, and the "how the Tern is written" advice that the fixes made unnecessary is dropped from the report.
+**Part 1: local code shapes** (code generator and peepholes, about 90,000 / 190)
+
+- F2: `a[i + c]` folded into the address (`lda a+c,x`) when the loop counter's bounds prove `i + c` does not wrap: constant bounds, or a variable end of the counter's type (`for i in 0..last` with `last: u8` gives `i <= 254`, so `i + 1` folds). Not from other accesses in the body (question 63 (b), deferred). Tests: the fold in a loop with constant and with variable bounds (listing); no fold for a 256-element ring buffer `buf[head + 1]` with `head = 255` (result is `buf[0]`), for `i + 2` under `0..last`, and outside a loop
+- F1: an indexed or indirect operand used directly by `adc`, `sbc`, `cmp`, `and`, `ora`, `eor` (`lda b,x / adc a,x`, `lda (p),y / cmp (q),y`), 8- and 16-bit
+- F4: `x > c` with a constant as `cmp #c+1 / bcc skip` (and `x <= c` likewise), keeping x in A; edge values `c = 0`, `254`, `255` (`x > 255` is never true)
+- F6: `w += b as u16` as `lda b / clc / adc w / sta w / bcc + / inc w+1` (spec 11), and `-=` likewise
+- F8: a 16-bit shift by a constant with one byte in A, without a memory copy
+- F10: the small shapes, led by `p += 256` / `n -= 256` as `inc p+1` / `dec n+1` (spec 11); also no `clc` when the carry is known clear, negation as `lda #0 / sec / sbc`, no `cmp #0` after a load, no stores of 0 into memory the startup cleared and main has not written, a field bound used directly, Y known 0 after a `0..=255` loop, zeros stored together, `a[i] += 1` as `inc a,x`, `iny` for `ldy #c` after `ldy #c-1`
+- F19: a commutative operand in A used as is (`eor crc` instead of `lda crc / eor b`)
+- F21: a `bool using carry` result returned as the compare's own carry, without branches; also `>` and `<=` through `clc / sbc` where that is shorter
+
+**Part 2: dataflow in the optimizer** (about 44,000 / 15)
+
+- F3: no store to a local or temporary that is never read from memory afterwards
+- F18: a local copy of an array element that is not written in between is replaced by the element (`cmp values,x`), and loaded into a free register only on the path that needs it after the element is overwritten
+- F16: a `using A` (and `using AX`) parameter kept in its register while the body does not need it
+- F17: A known on both paths after `bcc / inc hi` (`inc` does not change A)
+- F5: after `sta a,x` the optimizer knows A holds the element
+
+**Part 3: registers across loops, and layout** (about 12,000 / 50)
+
+- F7, F11, F15: a global used by one root, or a local, kept in a free register across a loop with no call that reads it, stored back before the loop exits or a call; also across a `match` jump table (`interp`'s `sp` in Y); then the `jmp` over an `else` that became empty goes
+- F13: an outer loop counter in a free register when the inner loop takes X
+- F9: loop entry `jmp` and empty-range test dropped when the first test is known true; `dec / bne` where the decrement already set Z
+- F12: an indexed array placed so its indexed range does not cross a page when there is room (RAM, no bytes in the file); the report shows the placement
+
+Deferred: F20 (moving an independent shift before a bit test, 50 cycles) and F14 (no `match` range check when the value's range is known, 350 cycles; wants a value-range analysis once more cases need it). Question 63 (b), the fold proved from another access, is deferred too.
+
+For every fix: correctness tests on programs other than the benchmarks, at edge values (0, 255, 256, wrap-around), compared with C#; a listing test of the new shape; the benchmark delta in the commit message (`BenchmarkTests` baseline rewritten in the same commit); in `analysis.md`, the measured saving next to the report's estimate.
+
+Done when: the three parts are merged, `comparison.md` has the new totals, and the "how the Tern is written" advice the fixes made unnecessary (`bubble.minus` with F2) is dropped from the report. The guide advice is written by the spec session after M18, from what is still true.
 
 ## M19: Tools and skills for coding agents
 
