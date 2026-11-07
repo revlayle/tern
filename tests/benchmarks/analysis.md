@@ -325,3 +325,11 @@ Items 1 to 17 add up to the class 1 column: 147,954 cycles and 267 bytes. Class 
 The guide advice in item 18 can be written now. The `bubble.minus` workaround is no longer needed once F2 is built. `bubble.direct` (compare the elements, no locals) should not become advice: with F2 and F18 the source as written gives the assembly's loop, and `bubble.direct` would be 17,616 cycles slower.
 
 Question for the spec session: F2 needs no rule change if "when it can prove the sum does not wrap" in spec 3.2 includes either of two proofs in `bubble`. (a) The loop bound: `for i in 0..last` with `last: u8` gives `i <= 254`, so `i + 1 <= 255`. (b) The other access: the same body reads `values[i]`, and spec 3.2 says an index outside the array "is not supported" and "the compiler may assume it never happens", so `i < 100` and `i + 1 <= 100`. (b) does not depend on the bounds, so it also covers `while` loops and the constant-bounds case, but it uses the out-of-range assumption for more than "a[i] = v changes only a". This report reads (a) as allowed; please decide (b).
+
+## 8. M18: measured savings
+
+Each fix as built, against the estimate above. Measured on `BenchmarkTests` (`baseline.txt`: the whole program, startup included), cycles / bytes over the nine benchmarks.
+
+| finding | estimate | measured | where |
+|---|--:|--:|---|
+| F2 | 57,216 / 10 | 57,216 / 10 | `bubble` |

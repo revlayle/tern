@@ -31,6 +31,8 @@ public sealed class CodeGen
     private int _loopDepth;
     private readonly List<(Label Break, Label Continue)> _loops = [];
     private readonly HashSet<Register> _reserved = [];
+    /// <summary>The largest value each enclosing <c>for</c> counter can have in the body, where its bounds prove one (spec 3.2).</summary>
+    private readonly Dictionary<VariableSymbol, long> _counterMax = [];
     private readonly List<VariableSymbol> _freeTemps = [];
     private int _tempCounter;
 
@@ -918,13 +920,22 @@ public sealed class CodeGen
     /// <c>a[i - c]</c> is addressed as <c>a-c,x</c> with i in the index register, so the subtraction
     /// costs nothing (spec 11). Only where the wrap-around of the u8 index cannot matter: i - c wraps to
     /// 256 - c + i, which is past the end of an array shorter than 257 - c elements.
+    /// <c>a[i + c]</c> is <c>a+c,x</c> when i is a <c>for</c> counter whose bounds prove i + c &lt;= 255.
     /// </summary>
-    private static (Expr Index, int Offset) FoldIndexOffset(Expr index, VariableSymbol array) =>
-        index is BinaryExpr { Op: TokenKind.Minus, Type.Kind: TypeKind.U8 } b
-            && b.Left.Type is { Size: 1, IsSigned: false } && b.Right.ConstValue is long c && c > 0
-            && array.Type.Length + c <= 256
-            ? (b.Left, -(int)c)
-            : (index, 0);
+    private (Expr Index, int Offset) FoldIndexOffset(Expr index, VariableSymbol array)
+    {
+        if (index is not BinaryExpr { Type.Kind: TypeKind.U8 } b) return (index, 0);
+        if (b.Op == TokenKind.Minus && b.Left.Type is { Size: 1, IsSigned: false } && b.Right.ConstValue is long c && c > 0
+            && array.Type.Length + c <= 256)
+            return (b.Left, -(int)c);
+        if (b.Op == TokenKind.Plus)
+        {
+            var (counter, add) = b.Right.ConstValue is long r ? (b.Left, r) : b.Left.ConstValue is long l ? (b.Right, l) : (null, 0L);
+            if (counter is NameExpr { Symbol: VariableSymbol v } && add > 0 && _counterMax.TryGetValue(v, out long max) && max + add <= 255)
+                return (counter, (int)add);
+        }
+        return (index, 0);
+    }
 
     /// <summary>Puts an array index into X or Y and returns which.</summary>
     private Register LoadIndex(Expr index)
@@ -1826,6 +1837,26 @@ public sealed class CodeGen
     // ---------- for loops ----------
 
     private void GenFor(ForStmt f)
+    {
+        if (CounterMax(f) is long max) _counterMax[f.Symbol!] = max;
+        GenForLoop(f);
+        _counterMax.Remove(f.Symbol!);
+    }
+
+    /// <summary>
+    /// The largest value a u8 counter takes in the body, from the loop header only: a constant end
+    /// (counting up) or start (counting down), or a variable u8 end that is excluded (at most 254).
+    /// </summary>
+    private static long? CounterMax(ForStmt f)
+    {
+        if (f.Symbol!.Type is not { Size: 1, IsSigned: false }) return null;
+        if (f.StepValue < 0) return f.From.ConstValue;
+        if (f.To.ConstValue is long to) return f.Inclusive ? to : to - 1;
+        if (!f.Inclusive && f.To.Type is { Size: 1, IsSigned: false }) return 254;
+        return null;
+    }
+
+    private void GenForLoop(ForStmt f)
     {
         var c = f.Symbol!;
         var type = c.Type;
