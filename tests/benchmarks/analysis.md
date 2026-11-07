@@ -337,3 +337,4 @@ Each fix as built, against the estimate above. Measured on `BenchmarkTests` (`ba
 | F4 | 4,752 / 4 | 4,752 / 4 | `enemies` |
 | F6 | 3,048 / 10 | 3,048 / 10 | `calls` |
 | F8 | 3,000 / 7 | 3,636 / 9 | `sum16`; beyond the estimate, the optimizer now drops `lda v+1` at the loop top (A holds it from the store at the end of the pass), 597, which the assembly does not do; the rest is page crossings |
+| F19 | 768 / 2 | 768 / 2 | `crc8` |

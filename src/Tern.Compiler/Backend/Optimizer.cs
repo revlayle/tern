@@ -19,7 +19,32 @@ public static class Optimizer
     {
         ThreadJumps(code);
         RemoveUnreachable(code);
-        while (RemoveRedundant(code, function) | FoldShiftTests(code, function)) { }
+        while (RemoveRedundant(code, function) | FoldShiftTests(code, function) | UseOperandInA(code, function)) { }
+    }
+
+    /// <summary>
+    /// <c>lda x</c> / <c>eor y</c> where A already holds y becomes <c>eor x</c>; also <c>and</c>,
+    /// <c>ora</c> and <c>adc</c> (with the carry it finds), which are commutative and take every
+    /// addressing mode <c>lda</c> does. A, N, Z, C and V end the same; a <c>clc</c> between
+    /// <c>lda</c> and <c>adc</c> stays. Returns true after one change.
+    /// </summary>
+    private static bool UseOperandInA(List<AsmItem> code, FunctionSymbol function)
+    {
+        State?[]? before = null;
+        for (int k = 0; k < code.Count; k++)
+        {
+            if (code[k] is not Instr { Mnemonic: Lda, AsmPos: null } load) continue;
+            int o = NextReal(code, k + 1);
+            if (o < code.Count && code[o] is Instr { Mnemonic: Clc or Sec, AsmPos: null }) o = NextReal(code, o + 1);
+            if (o >= code.Count || code[o] is not Instr { Mnemonic: And or Ora or Eor or Adc, AsmPos: null } op || !Trackable(op)) continue;
+            if (op.Mnemonic != Adc && NextReal(code, k + 1) != o) continue;
+            before ??= Analyse(code, function);
+            if (before[k] is not { } s || !s.Regs[(int)Reg.A].Contains(op.Operand!)) continue;
+            code[o] = op with { Mode = load.Mode, Operand = load.Operand };
+            code.RemoveAt(k);
+            return true;
+        }
+        return false;
     }
 
     /// <summary>The index of each label's definition.</summary>
