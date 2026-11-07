@@ -186,17 +186,16 @@ e.pos.y = 5                        // ldy #1 / sta (e),y
 - **No initial values.** There are no struct literals: struct variables and arrays of structs cannot have an initial value, and global ones are zeroed at startup. Local struct variables are allowed without one, like local arrays; their memory is shared (8.1), so it holds leftovers. `data` cannot hold structs.
 - `addr(player)` gives a `ptr Enemy`. `addr(player.name)` gives the address of a field of a struct variable, or of a struct at a fixed address (3.4).
 
-**Planned: indexing small linear struct arrays.** `list[i].field` with a variable index, on an array of structs stored as whole records whose whole size is at most 256 bytes, so every byte is reachable from one base address with an 8-bit offset in Y. The developer chooses how the record offset is found:
+**Indexing small linear struct arrays.** `list[i].field` with a variable index works on an array of structs stored as whole records whose whole size is at most 256 bytes, so every byte is reachable from one base address with an 8-bit offset in a register. The developer chooses how the record offset is found:
 
-- **`linear var list: [Enemy; 20]`: shifts.** The struct size must be 1, 2, 4 or 8: `lda i` / `asl` / `asl` / `tay` / `lda list+off,y` for size 4. No extra memory.
-- **`indexed var list: [Enemy; 20]`: an offset table**, for any struct size. The compiler adds a read-only table of `i * sizeof(T)`, one byte per element (`n` bytes, built at compile time, included only when the array is indexed with a variable): `ldx i` / `ldy list_offsets,x` / `lda list+off,y`. That is 7 cycles to the offset, faster than shifting for sizes 4 and 8, at the cost of the table. The listing and report show the table.
-- `indexed` stores records exactly as `linear` does (pointers, `addr()`, `sizeof` work the same), and replaces it: `indexed linear` is an error. It is a word only before `var` (it may follow `noinit`, `volatile`, `private`), not a reserved word. It applies only to arrays of structs, whose whole size is at most 256 bytes; anything else is an error at the declaration.
-- **Errors at the index, not the declaration.** A `linear` array of any struct size stays valid for pointer use, and a constant index is always a fixed address with no code. A variable index into a `linear` array whose struct size is not 1, 2, 4 or 8 is an error that names the size and suggests padding the struct with `_` fields to the next of those sizes, or declaring the array `indexed` (giving the table's size). A variable index into a `linear` struct array larger than 256 bytes is an error that suggests a pointer.
-- Section 11 gets both code shapes.
+- **`linear var list: [Enemy; 20]`: shifts.** The struct size must be 1, 2, 4 or 8: `lda i` / `asl` / `asl` / `tax` / `lda list+off,x` for size 4; size 1 is `ldx i` / `lda list+off,x`. No extra memory.
+- **`indexed var list: [Enemy; 20]`: an offset table**, for any struct size. The compiler adds a read-only table `list.offsets` of `i * sizeof(T)`, one byte per element (`n` bytes, built at compile time, included only when the array is indexed with a variable): `ldx i` / `ldy list.offsets,x` / `lda list+off,y`. That is 7 cycles to the offset, faster than shifting for sizes 4 and 8, at the cost of the table. The table's name cannot be written in source. The listing shows the table and the report gives its size.
+- `indexed` stores records exactly as `linear` does (pointers, `addr()`, `sizeof` work the same), and replaces it: `indexed linear` is an error. It is a word only before `var` (it may follow `noinit`, `volatile`, `private`), not a reserved word; it works for globals and locals. It applies only to arrays of structs, whose whole size is at most 256 bytes; anything else (a non-struct array, a larger one, `data`) is an error at the declaration.
+- **Errors at the index, not the declaration.** A `linear` array of any struct size stays valid for pointer use, and a constant index is always a fixed address with no code, whatever the struct and array size. A variable index into a `linear` array whose struct size is not 1, 2, 4 or 8 is an error that names the size and suggests padding the struct with `_` fields to the next of those sizes, or declaring the array `indexed` (giving the table's size). A variable index into a `linear` struct array larger than 256 bytes is an error that suggests a pointer. `addr()` of a field with a variable index, and a variable index into an array field of such a record, are errors.
 
-**Padding fields.** A field named `_` takes space but has no name: `struct Enemy { x: u8, y: u8, hp: u8, vel: i16, _: [u8; 3] }` is 8 bytes. A struct may have several. They cannot be read or written, and they follow the usual offset rules (a `_` field may have an `@` offset). Uses: making a struct a power-of-two size for indexing, and matching a hardware or file layout. In an array of structs stored as tables, a padding field costs its tables like any field (planned with the linear indexing).
+**Padding fields.** A field named `_` takes space but has no name: `struct Enemy { x: u8, y: u8, hp: u8, vel: i16, _: [u8; 3] }` is 8 bytes. A struct may have several. They cannot be read or written, and they follow the usual offset rules (a `_` field may have an `@` offset). Uses: making a struct a power-of-two size for indexing, and matching a hardware or file layout. In an array of structs stored as tables, a padding field costs its tables like any field.
 
-**Arrays of structs are stored as one array per field** ("structure of arrays"). `enemies[i].x` is a single `lda enemies_x,x`, and multi-byte fields are split as in 3.2. Nested structs flatten all the way down: `enemies[i].pos.x` is one table, `enemies_pos_x`. Precisely, there is one table per *byte* of the record: byte k of record i is at `base + k * n + i`, where `n` is the array length. A gap left by `@` offsets costs one table of `n` bytes per gap byte. An array field inside an array of structs, as in `enemies[i].name[j]`, can only be indexed with a constant `j`, because a variable `j` would need a multiply. Use a `linear` array and a pointer instead. A `linear` array of structs (`linear var list: [Enemy; 8]`; `linear` goes before `var`) stores whole records one after another, so a `ptr Enemy` can step through it; `addr(list)` points to the first record. Linear struct arrays cannot be indexed with a variable yet (planned above, with `linear` and `indexed`): use a pointer. `addr()` of an array of structs stored as tables is an error.
+**Arrays of structs are stored as one array per field** ("structure of arrays"). `enemies[i].x` is a single `lda enemies_x,x`, and multi-byte fields are split as in 3.2. Nested structs flatten all the way down: `enemies[i].pos.x` is one table, `enemies_pos_x`. Precisely, there is one table per *byte* of the record: byte k of record i is at `base + k * n + i`, where `n` is the array length. A gap left by `@` offsets costs one table of `n` bytes per gap byte. An array field inside an array of structs, as in `enemies[i].name[j]`, can only be indexed with a constant `j`, because a variable `j` would need a multiply. Use a `linear` array and a pointer instead. A `linear` array of structs (`linear var list: [Enemy; 8]`; `linear` goes before `var`) stores whole records one after another, so a `ptr Enemy` can step through it; `addr(list)` points to the first record. A variable index into a linear struct array works as described above (shifts or `indexed`); otherwise use a pointer. `addr()` of an array of structs stored as tables is an error.
 
 ### 3.4 Pointers
 
@@ -357,6 +356,7 @@ break; continue; return value
 ```
 
 - There is one endless loop form, `while true`. There is no C-style `for (init; cond; step)`.
+- **Evaluation order.** In an assignment to an indexed place (`a[i] = v`, `a[i] op= v`, also with a record or pointer index), the index is evaluated before the value. When the index contains a function call, the order is unspecified. Otherwise the order in which the parts of an expression are evaluated is unspecified. It matters only when a part reads a `volatile` variable or calls a function with side effects; write such a part into a local first when the order matters.
 
 ### 5.1 `for` loops
 
@@ -691,7 +691,7 @@ The standard library is ordinary Tern and `asm fn` source in the compiler's `lib
 
 **Strings and memory blocks are passed as a pointer plus a length**, matching `len()` on literals. The library has no zero-terminated variants.
 
-The tables below describe the library as written in M4, M5 and M10. Work variables and tables that callers should not use are `private` (2.2).
+The tables below describe the library as written in M4, M5, M10, M11 and M14. Work variables and tables that callers should not use are `private` (2.2).
 
 **`math`**: cycle-heavy arithmetic (the operators only work on constants, 3.1)
 
@@ -819,6 +819,25 @@ Each is an empty-body `inline asm fn` (section 7), so a call adds no instruction
 | `sid: Sid @ $D400` | SID registers: `voice1`-`voice3: Voice` (`freq: u16`, `pulse: u16`, `control`, `attack_decay`, `sustain_release`), `cutoff: u16`, `resonance`, `volume`, `paddle_x`, `paddle_y`, `osc3`, `env3` |
 | `cia1: Cia @ $DC00`, `cia2: Cia @ $DD00` | CIA registers: `port_a`, `port_b`, `ddr_a`, `ddr_b`, `timer_a: u16`, `timer_b: u16`, `tod_tenths`, `tod_seconds`, `tod_minutes`, `tod_hours`, `serial`, `icr`, `control_a`, `control_b` |
 
+**`io`**: C64 device I/O through the KERNAL (M14). Needs the KERNAL banked in (not after `kernal_off()`). Addresses are `ptr u8` (a plain number converts); counts are `u8`, so larger blocks take several calls. Results that are `bool` are true on failure (the KERNAL's carry).
+
+| Name | Signature | Purpose |
+|---|---|---|
+| `setlfs`, `setnam`, `kernal_open`, `close`, `chkin`, `chkout`, `clrchn`, `chrin`, `chrout`, `readst` | routines at a fixed address (6.6) | The raw KERNAL routines (`kernal_open` is `OPEN`; `io.chrout` is the same routine as `c64.chrout`) |
+| `kernal_load` | `(0 using A, address: ptr u8 using XY) -> bool using carry @ $FFD5` | Raw `LOAD`; `SAVE` has no raw form (it needs a zero-page pointer) |
+| `load` | `(name: ptr u8, n: u8, device: u8, address: ptr u8) -> bool` | Load a whole file to `address` |
+| `save` | `(name: ptr u8, n: u8, device: u8, first: ptr u8, last: ptr u8) -> bool` | Save `first` to `last`, `last` included (like `..=`); `last` must be below `$FFFF` (a KERNAL limit) |
+| `open` | `(lfn: u8, device: u8, channel: u8, name: ptr u8, n: u8) -> bool` | Open a sequential file |
+| `read` | `(lfn: u8, dst: ptr u8, max: u8) -> u8` | Read up to `max` bytes; stops at end of file (the last byte counts) or a timeout (counts nothing, e.g. a missing file) |
+| `write` | `(lfn: u8, src: ptr u8, n: u8) -> bool` | Write `n` bytes; true on carry or any status bit |
+| `status` | `() -> u8` | `READST`, inline; constants `ST_EOF`, `ST_TIMEOUT`, `ST_NO_DEVICE` |
+| `command_open`, `command_close` | `(device: u8) -> bool`, `()` | Open the command channel (15) once, close it last: closing it closes every file on the drive |
+| `command` | `(cmd: ptr u8, n: u8) -> bool` | Send a drive command (scratch, rename, ...) and a CR through the open channel |
+| `drive_status` | `(dst: ptr u8, max: u8) -> u8` | Read the drive's status message without the CR; 0 if the channel is not open or the drive does not answer |
+| `command_once` | `(device: u8, cmd: ptr u8, n: u8) -> bool` | Open, send, close; only when no file is open on the drive |
+
+`c64.load` (8.5) is built on the same routines. Fast loaders are out of scope.
+
 **C64 graphics (M11):**
 
 - **`sprites`**, a sprite multiplexer: `module sprites(COUNT: u8 = 32, FLICKER: bool = false, SCREEN: u16 = $0400, SCREEN2: u16 = $0400)`, `COUNT` 8 to 64.
@@ -850,6 +869,8 @@ These are the intended translations. The optimizer may produce something shorter
 | `b = a[i + 1]` in `for i in 0..last` (last: u8) | `lda a+1,x` / `sta b` (3.2) |
 | `a[i] = v` | `ldx i` / `lda v` / `sta a,x` |
 | `p[i] = v` | `ldy i` / `lda v` / `sta (p),y` |
+| `v = list[i].f` (`linear`, struct size 4) | `lda i` / `asl` / `asl` / `tax` / `lda list+f,x` / `sta v` |
+| `v = list[i].f` (`indexed`) | `ldx i` / `ldy list.offsets,x` / `lda list+f,y` / `sta v` |
 | `w = pts[i]` (`linear [u16; n]`) | `lda i` / `asl` / `tax` / `lda pts,x` / `sta w` / `lda pts+1,x` / `sta w+1` |
 | `for i in 9..=0 using X` | `ldx #9` … `dex` / `bpl loop` (start ≤ 127; otherwise one extra `cpx #$FF`) |
 | `for i in n..0 using X` | `ldx n` / `beq done` / … `dex` / `bne loop` |

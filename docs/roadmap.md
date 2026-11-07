@@ -408,6 +408,7 @@ Done when: the benchmarks compile for the 65C02 and use the new instructions whe
   - an overlay's zero-page bytes at a fixed address hold whatever was there before it loaded; the overlay sets them (8.5)
   - a `volatile` fixed-address variable over an overlay reads whatever overlay is loaded; addresses inside an overlay's file move when the overlay changes (8.5)
   - a binary's entries are one root: the host must not call one from an interrupt while another runs (12.3)
+  - evaluation order: in `a[i] = v` the index is evaluated first; with a call in the index, and inside expressions, the order is unspecified (5)
 
 After the compiler is complete (far off, not planned):
 
