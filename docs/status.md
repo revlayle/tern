@@ -4,11 +4,20 @@ Owned by the coding session. Updated at the end of every coding session.
 
 ## Current
 
-- **Milestone:** M15, indexing small linear struct arrays (roadmap), is built and tested. Ready for `/review`.
-- **Branch:** `m15-struct-arrays` (from `main`, after the M14 merge). 1379 compiler tests pass plus 36 CPU tests (38 new in `RecordIndexTests`). Review findings 1, 2, 3 and 5 (`docs/reviews/m15.md`) are fixed; finding 4 (shorter shapes) is for the M17 list. `BenchmarkTests` baseline rewritten (see M15 below): 1516 bytes / 509175 cycles -> 1512 bytes / 495963 cycles.
-- **Next step:** M16, locals of inline functions in each caller's frame (`docs/roadmap.md`), on a new branch from `main` once M15 is merged. Spec 3.3 still says "Planned" for this feature; the spec session updates it (question 60).
+- **Milestone:** M16, locals of inline functions in each caller's frame (roadmap), is built and tested. Ready for `/review`.
+- **Branch:** `m16-inline-locals` (from `main`, after the M15 merge). 1392 compiler tests pass plus 36 CPU tests (12 new in `InlineLocalsTests`, 6 error rows in `InlineTests`). `BenchmarkTests` baseline unchanged (no benchmark uses an inline function with locals).
+- **Next step:** M17, analysis of the gap to hand-written assembly (`docs/roadmap.md`), on a new branch from `main` once M16 is merged. Spec 6.2 still says "An inline function keeps its frame" and 14.2 may mention the per-root copy; the spec session updates them (question 61).
 
 ## Done
+
+- **M16, locals of inline functions in each caller's frame** (2026-11-07).
+  - `CodeGen.MoveInlineFrame`: after the copy of an inline function (arguments and body) is generated, every operand that is a variable of the inline function (parameter, local, loop counter, temporary; `Owner == f`) is replaced by a copy owned by the function being generated (`_frameOwner`), added to its `FrameVariables`. One set per (caller, inline function): all copies in one caller share it (as before, and as `_inlineTemps` already did), two callers have two sets. The copy is named `caller.function.name` (`main.math.min8.tmp`) and carries the original's flags (`Dereferenced`, `AsmZeroPage`, `RequireZeroPage`, `AddressTaken`, ...); `VariableSymbol.InlineOf` names the inline function. Weights are copied at the end of `GenerateFunctions`, which also empties each inline function's `FrameVariables`, so it has no frame and `CheckSharedFunctions` no longer rejects an inline function with locals reached from two roots.
+  - What stays an error: a function an inline function calls is still one function (`g` with memory called through `f` from main and a handler); a function reached from two roots that calls an inline function with locals ("the variable 't' of the inline function 'f', which is copied into it").
+  - `var` lines at the start of an `inline asm fn` body (`AsmStmt.Locals`, `Parser.ParseAsmBody(isFn)`, `Checker.CheckLocal(inAsmFn)`): scalars, arrays or structs, no initial value (the assembly sets it), named in the instructions like any local. Errors: after the first instruction, with an initial value, in a plain `asm fn`, in an `asm { }` block statement.
+  - Library: `math.min8`, `max8`, `clamp8` and the signed ones use a local (`tmp`; `ta`/`tb`; `tx`/`tlo`/`thi`) instead of the private `n0`-`n2`, which are gone. `math.min8` in main and in a handler compiles and runs (`SignedMathTests.Min8_from_main_and_a_handler_compiles_and_runs`); the old test that expected the private-variable error is replaced by it.
+  - The optimizer now treats an inline function's variables as the caller's own (`Owner` is the caller), so a write to them no longer counts as a write to a callee's frame. No benchmark changed.
+  - Tests (`InlineLocalsTests`): one inline function with locals called from main and from a handler under `irqEvery`, results compared with C# for both (a shared set would be corrupted by an interrupt between statements); the symbol table shows `main.f.t` and `h.f.t` at different addresses; copies in one caller share one set; nested inline functions with a local array; loop counters and a dereferenced pointer parameter (zero page) per caller; a function and main both calling the inline function; an `inline asm fn` with a `var` line from main and a handler; the two errors above.
+  - Not done: a `for` loop counter that an inline function put in a register keeps its register in every copy (`ChooseCounterRegister` decides once per function, from the first copy's context; unchanged from before M16).
 
 - **M15, indexing small linear struct arrays** (2026-11-07).
   - `linear var list: [T; n]` with a variable index: the checker lowers `list[i].f` to a view of the array at the field's offset, indexed by `i << k` for struct size 1, 2, 4, 8 (`Checker.CheckRecordIndex`, new `PlaceKind.Records`). The code generator is unchanged for this: `lda i / asl / asl / tax / lda list+off,x`. Size 1 is no shift: `ldx i / lda list,x`. Linear struct arrays of one-byte structs are now allowed (they were an error "elements are one byte").
@@ -293,6 +302,8 @@ Not bugs; things to improve, mostly in M7 (optimizer).
 
 
 Questions 1-37 are settled (decisions.md, 2026-11-01 and 2026-11-02). Questions 55-58 are settled (decisions.md, 2026-11-03) and built in the M13 follow-up. Questions 46-54 are settled (decisions.md, 2026-11-03); 48, 49 and 51 were built in M13, the rest in M11 and M12. 
+
+61. **Spec 6.2 and 14.2 for M16.** 6.2 says "An inline function keeps its frame ... inlining saves the `jsr`/`rts` but no memory"; it is now the reverse: its parameters, locals and temporaries are in each caller's frame, so one inline function with locals can be called from main and from a handler, and a function reached from two roots that calls one is an error naming the variable. 6.2 and section 9 should also say that an `inline asm fn` body may start with `var name: type` lines (no initial value). Provisional syntax: `var` lines only before the first instruction, any type, no `@`. Section 10.1 can drop the sentence about the private work bytes of `min8`/`max8`/`clamp8`: calling them from main and a handler is allowed now.
 
 Questions 38-43 (from the M8 comparison and M9) are settled (decisions.md, 2026-11-02) and implemented in M9.
 

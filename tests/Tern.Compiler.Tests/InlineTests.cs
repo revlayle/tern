@@ -239,9 +239,6 @@ public class InlineTests
     [InlineData("inline fn f() @ $1000\nfn main() { }", "An inline function needs a body")]
     [InlineData("inline fn f() { }\nfn main() { asm {\n jsr f\n } }", "'f' is inline: it is copied into each Tern caller and has no address of its own")]
     [InlineData("inline fn f() { g() }\ninline fn g() { f() }\nfn main() { f() }", "Recursion is not allowed: f -> g -> f")]
-    [InlineData("var v: u8\nfn g(k: u8) { v = k }\ninline fn f() { g(1) }\ninterrupt fn h() { f() }\nfn main() { f() }", "'g' is called from main and from the interrupt handler 'h'")]
-    [InlineData("var v: u8\ninline fn f() { var t = v\n v = t + 1 }\nfn g() { f() }\ninterrupt fn h() { g() }\nfn main() { g() }",
-        "'g' is called from main and from the interrupt handler 'h'. An interrupt can stop it halfway and run it again, which would overwrite its memory: the variable 't' of the inline function 'f', which is copied into it")]
     [InlineData("inline asm fn f() {\n var t: u8\n lda t\n var u: u8\n}\nfn main() { f() }", "'var' lines go at the start of an inline asm fn, before the first instruction")]
     [InlineData("inline asm fn f() {\n var t: u8 = 3\n lda t\n}\nfn main() { f() }", "'t' in an inline asm fn has no initial value: the assembly sets it")]
     [InlineData("asm fn f() {\n var t: u8\n lda t\n}\nfn main() { f() }", "An asm fn has no variables of its own")]
