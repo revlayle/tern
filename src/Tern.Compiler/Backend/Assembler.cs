@@ -121,7 +121,7 @@ public static class Assembler
             {
                 int at = section.Info.FixedAddress!.Value;
                 int end = Lay(section, at);
-                if (end > at) fixedRanges.Add(new AddressRange(at, end - 1));
+                if (end > at && section.Info.Overlay is null) fixedRanges.Add(new AddressRange(at, end - 1));
             }
             // The first section (the BASIC line and startup code, or a binary's jump table) must be at the
             // start of the first area: data placed there with '@' would push it away.
@@ -136,7 +136,7 @@ public static class Assembler
                     if (firstEnd > areas[0].Last + 1)
                         throw new CompileError(new SourcePos(1, 1),
                             $"The {what} ({firstEnd - areas[0].First} bytes) must be at the start of the first program area, but it does not fit in {areas[0]}. Make the first area larger");
-                    foreach (var section in sections.Where(s => s.Info.FixedAddress is not null))
+                    foreach (var section in sections.Where(s => s.Info.FixedAddress is not null && s.Info.Overlay is null))
                     {
                         int at = section.Info.FixedAddress!.Value;
                         int end = Lay(section, at);
@@ -172,11 +172,34 @@ public static class Assembler
             foreach (var module in sections.Where(s => s.Info.Overlay is not null).GroupBy(s => s.Info.Overlay!))
             {
                 var area = overlayAreas![module.Key];
-                int at = area.First;
-                foreach (var section in module) at = Lay(section, at);
-                if (at > area.Last + 1)
+                // Fixed data (spec 8.5) goes at its address; the rest goes around it, first fit, as in a program area.
+                var fixedHere = new List<AddressRange>();
+                foreach (var section in module.Where(s => s.Info.FixedAddress is not null))
+                {
+                    int at0 = section.Info.FixedAddress!.Value;
+                    int end0 = Lay(section, at0);
+                    if (end0 > at0) fixedHere.Add(new AddressRange(at0, end0 - 1));
+                }
+                var room = MemoryLayout.Subtract([area], fixedHere);
+                int at = area.First, size = 0, slot = 0;
+                int pos = room.Count > 0 ? room[0].First : area.First;
+                bool fits = true;
+                foreach (var section in module.Where(s => s.Info.FixedAddress is null))
+                {
+                    int end = Lay(section, pos);
+                    while (room.Count > 0 && end > room[slot].Last + 1 && slot + 1 < room.Count)
+                    {
+                        pos = room[++slot].First;
+                        end = Lay(section, pos);
+                    }
+                    if (room.Count == 0 || end > room[slot].Last + 1) fits = false;
+                    size += end - slots[section.Start].Address;
+                    pos = end;
+                    at = Math.Max(at, end);
+                }
+                if (!fits)
                     throw new CompileError(overlayImports?.GetValueOrDefault(module.Key) ?? new SourcePos(1, 1),
-                        $"The overlay '{module.Key}' needs {at - area.First} bytes, but its area {area} has {area.Size}. Make the area larger, or split the module");
+                        $"The overlay '{module.Key}' needs {Math.Max(at - area.First, size)} bytes, but its area {area} has {area.Size}. Make the area larger, or split the module");
             }
 
             variables = null;
@@ -224,6 +247,8 @@ public static class Assembler
             for (int b = a + 1; b < fixedSections.Count; b++)
             {
                 var (x, y) = (fixedSections[a], fixedSections[b]);
+                // Fixed data of two overlays may share an address: they are never loaded together.
+                if (x.Overlay is not null && y.Overlay is not null && x.Overlay != y.Overlay) continue;
                 if (x.Address < y.Address + y.Size && y.Address < x.Address + x.Size)
                     throw new CompileError(new SourcePos(1, 1),
                         $"'{x.Name}' ({new AddressRange(x.Address, x.Address + x.Size - 1)}) and '{y.Name}' ({new AddressRange(y.Address, y.Address + y.Size - 1)}) are placed at overlapping addresses");

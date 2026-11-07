@@ -115,7 +115,7 @@ public static class TernCompiler
         }
         foreach (var g in plan.FixedImageGlobals)
         {
-            items.Add(new SectionStart(g.Name, g.Address));
+            items.Add(new SectionStart(g.Name, g.Address, Overlay: g.OverlayArea is null ? null : g.Module!.Name));
             items.AddRange(ImageBytes(g, gen.LabelOf));
         }
         // Overlay modules: their variables are bytes of the file, zeros where there is no initial value.
@@ -218,7 +218,7 @@ public static class TernCompiler
         foreach (var module in program.Modules.Where(m => m.OverlayArea is not null))
         {
             if (!code.Overlays.TryGetValue(module.Name, out var segments)) continue;
-            int first = segments.Min(s => s.Address);
+            int first = Math.Min(segments.Min(s => s.Address), program.Layout.Overlays[module.OverlayArea!].First);
             var overlayImage = new byte[segments.Max(s => s.Address + s.Bytes.Length) - first];
             foreach (var (address, bytes) in segments) bytes.CopyTo(overlayImage, address - first);
             overlayFiles.Add(new OverlayFile(module.Name, module.OverlayArea!, first, overlayImage));
@@ -284,6 +284,19 @@ public static class TernCompiler
         foreach (var g in plan.FixedImageGlobals.Where(g => g.FixedAddress is not null))
         {
             var range = new AddressRange(g.Address, g.Address + g.Type.Size - 1);
+            if (g.OverlayArea is { } areaName && g.FixedAddress is not null)
+            {
+                if (layout.Overlays.TryGetValue(areaName, out var own) && own.Contains(range)) continue;
+                throw new CompileError(g.Pos,
+                    $"'{g.Name}' at {range} is outside the overlay area {areaName}" +
+                    (layout.Overlays.TryGetValue(areaName, out var a0) ? $" ({a0})" : "") +
+                    ", where its module is loaded. Fixed data of an overlay module must lie in its own area; put data for the resident program in the main file or a resident module");
+            }
+            if (g.FixedAddress is not null)
+                foreach (var (areaName2, area2) in layout.Overlays)
+                    if (area2.Overlaps(range))
+                        throw new CompileError(g.Pos,
+                            $"'{g.Name}' at {range} is in the overlay area {areaName2} ({area2}), but its module is resident. Fixed data in an overlay area belongs in an overlay module, which is loaded there");
             if (layout.Program.Concat(layout.Reserved).Any(a => a.Contains(range))) continue;
             throw new CompileError(g.Pos,
                 $"'{g.Name}' at {range} is not in a program or reserved area. " +
@@ -318,7 +331,7 @@ public static class TernCompiler
             foreach (var module in code.Sections.Where(s => s.Overlay is not null && s.Size > 0).GroupBy(s => s.Overlay!))
             {
                 var file = new AddressRange(module.Min(s => s.Address), module.Max(s => s.Address + s.Size - 1));
-                if (range.Overlaps(file) && !g.DeclaredVolatile)
+                if (!g.DeclaredVolatile && module.Any(s => range.Overlaps(new AddressRange(s.Address, s.Address + s.Size - 1))))
                     throw new CompileError(g.Pos,
                         $"'{g.Name}' at {range} overlaps the overlay {module.Key} at {file}, which is loaded there. " +
                         $"If the overlap is intended, declare it 'volatile var {g.Name}'; otherwise name the overlay's own variable ({module.Key}.name) or move '{g.Name}' out of the overlay's area");
@@ -327,7 +340,7 @@ public static class TernCompiler
                 if (range.Overlaps(use))
                     throw new CompileError(g.Pos,
                         $"'{g.Name}' at {range} overlaps the variables the compiler placed in region '{regionName}' at {use}. Move '{g.Name}', or place it with the region");
-            foreach (var section in code.Sections.Where(s => s.IsFixed && s.Size > 0))
+            foreach (var section in code.Sections.Where(s => s.IsFixed && s.Size > 0 && (s.Overlay is null || (g.Module?.OverlayArea is not null && g.Module.Name == s.Overlay))))
                 if (range.Overlaps(new AddressRange(section.Address, section.Address + section.Size - 1)))
                     throw new CompileError(g.Pos,
                         $"'{g.Name}' at {range} overlaps the data '{section.Name}' at {new AddressRange(section.Address, section.Address + section.Size - 1)}. Move one of them");
