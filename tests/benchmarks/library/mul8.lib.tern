@@ -1,0 +1,12 @@
+// math.mul8 (asm): 256 products of a counter and a running value, summed.
+import math
+
+var acc: u16
+
+fn main() {
+    var b: u8 = 0
+    for i in 0..=255 {
+        b = b + 37
+        acc += math.mul8(i, b)
+    }
+}

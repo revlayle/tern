@@ -1,0 +1,66 @@
+                     
+                     
+                     
+                     
+                     =$c000   values  = $c000             ; 200 low bytes, then 200 high bytes
+                     =$c200   total   = $c200
+                     =$c202   largest = $c202
+                     =$10   vl = $10
+                     =$11   vh = $11
+                     =$12   th = $12
+                     .0800   start
+      1 x        2  .0800 a9 e8          lda #<1000
+      1 x        3  .0802 85 10          sta vl
+      1 x        2  .0804 a9 03          lda #>1000
+      1 x        3  .0806 85 11          sta vh
+      1 x        2  .0808 a2 00          ldx #0
+    200 x      600  .080a a5 11  gen     lda vh
+    200 x      600  .080c 85 12          sta th
+    200 x      600  .080e a5 10          lda vl
+    200 x     1000  .0810 46 12          lsr th
+    200 x      400  .0812 6a          ror
+    200 x     1000  .0813 46 12          lsr th
+    200 x      400  .0815 6a          ror
+    200 x     1000  .0816 46 12          lsr th
+    200 x      400  .0818 6a          ror
+    200 x      400  .0819 18          clc
+    200 x      600  .081a 65 10          adc vl
+    200 x      600  .081c 85 10          sta vl
+    200 x      600  .081e a5 12          lda th
+    200 x      600  .0820 65 11          adc vh
+    200 x      600  .0822 85 11          sta vh
+    200 x      600  .0824 a5 10          lda vl
+    200 x      400  .0826 18          clc
+    200 x      400  .0827 69 4d          adc #77
+    200 x      600  .0829 85 10          sta vl
+    200 x      539  .082b 90 02          bcc nc
+     61 x      305  .082d e6 11          inc vh
+    200 x     1000  .082f 9d 00 c0 nc      sta values,x
+    200 x      600  .0832 a5 11          lda vh
+    200 x     1000  .0834 9d c8 c0         sta values+200,x
+    200 x      400  .0837 e8          inx
+    200 x      400  .0838 e0 c8          cpx #200
+    200 x      599  .083a d0 ce          bne gen
+      1 x        2  .083c a2 00          ldx #0
+    200 x      800  .083e ad 00 c2 sum     lda total
+    200 x      400  .0841 18          clc
+    200 x      800  .0842 7d 00 c0         adc values,x
+    200 x      800  .0845 8d 00 c2         sta total
+    200 x      800  .0848 ad 01 c2         lda total+1
+    200 x      944  .084b 7d c8 c0         adc values+200,x
+    200 x      800  .084e 8d 01 c2         sta total+1
+    200 x      800  .0851 ad 02 c2         lda largest
+    200 x      800  .0854 dd 00 c0         cmp values,x
+    200 x      800  .0857 ad 03 c2         lda largest+1
+    200 x      944  .085a fd c8 c0         sbc values+200,x
+    200 x      568  .085d b0 0c          bcs next
+     32 x      128  .085f bd 00 c0         lda values,x
+     32 x      128  .0862 8d 02 c2         sta largest
+     32 x      128  .0865 bd c8 c0         lda values+200,x
+     32 x      128  .0868 8d 03 c2         sta largest+1
+    200 x      400  .086b e8  next    inx
+    200 x      400  .086c e0 c8          cpx #200
+    200 x      599  .086e d0 ce          bne sum
+      1 x        6  .0870 60          rts
+                     
+total 27430 cycles

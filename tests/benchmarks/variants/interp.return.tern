@@ -1,0 +1,65 @@
+// The interpreter with HALT leaving the loop by return, so the loop has no flag to test.
+const PUSH = 0
+const ADD = 1
+const SUB = 2
+const DUP = 3
+const SWAP = 4
+const DROP = 5
+const JNZ = 6
+const DEC = 7
+const OVER = 8
+const HALT = 9
+
+// Computes 10 + 9 + ... + 1: the sum and a counter on the stack.
+data code: [u8; 14] = [PUSH, 0, PUSH, 10, SWAP, OVER, ADD, SWAP, DEC, DUP, JNZ, 4, DROP, HALT]
+var stack: [u8; 16]
+var sp: u8
+var result: u8
+var steps: u16
+
+fn main() {
+    var pc: u8 = 0
+    while true {
+        var op: u8 = code[pc]
+        pc += 1
+        steps += 1
+        match op {
+            PUSH => {
+                stack[sp] = code[pc]
+                sp += 1
+                pc += 1
+            }
+            ADD => {
+                sp -= 1
+                stack[sp - 1] = stack[sp - 1] + stack[sp]
+            }
+            SUB => {
+                sp -= 1
+                stack[sp - 1] = stack[sp - 1] - stack[sp]
+            }
+            DUP => {
+                stack[sp] = stack[sp - 1]
+                sp += 1
+            }
+            SWAP => {
+                var t: u8 = stack[sp - 1]
+                stack[sp - 1] = stack[sp - 2]
+                stack[sp - 2] = t
+            }
+            DROP => sp -= 1
+            JNZ => {
+                sp -= 1
+                if stack[sp] != 0 { pc = code[pc] } else { pc += 1 }
+            }
+            DEC => stack[sp - 1] -= 1
+            OVER => {
+                stack[sp] = stack[sp - 2]
+                sp += 1
+            }
+            _ => {
+                result = stack[0]
+                return
+            }
+        }
+    }
+}

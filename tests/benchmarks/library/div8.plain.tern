@@ -1,0 +1,28 @@
+// The same in plain Tern: shift and subtract with a 16-bit remainder (it needs 9 bits).
+var acc: u16
+var remainder8: u8
+
+fn div8(a: u8, b: u8) -> u8 {
+    var q: u8 = 0
+    var r: u16 = 0
+    for _ in 0..8 {
+        r = (r << 1) + (a >> 7) as u16
+        a = a << 1
+        q = q << 1
+        if r >= b as u16 {
+            r -= b as u16
+            q += 1
+        }
+    }
+    remainder8 = r as u8
+    return q
+}
+
+fn main() {
+    var d: u8 = 1
+    for i in 0..=255 {
+        d = (d + 37) | 1
+        acc += div8(i, d) as u16
+        acc += remainder8 as u16
+    }
+}

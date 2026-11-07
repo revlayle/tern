@@ -1,0 +1,15 @@
+// The same in plain Tern.
+var acc: u16
+
+fn abs16(x: i16) -> u16 {
+    if x < 0 { return (-x) as u16 }
+    return x as u16
+}
+
+fn main() {
+    var x: i16 = -32000
+    for _ in 0..=255 {
+        x += 421
+        acc += abs16(x)
+    }
+}

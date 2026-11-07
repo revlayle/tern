@@ -1,0 +1,28 @@
+// The same in plain Tern, which has no decimal mode: each byte adds, then each nibble above 9 is corrected.
+var score: [u8; 4]
+var delta: [u8; 4]
+
+fn add(p: ptr u8, q: ptr u8, n: u8) {
+    var carry: u8 = 0
+    for i in 0..n using Y {
+        var lo: u8 = (p[i] & $0F) + (q[i] & $0F) + carry
+        carry = 0
+        if lo > 9 { lo = lo + 6 }
+        var hi: u8 = (p[i] >> 4) + (q[i] >> 4) + (lo >> 4)
+        lo = lo & $0F
+        if hi > 9 {
+            hi = hi + 6
+            carry = 1
+        }
+        p[i] = (hi << 4) | lo
+    }
+}
+
+fn main() {
+    delta[0] = $37
+    delta[1] = $19
+    delta[2] = $02
+    for _ in 0..100 {
+        add(addr(score), addr(delta), 4)
+    }
+}

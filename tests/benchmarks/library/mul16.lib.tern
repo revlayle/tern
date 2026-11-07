@@ -1,0 +1,12 @@
+// math.mul16 (asm): 100 products of 16-bit values, xor-ed together.
+import math
+
+var acc: u16
+
+fn main() {
+    var m: u16 = 1
+    for i in 0..100 {
+        m = m + 1237
+        acc ^= math.mul16(m, 77 + i as u16)
+    }
+}

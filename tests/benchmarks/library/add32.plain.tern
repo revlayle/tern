@@ -1,0 +1,19 @@
+// The same in plain Tern: two 16-bit halves, the carry found by comparing.
+struct U32 { lo: u16, hi: u16 }
+var sum: U32
+var delta: U32
+
+fn add32(p: ptr U32, q: ptr U32) {
+    var lo: u16 = p.lo + q.lo
+    if lo < q.lo { p.hi += 1 }
+    p.lo = lo
+    p.hi += q.hi
+}
+
+fn main() {
+    delta.lo = $9E37
+    delta.hi = $0003
+    for _ in 0..100 {
+        add32(addr(sum), addr(delta))
+    }
+}

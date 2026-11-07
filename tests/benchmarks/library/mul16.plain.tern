@@ -1,0 +1,20 @@
+// The same in plain Tern: shift and add, looping until the multiplier is used up.
+var acc: u16
+
+fn mul16(m: u16, n: u16) -> u16 {
+    var r: u16 = 0
+    while n != 0 {
+        if n.lo & 1 != 0 { r += m }
+        m = m << 1
+        n = n >> 1
+    }
+    return r
+}
+
+fn main() {
+    var m: u16 = 1
+    for i in 0..100 {
+        m = m + 1237
+        acc ^= mul16(m, 77 + i as u16)
+    }
+}

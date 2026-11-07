@@ -1,0 +1,13 @@
+// wide.add32 (asm): 100 additions of a 32-bit delta to a 32-bit sum.
+import wide
+
+var sum: wide.U32
+var delta: wide.U32
+
+fn main() {
+    delta.lo = $9E37
+    delta.hi = $0003
+    for _ in 0..100 {
+        wide.add32(addr(sum), addr(delta))
+    }
+}

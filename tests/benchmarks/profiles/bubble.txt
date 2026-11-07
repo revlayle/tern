@@ -1,0 +1,85 @@
+                     $0801  0B 08 0A 00 9E 32 30 36
+                     $0809  31 00 00 00
+                     start:
+                                                     ; startup
+                     $080D  D8        cld                   ; 2
+                     $080E  A9 00     lda #$00              ; 2
+                     $0810  A2 64     ldx #$64              ; 2
+                     clear:
+                     $0812  9D 70 08  sta bss-1,x           ; 5
+                     $0815  CA        dex                   ; 2
+                     $0816  D0 FA     bne clear             ; 2+
+                     $0818  20 1E 08  jsr main              ; 6
+                     halt:
+                     $081B  4C 1B 08  jmp halt              ; 3
+                                                     ;    5: fn main() {
+                     main:
+                                                     ;    6: var x: u8 = 7
+      1 x        2  $081E  A9 07     lda #$07              ; 2
+      1 x        3  $0820  85 02     sta main.x            ; 3
+                                                     ;    7: for i in 0..N {
+      1 x        2  $0822  A2 00     ldx #$00              ; 2
+                     main.for2:
+                                                     ;    8: x = (x << 2) + x + 17
+    100 x      200  $0824  0A        asl a                 ; 2
+    100 x      200  $0825  0A        asl a                 ; 2
+    100 x      200  $0826  18        clc                   ; 2
+    100 x      300  $0827  65 02     adc main.x            ; 3
+    100 x      200  $0829  18        clc                   ; 2
+    100 x      200  $082A  69 11     adc #$11              ; 2
+    100 x      300  $082C  85 02     sta main.x            ; 3
+                                                     ;    9: values[i] = x
+    100 x      500  $082E  9D 71 08  sta values,x          ; 5
+                     main.fnext1:
+    100 x      200  $0831  E8        inx                   ; 2
+    100 x      200  $0832  E0 64     cpx #$64              ; 2
+    100 x      299  $0834  D0 EE     bne main.for2         ; 2+
+                     main.fend0:
+                                                     ;   11: var last: u8 = N - 1
+      1 x        2  $0836  A9 63     lda #$63              ; 2
+      1 x        3  $0838  85 03     sta main.last         ; 3
+                                                     ;   12: while last > 0 {
+      1 x        3  $083A  4C 6A 08  jmp main.test4        ; 3
+                     main.while3:
+                                                     ;   13: for i in 0..last {
+     99 x      198  $083D  A2 00     ldx #$00              ; 2
+     99 x      297  $083F  E4 03     cpx main.last         ; 3
+     99 x      198  $0841  B0 25     bcs main.fend6        ; 2+
+                     main.for8:
+                                                     ;   14: var a: u8 = values[i]
+   4950 x    19800  $0843  BD 71 08  lda values,x          ; 4+
+   4950 x    14850  $0846  85 04     sta main.a            ; 3
+                                                     ;   15: var b: u8 = values[i + 1]
+   4950 x     9900  $0848  8A        txa                   ; 2
+   4950 x     9900  $0849  18        clc                   ; 2
+   4950 x     9900  $084A  69 01     adc #$01              ; 2
+   4950 x     9900  $084C  A8        tay                   ; 2
+   4950 x    19800  $084D  B9 71 08  lda values,y          ; 4+
+   4950 x    14850  $0850  85 05     sta main.b            ; 3
+                                                     ;   16: if a > b {
+   4950 x    14850  $0852  C5 04     cmp main.a            ; 3
+   4950 x    12648  $0854  B0 0D     bcs main.endif9       ; 2+
+                                                     ;   17: values[i] = b
+   2202 x    11010  $0856  9D 71 08  sta values,x          ; 5
+                                                     ;   18: values[i + 1] = a
+   2202 x     4404  $0859  8A        txa                   ; 2
+   2202 x     4404  $085A  18        clc                   ; 2
+   2202 x     4404  $085B  69 01     adc #$01              ; 2
+   2202 x     4404  $085D  A8        tay                   ; 2
+   2202 x     6606  $085E  A5 04     lda main.a            ; 3
+   2202 x    11010  $0860  99 71 08  sta values,y          ; 5
+                     main.endif9:
+                     main.fnext7:
+   4950 x     9900  $0863  E8        inx                   ; 2
+   4950 x    14850  $0864  E4 03     cpx main.last         ; 3
+   4950 x    14751  $0866  D0 DB     bne main.for8         ; 2+
+                     main.fend6:
+                                                     ;   21: last -= 1
+     99 x      495  $0868  C6 03     dec main.last         ; 5
+                     main.test4:
+    100 x      200  $086A  A9 00     lda #$00              ; 2
+    100 x      300  $086C  C5 03     cmp main.last         ; 3
+    100 x      299  $086E  90 CD     bcc main.while3       ; 2+
+                     main.wend5:
+      1 x        6  $0870  60        rts                   ; 6
+                     

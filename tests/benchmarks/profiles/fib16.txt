@@ -1,0 +1,127 @@
+                     $0801  0B 08 0A 00 9E 32 30 36
+                     $0809  31 00 00 00
+                     start:
+                                                     ; startup
+                     $080D  D8        cld                   ; 2
+                     $080E  A9 00     lda #$00              ; 2
+                     $0810  85 02     sta product           ; 3
+                     $0812  85 03     sta product+1         ; 3
+                     $0814  A9 00     lda #$00              ; 2
+                     $0816  A2 30     ldx #$30              ; 2
+                     clear:
+                     $0818  9D DA 08  sta bss-1,x           ; 5
+                     $081B  CA        dex                   ; 2
+                     $081C  D0 FA     bne clear             ; 2+
+                     $081E  20 24 08  jsr main              ; 6
+                     halt:
+                     $0821  4C 21 08  jmp halt              ; 3
+                                                     ;   15: fn main() {
+                     main:
+                                                     ;   16: fib[0] = 0
+      1 x        2  $0824  A9 00     lda #$00              ; 2
+      1 x        4  $0826  8D DB 08  sta fib               ; 4
+      1 x        4  $0829  8D F3 08  sta fib+24            ; 4
+                                                     ;   17: fib[1] = 1
+      1 x        2  $082C  A9 01     lda #$01              ; 2
+      1 x        4  $082E  8D DC 08  sta fib+1             ; 4
+      1 x        2  $0831  A9 00     lda #$00              ; 2
+      1 x        4  $0833  8D F4 08  sta fib+25            ; 4
+                                                     ;   18: for i in 2..24 {
+      1 x        2  $0836  A2 02     ldx #$02              ; 2
+                     main.for2:
+                                                     ;   19: fib[i] = fib[i - 1] + fib[i - 2]
+     22 x       88  $0838  BD D9 08  lda fib-2,x           ; 4+
+     22 x       66  $083B  85 06     sta main._t1          ; 3
+     22 x       97  $083D  BD F1 08  lda fib+22,x          ; 4+
+     22 x       66  $0840  85 07     sta main._t1+1        ; 3
+     22 x       88  $0842  BD DA 08  lda fib-1,x           ; 4+
+     22 x       66  $0845  85 04     sta main._t0          ; 3
+     22 x       98  $0847  BD F2 08  lda fib+23,x          ; 4+
+     22 x       66  $084A  85 05     sta main._t0+1        ; 3
+     22 x       44  $084C  18        clc                   ; 2
+     22 x       66  $084D  A5 04     lda main._t0          ; 3
+     22 x       66  $084F  65 06     adc main._t1          ; 3
+     22 x       66  $0851  85 04     sta main._t0          ; 3
+     22 x       66  $0853  A5 05     lda main._t0+1        ; 3
+     22 x       66  $0855  65 07     adc main._t1+1        ; 3
+     22 x       66  $0857  85 05     sta main._t0+1        ; 3
+     22 x       66  $0859  A5 04     lda main._t0          ; 3
+     22 x      110  $085B  9D DB 08  sta fib,x             ; 5
+     22 x       66  $085E  A5 05     lda main._t0+1        ; 3
+     22 x      110  $0860  9D F3 08  sta fib+24,x          ; 5
+                     main.fnext1:
+     22 x       44  $0863  E8        inx                   ; 2
+     22 x       44  $0864  E0 18     cpx #$18              ; 2
+     22 x       65  $0866  D0 D0     bne main.for2         ; 2+
+                     main.fend0:
+                                                     ;   21: product = mul(fib[20], 9) + mul(123, 45)
+      1 x        2  $0868  A9 7B     lda #$7B              ; 2
+      1 x        3  $086A  85 08     sta mul.a             ; 3
+      1 x        2  $086C  A9 00     lda #$00              ; 2
+      1 x        3  $086E  85 09     sta mul.a+1           ; 3
+      1 x        2  $0870  A9 2D     lda #$2D              ; 2
+      1 x        3  $0872  85 0A     sta mul.b             ; 3
+      1 x        2  $0874  A9 00     lda #$00              ; 2
+      1 x        3  $0876  85 0B     sta mul.b+1           ; 3
+      1 x        6  $0878  20 A6 08  jsr mul               ; 6
+      1 x        3  $087B  85 06     sta main._t1          ; 3
+      1 x        3  $087D  86 07     stx main._t1+1        ; 3
+      1 x        4  $087F  AD EF 08  lda fib+20            ; 4
+      1 x        3  $0882  85 08     sta mul.a             ; 3
+      1 x        4  $0884  AD 07 09  lda fib+44            ; 4
+      1 x        3  $0887  85 09     sta mul.a+1           ; 3
+      1 x        2  $0889  A9 09     lda #$09              ; 2
+      1 x        3  $088B  85 0A     sta mul.b             ; 3
+      1 x        2  $088D  A9 00     lda #$00              ; 2
+      1 x        3  $088F  85 0B     sta mul.b+1           ; 3
+      1 x        6  $0891  20 A6 08  jsr mul               ; 6
+      1 x        3  $0894  85 02     sta product           ; 3
+      1 x        3  $0896  86 03     stx product+1         ; 3
+      1 x        2  $0898  18        clc                   ; 2
+      1 x        3  $0899  A5 02     lda product           ; 3
+      1 x        3  $089B  65 06     adc main._t1          ; 3
+      1 x        3  $089D  85 02     sta product           ; 3
+      1 x        3  $089F  A5 03     lda product+1         ; 3
+      1 x        3  $08A1  65 07     adc main._t1+1        ; 3
+      1 x        3  $08A3  85 03     sta product+1         ; 3
+      1 x        6  $08A5  60        rts                   ; 6
+                                                     ;    5: fn mul(a: u16, b: u16) -> u16 {
+                     mul:
+                                                     ;    6: var r: u16 = 0
+      2 x        4  $08A6  A9 00     lda #$00              ; 2
+      2 x        6  $08A8  85 0C     sta mul.r             ; 3
+      2 x        6  $08AA  85 0D     sta mul.r+1           ; 3
+                                                     ;    7: while b != 0 {
+      2 x        6  $08AC  4C CA 08  jmp mul.test4         ; 3
+                     mul.while3:
+                                                     ;    8: if b.lo & 1 != 0 { r += a }
+     10 x       30  $08AF  A5 0A     lda mul.b             ; 3
+     10 x       20  $08B1  29 01     and #$01              ; 2
+     10 x       24  $08B3  F0 0D     beq mul.endif6        ; 2+
+      6 x       12  $08B5  18        clc                   ; 2
+      6 x       18  $08B6  A5 0C     lda mul.r             ; 3
+      6 x       18  $08B8  65 08     adc mul.a             ; 3
+      6 x       18  $08BA  85 0C     sta mul.r             ; 3
+      6 x       18  $08BC  A5 0D     lda mul.r+1           ; 3
+      6 x       18  $08BE  65 09     adc mul.a+1           ; 3
+      6 x       18  $08C0  85 0D     sta mul.r+1           ; 3
+                     mul.endif6:
+                                                     ;    9: a = a << 1
+     10 x       50  $08C2  06 08     asl mul.a             ; 5
+     10 x       50  $08C4  26 09     rol mul.a+1           ; 5
+                                                     ;   10: b = b >> 1
+     10 x       50  $08C6  46 0B     lsr mul.b+1           ; 5
+     10 x       50  $08C8  66 0A     ror mul.b             ; 5
+                     mul.test4:
+     12 x       36  $08CA  A5 0A     lda mul.b             ; 3
+     12 x       24  $08CC  C9 00     cmp #$00              ; 2
+     12 x       34  $08CE  D0 DF     bne mul.while3        ; 2+
+      2 x        6  $08D0  A5 0B     lda mul.b+1           ; 3
+      2 x        4  $08D2  C9 00     cmp #$00              ; 2
+      2 x        4  $08D4  D0 D9     bne mul.while3        ; 2+
+                     mul.wend5:
+                                                     ;   12: return r
+      2 x        6  $08D6  A6 0D     ldx mul.r+1           ; 3
+      2 x        6  $08D8  A5 0C     lda mul.r             ; 3
+      2 x       12  $08DA  60        rts                   ; 6
+                     

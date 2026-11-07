@@ -1,0 +1,12 @@
+// math.abs16 (asm): the absolute values of 256 signed 16-bit numbers, summed.
+import math
+
+var acc: u16
+
+fn main() {
+    var x: i16 = -32000
+    for _ in 0..=255 {
+        x += 421
+        acc += math.abs16(x)
+    }
+}

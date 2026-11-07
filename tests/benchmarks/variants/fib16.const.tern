@@ -1,0 +1,13 @@
+// The multiplies written at the constant level: 123 * 45 is a constant and * 9 is a shift and an add. No multiply routine (a different task from the benchmark, for comparison with llvm-mos, which does this itself).
+var fib: [u16; 24]
+var product: u16
+
+fn main() {
+    fib[0] = 0
+    fib[1] = 1
+    for i in 2..24 {
+        fib[i] = fib[i - 1] + fib[i - 2]
+    }
+    var f: u16 = fib[20]
+    product = (f << 3) + f + 123 * 45
+}

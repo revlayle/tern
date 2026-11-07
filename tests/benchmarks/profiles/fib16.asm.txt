@@ -1,0 +1,80 @@
+                     
+                     
+                     
+                     
+                     =$c000   fib     = $c000             ; 24 low bytes, then 24 high bytes
+                     =$c040   product = $c040
+                     =$10   al = $10
+                     =$11   ah = $11
+                     =$12   bl = $12
+                     =$13   bh = $13
+                     =$14   rl = $14
+                     =$15   rh = $15
+                     .0800   start
+      1 x        2  .0800 a9 01          lda #1
+      1 x        4  .0802 8d 01 c0         sta fib+1
+      1 x        2  .0805 a2 02          ldx #2
+     22 x      110  .0807 bd ff bf f       lda fib-1,x
+     22 x       44  .080a 18          clc
+     22 x      110  .080b 7d fe bf         adc fib-2,x
+     22 x      110  .080e 9d 00 c0         sta fib,x
+     22 x       88  .0811 bd 17 c0         lda fib+24-1,x
+     22 x       88  .0814 7d 16 c0         adc fib+24-2,x
+     22 x      110  .0817 9d 18 c0         sta fib+24,x
+     22 x       44  .081a e8          inx
+     22 x       44  .081b e0 18          cpx #24
+     22 x       65  .081d d0 e8          bne f
+      1 x        2  .081f a2 14          ldx #20
+      1 x        4  .0821 bd 00 c0         lda fib,x
+      1 x        3  .0824 85 10          sta al
+      1 x        4  .0826 bd 18 c0         lda fib+24,x
+      1 x        3  .0829 85 11          sta ah
+      1 x        2  .082b a9 09          lda #9
+      1 x        3  .082d 85 12          sta bl
+      1 x        2  .082f a9 00          lda #0
+      1 x        3  .0831 85 13          sta bh
+      1 x        6  .0833 20 63 08         jsr mul
+      1 x        3  .0836 a5 14          lda rl
+      1 x        4  .0838 8d 40 c0         sta product
+      1 x        3  .083b a5 15          lda rh
+      1 x        4  .083d 8d 41 c0         sta product+1
+      1 x        2  .0840 a9 7b          lda #123
+      1 x        3  .0842 85 10          sta al
+      1 x        2  .0844 a9 00          lda #0
+      1 x        3  .0846 85 11          sta ah
+      1 x        3  .0848 85 13          sta bh
+      1 x        2  .084a a9 2d          lda #45
+      1 x        3  .084c 85 12          sta bl
+      1 x        6  .084e 20 63 08         jsr mul
+      1 x        3  .0851 a5 14          lda rl
+      1 x        2  .0853 18          clc
+      1 x        4  .0854 6d 40 c0         adc product
+      1 x        4  .0857 8d 40 c0         sta product
+      1 x        3  .085a a5 15          lda rh
+      1 x        4  .085c 6d 41 c0         adc product+1
+      1 x        4  .085f 8d 41 c0         sta product+1
+      1 x        6  .0862 60          rts
+      2 x        4  .0863 a9 00  mul     lda #0
+      2 x        6  .0865 85 14          sta rl
+      2 x        6  .0867 85 15          sta rh
+      2 x        6  .0869 a5 12          lda bl
+      2 x        6  .086b 05 13          ora bh
+      2 x        4  .086d f0 1d          beq done
+     10 x       50  .086f 46 13  loop    lsr bh
+     10 x       50  .0871 66 12          ror bl
+     10 x       24  .0873 90 0d          bcc skip
+      6 x       12  .0875 18          clc
+      6 x       18  .0876 a5 14          lda rl
+      6 x       18  .0878 65 10          adc al
+      6 x       18  .087a 85 14          sta rl
+      6 x       18  .087c a5 15          lda rh
+      6 x       18  .087e 65 11          adc ah
+      6 x       18  .0880 85 15          sta rh
+     10 x       50  .0882 06 10  skip    asl al
+     10 x       50  .0884 26 11          rol ah
+     10 x       30  .0886 a5 12          lda bl
+     10 x       30  .0888 05 13          ora bh
+     10 x       28  .088a d0 e3          bne loop
+      2 x       12  .088c 60  done    rts
+                     
+total 1397 cycles

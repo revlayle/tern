@@ -1,0 +1,25 @@
+                     
+                     
+                     
+                     
+                     =$c000   crc = $c000
+                     =$10   b   = $10
+                     .0800   start
+      1 x        2  .0800 a2 00          ldx #0
+    256 x      768  .0802 a5 10  loop    lda b
+    256 x      512  .0804 18          clc
+    256 x      512  .0805 69 25          adc #37
+    256 x      768  .0807 85 10          sta b
+    256 x     1024  .0809 4d 00 c0         eor crc
+    256 x      512  .080c a0 08          ldy #8
+   2048 x     4096  .080e 0a  bitloop asl
+   2048 x     5108  .080f 90 02          bcc nox
+   1036 x     2072  .0811 49 07          eor #$07
+   2048 x     4096  .0813 88  nox     dey
+   2048 x     5888  .0814 d0 f8          bne bitloop
+    256 x     1024  .0816 8d 00 c0         sta crc
+    256 x      512  .0819 e8          inx
+    256 x      767  .081a d0 e6          bne loop
+      1 x        6  .081c 60          rts
+                     
+total 27667 cycles

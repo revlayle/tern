@@ -1,0 +1,81 @@
+                     
+                     
+                     
+                     
+                     =$c000   enemies = $c000
+                     =$c000   ex      = enemies
+                     =49168   ey      = enemies+16
+                     =49184   edx     = enemies+32
+                     =49200   edy     = enemies+48
+                     =49216   ehits   = enemies+64
+                     =$c100   bounces = $c100             ; 16 bits
+                     =$10   frames  = $10
+                     =$11   tmp     = $11
+                     .0800   start
+      1 x        2  .0800 a2 00          ldx #0
+     16 x       32  .0802 8a  init    txa
+     16 x       32  .0803 0a          asl
+     16 x       32  .0804 0a          asl
+     16 x       32  .0805 0a          asl
+     16 x       48  .0806 85 11          sta tmp
+     16 x       32  .0808 8a          txa
+     16 x       48  .0809 65 11          adc tmp             ; carry is clear: i * 8 < 128
+     16 x       32  .080b 69 0a          adc #10
+     16 x       80  .080d 9d 00 c0         sta ex,x
+     16 x       32  .0810 8a          txa
+     16 x       32  .0811 0a          asl
+     16 x       32  .0812 0a          asl
+     16 x       48  .0813 85 11          sta tmp
+     16 x       32  .0815 8a          txa
+     16 x       48  .0816 65 11          adc tmp
+     16 x       32  .0818 69 14          adc #20
+     16 x       80  .081a 9d 10 c0         sta ey,x
+     16 x       32  .081d a9 01          lda #1
+     16 x       80  .081f 9d 20 c0         sta edx,x
+     16 x       32  .0822 a9 fe          lda #$fe
+     16 x       80  .0824 9d 30 c0         sta edy,x
+     16 x       32  .0827 e8          inx
+     16 x       32  .0828 e0 10          cpx #16
+     16 x       47  .082a d0 d6          bne init
+      1 x        2  .082c a9 32          lda #50
+      1 x        3  .082e 85 10          sta frames
+     50 x      100  .0830 a2 00  frame   ldx #0
+    800 x     3200  .0832 bd 00 c0 loop    lda ex,x
+    800 x     1600  .0835 18          clc
+    800 x     3200  .0836 7d 20 c0         adc edx,x
+    800 x     4000  .0839 9d 00 c0         sta ex,x
+    800 x     1600  .083c c9 08          cmp #8
+    800 x     1600  .083e 90 04          bcc bx
+    800 x     1600  .0840 c9 c9          cmp #201
+    800 x     2400  .0842 90 14          bcc oky
+                     .0844 a9 00  bx      lda #0
+                     .0846 38          sec
+                     .0847 fd 20 c0         sbc edx,x
+                     .084a 9d 20 c0         sta edx,x
+                     .084d fe 40 c0         inc ehits,x
+                     .0850 ee 00 c1         inc bounces
+                     .0853 d0 03          bne oky
+                     .0855 ee 01 c1         inc bounces+1
+    800 x     3200  .0858 bd 10 c0 oky     lda ey,x
+    800 x     1600  .085b 18          clc
+    800 x     3200  .085c 7d 30 c0         adc edy,x
+    800 x     4000  .085f 9d 10 c0         sta ey,x
+    800 x     1600  .0862 c9 10          cmp #16
+    800 x     1616  .0864 90 04          bcc by
+    784 x     1568  .0866 c9 b5          cmp #181
+    784 x     2352  .0868 90 11          bcc next
+     16 x       32  .086a a9 00  by      lda #0
+     16 x       32  .086c 38          sec
+     16 x       64  .086d fd 30 c0         sbc edy,x
+     16 x       80  .0870 9d 30 c0         sta edy,x
+     16 x       96  .0873 ee 00 c1         inc bounces
+     16 x       48  .0876 d0 03          bne next
+                     .0878 ee 01 c1         inc bounces+1
+    800 x     1600  .087b e8  next    inx
+    800 x     1600  .087c e0 10          cpx #16
+    800 x     2350  .087e d0 b2          bne loop
+     50 x      250  .0880 c6 10          dec frames
+     50 x      149  .0882 d0 ac          bne frame
+      1 x        6  .0884 60          rts
+                     
+total 45789 cycles

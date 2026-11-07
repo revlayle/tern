@@ -1,0 +1,39 @@
+                     
+                     
+                     
+                     
+                     =$c000   values = $c000
+                     =$10   last   = $10
+                     =$11   tmp    = $11
+                     .0800   start
+      1 x        2  .0800 a0 00          ldy #0
+      1 x        2  .0802 a9 07          lda #7
+    100 x      300  .0804 85 11  gen     sta tmp
+    100 x      200  .0806 0a          asl
+    100 x      200  .0807 0a          asl
+    100 x      200  .0808 18          clc
+    100 x      300  .0809 65 11          adc tmp
+    100 x      200  .080b 18          clc
+    100 x      200  .080c 69 11          adc #17
+    100 x      500  .080e 99 00 c0         sta values,y
+    100 x      200  .0811 c8          iny
+    100 x      200  .0812 c0 64          cpy #100
+    100 x      299  .0814 d0 ee          bne gen
+      1 x        2  .0816 a9 63          lda #99
+      1 x        3  .0818 85 10          sta last
+     99 x      198  .081a a0 00  outer   ldy #0
+   4950 x    19800  .081c b9 01 c0 inner   lda values+1,y
+   4950 x    19800  .081f d9 00 c0         cmp values,y
+   4950 x    12648  .0822 b0 0a          bcs ordered         ; b >= a
+   2202 x     8808  .0824 be 00 c0         ldx values,y
+   2202 x    11010  .0827 99 00 c0         sta values,y
+   2202 x     4404  .082a 8a          txa
+   2202 x    11010  .082b 99 01 c0         sta values+1,y
+   4950 x     9900  .082e c8  ordered iny
+   4950 x    14850  .082f c4 10          cpy last
+   4950 x    14751  .0831 d0 e9          bne inner
+     99 x      495  .0833 c6 10          dec last
+     99 x      296  .0835 d0 e3          bne outer
+      1 x        6  .0837 60          rts
+                     
+total 130784 cycles
