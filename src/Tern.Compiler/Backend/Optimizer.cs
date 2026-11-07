@@ -15,11 +15,193 @@ namespace Tern.Compiler.Backend;
 /// </summary>
 public static class Optimizer
 {
-    public static void Run(List<AsmItem> code, FunctionSymbol function)
+    /// <param name="startsProgram">The function is main, entered once just after the startup code cleared memory.</param>
+    public static void Run(List<AsmItem> code, FunctionSymbol function, bool startsProgram = false)
     {
         ThreadJumps(code);
         RemoveUnreachable(code);
-        while (RemoveRedundant(code, function) | FoldShiftTests(code, function)) { }
+        Improve(code, function);
+        // After the other changes, which may use what the stores tell them (A holds x after sta x).
+        if (startsProgram && RemoveStoresOfStartupZeros(code)) Improve(code, function);
+    }
+
+    private static void Improve(List<AsmItem> code, FunctionSymbol function)
+    {
+        while (RemoveRedundant(code, function) | FoldShiftTests(code, function) | UseOperandInA(code, function)
+            | RemoveDeadLoads(code, function) | GroupConstantStores(code)) { }
+    }
+
+    /// <summary>
+    /// At the start of main, before any label, branch, call or assembly, a store of 0 into a global
+    /// the startup code cleared, and that main has not written yet, changes nothing (<c>fib[0] = 0</c>).
+    /// </summary>
+    private static bool RemoveStoresOfStartupZeros(List<AsmItem> code)
+    {
+        int count = code.Count;
+        static bool ClearedAtStartup(VariableSymbol v) =>
+            v.Kind == VariableKind.Global && v.InitialBytes is null && !v.NoInit && !v.IsData && v.FixedAddress is null
+            && !v.IsOverlayImage && !v.IsVolatile && v.AliasOf is null;
+        var known = new Operand?[3];
+        var written = new HashSet<VarOperand>();
+        var writtenWhole = new HashSet<VariableSymbol>();   // arrays written with an index
+        int first = NextReal(code, 0);
+        // main's own label, if nothing in main jumps to it.
+        if (first < code.Count && code[first] is LabelDef entry && !code.Any(item => item is Instr { Operand: LabelOperand { Label: var l } } && l == entry.Label))
+            first++;
+        for (int k = first; k < code.Count; k++)
+        {
+            if (code[k] is Comment or SourceLine) continue;
+            if (code[k] is not Instr { AsmPos: null } i || i.Mnemonic is Jsr or Brk or Rts or Rti or Mnemonic.Jmp || IsBranch(i.Mnemonic)) break;
+            if (Stored(i.Mnemonic) is Reg st && i.Mode is Absolute or ZeroPage && i.Operand is VarOperand target)
+            {
+                if (known[(int)st] is Imm { Value: 0 } && ClearedAtStartup(target.Variable) && !written.Contains(target)
+                    && !writtenWhole.Contains(target.Variable))
+                    code.RemoveAt(k--);
+                else
+                    written.Add(target);
+                continue;
+            }
+            // Anything else in straight-line code: note what it writes.
+            if (AsmEffects.WritesMemory(i.Mnemonic, i.Mode) || Stored(i.Mnemonic) is not null)
+            {
+                // Through a pointer, or at a number: anything may change.
+                if (i.Mode is IndirectIndexed or IndexedIndirect or Indirect || i.Operand is not VarOperand { Variable: var v }) break;
+                if (i.Mode is Absolute or ZeroPage) written.Add((VarOperand)i.Operand); else writtenWhole.Add(v);
+            }
+            var (_, writes) = AsmEffects.Of(i.Mnemonic, i.Mode);
+            foreach (var r in new[] { Reg.A, Reg.X, Reg.Y })
+                if (writes.HasFlag(r switch { Reg.A => CpuState.A, Reg.X => CpuState.X, _ => CpuState.Y })) known[(int)r] = null;
+            if (Loaded(i.Mnemonic) is Reg load && i.Mode == Immediate) known[(int)load] = i.Operand;
+        }
+        return code.Count != count;
+    }
+
+    /// <summary>
+    /// Removes a load whose register is loaded again before anything reads it or N and Z, on the
+    /// straight-line code after it (<c>lda #0</c> / <c>lda #1</c>). A volatile read, and a read of a
+    /// fixed address (it may be hardware), stay. Returns true if any was removed.
+    /// </summary>
+    private static bool RemoveDeadLoads(List<AsmItem> code, FunctionSymbol function)
+    {
+        bool removed = false;
+        // From the end, so each decision sees the code after it as it will be.
+        for (int k = code.Count - 1; k >= 0; k--)
+        {
+            if (code[k] is not Instr { AsmPos: null } i || Loaded(i.Mnemonic) is not Reg load || !Trackable(i)
+                || i.Operand is VarOperand { Variable.FixedAddress: not null }) continue;
+            var reg = load switch { Reg.A => CpuState.A, Reg.X => CpuState.X, _ => CpuState.Y };
+            var register = load switch { Reg.A => Register.A, Reg.X => Register.X, _ => Register.Y };
+            for (int j = k + 1; j < code.Count; j++)
+            {
+                if (code[j] is Comment or SourceLine or LabelDef) continue;
+                if (code[j] is not Instr n || FromAsm(n)) break;
+                // rts reads only the return value's registers (N and Z for a bool in a flag).
+                bool deadAtReturn = n.Mnemonic == Rts
+                    && function.ReturnRegister is not (Register.Zero or Register.Negative)
+                    && !(function.ReturnRegister is { } ret && ret.Uses(register));
+                if (!deadAtReturn && (n.Mnemonic is Jsr or Rts or Rti or Brk or Mnemonic.Jmp || IsBranch(n.Mnemonic))) break;
+                var (reads, writes) = AsmEffects.Of(n.Mnemonic, n.Mode);
+                if ((reads & (reg | CpuState.N | CpuState.Z)) != 0) break;
+                if (deadAtReturn || (writes.HasFlag(reg) && writes.HasFlag(CpuState.N) && writes.HasFlag(CpuState.Z)))
+                {
+                    code.RemoveAt(k);
+                    removed = true;
+                    break;
+                }
+            }
+        }
+        return removed;
+    }
+
+    /// <summary>
+    /// A run of <c>lda #c</c> / <c>sta v</c> pairs into different bytes of ordinary memory stores each
+    /// constant once: <c>lda #0 / sta a+1 / lda #45 / sta b / lda #0 / sta b+1</c> becomes
+    /// <c>lda #45 / sta b / lda #0 / sta a+1 / sta b+1</c>. The value loaded last stays last, so A, N
+    /// and Z end the same. Bytes that may share memory (frames of different callees, fixed addresses)
+    /// keep their order. Returns true if a run was changed.
+    /// </summary>
+    private static bool GroupConstantStores(List<AsmItem> code)
+    {
+        bool changed = false;
+        for (int k = 0; k < code.Count; k++)
+        {
+            // The run: from an lda #c, every instruction an lda #c or an sta to a trackable byte.
+            if (code[k] is not Instr { Mnemonic: Lda, Mode: Immediate, AsmPos: null }) continue;
+            // Each store with the source lines and comments since the store before it.
+            var stores = new List<(Operand Value, Instr Store, List<AsmItem> Lines)>();
+            var lines = new List<AsmItem>();
+            Operand? value = null;
+            int end = k;
+            for (int j = k; j < code.Count; j++)
+            {
+                if (code[j] is Comment or SourceLine) { lines.Add(code[j]); continue; }
+                if (code[j] is Instr { Mnemonic: Lda, Mode: Immediate, AsmPos: null } l) { value = l.Operand; end = j; continue; }
+                if (code[j] is Instr { Mnemonic: Sta, AsmPos: null, Operand: VarOperand } s && Trackable(s)) { stores.Add((value!, s, lines)); lines = []; end = j; continue; }
+                break;
+            }
+            // Lines after the last store belong to what follows the run, unless an lda in the run follows them.
+            var trailing = code.GetRange(k, end - k + 1).Where(lines.Contains).ToList();
+            var run = code.GetRange(k, end - k + 1);
+            // Each value once; the last value loaded (even with no store after it) goes last.
+            var values = stores.Select(s => s.Value).Where(v => !v.Equals(value)).Distinct().Append(value!).ToList();
+            if (stores.Count == 0 || run.Count(item => item is Instr { Mnemonic: Lda }) <= values.Count) continue;
+            var targets = stores.Select(s => (VarOperand)s.Store.Operand!).ToList();
+            static bool MayShare(VarOperand a, VarOperand b) =>
+                a == b || (a.Variable.FixedAddress is not null && b.Variable.FixedAddress is not null)
+                || (a.Variable.Owner is { } oa && b.Variable.Owner is { } ob && oa != ob);
+            if (targets.SelectMany((a, x) => targets.Skip(x + 1).Select(b => (a, b))).Any(p => MayShare(p.a, p.b))) continue;
+
+            // Each source line stays in front of the code of its statement: the first store of a
+            // value takes its lines in front of the lda, the others in front of the store.
+            var grouped = new List<AsmItem>();
+            foreach (var v in values)
+            {
+                var group = stores.Where(s => s.Value.Equals(v)).ToList();
+                if (group.Count > 0) grouped.AddRange(group[0].Lines);
+                if (v.Equals(values[^1])) grouped.AddRange(trailing);
+                grouped.Add(new Instr(Lda, Immediate, v));
+                for (int g = 0; g < group.Count; g++)
+                {
+                    if (g > 0) grouped.AddRange(group[g].Lines);
+                    grouped.Add(group[g].Store);
+                }
+            }
+            code.RemoveRange(k, end - k + 1);
+            code.InsertRange(k, grouped);
+            changed = true;
+            k += grouped.Count - 1;
+        }
+        return changed;
+    }
+
+    /// <summary>
+    /// <c>lda x</c> / <c>eor y</c> where A already holds y becomes <c>eor x</c>; also <c>and</c>,
+    /// <c>ora</c> and <c>adc</c> (with the carry it finds), which are commutative and take every
+    /// addressing mode <c>lda</c> does. A, N, Z, C and V end the same; a <c>clc</c> between
+    /// <c>lda</c> and <c>adc</c> stays. Returns true if anything changed.
+    /// </summary>
+    /// <remarks>
+    /// Each change leaves every register and flag as it was after the pair, so one analysis serves
+    /// all of them; going from the end keeps the positions of the states not yet used.
+    /// </remarks>
+    private static bool UseOperandInA(List<AsmItem> code, FunctionSymbol function)
+    {
+        State?[]? before = null;
+        bool changed = false;
+        for (int k = code.Count - 1; k >= 0; k--)
+        {
+            if (code[k] is not Instr { Mnemonic: Lda, AsmPos: null } load) continue;
+            int o = NextReal(code, k + 1);
+            if (o < code.Count && code[o] is Instr { Mnemonic: Clc or Sec, AsmPos: null }) o = NextReal(code, o + 1);
+            if (o >= code.Count || code[o] is not Instr { Mnemonic: And or Ora or Eor or Adc, AsmPos: null } op || !Trackable(op)) continue;
+            if (op.Mnemonic != Adc && NextReal(code, k + 1) != o) continue;
+            before ??= Analyse(code, function);
+            if (before[k] is not { } s || !s.Regs[(int)Reg.A].Contains(op.Operand!)) continue;
+            code[o] = op with { Mode = load.Mode, Operand = load.Operand };
+            code.RemoveAt(k);
+            changed = true;
+        }
+        return changed;
     }
 
     /// <summary>The index of each label's definition.</summary>
@@ -277,6 +459,18 @@ public static class Optimizer
         if (m is Plp or Rti) s.Flags = null;
     }
 
+    /// <summary>
+    /// The state where Z is set: the register N and Z were set from is 0 (after <c>iny / bne loop</c>
+    /// falls through, Y is 0).
+    /// </summary>
+    private static State IsZero(State s)
+    {
+        if (s.Flags is not Reg f) return s;
+        var z = s.Copy();
+        z.Regs[(int)f].Add(new Imm(0));
+        return z;
+    }
+
     /// <summary>The state before each item, from the start of the function and every jump into a label.</summary>
     private static State?[] Analyse(List<AsmItem> code, FunctionSymbol function)
     {
@@ -306,7 +500,8 @@ public static class Optimizer
             if (code[k] is Instr i)
             {
                 Step(s, i, function, selfModifying);
-                if (Target(i) is { } t && positions.TryGetValue(t, out int tp)) Join(tp, s);
+                if (Target(i) is { } t && positions.TryGetValue(t, out int tp)) Join(tp, i.Mnemonic == Beq ? IsZero(s) : s);
+                if (i.Mnemonic == Bne) s = IsZero(s);
             }
             if (FallsThrough(code[k])) Join(k + 1, s);
         }
@@ -371,7 +566,7 @@ public static class Optimizer
         var positions = Positions(code);
         var before = Analyse(code, function);
         var kept = new List<AsmItem>(code.Count);
-        bool flagsChanged = false;
+        bool flagsChanged = false, replaced = false;
         for (int k = 0; k < code.Count; k++)
         {
             if (code[k] is not Instr i || FromAsm(i) || before[k] is not { } s)
@@ -389,12 +584,40 @@ public static class Optimizer
             else if (Transfer(i.Mnemonic) is var (from, to))
                 redundant = s.Regs[(int)from].Overlaps(s.Regs[(int)to]) && FlagsMatch(s.Regs[(int)from]);
             if (redundant) flagsChanged |= setsFlags;
+            else if (Shorter(i, s) is { } shorter) { kept.Add(shorter); replaced = true; }
             else kept.Add(i);
         }
-        if (kept.Count == code.Count) return false;
+        if (kept.Count == code.Count && !replaced) return false;
         code.Clear();
         code.AddRange(kept);
         return true;
+    }
+
+    /// <summary>
+    /// A one-byte instruction that loads the same value and sets N and Z the same way, or null:
+    /// <c>lda v</c> as <c>txa</c> when X holds v (also <c>tya</c>, <c>tax</c>, <c>tay</c>), and
+    /// <c>ldy #c</c> as <c>iny</c> when Y holds c - 1 (<c>dey</c> for c + 1; also X).
+    /// </summary>
+    private static Instr? Shorter(Instr i, State s)
+    {
+        if (Loaded(i.Mnemonic) is not Reg load || !Trackable(i)) return null;
+        var op = i.Operand!;
+        Mnemonic? transfer = load switch
+        {
+            Reg.A when s.Regs[(int)Reg.X].Contains(op) => Txa,
+            Reg.A when s.Regs[(int)Reg.Y].Contains(op) => Tya,
+            Reg.X when s.Regs[(int)Reg.A].Contains(op) => Tax,
+            Reg.Y when s.Regs[(int)Reg.A].Contains(op) => Tay,
+            _ => null,
+        };
+        if (transfer is { } t) return new Instr(t);
+        if (load != Reg.A && op is Imm { Value: var c })
+        {
+            var held = s.Regs[(int)load];
+            if (held.Contains(new Imm((c - 1) & 0xFF))) return new Instr(load == Reg.X ? Inx : Iny);
+            if (held.Contains(new Imm((c + 1) & 0xFF))) return new Instr(load == Reg.X ? Dex : Dey);
+        }
+        return null;
     }
 
     // ---------- Bit test and shift ----------

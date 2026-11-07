@@ -66,7 +66,7 @@ Each finding: the pattern, Tern's lines against the assembly's, and what it save
 
 **F1. An indexed or indirect operand is copied to a temporary before `adc`/`sbc`/`cmp`.** Tern: `lda a,x / sta _t0 / lda b,x / adc _t0`; assembly: `lda b,x / adc a,x`. 6 cycles and 4 bytes per operand byte. `enemies` 9,600 / 8 (`x + dx`, `y + dy`), `copy` 6,000 / 8 (`lda (b),y / sta t0 / lda (a),y / cmp t0` against `lda (p),y / cmp (q),y`), `sum16` 4,800 / 16, `fib16` 792 / 24, `interp` 60 / 8 (ADD, and SUB's bytes). **21,252 / 64.**
 
-**F2. A constant offset is folded into the address only for `a[i - c]`.** `a[i + 1]` is `txa / clc / adc #1 / tay / lda a,y`, 8 cycles and 5 bytes more than `lda a+1,x`, because the `u8` index wraps (decision 42). Spec 3.2 already allows the fold "when it can prove the sum does not wrap (e.g. a loop counter with constant bounds)", but not even the constant-bounds case is built: `for i in 0..99 { b[i] = a[i + 1] }` still computes the index. In `bubble`, `for i in 0..last` with `last: u8` proves `i <= 254`, so `i + 1` does not wrap either. `bubble` 57,216 / 10 (4,950 reads and 2,202 swaps, 8 cycles each). **57,216 / 10**, 35% of the gap. Until it is built, `bubble.minus` (`values[i - 1], values[i]` over `1..=last`) gets most of it today: 179,532 cycles against 226,948.
+**F2. A constant offset is folded into the address only for `a[i - c]`.** `a[i + 1]` is `txa / clc / adc #1 / tay / lda a,y`, 8 cycles and 5 bytes more than `lda a+1,x`, because the `u8` index wraps (decision 42). Spec 3.2 already allows the fold "when it can prove the sum does not wrap (e.g. a loop counter with constant bounds)", but not even the constant-bounds case is built: `for i in 0..99 { b[i] = a[i + 1] }` still computes the index. In `bubble`, `for i in 0..last` with `last: u8` proves `i <= 254`, so `i + 1` does not wrap either. `bubble` 57,216 / 10 (4,950 reads and 2,202 swaps, 8 cycles each). **57,216 / 10**, 35% of the gap. Built in M18 (section 8); the workaround `bubble.minus` (`values[i - 1], values[i]` over `1..=last`) is now slower than the source as written (179,532 against 169,732 cycles), so it is not advice.
 
 **F3. A store to a local that is never read from memory stays.** `var b = values[i]` then `cmp main.a` and `sta values,x` use A, but `sta main.b` stays. `bubble` 14,850 / 2 (`b`), `enemies` 4,800 / 4 (`sta main.x`, `sta main.y`: after F4 nothing reads them from memory), `interp` 222 / 2 (`op`). **19,872 / 8.**
 
@@ -151,7 +151,7 @@ Inner loop, 4,950 passes and 2,202 swaps: Tern `lda values,x / sta a / txa / clc
 | F9: outer loop control and the store of `x` | 1,004 | 13 | 1 |
 | F18: `a` in memory: `lda values,x / sta a / cmp a` (10) against `cmp values,y` (4) on every pass, less 3 a swap (Tern's `lda a` against `ldx values,y / txa`) | 23,094 | 2 | 1 |
 
-The original source with F2, F3, F9 and F18 is the assembly's code. `bubble.direct` with F1 and F2 would be the assembly plus 17,616 (its swap) plus F9, so once F18 exists it is the worse form. Variants today: `bubble.minus` 77 / 179,532 (the F2 workaround), `bubble.direct` 94 / 253,936. The first loop (`x = (x << 2) + x + 17`) is the same in both apart from the store of `x`.
+The original source with F2, F3, F9 and F18 is the assembly's code. `bubble.direct` with F1 and F2 would be the assembly plus 17,616 (its swap) plus F9, so once F18 exists it is the worse form. Variants in M17: `bubble.minus` 77 / 179,532 (the F2 workaround), `bubble.direct` 94 / 253,936. The first loop (`x = (x << 2) + x + 17`) is the same in both apart from the store of `x`.
 
 ### calls: 107 / 31,754 against 88 / 26,551 (gap 19 / 5,203)
 
@@ -317,11 +317,35 @@ Largest saving first, in cycles over the nine benchmarks (of the 162,383-cycle g
 | 15 | Small shapes (F10), led by `p += 256` as `inc p+1` | 1 | 415 | 98 | the `± 256` part is 195 / 55 |
 | 16 | No `match` range check when the value's range is known (F14) | 1 | 350 | 5 | here from a `data` table |
 | 17 | Branch on the carry a shift leaves, moving an independent shift before the test (F20) | 1 | 50 | 4 | also `math.mul16` |
-| 18 | Guide advice, measured today: compare and copy in pages, store an element before testing it, register parameters (`using`), `return` instead of a loop flag; until F2 is built, `a[i - 1], a[i]` for adjacent pairs (`bubble.minus` −21%) | 2 now | 16,785 | 3 | `copy.pages` −15%, `enemies.first` −7%, `interp.return` −9%; beyond the gap, small hot functions as `inline fn` (`calls.inline` −25%, below the assembly) |
+| 18 | Guide advice, measured today: compare and copy in pages, store an element before testing it, register parameters (`using`), `return` instead of a loop flag | 2 now | 16,785 | 3 | `copy.pages` −15%, `enemies.first` −7%, `interp.return` −9%; beyond the gap, small hot functions as `inline fn` (`calls.inline` −25%, below the assembly) |
 | 19 | Return a `bool` as the compare's own carry (F21), and write such functions so their condition is that carry | 1, then 2 | 903 | 5 | F21 for `cmp`'s own carry needs `bigger` rewritten; an F21 that also makes `>` with `clc / sbc` would get about 500 of it from the source as written |
 
 Items 1 to 17 add up to the class 1 column: 147,954 cycles and 267 bytes. Class 3 is empty. Class 4 (285 cycles, 25 bytes: the assembly's copy written for one size, and `mul` leaving its result in zero page) and, in the library, carry as data and decimal mode stay assembly by design (section 4).
 
-The guide advice in item 18 can be written now. The `bubble.minus` workaround is no longer needed once F2 is built. `bubble.direct` (compare the elements, no locals) should not become advice: with F2 and F18 the source as written gives the assembly's loop, and `bubble.direct` would be 17,616 cycles slower.
+The guide advice in item 18 can be written now. The `bubble.minus` workaround is dropped: F2 is built (M18). `bubble.direct` (compare the elements, no locals) should not become advice: with F2 and F18 the source as written gives the assembly's loop, and `bubble.direct` would be 17,616 cycles slower.
 
 Question for the spec session: F2 needs no rule change if "when it can prove the sum does not wrap" in spec 3.2 includes either of two proofs in `bubble`. (a) The loop bound: `for i in 0..last` with `last: u8` gives `i <= 254`, so `i + 1 <= 255`. (b) The other access: the same body reads `values[i]`, and spec 3.2 says an index outside the array "is not supported" and "the compiler may assume it never happens", so `i < 100` and `i + 1 <= 100`. (b) does not depend on the bounds, so it also covers `while` loops and the constant-bounds case, but it uses the out-of-range assumption for more than "a[i] = v changes only a". This report reads (a) as allowed; please decide (b).
+
+## 8. M18: measured savings
+
+Each fix as built, against the estimate above. Measured on `BenchmarkTests` (`baseline.txt`: the whole program, startup included), cycles / bytes over the nine benchmarks.
+
+After part 1 (F2, F1, F4, F6, F8, F10, F19, F21), `comparison.md`: Tern 1036 / 394,956 against the assembly's 947 / 324,419 (M17: 1221 / 486,802), so the gap went from 274 / 162,383 to 89 / 70,537. `fib16` and `sum16` are now below the assembly in cycles and bytes. Variants (`variants.md`): `bubble.minus` is slower than `bubble` as written, so its advice is dropped; `bubble.direct` (149,404) is now faster than `bubble` (169,732), until F18 (part 2) gives `bubble` the assembly's inner loop.
+
+| finding | estimate | measured | where |
+|---|--:|--:|---|
+| F2 | 57,216 / 10 | 57,216 / 10 | `bubble` |
+| F1 | 21,252 / 64 | 21,590 / 60 | `enemies` 9,855 / 8 (of which 255 is F12: `enemies` no longer crosses a page), `copy` 6,000 / 4 (the estimate's 8 bytes were on the pages form), `sum16` 4,864 / 16, `fib16` 811 / 24, `interp` 60 / 8 |
+| F4 | 4,752 / 4 | 4,752 / 4 | `enemies` |
+| F6 | 3,048 / 10 | 3,048 / 10 | `calls` |
+| F8 | 3,000 / 7 | 3,636 / 9 | `sum16`; beyond the estimate, the optimizer now drops `lda v+1` at the loop top (A holds it from the store at the end of the pass), 597, which the assembly does not do; the rest is page crossings |
+| F19 | 768 / 2 | 768 / 2 | `crc8` |
+| F21 | 903 / 5 (about 500 from the source as written) | 503 / 4 | `calls`: `bigger`'s `return a > b` is `lda a / clc / sbc b / rts`; the rest needs the rewrite (section 3) |
+| F10 `± 256` | 195 / 55 | 117 / 33 | `copy`: `to`, `from`, `n`; the estimate also counted `a`, `b`, which step by 256 only in `copy.pages` |
+| F10 `a[i] += 1` | 0 / 6 | 0 / 6 | `enemies` (`hits`, never runs); also `interp`'s `DEC` as `dec stack-1,x`, 6 bytes, but 22 cycles slower in all: the shorter program moves `code` across a page (F12) |
+| F10 register transfers, `iny` | A known from X 6 / 1, `ldy #c` 0 / 3, Y known 0 2 / 2 | 22 / 6 | `sieve` 22 / 2 (`ldx n` as `tax` after the loop test, `lda n` as `txa`), `copy` 0 / 4 (`iny` for `ldy #2`, `#3`). `copy`'s `ldy #0` after the pages loop stays: the `while` can be skipped on entry, so Y is not known there (it would need F9) |
+| F10 negation | 32 / 4 | 32 / 4 | `enemies` |
+| F10 `cmp #0` | 28 / 4 | 28 / 4 | `fib16` (`while b != 0`, 16-bit) |
+| F10 carry known clear | 128 / 4 | 128 / 4 | `enemies` init: `(i << 3) + i + 10` with `i < 16` |
+| F10 a field as a bound | 6 / 4 | 6 / 4 | `copy`: `for i in 0..n.lo` is `cpy n` |
+| F10 stores of 0 into cleared memory, zeros stored together | 16 / 13, 2 / 2 | 22 / 19 | `fib16` 18 / 15; `copy` 4 / 4 (the zeros of `copy(DST, SRC, 1000)`'s arguments) |

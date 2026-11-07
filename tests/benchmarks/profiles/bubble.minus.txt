@@ -72,9 +72,9 @@
                                                      ;   21: last -= 1
      99 x      495  $0862  C6 03     dec main.last         ; 5
                      main.test4:
-    100 x      200  $0864  A9 00     lda #$00              ; 2
-    100 x      300  $0866  C5 03     cmp main.last         ; 3
-    100 x      299  $0868  90 D3     bcc main.while3       ; 2+
+    100 x      300  $0864  A5 03     lda main.last         ; 3
+    100 x      200  $0866  C9 01     cmp #$01              ; 2
+    100 x      299  $0868  B0 D3     bcs main.while3       ; 2+
                      main.wend5:
       1 x        6  $086A  60        rts                   ; 6
                      

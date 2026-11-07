@@ -424,7 +424,7 @@ public class OptimizerTests
             }
             """);
         Assert.Equal(33, r.U8("b", 2));
-        Assert.Equal(1, Main(r).Split("ldx main.i").Length - 1);
+        Assert.Equal(1, Main(r).Split(" / ").Count(s => s.StartsWith("ldx") || s == "tax"));   // X is loaded once
     }
 
     [Theory]
@@ -493,6 +493,69 @@ public class OptimizerTests
             }
             """);
         Assert.Equal(0, r.U8("out"));
+    }
+
+    // M18 F19: lda x / eor y with y already in A is eor x.
+
+    [Theory]
+    [InlineData("^", "eor")]
+    [InlineData("&", "and")]
+    [InlineData("|", "ora")]
+    [InlineData("+", "adc")]
+    public void A_commutative_operand_already_in_A_is_used_as_is(string op, string mnemonic)
+    {
+        foreach (int start in new[] { 0, 1, 127, 128, 255 })
+        {
+            var r = Run.Program($$"""
+                var crc: u8 = {{start}}
+                var b: u8
+                fn main() {
+                    for i in 0..=255 {
+                        b = b + 37
+                        crc = crc {{op}} b
+                    }
+                }
+                """);
+            int crc = start, b = 0;
+            for (int i = 0; i < 256; i++)
+            {
+                b = (byte)(b + 37);
+                crc = (byte)(op switch { "^" => crc ^ b, "&" => crc & b, "|" => crc | b, _ => crc + b });
+            }
+            Assert.Equal(crc, r.U8("crc"));
+            Assert.Contains($"sta b / {(op == "+" ? "clc / " : "")}{mnemonic} crc / sta crc", Main(r));
+        }
+    }
+
+    [Fact]
+    public void A_subtraction_keeps_its_load()
+    {
+        var r = Run.Program("""
+            var t: u8 = 100
+            var b: u8
+            fn main() {
+                b = 30
+                t = t - b
+            }
+            """);
+        Assert.Equal(70, r.U8("t"));
+        Assert.Equal("lda #$1E / sta b / lda t / sec / sbc b / sta t / rts", Main(r));
+    }
+
+    [Fact]
+    public void An_operand_in_A_on_only_one_path_keeps_the_load()
+    {
+        var r = Run.Program("""
+            var t: u8 = 3
+            var b: u8 = 5
+            var c: u8 = 1
+            fn main() {
+                if c == 1 { b = 9 }
+                t = t ^ b
+            }
+            """);
+        Assert.Equal(3 ^ 9, r.U8("t"));
+        Assert.Contains("lda t / eor b", Main(r));
     }
 }
 

@@ -9,7 +9,7 @@
                      $0814  A9 00     lda #$00              ; 2
                      $0816  A2 50     ldx #$50              ; 2
                      clear:
-                     $0818  9D C0 08  sta bss-1,x           ; 5
+                     $0818  9D A6 08  sta bss-1,x           ; 5
                      $081B  CA        dex                   ; 2
                      $081C  D0 FA     bne clear             ; 2+
                      $081E  20 24 08  jsr main              ; 6
@@ -26,109 +26,94 @@
      16 x       32  $0829  0A        asl a                 ; 2
      16 x       32  $082A  0A        asl a                 ; 2
      16 x       32  $082B  0A        asl a                 ; 2
-     16 x       32  $082C  18        clc                   ; 2
-     16 x       48  $082D  65 07     adc main._t0          ; 3
-     16 x       32  $082F  18        clc                   ; 2
-     16 x       32  $0830  69 0A     adc #$0A              ; 2
-     16 x       80  $0832  9D C1 08  sta enemies,x         ; 5
+     16 x       48  $082C  65 07     adc main._t0          ; 3
+     16 x       32  $082E  69 0A     adc #$0A              ; 2
+     16 x       80  $0830  9D A7 08  sta enemies,x         ; 5
                                                      ;    9: enemies[i].y = (i << 2) + i + 20
-     16 x       32  $0835  8A        txa                   ; 2
-     16 x       48  $0836  85 07     sta main._t0          ; 3
-     16 x       32  $0838  0A        asl a                 ; 2
-     16 x       32  $0839  0A        asl a                 ; 2
-     16 x       32  $083A  18        clc                   ; 2
-     16 x       48  $083B  65 07     adc main._t0          ; 3
-     16 x       32  $083D  18        clc                   ; 2
-     16 x       32  $083E  69 14     adc #$14              ; 2
-     16 x       80  $0840  9D D1 08  sta enemies+16,x      ; 5
+     16 x       32  $0833  8A        txa                   ; 2
+     16 x       48  $0834  85 07     sta main._t0          ; 3
+     16 x       32  $0836  0A        asl a                 ; 2
+     16 x       32  $0837  0A        asl a                 ; 2
+     16 x       48  $0838  65 07     adc main._t0          ; 3
+     16 x       32  $083A  69 14     adc #$14              ; 2
+     16 x       80  $083C  9D B7 08  sta enemies+16,x      ; 5
                                                      ;   10: enemies[i].dx = 1
-     16 x       32  $0843  A9 01     lda #$01              ; 2
-     16 x       80  $0845  9D E1 08  sta enemies+32,x      ; 5
+     16 x       32  $083F  A9 01     lda #$01              ; 2
+     16 x       80  $0841  9D C7 08  sta enemies+32,x      ; 5
                                                      ;   11: enemies[i].dy = -2
-     16 x       32  $0848  A9 FE     lda #$FE              ; 2
-     16 x       80  $084A  9D F1 08  sta enemies+48,x      ; 5
+     16 x       32  $0844  A9 FE     lda #$FE              ; 2
+     16 x       80  $0846  9D D7 08  sta enemies+48,x      ; 5
                      main.fnext1:
-     16 x       32  $084D  E8        inx                   ; 2
-     16 x       32  $084E  E0 10     cpx #$10              ; 2
-     16 x       47  $0850  D0 D4     bne main.for2         ; 2+
+     16 x       32  $0849  E8        inx                   ; 2
+     16 x       32  $084A  E0 10     cpx #$10              ; 2
+     16 x       47  $084C  D0 D8     bne main.for2         ; 2+
                      main.fend0:
                                                      ;   13: for _ in 0..50 {
                                                      ; repeat 50 times
-      1 x        2  $0852  A9 32     lda #$32              ; 2
-      1 x        3  $0854  85 04     sta main._loop0       ; 3
+      1 x        2  $084E  A9 32     lda #$32              ; 2
+      1 x        3  $0850  85 04     sta main._loop0       ; 3
                      main.for5:
                                                      ;   14: for i in 0..16 {
-     50 x      100  $0856  A2 00     ldx #$00              ; 2
+     50 x      100  $0852  A2 00     ldx #$00              ; 2
                      main.for8:
                                                      ;   15: var x: u8 = enemies[i].x + (enemies[i].dx as u8)
-    800 x     3200  $0858  BD E1 08  lda enemies+32,x      ; 4+
-    800 x     2400  $085B  85 07     sta main._t0          ; 3
-    800 x     3200  $085D  BD C1 08  lda enemies,x         ; 4+
-    800 x     1600  $0860  18        clc                   ; 2
-    800 x     2400  $0861  65 07     adc main._t0          ; 3
-    800 x     2400  $0863  85 05     sta main.x            ; 3
+    800 x     3200  $0854  BD A7 08  lda enemies,x         ; 4+
+    800 x     1600  $0857  18        clc                   ; 2
+    800 x     3200  $0858  7D C7 08  adc enemies+32,x      ; 4+
+    800 x     2400  $085B  85 05     sta main.x            ; 3
                                                      ;   16: enemies[i].x = x
-    800 x     4000  $0865  9D C1 08  sta enemies,x         ; 5
+    800 x     4000  $085D  9D A7 08  sta enemies,x         ; 5
                                                      ;   17: if x < 8 || x > 200 {
-    800 x     1600  $0868  C9 08     cmp #$08              ; 2
-    800 x     1600  $086A  90 06     bcc main.or10         ; 2+
-    800 x     1600  $086C  A9 C8     lda #$C8              ; 2
-    800 x     2400  $086E  C5 05     cmp main.x            ; 3
-    800 x     2400  $0870  B0 1A     bcs main.endif9       ; 2+
+    800 x     1600  $0860  C9 08     cmp #$08              ; 2
+    800 x     1600  $0862  90 04     bcc main.or10         ; 2+
+    800 x     1600  $0864  C9 C9     cmp #$C9              ; 2
+    800 x     2400  $0866  90 12     bcc main.endif9       ; 2+
                      main.or10:
                                                      ;   18: enemies[i].dx = -enemies[i].dx
-                     $0872  BD E1 08  lda enemies+32,x      ; 4+
-                     $0875  49 FF     eor #$FF              ; 2
-                     $0877  18        clc                   ; 2
-                     $0878  69 01     adc #$01              ; 2
-                     $087A  9D E1 08  sta enemies+32,x      ; 5
+                     $0868  A9 00     lda #$00              ; 2
+                     $086A  38        sec                   ; 2
+                     $086B  FD C7 08  sbc enemies+32,x      ; 4+
+                     $086E  9D C7 08  sta enemies+32,x      ; 5
                                                      ;   19: enemies[i].hits += 1
-                     $087D  BD 01 09  lda enemies+64,x      ; 4+
-                     $0880  18        clc                   ; 2
-                     $0881  69 01     adc #$01              ; 2
-                     $0883  9D 01 09  sta enemies+64,x      ; 5
+                     $0871  FE E7 08  inc enemies+64,x      ; 7
                                                      ;   20: bounces += 1
-                     $0886  E6 02     inc bounces           ; 5
-                     $0888  D0 02     bne main.inc11        ; 2+
-                     $088A  E6 03     inc bounces+1         ; 5
+                     $0874  E6 02     inc bounces           ; 5
+                     $0876  D0 02     bne main.inc11        ; 2+
+                     $0878  E6 03     inc bounces+1         ; 5
                      main.inc11:
                      main.endif9:
                                                      ;   22: var y: u8 = enemies[i].y + (enemies[i].dy as u8)
-    800 x     3250  $088C  BD F1 08  lda enemies+48,x      ; 4+
-    800 x     2400  $088F  85 07     sta main._t0          ; 3
-    800 x     3200  $0891  BD D1 08  lda enemies+16,x      ; 4+
-    800 x     1600  $0894  18        clc                   ; 2
-    800 x     2400  $0895  65 07     adc main._t0          ; 3
-    800 x     2400  $0897  85 06     sta main.y            ; 3
+    800 x     3200  $087A  BD B7 08  lda enemies+16,x      ; 4+
+    800 x     1600  $087D  18        clc                   ; 2
+    800 x     3200  $087E  7D D7 08  adc enemies+48,x      ; 4+
+    800 x     2400  $0881  85 06     sta main.y            ; 3
                                                      ;   23: enemies[i].y = y
-    800 x     4000  $0899  9D D1 08  sta enemies+16,x      ; 5
+    800 x     4000  $0883  9D B7 08  sta enemies+16,x      ; 5
                                                      ;   24: if y < 16 || y > 180 {
-    800 x     1600  $089C  C9 10     cmp #$10              ; 2
-    800 x     1616  $089E  90 06     bcc main.or13         ; 2+
-    784 x     1568  $08A0  A9 B4     lda #$B4              ; 2
-    784 x     2352  $08A2  C5 06     cmp main.y            ; 3
-    784 x     2352  $08A4  B0 11     bcs main.endif12      ; 2+
+    800 x     1600  $0886  C9 10     cmp #$10              ; 2
+    800 x     1616  $0888  90 04     bcc main.or13         ; 2+
+    784 x     1568  $088A  C9 B5     cmp #$B5              ; 2
+    784 x     2352  $088C  90 0F     bcc main.endif12      ; 2+
                      main.or13:
                                                      ;   25: enemies[i].dy = -enemies[i].dy
-     16 x       65  $08A6  BD F1 08  lda enemies+48,x      ; 4+
-     16 x       32  $08A9  49 FF     eor #$FF              ; 2
-     16 x       32  $08AB  18        clc                   ; 2
-     16 x       32  $08AC  69 01     adc #$01              ; 2
-     16 x       80  $08AE  9D F1 08  sta enemies+48,x      ; 5
+     16 x       32  $088E  A9 00     lda #$00              ; 2
+     16 x       32  $0890  38        sec                   ; 2
+     16 x       64  $0891  FD D7 08  sbc enemies+48,x      ; 4+
+     16 x       80  $0894  9D D7 08  sta enemies+48,x      ; 5
                                                      ;   26: bounces += 1
-     16 x       80  $08B1  E6 02     inc bounces           ; 5
-     16 x       48  $08B3  D0 02     bne main.inc14        ; 2+
-                     $08B5  E6 03     inc bounces+1         ; 5
+     16 x       80  $0897  E6 02     inc bounces           ; 5
+     16 x       48  $0899  D0 02     bne main.inc14        ; 2+
+                     $089B  E6 03     inc bounces+1         ; 5
                      main.inc14:
                      main.endif12:
                      main.fnext7:
-    800 x     1600  $08B7  E8        inx                   ; 2
-    800 x     1600  $08B8  E0 10     cpx #$10              ; 2
-    800 x     2350  $08BA  D0 9C     bne main.for8         ; 2+
+    800 x     1600  $089D  E8        inx                   ; 2
+    800 x     1600  $089E  E0 10     cpx #$10              ; 2
+    800 x     2350  $08A0  D0 B2     bne main.for8         ; 2+
                      main.fend6:
                      main.fnext4:
-     50 x      250  $08BC  C6 04     dec main._loop0       ; 5
-     50 x      149  $08BE  D0 96     bne main.for5         ; 2+
+     50 x      250  $08A2  C6 04     dec main._loop0       ; 5
+     50 x      149  $08A4  D0 AC     bne main.for5         ; 2+
                      main.fend3:
-      1 x        6  $08C0  60        rts                   ; 6
+      1 x        6  $08A6  60        rts                   ; 6
                      

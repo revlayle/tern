@@ -100,7 +100,7 @@ public class MathLibraryTests
                 int expected = (int)((long)m * n & 0xFFFF);
                 if (Math.AX != expected) Assert.Fail($"mul16({m}, {n}) = {Math.AX}, expected {expected}");
             }
-        Assert.Equal((37, 853), Range(cycles));
+        Assert.Equal((38, 870), Range(cycles));
     }
 
     [Fact]

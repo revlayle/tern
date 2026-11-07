@@ -31,6 +31,8 @@ public sealed class CodeGen
     private int _loopDepth;
     private readonly List<(Label Break, Label Continue)> _loops = [];
     private readonly HashSet<Register> _reserved = [];
+    /// <summary>The largest value each enclosing <c>for</c> counter can have in the body, where its bounds prove one (spec 3.2).</summary>
+    private readonly Dictionary<VariableSymbol, long> _counterMax = [];
     private readonly List<VariableSymbol> _freeTemps = [];
     private int _tempCounter;
 
@@ -61,7 +63,9 @@ public sealed class CodeGen
             GenFunction(f);
             all.Add(new SectionStart(f.Name, Overlay: f.OverlayArea is null ? null : f.Module!.Name));
             // An interrupt handler's body is optimized before its saving code is added.
-            if (!f.Declaration!.IsAsm && !(f.IsInterrupt && !f.IsPart)) Optimizer.Run(_out, f);
+            // main runs once, right after the startup code has cleared memory.
+            bool startsProgram = f == _program.Main && !_program.IsBinary && !f.AddressTaken;
+            if (!f.Declaration!.IsAsm && !(f.IsInterrupt && !f.IsPart)) Optimizer.Run(_out, f, startsProgram);
             FunctionItems[f] = _out.ToList();
             all.AddRange(_out);
         }
@@ -654,6 +658,10 @@ public sealed class CodeGen
                 {
                     if (c != 0) Set(setTrue, trueOp); else Set(setFalse, falseOp);
                 }
+                else if (_fn.ReturnRegister == Register.Carry && CompareIntoCarry(value))
+                {
+                    // The compare left the result in the carry.
+                }
                 else
                 {
                     var isTrue = NewLabel("rtrue");
@@ -667,6 +675,53 @@ public sealed class CodeGen
             }
         }
         ReturnJump();
+    }
+
+    /// <summary>
+    /// An unsigned one-byte <c>&lt;</c>, <c>&lt;=</c>, <c>&gt;</c> or <c>&gt;=</c> computed straight into the
+    /// carry, with no branches: <c>l &gt;= r</c> is <c>lda l / cmp r</c>, <c>l &gt; r</c> is
+    /// <c>lda l / clc / sbc r</c> (C is set when l - r - 1 does not borrow), or <c>cmp #c+1</c> for a
+    /// constant; <c>&lt;</c> and <c>&lt;=</c> swap the operands. False (nothing emitted) for anything else.
+    /// </summary>
+    private bool CompareIntoCarry(Expr value)
+    {
+        if (value is not BinaryExpr { Op: TokenKind.Less or TokenKind.LessEq or TokenKind.Greater or TokenKind.GreaterEq } b
+            || b.Left.Type is not { Size: 1, IsSigned: false } || b.Right.Type is not { Size: 1, IsSigned: false })
+            return false;
+        Expr l = b.Left, r = b.Right;
+        var op = b.Op;
+        if (op is TokenKind.Less or TokenKind.LessEq)
+        {
+            (l, r) = (r, l);
+            op = op == TokenKind.Less ? TokenKind.Greater : TokenKind.GreaterEq;
+        }
+        if (op == TokenKind.Greater && r.ConstValue is long c && c < 255)
+        {
+            r = new NumberExpr(r.Pos, c + 1) { Type = r.Type, ConstValue = c + 1 };
+            op = TokenKind.GreaterEq;
+        }
+
+        VariableSymbol? temp = null;
+        Action<Mnemonic> use;
+        if (Simple1(r) is { } rop) use = m => Op(m, rop);
+        else if (IndexedOperand(r) is { } element) use = m => element(m, 0);
+        else
+        {
+            temp = AcquireTemp(1);
+            GenA(r);
+            Op(Sta, Var(temp));
+            use = m => Op(m, Var(temp));
+        }
+        if (op == TokenKind.GreaterEq && l is NameExpr { Symbol.Register: { } reg } && Simple1(r) is { } simple)
+            Op(reg == Register.X ? Cpx : Cpy, simple);
+        else
+        {
+            GenA(l);
+            if (op == TokenKind.GreaterEq) use(Cmp);
+            else { Emit(Clc); use(Sbc); }
+        }
+        if (temp is not null) Release(temp);
+        return true;
     }
 
     // ---------- Assignment ----------
@@ -706,6 +761,32 @@ public sealed class CodeGen
                 Place(done);
                 Op(Dec, Var(v));
             }
+            return;
+        }
+
+        // w += 256 / w -= 256 on a 16-bit variable: inc w+1 / dec w+1; another multiple of 256 adds to the high byte only.
+        if (a.Op is TokenKind.PlusEq or TokenKind.MinusEq && target is NameExpr { Symbol: { InMemory: true, Type.Size: 2 } wv }
+            && a.Value.ConstValue is long whole && (whole & 0xFF) == 0 && whole is > 0 and <= 0xFF00)
+        {
+            long k = whole >> 8;
+            if (k == 1) Op(a.Op == TokenKind.PlusEq ? Inc : Dec, Var(wv, 1));
+            else
+            {
+                Op(Lda, Var(wv, 1));
+                CarryFor(a.Op == TokenKind.PlusEq ? TokenKind.Plus : TokenKind.Minus);
+                Op(a.Op == TokenKind.PlusEq ? Adc : Sbc, Byte(k));
+                Op(Sta, Var(wv, 1));
+            }
+            return;
+        }
+
+        // a[i] += 1 / a[i] -= 1 with the index in X: inc a,x / dec a,x (there is no inc a,y).
+        if (byOne && target is IndexExpr { Type.Size: 1 } incx && !IsPointerIndex(incx) && incx.Index.ConstValue is null
+            && FoldIndexOffset(incx.Index, ArrayOf(incx)) is var (incIndex, incShift) && IndexIsCheap(incIndex)
+            && (incIndex is NameExpr { Symbol.Register: Register.X } || (incIndex is not NameExpr { Symbol.Register: not null } && !_reserved.Contains(Register.X))))
+        {
+            LoadIndex(incIndex);   // X, by the condition above
+            Emit(a.Op == TokenKind.PlusEq ? Inc : Dec, AbsoluteX, Var(ArrayOf(incx), incShift));
             return;
         }
 
@@ -802,6 +883,10 @@ public sealed class CodeGen
             case IndexExpr ix:
             {
                 var arr = ArrayOf(ix);
+                // a[i] = b[j] + c[k]: each byte straight into the element (lda b,x / adc c,x / sta a,x).
+                if (value is BinaryExpr bv && Simple2(value) is null && IndexedOperand(ix, 2) is { } element
+                    && Binary16InPlace(bv, element, arr))
+                    break;
                 VariableSymbol? temp = null;
                 var pair = Simple2(value);
                 if (pair is null)
@@ -910,6 +995,46 @@ public sealed class CodeGen
         }
     }
 
+    /// <summary>
+    /// An element used as the operand of an instruction without a temporary (<c>adc b,x</c>,
+    /// <c>cmp (q),y</c>): an array element whose index loads without changing A, or a byte of
+    /// <c>p[i]</c> through a zero-page pointer with such an index. The action loads the index
+    /// register and emits the instruction on byte 0 or 1 of the element. Null for anything else.
+    /// </summary>
+    private Action<Mnemonic, int>? IndexedOperand(Expr e, int size = 1)
+    {
+        // A cast between types of the same size is no code.
+        if (e is CastExpr cast && cast.Type.Size == size && cast.Operand.Type.Size == size) return IndexedOperand(cast.Operand, size);
+        if (e is not IndexExpr ix || ix.Type.Size != size || ix.Index.ConstValue is not null || ContainsCall(ix.Index)) return null;
+        if (IsPointerIndex(ix))
+        {
+            if (ix.Type.Size != 1 || DirectPointer(ix.Target) is not { } p || !PointerIndexIsCheap(ix)) return null;
+            return (m, _) => { LoadPointerIndex(ix, 0); Emit(m, IndirectIndexed, Var(p)); };
+        }
+        var arr = ArrayOf(ix);
+        var (index, shift) = FoldIndexOffset(ix.Index, arr);
+        if (!IndexIsCheap(index)) return null;
+        // Each byte of a 16-bit element loads the index again: a volatile index must be read once (spec 4).
+        if (size == 2 && ReadsVolatile(index)) return null;
+        return (m, b) =>
+        {
+            var reg = LoadIndex(index);
+            Emit(m, reg == Register.X ? AbsoluteX : AbsoluteY, Var(arr, (b == 0 ? 0 : HighTable(arr)) + shift));
+        };
+    }
+
+    /// <summary>True if evaluating e reads volatile memory.</summary>
+    private static bool ReadsVolatile(Expr e) => e switch
+    {
+        NameExpr { Symbol: VariableSymbol v } => v.IsVolatile,
+        UnaryExpr u => ReadsVolatile(u.Operand),
+        BinaryExpr b => ReadsVolatile(b.Left) || ReadsVolatile(b.Right),
+        IndexExpr ix => ReadsVolatile(ix.Target) || ReadsVolatile(ix.Index),
+        MemberExpr m => ReadsVolatile(m.Target),
+        CastExpr c => ReadsVolatile(c.Operand),
+        _ => false,
+    };
+
     /// <summary>Loading this index into X or Y does not change A.</summary>
     private bool IndexIsCheap(Expr index) =>
         index is NameExpr { Symbol.Register: not null } || Simple1(index) is not null;
@@ -918,13 +1043,22 @@ public sealed class CodeGen
     /// <c>a[i - c]</c> is addressed as <c>a-c,x</c> with i in the index register, so the subtraction
     /// costs nothing (spec 11). Only where the wrap-around of the u8 index cannot matter: i - c wraps to
     /// 256 - c + i, which is past the end of an array shorter than 257 - c elements.
+    /// <c>a[i + c]</c> is <c>a+c,x</c> when i is a <c>for</c> counter whose bounds prove i + c &lt;= 255.
     /// </summary>
-    private static (Expr Index, int Offset) FoldIndexOffset(Expr index, VariableSymbol array) =>
-        index is BinaryExpr { Op: TokenKind.Minus, Type.Kind: TypeKind.U8 } b
-            && b.Left.Type is { Size: 1, IsSigned: false } && b.Right.ConstValue is long c && c > 0
-            && array.Type.Length + c <= 256
-            ? (b.Left, -(int)c)
-            : (index, 0);
+    private (Expr Index, int Offset) FoldIndexOffset(Expr index, VariableSymbol array)
+    {
+        if (index is not BinaryExpr { Type.Kind: TypeKind.U8 } b) return (index, 0);
+        if (b.Op == TokenKind.Minus && b.Left.Type is { Size: 1, IsSigned: false } && b.Right.ConstValue is long c && c > 0
+            && array.Type.Length + c <= 256)
+            return (b.Left, -(int)c);
+        if (b.Op == TokenKind.Plus)
+        {
+            var (counter, add) = b.Right.ConstValue is long r ? (b.Left, r) : b.Left.ConstValue is long l ? (b.Right, l) : (null, 0L);
+            if (counter is NameExpr { Symbol: VariableSymbol v } && add > 0 && _counterMax.TryGetValue(v, out long max) && max + add <= 255)
+                return (counter, (int)add);
+        }
+        return (index, 0);
+    }
 
     /// <summary>Puts an array index into X or Y and returns which.</summary>
     private Register LoadIndex(Expr index)
@@ -1007,6 +1141,14 @@ public sealed class CodeGen
                 return;
             }
 
+            case UnaryExpr { Op: TokenKind.Minus } neg when Simple1(neg.Operand) is not null || IndexedOperand(neg.Operand) is not null:
+                // -m as 0 - m: lda #0 / sec / sbc m, shorter than lda m / eor #$FF / clc / adc #1.
+                Op(Lda, Byte(0));
+                Emit(Sec);
+                if (Simple1(neg.Operand) is { } nop) Op(Sbc, nop);
+                else IndexedOperand(neg.Operand)!(Sbc, 0);
+                return;
+
             case UnaryExpr u:
                 GenA(u.Operand);
                 switch (u.Op)
@@ -1075,6 +1217,43 @@ public sealed class CodeGen
         else if (op == TokenKind.Minus) Emit(Sec);
     }
 
+    /// <summary>As <see cref="CarryFor(TokenKind)"/>, with no <c>clc</c> when the code for <paramref name="last"/>, just generated, left the carry clear.</summary>
+    private void CarryFor(TokenKind op, Expr last)
+    {
+        if (op == TokenKind.Plus && CarryClearAfter(last)) return;
+        CarryFor(op);
+    }
+
+    /// <summary>
+    /// The largest value of an unsigned one-byte expression, from constants and the enclosing
+    /// <c>for</c> counters' bounds (as for <see cref="FoldIndexOffset"/>); 255 when nothing is known.
+    /// </summary>
+    private long MaxOf(Expr e)
+    {
+        if (e.ConstValue is long c) return c & 0xFF;
+        if (e.Type is not { Size: 1, IsSigned: false }) return 255;
+        return e switch
+        {
+            NameExpr { Symbol: VariableSymbol v } when _counterMax.TryGetValue(v, out long m) => m,
+            BinaryExpr { Op: TokenKind.Shl, Right.ConstValue: long k } b => Math.Min(255, MaxOf(b.Left) << (int)k),
+            BinaryExpr { Op: TokenKind.Shr, Right.ConstValue: long k } b => MaxOf(b.Left) >> (int)k,
+            BinaryExpr { Op: TokenKind.Plus } b => Math.Min(255, MaxOf(b.Left) + MaxOf(b.Right)),
+            BinaryExpr { Op: TokenKind.Amp } b => Math.Min(MaxOf(b.Left), MaxOf(b.Right)),
+            _ => 255,
+        };
+    }
+
+    /// <summary>
+    /// True if <see cref="GenA"/> of e ends with the carry clear: an <c>asl</c> that shifts out a 0
+    /// bit (x &lt;&lt; k with x &lt;&lt; k below 256), or an <c>adc</c> whose sum cannot pass 255.
+    /// </summary>
+    private bool CarryClearAfter(Expr e) => e.ConstValue is null && e.Type is { Size: 1, IsSigned: false } && e switch
+    {
+        BinaryExpr { Op: TokenKind.Shl, Right.ConstValue: long k } b => k >= 1 && MaxOf(b.Left) << (int)k <= 255,
+        BinaryExpr { Op: TokenKind.Plus } b => MaxOf(b.Left) + MaxOf(b.Right) <= 255,
+        _ => false,
+    };
+
     private void GenBinaryA(BinaryExpr b)
     {
         if (b.Op is TokenKind.Shl or TokenKind.Shr)
@@ -1090,22 +1269,33 @@ public sealed class CodeGen
         if (right is null && commutative && Simple1(b.Left) is { } left)
         {
             GenA(b.Right);
-            CarryFor(b.Op);
+            CarryFor(b.Op, b.Right);
             Op(m, left);
             return;
         }
         if (right is not null)
         {
             GenA(b.Left);
-            CarryFor(b.Op);
+            CarryFor(b.Op, b.Left);
             Op(m, right);
+            return;
+        }
+        // An element as the operand: lda a,x / adc b,x.
+        var indexed = IndexedOperand(b.Right);
+        var other = b.Left;
+        if (indexed is null && commutative && IndexedOperand(b.Left) is { } li) (indexed, other) = (li, b.Right);
+        if (indexed is not null)
+        {
+            GenA(other);
+            CarryFor(b.Op, other);
+            indexed(m, 0);
             return;
         }
         var temp = AcquireTemp(1);
         GenA(b.Right);
         Op(Sta, Var(temp));
         GenA(b.Left);
-        CarryFor(b.Op);
+        CarryFor(b.Op, b.Left);
         Op(m, Var(temp));
         Release(temp);
     }
@@ -1161,6 +1351,91 @@ public sealed class CodeGen
             default:
                 return null;
         }
+    }
+
+    /// <summary>
+    /// One byte of a 16-bit operand used in place: a simple operand, or an element of a split array
+    /// whose index loads without changing A (<c>adc w,x</c>). Neither may read <paramref name="written"/>
+    /// (the index, for an element), which the low byte of the result changes before the high byte is
+    /// read; the variable itself is fine, since each byte is read before it is written. Null otherwise.
+    /// </summary>
+    private Action<Mnemonic, int>? InPlace16(Expr e, VariableSymbol written)
+    {
+        if (Simple2(e) is { } p)
+            return e is NameExpr { Symbol: { } s } && s == written || !ReadsVar(e, written) ? (m, b) => Op(m, b == 0 ? p.Lo : p.Hi) : null;
+        return e is IndexExpr ix && !ReadsVar(ix.Index, written) ? IndexedOperand(e, 2) : null;
+    }
+
+    /// <summary>
+    /// <c>l op r</c> (+, -, &amp;, |, ^) one byte at a time with both operands in place:
+    /// <c>lda l / clc / adc r / sta d</c>, then the high bytes. False if an operand needs code.
+    /// </summary>
+    private bool Binary16InPlace(BinaryExpr b, Action<Mnemonic, int> store, VariableSymbol written)
+    {
+        if (b.Op is TokenKind.Shl or TokenKind.Shr) return false;
+        var l = InPlace16(b.Left, written);
+        var r = InPlace16(b.Right, written);
+        if (l is null || r is null) return false;
+        var m = ArithMnemonic(b.Op);
+        CarryFor(b.Op);
+        l(Lda, 0); r(m, 0); store(Sta, 0);
+        l(Lda, 1); r(m, 1); store(Sta, 1);
+        return true;
+    }
+
+    /// <summary>
+    /// The one-byte unsigned operand of <c>d + b</c>, <c>b + d</c> or <c>d - b</c> (b a u8, or a u8 as u16),
+    /// where d is the destination itself; for <c>-</c>, b must need no code. Null otherwise.
+    /// </summary>
+    private Expr? AddsByteTo(BinaryExpr b, Loc d)
+    {
+        static Expr? Narrow(Expr e) =>
+            e.Type is { Size: 1, IsSigned: false } ? e
+            : e is CastExpr { Operand.Type: { Size: 1, IsSigned: false } } c ? c.Operand : null;
+        static bool IsDest(Expr e, Loc d) => e is NameExpr { Symbol: { } v } && v == d.Var && d.Offset == 0;
+        if (b.Op == TokenKind.Plus)
+        {
+            // A constant keeps clc / lda w / adc #c, the same cost.
+            if (IsDest(b.Left, d) && Narrow(b.Right) is { ConstValue: null } r) return r;
+            if (IsDest(b.Right, d) && Narrow(b.Left) is { ConstValue: null } l) return l;
+            return null;
+        }
+        return IsDest(b.Left, d) && Narrow(b.Right) is { } s && (Simple1(s) is not null || IndexedOperand(s) is not null) ? s : null;
+    }
+
+    /// <summary>
+    /// <c>x op (y &gt;&gt; k)</c> (or <c>&lt;&lt;</c>, either side unless op is <c>-</c>) with y and x
+    /// needing no code: the shifted low byte stays in A and only its high byte goes to a temporary,
+    /// <c>lda y+1 / sta t / lda y / lsr t / ror a ... / clc / adc x / sta d / lda t / adc x+1 / sta d+1</c>.
+    /// Not for a signed <c>&gt;&gt;</c>. False if the expression is not of this form.
+    /// </summary>
+    private bool ShiftedOperand16(BinaryExpr b, Loc d)
+    {
+        if (b.Op is not (TokenKind.Plus or TokenKind.Minus or TokenKind.Amp or TokenKind.Pipe or TokenKind.Caret) || d.Offset != 0)
+            return false;
+        static bool IsShift(Expr e) =>
+            e is BinaryExpr { Op: TokenKind.Shl or TokenKind.Shr, Type.Size: 2, Right.ConstValue: not null } s
+            && !(s.Op == TokenKind.Shr && s.Type.IsSigned);
+        Expr shift, other;
+        if (IsShift(b.Right) && b.Op != TokenKind.Minus) (shift, other) = (b.Right, b.Left);
+        else if (IsShift(b.Left)) (shift, other) = (b.Left, b.Right);
+        else return false;
+        var s = (BinaryExpr)shift;
+        if (Simple2(s.Left) is not { } y || InPlace16(other, d.Var) is not { } x) return false;
+
+        var t = AcquireTemp(1);
+        Op(Lda, y.Hi); Op(Sta, Var(t)); Op(Lda, y.Lo);
+        for (int i = 0; i < s.Right.ConstValue; i++)
+        {
+            if (s.Op == TokenKind.Shl) { Emit(Asl, Accumulator); Op(Rol, Var(t)); }
+            else { Op(Lsr, Var(t)); Emit(Ror, Accumulator); }
+        }
+        var m = ArithMnemonic(b.Op);
+        CarryFor(b.Op);
+        x(m, 0); Op(Sta, d.Lo);
+        Op(Lda, Var(t)); x(m, 1); Op(Sta, d.Hi);
+        Release(t);
+        return true;
     }
 
     private void Gen16(Expr e, Loc d)
@@ -1266,9 +1541,40 @@ public sealed class CodeGen
                 }
                 return;
 
+            case BinaryExpr b when b.Op is TokenKind.Plus or TokenKind.Minus && AddsByteTo(b, d) is { } small:
+            {
+                // w += b as u16: lda b / clc / adc w / sta w / bcc + / inc w+1 (spec 11);
+                // w -= b as u16: lda w / sec / sbc b / sta w / bcs + / dec w+1.
+                var done = NewLabel("c");
+                if (b.Op == TokenKind.Plus)
+                {
+                    GenA(small);
+                    Emit(Clc); Op(Adc, d.Lo); Op(Sta, d.Lo);
+                    Branch(Bcc, done);
+                    Op(Inc, d.Hi);
+                }
+                else
+                {
+                    Op(Lda, d.Lo); Emit(Sec);
+                    if (Simple1(small) is { } op) Op(Sbc, op);
+                    else IndexedOperand(small)!(Sbc, 0);
+                    Op(Sta, d.Lo);
+                    Branch(Bcs, done);
+                    Op(Dec, d.Hi);
+                }
+                Place(done);
+                return;
+            }
+
             case BinaryExpr b:
             {
+                if (ShiftedOperand16(b, d)) return;
                 var right = Simple2(b.Right);
+                // An element on either side: lda a,x / adc b,x / sta d. Not for w + (u8 operand), which adds with bcc / inc.
+                if (d.Offset == 0 && !(b.Op == TokenKind.Plus && right is { Hi: Imm { Value: 0 } })
+                    && (right is null || Simple2(b.Left) is null)
+                    && Binary16InPlace(b, (m, k) => Op(m, k == 0 ? d.Lo : d.Hi), d.Var))
+                    return;
                 if (right is not null && ReadsVar(b.Right, d.Var)) right = null;
                 VariableSymbol? temp = null;
                 if (right is null)
@@ -1387,6 +1693,23 @@ public sealed class CodeGen
         var type = left.Type.Size >= right.Type.Size ? left.Type : right.Type;
         bool signed = type.IsSigned;
 
+        // A one-byte value against a constant keeps the value in A: c < x is x > c, and x > c is
+        // x >= c + 1 (cmp #c+1), x <= c is x < c + 1. Not when c + 1 does not fit (x > 255).
+        if (type.Size == 1 && left.ConstValue is not null && right.ConstValue is null)
+        {
+            (left, right) = (right, left);
+            op = op switch
+            {
+                TokenKind.Less => TokenKind.Greater, TokenKind.Greater => TokenKind.Less,
+                TokenKind.LessEq => TokenKind.GreaterEq, TokenKind.GreaterEq => TokenKind.LessEq, _ => op,
+            };
+        }
+        if (type.Size == 1 && op is TokenKind.Greater or TokenKind.LessEq && right.ConstValue is long c && c < type.MaxValue)
+        {
+            right = new NumberExpr(right.Pos, c + 1) { Type = right.Type, ConstValue = c + 1 };
+            op = op == TokenKind.Greater ? TokenKind.GreaterEq : TokenKind.Less;
+        }
+
         // Only ==, !=, < and >= remain: a > b is b < a, and a <= b is b >= a.
         if (op is TokenKind.Greater or TokenKind.LessEq)
         {
@@ -1401,23 +1724,37 @@ public sealed class CodeGen
     private void Compare8(Expr left, Expr right, TokenKind op, bool signed, Label target)
     {
         VariableSymbol? temp = null;
+        bool equality = op is TokenKind.EqEq or TokenKind.NotEq;
         var rop = Simple1(right);
-        if (rop is null && op is TokenKind.EqEq or TokenKind.NotEq && Simple1(left) is { } lop)
+        if (rop is null && equality && Simple1(left) is { } lop)
         {
             (left, right) = (right, left);
             rop = lop;
         }
-        if (rop is null)
+        // An element compared from A: lda (p),y / cmp (q),y. cpx and cpy have no indexed forms.
+        bool inRegister = !signed && left is NameExpr { Symbol.Register: not null };
+        var indexed = rop is null && !inRegister ? IndexedOperand(right) : null;
+        if (rop is null && indexed is null && equality && !inRegister && IndexedOperand(left) is { } li)
+        {
+            (left, right) = (right, left);
+            indexed = li;
+        }
+        if (rop is null && indexed is null)
         {
             temp = AcquireTemp(1);
             GenA(right);
             Op(Sta, Var(temp));
             rop = Var(temp);
         }
-
-        if (!signed && left is NameExpr { Symbol.Register: { } reg })
+        void Use(Mnemonic m)
         {
-            Op(reg == Register.X ? Cpx : Cpy, rop);
+            if (indexed is not null) indexed(m, 0);
+            else Op(m, rop!);
+        }
+
+        if (inRegister && left is NameExpr { Symbol.Register: { } reg })
+        {
+            Op(reg == Register.X ? Cpx : Cpy, rop!);
         }
         else
         {
@@ -1427,7 +1764,7 @@ public sealed class CodeGen
                 // N = (left < right) after correcting for overflow.
                 var noOverflow = NewLabel("v");
                 Emit(Sec);
-                Op(Sbc, rop);
+                Use(Sbc);
                 Branch(Bvc, noOverflow);
                 Op(Eor, Byte(0x80));
                 Place(noOverflow);
@@ -1435,8 +1772,8 @@ public sealed class CodeGen
                 if (temp is not null) Release(temp);
                 return;
             }
-            if (!(rop is Imm { Value: 0 } && op is TokenKind.EqEq or TokenKind.NotEq && FlagsMatchA()))
-                Op(Cmp, rop);
+            if (!(rop is Imm { Value: 0 } && equality && FlagsMatchA()))
+                Use(Cmp);
         }
         Branch(op switch
         {
@@ -1456,26 +1793,41 @@ public sealed class CodeGen
             Gen16(e, new Loc(t));
             return (Var(t), Var(t, 1));
         }
-        var l = Operands(left);
-        var r = Operands(right);
+        // An element on either side is used in place (lda u,x / cmp v,x / lda u+n,x / sbc v+n,x).
+        Action<Mnemonic, int> Side(Expr e)
+        {
+            if (Simple2(e) is null && IndexedOperand(e, 2) is { } element) return element;
+            var p = Operands(e);
+            return (m, b) => Op(m, b == 0 ? p.Lo : p.Hi);
+        }
+        if (op is TokenKind.EqEq or TokenKind.NotEq && left.ConstValue is not null && right.ConstValue is null)
+            (left, right) = (right, left);
+        var l = Side(left);
+        var r = Side(right);
+        // One byte loaded and compared for == and !=; lda sets Z, so a zero byte needs no cmp #0.
+        void LoadAndCompare(int b)
+        {
+            l(Lda, b);
+            if (right.ConstValue is not long c || ((c >> (8 * b)) & 0xFF) != 0) r(Cmp, b);
+        }
 
         switch (op)
         {
             case TokenKind.EqEq:
             {
                 var skip = NewLabel("ne");
-                Op(Lda, l.Lo); Op(Cmp, r.Lo); Branch(Bne, skip);
-                Op(Lda, l.Hi); Op(Cmp, r.Hi); Branch(Beq, target);
+                LoadAndCompare(0); Branch(Bne, skip);
+                LoadAndCompare(1); Branch(Beq, target);
                 Place(skip);
                 break;
             }
             case TokenKind.NotEq:
-                Op(Lda, l.Lo); Op(Cmp, r.Lo); Branch(Bne, target);
-                Op(Lda, l.Hi); Op(Cmp, r.Hi); Branch(Bne, target);
+                LoadAndCompare(0); Branch(Bne, target);
+                LoadAndCompare(1); Branch(Bne, target);
                 break;
             default: // < or >=
-                Op(Lda, l.Lo); Op(Cmp, r.Lo);
-                Op(Lda, l.Hi); Op(Sbc, r.Hi);
+                l(Lda, 0); r(Cmp, 0);
+                l(Lda, 1); r(Sbc, 1);
                 if (signed)
                 {
                     var noOverflow = NewLabel("v");
@@ -1827,6 +2179,29 @@ public sealed class CodeGen
 
     private void GenFor(ForStmt f)
     {
+        if (CounterMax(f) is long max) _counterMax[f.Symbol!] = max;
+        GenForLoop(f);
+        _counterMax.Remove(f.Symbol!);
+    }
+
+    /// <summary>
+    /// The largest value a u8 counter takes in the body, from the loop header only: the checker's
+    /// last value for constant bounds, else a constant end (counting up) or start (counting down),
+    /// or a variable u8 end that is excluded (at most 254).
+    /// </summary>
+    private static long? CounterMax(ForStmt f)
+    {
+        if (f.Symbol!.Type is not { Size: 1, IsSigned: false }) return null;
+        if (f.From.ConstValue is long from && f.To.ConstValue is long last)
+            return Checker.LargestLoopValue(from, last, f.Inclusive, f.StepValue);
+        if (f.StepValue < 0) return f.From.ConstValue;
+        if (f.To.ConstValue is long to) return f.Inclusive ? to : to - 1;
+        if (!f.Inclusive && f.To.Type is { Size: 1, IsSigned: false }) return 254;
+        return null;
+    }
+
+    private void GenForLoop(ForStmt f)
+    {
         var c = f.Symbol!;
         var type = c.Type;
         if (type.IsSigned)
@@ -1882,6 +2257,9 @@ public sealed class CodeGen
         else if (f.To is NameExpr { Symbol: { InMemory: true, AliasOf: null, Kind: VariableKind.Local or VariableKind.Parameter } bv }
                  && bv.Type.Size == type.Size && bv != c && !bv.AddressTaken && !AssignsVar(f.Body, bv))
             bound = (Var(bv), Var(bv, 1));
+        else if (type.Size == 1 && f.To is MemberExpr { Target: NameExpr { Symbol: { InMemory: true, AliasOf: null, Kind: VariableKind.Local or VariableKind.Parameter } mv } }
+                 && mv != c && !mv.AddressTaken && !AssignsVar(f.Body, mv) && Simple1(f.To) is { } half)
+            bound = (half, Byte(0));   // n.lo of a local or parameter the body does not change: cpy n
         else
         {
             boundTemp = AcquireTemp(type.Size);

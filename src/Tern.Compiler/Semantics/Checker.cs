@@ -1094,8 +1094,8 @@ public sealed partial class Checker
                 $"The loop reaches {last}, past the end of '{name}' (length {length}). Make the loop stop before {length}");
     }
 
-    /// <summary>The largest value a loop with constant bounds reaches, or null if it runs no passes.</summary>
-    private static long? LargestLoopValue(long from, long to, bool inclusive, int step)
+    /// <summary>The largest value a loop with constant bounds reaches, or null if it runs no passes. Also used by the code generator (spec 3.2's fold).</summary>
+    internal static long? LargestLoopValue(long from, long to, bool inclusive, int step)
     {
         if (step > 0)
         {
