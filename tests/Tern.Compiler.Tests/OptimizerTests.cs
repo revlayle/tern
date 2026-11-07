@@ -626,13 +626,15 @@ public class RegisterParameterTests
         Assert.DoesNotContain("stx fill.i", r.Result.Listing);
     }
 
+    // Since M18 (F3) a store that is never read back is removed (the reload became txa), so the
+    // store shows only where the body reads the copy; the results show X was not relied on.
     [Theory]
-    [InlineData("fn f(i: u8 using X) { g()\n a[i] = 1 }")]                   // a call
-    [InlineData("fn f(i: u8 using X) { i += 1\n a[i] = 1 }")]                // assigned
-    [InlineData("fn f(i: u8 using X) { asm {\n nop\n }\n a[i] = 1 }")]       // an asm block
-    [InlineData("fn f(i: u8 using X) { for k in 0..2 using Y { a[k] = i } }")] // a loop in a register
-    [InlineData("fn f(i: u8 using X) -> u16 { a[i] = 1\n return 300 }")]    // returns in AX
-    public void A_parameter_is_stored_when_the_body_needs_the_register(string f)
+    [InlineData("fn f(i: u8 using X) { g()\n a[i] = 1 }", 2, 1, true)]                   // a call
+    [InlineData("fn f(i: u8 using X) { i += 1\n a[i] = 1 }", 3, 1, true)]                // assigned
+    [InlineData("fn f(i: u8 using X) { asm {\n nop\n }\n a[i] = 1 }", 2, 1, false)]       // an asm block
+    [InlineData("fn f(i: u8 using X) { for k in 0..2 using Y { a[k] = i } }", 1, 2, false)] // a loop in a register
+    [InlineData("fn f(i: u8 using X) -> u16 { a[i] = 1\n return 300 }", 2, 1, false)]    // returns in AX
+    public void A_parameter_is_stored_when_the_body_needs_the_register(string f, int index, int value, bool stored)
     {
         var r = Run.Program($$"""
             var a: [u8; 8]
@@ -640,7 +642,8 @@ public class RegisterParameterTests
             {{f}}
             fn main() { f(2) }
             """);
-        Assert.Contains("stx f.i", r.Result.Listing);
+        Assert.Equal(value, r.U8("a", index));
+        Assert.Equal(stored, r.Result.Listing.Contains("stx f.i"));
     }
 
     [Fact]
@@ -662,16 +665,15 @@ public class RegisterParameterTests
                 words[4] = $34
                 words[5] = $12
                 f(2)
-                g(5)
+                g(9)
                 buf[6] = 9
                 h(6)
             }
             """);
         Assert.Equal(2, r.U8("buf", 3));
-        Assert.Equal(0x1234 + 5, r.U16("res"));
+        Assert.Equal(0x1234 + 9, r.U16("res"));   // Y is 5 after w[2], so g(5) would not show n read from Y
         Assert.Equal(10, r.U8("buf", 6));
         Assert.Contains("sty f.n", r.Result.Listing);
-        Assert.Contains("sty g.n", r.Result.Listing);
         Assert.DoesNotContain("sty h.n", r.Result.Listing);   // only p[n]: stays in Y
     }
 

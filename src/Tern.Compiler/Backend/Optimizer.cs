@@ -28,7 +28,139 @@ public static class Optimizer
     private static void Improve(List<AsmItem> code, FunctionSymbol function)
     {
         while (RemoveRedundant(code, function) | FoldShiftTests(code, function) | UseOperandInA(code, function)
-            | RemoveDeadLoads(code, function) | GroupConstantStores(code)) { }
+            | RemoveDeadLoads(code, function) | RemoveDeadStores(code, function) | GroupConstantStores(code)) { }
+    }
+
+    // ---------- Dead stores ----------
+
+    /// <summary>
+    /// Bytes of the function's own memory variables that may be read before they are written again.
+    /// <see cref="All"/>: anything may be read (code the analysis cannot follow).
+    /// </summary>
+    private sealed class Live
+    {
+        public bool All;
+        public readonly HashSet<(VariableSymbol, int)> Bytes = [];
+        public readonly HashSet<VariableSymbol> Whole = [];   // read with an index
+
+        public bool Has(VariableSymbol v, int offset) => All || Whole.Contains(v) || Bytes.Contains((v, offset));
+
+        /// <summary>Adds what <paramref name="other"/> holds. Returns true if this changed.</summary>
+        public bool Union(Live other)
+        {
+            if (All) return false;
+            if (other.All) { All = true; return true; }
+            int before = Bytes.Count + Whole.Count;
+            Bytes.UnionWith(other.Bytes);
+            Whole.UnionWith(other.Whole);
+            return Bytes.Count + Whole.Count != before;
+        }
+    }
+
+    /// <summary>
+    /// A variable whose bytes only this function's code reads: a local, parameter or temporary of
+    /// its own frame (spec 8.1: no other function runs while it is active and can name it, and it
+    /// holds nothing useful on entry), whose address is not taken and that is not volatile.
+    /// </summary>
+    private static bool OwnMemory(VariableSymbol v, FunctionSymbol function)
+    {
+        var s = v.Storage;
+        return s.Owner == function && s.Kind != VariableKind.Global && !s.AddressTaken && !v.AddressTaken
+            && !s.IsVolatile && s.FixedAddress is null && s.Region is null;
+    }
+
+    /// <summary>
+    /// Removes <c>sta</c>, <c>stx</c> and <c>sty</c> into a byte of the function's own memory
+    /// (<see cref="OwnMemory"/>) that no path reads before it is stored again or the function
+    /// returns: <c>var b = values[i + 1]</c> whose value is used only from A. A store changes no
+    /// register or flag, so nothing else changes. Stores from assembly stay. Returns true if any was removed.
+    /// </summary>
+    /// <remarks>
+    /// A backward analysis over the code. A <c>jsr</c> reads none of these bytes (the callee cannot
+    /// name them). An <c>rts</c> or <c>jmp (v)</c> may go to a label named other than by a jump (the
+    /// jump table of a <c>match</c> dispatches with <c>rts</c>), so it reads what those labels may read.
+    /// The end of the code, and a jump to a label outside it, read nothing: what follows is the
+    /// function's exit (an interrupt handler's register restore) or another function.
+    /// </remarks>
+    private static bool RemoveDeadStores(List<AsmItem> code, FunctionSymbol function)
+    {
+        var positions = Positions(code);
+        // Assembly that patches code, or calls a subroutine of its own block: not followed.
+        if (function.CodePatched || code.Any(item => item is Instr { AsmPos: not null } w
+                && ((w.Operand is LabelOperand && (AsmEffects.WritesMemory(w.Mnemonic, w.Mode) || Stored(w.Mnemonic) is not null))
+                    || (w.Mnemonic == Jsr && w.Operand is LabelOperand { Label: var l } && positions.ContainsKey(l)))))
+            return false;
+        var unknown = UnknownEntries(code).Where(positions.ContainsKey).Select(l => positions[l]).ToList();
+
+        (VariableSymbol, int) Byte(VarOperand o) => (o.Variable.Storage, o.Variable.AliasOffset + o.Offset);
+
+        // What item k reads of these bytes, and which byte it overwrites.
+        void Transfer(int k, Live after, Live into)
+        {
+            into.Union(after);
+            if (code[k] is not Instr i) return;
+            if (i.Mnemonic == Brk) { into.All = true; return; }
+            if (i.Operand is ImmVarByte { Variable: var a } && OwnMemory(a, function)) into.Whole.Add(a.Storage);
+            if (i.Operand is not VarOperand o || !OwnMemory(o.Variable, function)) return;
+            var b = Byte(o);
+            switch (i.Mode)
+            {
+                case Absolute or ZeroPage:
+                    if (Stored(i.Mnemonic) is not null) into.Bytes.Remove(b);
+                    else if (AsmEffects.ReadsMemory(i.Mnemonic, i.Mode)) into.Bytes.Add(b);
+                    break;
+                case IndirectIndexed or Indirect:
+                    into.Bytes.Add(b);
+                    into.Bytes.Add((b.Item1, b.Item2 + 1));
+                    break;
+                default:
+                    // Indexed: any byte of the variable. An indexed store overwrites no known byte.
+                    if (AsmEffects.ReadsMemory(i.Mnemonic, i.Mode) || i.Mode == IndexedIndirect) into.Whole.Add(b.Item1);
+                    break;
+            }
+        }
+
+        var liveIn = new Live[code.Count];
+        for (int k = 0; k < code.Count; k++) liveIn[k] = new Live();
+
+        // What may be read after item k.
+        Live After(int k)
+        {
+            var after = new Live();
+            var item = code[k];
+            if (item is Instr i)
+            {
+                if (i.Mnemonic is Rts || (i.Mnemonic == Mnemonic.Jmp && i.Mode == Indirect))
+                    foreach (int u in unknown) after.Union(liveIn[u]);
+                if (Target(i) is { } t && positions.TryGetValue(t, out int tp)) after.Union(liveIn[tp]);
+            }
+            // liveIn keeps the indexes from before any removal below; items before a removal do not move.
+            if (FallsThrough(item) && k + 1 < liveIn.Length) after.Union(liveIn[k + 1]);
+            return after;
+        }
+
+        for (bool changed = true; changed;)
+        {
+            changed = false;
+            for (int k = code.Count - 1; k >= 0; k--)
+            {
+                var next = new Live();
+                Transfer(k, After(k), next);
+                changed |= liveIn[k].Union(next);
+            }
+        }
+
+        bool removed = false;
+        for (int k = code.Count - 1; k >= 0; k--)
+        {
+            if (code[k] is Instr { AsmPos: null, Mode: Absolute or ZeroPage, Operand: VarOperand o } i && Stored(i.Mnemonic) is not null
+                && OwnMemory(o.Variable, function))
+            {
+                var (v, offset) = Byte(o);
+                if (!After(k).Has(v, offset)) { code.RemoveAt(k); removed = true; }
+            }
+        }
+        return removed;
     }
 
     /// <summary>
