@@ -1,0 +1,22 @@
+// Bubble sort, compare the array elements directly instead of copying them to locals.
+const N = 100
+var values: [u8; N]
+
+fn main() {
+    var x: u8 = 7
+    for i in 0..N {
+        x = (x << 2) + x + 17
+        values[i] = x
+    }
+    var last: u8 = N - 1
+    while last > 0 {
+        for i in 0..last {
+            if values[i] > values[i + 1] {
+                var a: u8 = values[i]
+                values[i] = values[i + 1]
+                values[i + 1] = a
+            }
+        }
+        last -= 1
+    }
+}

@@ -1,0 +1,12 @@
+al C:0002 .total
+al C:0004 .clamped
+al C:0005 .main.i
+al C:0006 .main.s
+al C:000a .bigger.a
+al C:000a .clamp.v
+al C:000a .add3.a
+al C:000b .add3.c
+al C:081c .main
+al C:0862 .bigger
+al C:086c .clamp
+al C:0875 .add3

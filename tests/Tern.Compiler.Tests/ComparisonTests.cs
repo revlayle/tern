@@ -18,7 +18,10 @@ public class ComparisonTests
     private const long MaxCycles = 20_000_000;
     private const ushort Sentinel = 0xFFF0;
 
-    private sealed record Measure(int Bytes, long Cycles);
+    internal sealed record Measure(int Bytes, long Cycles)
+    {
+        public static implicit operator Measure((int Bytes, long Cycles) m) => new(m.Bytes, m.Cycles);
+    }
 
     private sealed record Row(string Name, Measure Tern, Measure Asm, Measure Prog8, Measure C, Measure Mos);
 
@@ -51,20 +54,23 @@ public class ComparisonTests
     // ---- Tern ----
 
     /// <summary>Bytes from the label <c>main</c> to the end of the image, and the cycles from entering main to its rts, as for the others.</summary>
-    private static Measure RunTern(string dir, string name)
+    private static Measure RunTern(string dir, string name) => MeasureTern(Path.Combine(dir, name + ".tern"), name);
+
+    /// <summary>Compiles, runs and checks one Tern source against the result check of benchmark <paramref name="check"/>.</summary>
+    internal static (int Bytes, long Cycles) MeasureTern(string path, string check)
     {
-        var path = Path.Combine(dir, name + ".tern");
+        var name = Path.GetFileName(path);
         var result = TernCompiler.Compile(File.ReadAllText(path), sourcePath: path);
         var ram = new Ram();
         ram.Load((ushort)result.LoadAddress, result.Image);
         var cpu = new Cpu6502(ram) { PC = (ushort)result.Entry, SP = 0xFF, I = true };
         int main = result.Symbols["main"];
-        while (cpu.PC != main) Step(cpu, name + ".tern startup");
+        while (cpu.PC != main) Step(cpu, name + " startup");
         long from = cpu.Cycles;
-        while (cpu.PC != result.HaltAddress) Step(cpu, name + ".tern");
+        while (cpu.PC != result.HaltAddress) Step(cpu, name);
         long cycles = cpu.Cycles - from;
-        Verify(name, new Results(ram, (n, o) => result.Symbols[n] + o), "Tern");
-        return new Measure(result.LoadAddress + result.Image.Length - main, cycles);
+        Verify(check, new Results(ram, (n, o) => result.Symbols[n] + o), "Tern " + name);
+        return (result.LoadAddress + result.Image.Length - main, cycles);
     }
 
     // ---- hand-written assembly ----
