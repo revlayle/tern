@@ -20,6 +20,7 @@ public class IoTests
         public byte StatusOnRead;               // bits ORed into the status by every CHRIN
         public string DriveMessage = "00, OK,00,00";
         public readonly List<byte> Written = [];
+        public readonly List<byte> Screen = [];
 
         private readonly Dictionary<int, (string Name, int Pos)> _open = [];
         private int _in = -1, _out = -1;
@@ -78,6 +79,7 @@ public class IoTests
             },
             [0xFFD2] = run =>
             {
+                if (_out == -1) { Screen.Add(run.Cpu.A); return; }       // the default output: the screen
                 Written.Add(run.Cpu.A);
                 var name = _open[_out].Name;
                 Files[name] = [.. Files[name], run.Cpu.A];
@@ -100,7 +102,7 @@ public class IoTests
                 SaveEnd = run.Cpu.X | run.Cpu.Y << 8;
                 run.Cpu.C = Fail;
                 if (Fail) return;
-                Files[Name] = [.. run.Ram.Bytes.Skip(SaveStart).Take((SaveEnd - SaveStart) & 0xFFFF)];
+                Files[Name.StartsWith("@0:") ? Name[3..] : Name] = [.. run.Ram.Bytes.Skip(SaveStart).Take((SaveEnd - SaveStart) & 0xFFFF)];
             },
         };
     }
@@ -400,6 +402,18 @@ public class IoTests
         var k = new FakeKernal { DriveMessage = "XX", StatusOnRead = 0x80 };
         var r = Go("n = io.drive_status(9, addr(buf), 20)", k);
         Assert.Equal(0, r.U8("n"));
+    }
+
+    // ---------- Example ----------
+
+    [Fact]
+    public void The_highscore_example_saves_loads_and_prints_the_status()
+    {
+        var path = AsmTests.FindExample("highscore.tern");
+        var k = new FakeKernal();
+        Run.Program(File.ReadAllText(path), sourcePath: path, traps: k.Traps);
+        Assert.Equal("\u0093SAVED: HIGH SCORE 12340\rLOADED: HIGH SCORE 12340\rSTATUS: 00, OK,00,00", Encoding.Latin1.GetString([.. k.Screen]));
+        Assert.Equal("HIGH SCORE 12340", Encoding.Latin1.GetString(k.Files["SCORES"]));
     }
 
     // ---------- Code shape ----------

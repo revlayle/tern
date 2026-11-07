@@ -1,0 +1,43 @@
+// Device I/O (lib/c64/io.tern): saves a high-score line to disk, loads it back into another buffer,
+// prints it and shows the drive's status message.
+//
+// To try it in VICE (a disk image, so the KERNAL uses drive 8):
+//   dotnet run --project src/Tern.Cli -- examples/highscore.tern
+//   c1541 -format scores,01 d64 examples/highscore.d64 -write examples/highscore.prg highscore
+//   x64sc -default -warp -autostart examples/highscore.d64
+//
+// Result: the screen shows "SAVED: HIGH SCORE 12340", then "LOADED: HIGH SCORE 12340" (read back
+// from the file SCORES on the disk) and the drive's status "STATUS: 00, OK,00,00". Run it a second
+// time on the same disk: the "@0:" in the name replaces the old file.
+import c64
+import io
+
+data SAVE_NAME = "@0:SCORES"        // "@0:" replaces an existing file
+data LOAD_NAME = "SCORES"
+data SCORE = "HIGH SCORE 12340"
+data SAVED = "SAVED: "
+data LOADED = "\nLOADED: "
+data STATUS = "\nSTATUS: "
+data FAILED = "\nFAILED"
+
+var back: [u8; 16]
+var message: [u8; 40]
+
+fn main() {
+    c64.chrout(147)                 // clear the screen
+    c64.print(addr(SAVED), len(SAVED))
+    c64.print(addr(SCORE), len(SCORE))
+    var failed = io.save(addr(SAVE_NAME), len(SAVE_NAME), 8, addr(SCORE), addr(SCORE) + (len(SCORE) - 1))
+    if !failed {
+        failed = io.load(addr(LOAD_NAME), len(LOAD_NAME), 8, addr(back))
+    }
+    if failed {
+        c64.print(addr(FAILED), len(FAILED))
+    } else {
+        c64.print(addr(LOADED), len(LOADED))
+        c64.print(addr(back), len(back))
+    }
+    c64.print(addr(STATUS), len(STATUS))
+    var n = io.drive_status(8, addr(message), 40)
+    c64.print(addr(message), n)
+}
