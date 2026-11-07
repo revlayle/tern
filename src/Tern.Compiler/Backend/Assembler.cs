@@ -181,7 +181,7 @@ public static class Assembler
                     if (end0 > at0) fixedHere.Add(new AddressRange(at0, end0 - 1));
                 }
                 var room = MemoryLayout.Subtract([area], fixedHere);
-                int at = area.First, size = 0, slot = 0;
+                int size = 0, slot = 0;
                 int pos = room.Count > 0 ? room[0].First : area.First;
                 bool fits = true;
                 foreach (var section in module.Where(s => s.Info.FixedAddress is null))
@@ -195,11 +195,11 @@ public static class Assembler
                     if (room.Count == 0 || end > room[slot].Last + 1) fits = false;
                     size += end - slots[section.Start].Address;
                     pos = end;
-                    at = Math.Max(at, end);
                 }
                 if (!fits)
                     throw new CompileError(overlayImports?.GetValueOrDefault(module.Key) ?? new SourcePos(1, 1),
-                        $"The overlay '{module.Key}' needs {Math.Max(at - area.First, size)} bytes, but its area {area} has {area.Size}. Make the area larger, or split the module");
+                        $"The overlay '{module.Key}' needs {size} bytes" + (fixedHere.Count > 0 ? $" of code, data and variables, plus {fixedHere.Sum(r => r.Size)} bytes of fixed data," : "") +
+                        $" but its area {area} has {area.Size}. Make the area larger, or split the module");
             }
 
             variables = null;

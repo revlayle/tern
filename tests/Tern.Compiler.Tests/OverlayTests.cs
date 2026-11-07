@@ -363,6 +363,33 @@ public class OverlayTests
     }
 
     [Fact]
+    public void An_inline_function_of_a_sibling_overlay_may_not_use_its_data_or_take_addresses_of_its_functions()
+    {
+        const string level2 = "data T: [u8; 2] @ $6100 = [5, 6]\nfn five() -> u8 using A { return 5 }\n" +
+            "inline fn peek() -> u8 using A { return T[1] }\ninline fn where() -> u16 using AX { return addr(five) }";
+        var message = Message($$"""
+            {{Header}}
+            fn main() { load(1); level1.go() }
+            """, new Dictionary<string, string>
+            {
+                ["level1"] = "import level2\nfn go() -> u8 using A { return level2.peek() }",
+                ["level2"] = level2,
+            });
+        Assert.Contains("calls the inline function 'level2.peek'", message);
+        Assert.Contains("'level2.T'", message);
+        message = Message($$"""
+            {{Header}}
+            fn main() { load(1); level1.go() }
+            """, new Dictionary<string, string>
+            {
+                ["level1"] = "import level2\nfn go() -> u16 using AX { return level2.where() }",
+                ["level2"] = level2,
+            });
+        Assert.Contains("takes addr(level2.five)", message);
+        Assert.Contains("Take the address in resident code", message);
+    }
+
+    [Fact]
     public void Resident_code_may_take_addresses_in_any_overlay_and_so_may_an_overlay_in_another_area()
     {
         var modules = new Dictionary<string, string>
@@ -523,6 +550,33 @@ public class OverlayTests
         Assert.Equal(9, r.U8("b"));
         Assert.Equal(33, r.U8("c"));
         Assert.Equal(12, r.U8("d"));
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("\n    $6000..=$6FFF  volatile")]   // the variable is in a volatile range too
+    public void A_write_to_a_volatile_fixed_variable_over_an_overlay_makes_the_optimizer_reload_the_overlays_variable(string extraRange)
+    {
+        int x = OvAddress("ov.x");
+        var main = $$"""
+            import ov @ levels
+            memory {
+                $0801..=$5FFF  program
+                $6000..=$6FFF  overlay levels{{extraRange}}
+            }
+            fn load(n: u8 using A) @ $C000 keeps X, Y
+            volatile var hdr: u8 @ ${{x:X4}}
+            var d: u8
+            var e: u8
+            fn main() { load(1); d = ov.get(); d = ov.x; hdr += 1; e = ov.x; ov.put(e) }
+            """;
+        var r = Compile(main, Ov);
+        Assert.Equal(8, r.U8("e"));
+        // ov.x is loaded again after the increment, not taken from the register that held the old value.
+        var lines = r.Result.Listing.Split('\n').Select(l => l.Trim()).ToList();
+        int inc = lines.FindIndex(l => l.Contains("inc hdr"));
+        Assert.True(inc >= 0);
+        Assert.Contains(lines.Skip(inc + 1).Take(2), l => l.Contains("lda ov.x"));
     }
 
     [Fact]
@@ -718,7 +772,7 @@ public class OverlayTests
             {{FixedHeader}}
             fn main() { res.f(); lv1.go(); lv2.go() }
             """, mods);
-        Assert.Contains("'res.d' at $6100-$6101 is in the overlay area levels ($6000-$6FFF), but its module is resident", message);
+        Assert.Contains("'res.d' at $6100-$6101 is in the overlay area levels ($6000-$6FFF), but it belongs to the resident program", message);
         var main = Message($$"""
             {{FixedHeader}}
             data d: [u8; 2] @ $6100 = [1, 2]

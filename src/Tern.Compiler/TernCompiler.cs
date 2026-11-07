@@ -284,7 +284,7 @@ public static class TernCompiler
         foreach (var g in plan.FixedImageGlobals.Where(g => g.FixedAddress is not null))
         {
             var range = new AddressRange(g.Address, g.Address + g.Type.Size - 1);
-            if (g.OverlayArea is { } areaName && g.FixedAddress is not null)
+            if (g.OverlayArea is { } areaName)
             {
                 if (layout.Overlays.TryGetValue(areaName, out var own) && own.Contains(range)) continue;
                 throw new CompileError(g.Pos,
@@ -292,11 +292,10 @@ public static class TernCompiler
                     (layout.Overlays.TryGetValue(areaName, out var a0) ? $" ({a0})" : "") +
                     ", where its module is loaded. Fixed data of an overlay module must lie in its own area; put data for the resident program in the main file or a resident module");
             }
-            if (g.FixedAddress is not null)
-                foreach (var (areaName2, area2) in layout.Overlays)
+            foreach (var (areaName2, area2) in layout.Overlays)
                     if (area2.Overlaps(range))
                         throw new CompileError(g.Pos,
-                            $"'{g.Name}' at {range} is in the overlay area {areaName2} ({area2}), but its module is resident. Fixed data in an overlay area belongs in an overlay module, which is loaded there");
+                            $"'{g.Name}' at {range} is in the overlay area {areaName2} ({area2}), but it belongs to the resident program. Fixed data in an overlay area belongs in an overlay module, which is loaded there");
             if (layout.Program.Concat(layout.Reserved).Any(a => a.Contains(range))) continue;
             throw new CompileError(g.Pos,
                 $"'{g.Name}' at {range} is not in a program or reserved area. " +

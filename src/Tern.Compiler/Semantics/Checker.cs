@@ -92,7 +92,12 @@ public sealed partial class Checker
         }
 
         foreach (var g in _globals)
-            if (g.FixedAddress is int fixedAt && _layout.IsVolatile(fixedAt, fixedAt + g.Type.Size - 1)) g.InVolatileArea = true;
+        {
+            if (g.FixedAddress is not int fixedAt) continue;
+            var span = new AddressRange(fixedAt, fixedAt + g.Type.Size - 1);
+            if (_layout.IsVolatile(fixedAt, span.Last)) g.InVolatileArea = true;
+            if (_layout.Overlays.Values.Any(a => a.Overlaps(span))) g.InOverlayArea = true;
+        }
 
         var mainModule = modules[^1];
         var exports = new List<FunctionSymbol>();
@@ -1677,10 +1682,14 @@ public sealed partial class Checker
             void Visit(FunctionSymbol inline)
             {
                 if (!seen.Add(inline)) return;
-                foreach (var g in inline.UsedGlobals.Where(g => g.OverlayArea == area && g.Module != caller.Module && g.FixedAddress is null && g.Region is null))
+                foreach (var g in inline.UsedGlobals.Where(g => g.OverlayArea == area && g.Module != caller.Module && (g.FixedAddress is null || g.IsData) && g.Region is null))
                     throw new CompileError(pos,
                         $"'{caller.Name}' calls the inline function '{callee.Name}', which is copied into it and uses '{g.Name}', a variable of {g.Module!.Name}. " +
                         $"{caller.Module!.Name} and {g.Module.Name} are both in the overlay area '{area}', never loaded together, and share their memory. Keep shared state in a resident module or the main file");
+                foreach (var f in inline.UsedAddresses.Where(f => f.OverlayArea == area && f.Module != caller.Module))
+                    throw new CompileError(pos,
+                        $"'{caller.Name}' calls the inline function '{callee.Name}', which is copied into it and takes addr({f.Name}). " +
+                        $"{caller.Module!.Name} and {f.Module!.Name} are both in the overlay area '{area}', never loaded together, so the address would point at the wrong code. Take the address in resident code");
                 foreach (var next in inline.Callees)
                     if (next.IsInline) Visit(next);
                     else if (next.OverlayArea == area && next.Module != caller.Module)

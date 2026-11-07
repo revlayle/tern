@@ -214,6 +214,8 @@ public sealed class VariableSymbol(string name, SourcePos pos, TernType type, Va
     public bool DeclaredVolatile { get; init; }
     /// <summary>At a fixed address in one of the platform's volatile areas, e.g. I/O registers.</summary>
     public bool InVolatileArea { get; set; }
+    /// <summary>At a fixed address inside an overlay area: it may name memory an overlay's file holds (spec 8.5).</summary>
+    public bool InOverlayArea { get; set; }
     /// <summary>A global used by functions reached from two roots (main and a handler, or two handlers).</summary>
     public bool UsedFromTwoRoots { get; set; }
 

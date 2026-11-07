@@ -5,19 +5,19 @@ Owned by the coding session. Updated at the end of every coding session.
 ## Current
 
 - **Milestone:** the M13 follow-up (roadmap) is built and tested; M13 itself was merged to `main` (`c49d88a`). Ready for `/review`.
-- **Branch:** `m13-followup` (from `main`). 1334 tests pass (36 CPU, 1298 compiler). `BenchmarkTests` unchanged.
+- **Branch:** `m13-followup` (from `main`). Review findings 1-5 of `docs/reviews/m13-followup.md` are fixed (finding 3: inline functions are now checked for data and `addr()` of siblings; 4: the "does not fit" message gives the size without the fixed data and the fixed bytes separately); finding 6 is for the spec session. 1337 tests pass (36 CPU, 1301 compiler). `BenchmarkTests` unchanged.
 - **Next step:** M14, the C64 device I/O library (`docs/roadmap.md`), on a new branch from `main` once this one is merged. After that M15, M16 and so on in roadmap order.
 
 ## Done
 
 - **M13 follow-up** (2026-11-07; settled 2026-11-03/04).
-  - *`volatile` over an overlay (spec 8.5).* A `volatile` fixed-address variable may overlap an overlay's file; without it the error suggests `volatile` or the overlay's own name. Overlap with the resident program is still an error. A write to a declared-volatile fixed variable that is not in a platform volatile area makes the optimizer forget every variable (`Optimizer.ForgetWrite`), like a write through a pointer. Overlap is now checked against each section of the overlay, not its whole span.
+  - *`volatile` over an overlay (spec 8.5).* A `volatile` fixed-address variable may overlap an overlay's file; without it the error suggests `volatile` or the overlay's own name. Overlap with the resident program is still an error. A write to a fixed variable that lies in an overlay area (`VariableSymbol.InOverlayArea`, set in the checker) makes the optimizer forget every variable (`Optimizer.ForgetWrite`), like a write through a pointer, whatever other volatile ranges it is in. Overlap is now checked against each section of the overlay, not its whole span.
   - *Fixed data in an overlay module (question 58).* `SectionStart` of such data carries the module; the assembler lays the module's other sections around it (first fit in the area, `Assembler`), gaps zero-filled, and the file starts at the area's start. Fixed data of two overlays may share an address. Errors (`CheckFixedData`): outside the module's own area; a resident module's or the main file's fixed data in an overlay area; overlap with the module's other fixed data (assembler) or fixed variables (`CheckFixedAddresses`). Unused data is dropped, so the checks apply only to data that is used.
   - *Sibling uses (question 56).* `addr()` of a function of another overlay in the same area is an error (`TakeFunctionAddress`); using fixed data of a sibling too. Resident code and overlays in other areas may still take these addresses.
   - *Zero page (question 55).* A fixed zero-page variable (`var p: ptr u8 @ $FB`) already worked in an overlay (not in the file, shared with the main program); tested. The `@ zp` error suggests it.
   - *Long byte buffers (spec 3.2).* `var x: [u8; n]` / `[i8; n]` with `n` above 256 for a global var (`_allowLongBytes` in `Checker`); other element types, locals, struct fields and a var with an initial value are errors; indexing was already an error that suggests `addr(x)`. `LongBufferTests`.
   - *`const` before the `memory` block (spec 8.4).* `Parser`: after the imports, `const` lines may precede the block; the other-declaration-before-the-block error keeps its test with the new message.
-  - *Tests:* 26 new in `OverlayTests`, `MemoryTests` and `LongBufferTests`. Not done: the optimizer test in the roadmap (a resident function reads an overlay variable, writes the aliased fixed variable, reads again) only checks behavior (`OverlayTests`), not the listing, since the write's own load clobbers the register anyway.
+  - *Tests:* 26 new in `OverlayTests`, `MemoryTests` and `LongBufferTests`. The optimizer test (`hdr += 1` leaves A alone, then `ov.x` must be loaded again) checks the listing and the result, with and without a `volatile` range over the area.
 
 - **M13, overlays** (2026-11-03).
   - **Follow-ups** (roadmap, settled 2026-11-02/03):
