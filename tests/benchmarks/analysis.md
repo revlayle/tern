@@ -335,3 +335,4 @@ Each fix as built, against the estimate above. Measured on `BenchmarkTests` (`ba
 | F2 | 57,216 / 10 | 57,216 / 10 | `bubble` |
 | F1 | 21,252 / 64 | 21,590 / 60 | `enemies` 9,855 / 8 (of which 255 is F12: `enemies` no longer crosses a page), `copy` 6,000 / 4 (the estimate's 8 bytes were on the pages form), `sum16` 4,864 / 16, `fib16` 811 / 24, `interp` 60 / 8 |
 | F4 | 4,752 / 4 | 4,752 / 4 | `enemies` |
+| F6 | 3,048 / 10 | 3,048 / 10 | `calls` |

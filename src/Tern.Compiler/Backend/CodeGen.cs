@@ -1243,6 +1243,26 @@ public sealed class CodeGen
         return true;
     }
 
+    /// <summary>
+    /// The one-byte unsigned operand of <c>d + b</c>, <c>b + d</c> or <c>d - b</c> (b a u8, or a u8 as u16),
+    /// where d is the destination itself; for <c>-</c>, b must need no code. Null otherwise.
+    /// </summary>
+    private Expr? AddsByteTo(BinaryExpr b, Loc d)
+    {
+        static Expr? Narrow(Expr e) =>
+            e.Type is { Size: 1, IsSigned: false } ? e
+            : e is CastExpr { Operand.Type: { Size: 1, IsSigned: false } } c ? c.Operand : null;
+        static bool IsDest(Expr e, Loc d) => e is NameExpr { Symbol: { } v } && v == d.Var && d.Offset == 0;
+        if (b.Op == TokenKind.Plus)
+        {
+            // A constant keeps clc / lda w / adc #c, the same cost.
+            if (IsDest(b.Left, d) && Narrow(b.Right) is { ConstValue: null } r) return r;
+            if (IsDest(b.Right, d) && Narrow(b.Left) is { ConstValue: null } l) return l;
+            return null;
+        }
+        return IsDest(b.Left, d) && Narrow(b.Right) is { } s && (Simple1(s) is not null || IndexedOperand(s) is not null) ? s : null;
+    }
+
     private void Gen16(Expr e, Loc d)
     {
         if (e.ConstValue is long c)
@@ -1345,6 +1365,31 @@ public sealed class CodeGen
                     else { Op(Lsr, d.Hi); Op(Ror, d.Lo); }
                 }
                 return;
+
+            case BinaryExpr b when b.Op is TokenKind.Plus or TokenKind.Minus && AddsByteTo(b, d) is { } small:
+            {
+                // w += b as u16: lda b / clc / adc w / sta w / bcc + / inc w+1 (spec 11);
+                // w -= b as u16: lda w / sec / sbc b / sta w / bcs + / dec w+1.
+                var done = NewLabel("c");
+                if (b.Op == TokenKind.Plus)
+                {
+                    GenA(small);
+                    Emit(Clc); Op(Adc, d.Lo); Op(Sta, d.Lo);
+                    Branch(Bcc, done);
+                    Op(Inc, d.Hi);
+                }
+                else
+                {
+                    Op(Lda, d.Lo); Emit(Sec);
+                    if (Simple1(small) is { } op) Op(Sbc, op);
+                    else IndexedOperand(small)!(Sbc, 0);
+                    Op(Sta, d.Lo);
+                    Branch(Bcs, done);
+                    Op(Dec, d.Hi);
+                }
+                Place(done);
+                return;
+            }
 
             case BinaryExpr b:
             {
