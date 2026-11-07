@@ -229,6 +229,8 @@ public static class TernCompiler
         report.AppendLine(code.Variables is { } vars
             ? $"Variables after the program: {plan.TotalSize} bytes, up to ${vars.Last:X4}"
             : "Variables after the program: 0 bytes");
+        foreach (var table in program.Globals.Where(g => g.IsOffsetTable))
+            report.AppendLine($"Offset table {table.Name}: {table.Type.Size} bytes, in the program");
         if (code.Areas.Count > 1 || layout.Regions.Count > 0)
         {
             report.AppendLine("Program areas:");

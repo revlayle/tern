@@ -677,20 +677,22 @@ public sealed class CodeGen
             var (p, temp) = PointerBase(pix.Target);
             LoadPointerIndex(pix, 0);
             Emit(Lda, IndirectIndexed, p);
-            if (a.Op is TokenKind.ShlEq or TokenKind.ShrEq)
-                ShiftA(a.Op == TokenKind.ShlEq ? TokenKind.Shl : TokenKind.Shr, a.Value.ConstValue!.Value, pix.Type.IsSigned);
-            else
-            {
-                var binary = a.Op switch
-                {
-                    TokenKind.PlusEq => TokenKind.Plus, TokenKind.MinusEq => TokenKind.Minus, TokenKind.AmpEq => TokenKind.Amp,
-                    TokenKind.PipeEq => TokenKind.Pipe, _ => TokenKind.Caret,
-                };
-                CarryFor(binary);
-                Op(ArithMnemonic(binary), Simple1(a.Value)!);
-            }
+            ApplyCompound(a, pix.Type);
             Emit(Sta, IndirectIndexed, p);
             if (temp is not null) Release(temp);
+            return;
+        }
+
+        // arr[expensive index] op= v: compute the index once (a shift or an offset table), read, change and write.
+        if (target is IndexExpr aix && !IsPointerIndex(aix) && aix.Type.Size == 1 && aix.Index.ConstValue is null
+            && (a.Op is TokenKind.ShlEq or TokenKind.ShrEq || Simple1(a.Value) is not null)
+            && FoldIndexOffset(aix.Index, ArrayOf(aix)) is var (index, shift) && !IndexIsCheap(index))
+        {
+            var reg = LoadIndex(index);
+            var mode = reg == Register.X ? AbsoluteX : AbsoluteY;
+            Emit(Lda, mode, Var(ArrayOf(aix), shift));
+            ApplyCompound(a, aix.Type);
+            Emit(Sta, mode, Var(ArrayOf(aix), shift));
             return;
         }
 
@@ -703,11 +705,37 @@ public sealed class CodeGen
         Assign(target, new BinaryExpr(a.Pos, op, target, a.Value) { Type = target.Type });
     }
 
+    /// <summary>The operation of <c>x op= v</c> on the element in A: a shift by a constant, or an arithmetic or logic instruction with a simple operand.</summary>
+    private void ApplyCompound(AssignStmt a, TernType type)
+    {
+        if (a.Op is TokenKind.ShlEq or TokenKind.ShrEq)
+        {
+            ShiftA(a.Op == TokenKind.ShlEq ? TokenKind.Shl : TokenKind.Shr, a.Value.ConstValue!.Value, type.IsSigned);
+            return;
+        }
+        var binary = a.Op switch
+        {
+            TokenKind.PlusEq => TokenKind.Plus, TokenKind.MinusEq => TokenKind.Minus, TokenKind.AmpEq => TokenKind.Amp,
+            TokenKind.PipeEq => TokenKind.Pipe, _ => TokenKind.Caret,
+        };
+        CarryFor(binary);
+        Op(ArithMnemonic(binary), Simple1(a.Value)!);
+    }
+
     private void Assign(Expr target, Expr value)
     {
         if (target.Type.Size == 1)
         {
             if (target is IndexExpr pix && IsPointerIndex(pix) && StorePointerByteIndexFirst(pix, value)) return;
+            // arr[expensive index] = v: load the index, then the value, so nothing has to be saved.
+            if (target is IndexExpr aix && !IsPointerIndex(aix) && aix.Index.ConstValue is null && Simple1(value) is { } simple
+                && FoldIndexOffset(aix.Index, ArrayOf(aix)) is var (index, shift) && !IndexIsCheap(index))
+            {
+                var reg = LoadIndex(index);
+                Op(Lda, simple);
+                Emit(Sta, reg == Register.X ? AbsoluteX : AbsoluteY, Var(ArrayOf(aix), shift));
+                return;
+            }
             GenA(value);
             StoreA(target);
             return;

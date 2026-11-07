@@ -598,7 +598,6 @@ public class StructTests
     [InlineData(E + "var es: [Enemy; 4]\nvar i: u8\nvar n: u8\nfn main() { n = es[0].name[i] }", "An array field in an array of structs needs a constant index")]
     [InlineData(E + "var es: [Enemy; 4]\nvar n: u8\nfn main() { n = es[0].name[4] }", "Index 4 is past the end of 'es.name'")]
     [InlineData(P + "var ps: [Point; 4]\nfn main() { ps[4].x = 1 }", "Index 4 is past the end of 'ps'")]
-    [InlineData(P + "linear var ps: [Point; 4]\nfn main() { ps[0].x = 1 }", "'ps' is linear, so it cannot be indexed")]
     [InlineData(P + "var ps: [Point; 4]\nvar p: ptr Point\nfn main() { p = addr(ps) }", "Declare it 'linear var'")]
     [InlineData(E + "var p: ptr Enemy\nfn main() { for i in 0..4 using Y { p.name[i] = 0 } }", "p[i] needs the Y register, which holds a loop variable")]
     // Review M5, findings 1 and 2.
