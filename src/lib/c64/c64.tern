@@ -1,5 +1,6 @@
 // Commodore 64: screen and color memory, colors, and KERNAL routines.
 // KERNAL routines are called directly in ROM (spec 6.6), so a call costs one jsr.
+import io
 
 const SCREEN = $0400            // 40 x 25 screen codes
 const COLOR = $D800             // 40 x 25 color numbers
@@ -43,19 +44,12 @@ fn print(src: ptr u8, n: u8) {
 // Load a file from disk to the address stored in the file (SETNAM, SETLFS with secondary address 1,
 // LOAD). `name` points to n PETSCII characters; `device` is 8 for the first disk drive. Returns true
 // when loading failed (the KERNAL's carry). Use it to load an overlay (spec 8.5): the file is the one
-// the compiler wrote for the module, e.g. "LEVEL1" for level1.prg on the disk. Each call costs
-// about 40 bytes; the KERNAL's own work (disk access) takes far longer than the call.
-asm fn load(name: ptr u8, n: u8, device: u8) -> bool using carry {
-    lda n
-    ldx name
-    ldy name+1
-    jsr $FFBD           // SETNAM
-    lda #1              // logical file number
-    ldx device
-    ldy #1              // secondary address 1: load to the address in the file
-    jsr $FFBA           // SETLFS
-    lda #0              // LOAD (not verify)
-    jsr $FFD5
+// the compiler wrote for the module, e.g. "LEVEL1" for level1.prg on the disk. The function is
+// about 30 bytes, shared by all calls; the KERNAL's own work (disk access) takes far longer.
+fn load(name: ptr u8, n: u8, device: u8) -> bool {
+    io.setnam(n, name)
+    io.setlfs(1, device, 1)         // logical file 1; secondary address 1: load to the address in the file
+    return io.kernal_load_own()
 }
 
 // ---------- Hardware registers (volatile: every read and write happens) ----------

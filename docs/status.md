@@ -4,11 +4,21 @@ Owned by the coding session. Updated at the end of every coding session.
 
 ## Current
 
-- **Milestone:** the M13 follow-up (roadmap) is built and tested; M13 itself was merged to `main` (`c49d88a`). Ready for `/review`.
-- **Branch:** `m13-followup` (from `main`). Review findings 1-5 of `docs/reviews/m13-followup.md` are fixed (finding 3: inline functions are now checked for data and `addr()` of siblings; 4: the "does not fit" message gives the size without the fixed data and the fixed bytes separately); finding 6 is for the spec session. The re-review (finding 7: `#f.lo`/`#f.hi` in assembly takes a sibling overlay's address) is fixed with `Checker.CheckSiblingAddress`, and its two suggestions too. 1339 tests pass (36 CPU, 1303 compiler). `BenchmarkTests` unchanged.
-- **Next step:** M14, the C64 device I/O library (`docs/roadmap.md`), on a new branch from `main` once this one is merged. After that M15, M16 and so on in roadmap order.
+- **Milestone:** M14, the C64 device I/O library (roadmap), is built and tested. Ready for `/review`.
+- **Branch:** `m14-device-io` (from `main`, after the M13 follow-up merge). 1341 compiler tests pass plus 36 CPU tests (38 new in `IoTests`). Review findings 1-5 (`docs/reviews/m14.md`) are fixed; the code generator part of 5 (`return f()` of a carry routine as `jsr f / rts`) is for the M17 list. `BenchmarkTests` unchanged. Checked in VICE with a `.d64` image, with the virtual drive and with true drive emulation (also a second run on the same disk, which replaces the file).
+- **Next step:** M15, indexing small linear struct arrays (`docs/roadmap.md`), on a new branch from `main` once M14 is merged.
 
 ## Done
+
+- **M14, C64 device I/O library** (2026-11-07).
+  - `src/lib/c64/io.tern` (module `io`). Raw KERNAL routines at their addresses (spec 6.6, direct `jsr`): `setlfs`, `setnam`, `kernal_open`, `close`, `chkin`, `chkout`, `clrchn`, `chrin`, `chrout`, `readst`, `kernal_load` (A fixed to 0). `OPEN` is `kernal_open` because `open` is the wrapper below. `LOAD`/`SAVE` raw forms: only `kernal_load` is public; `SAVE` is inside `save` (it needs a zero-page pointer).
+  - Whole files: `load(name, n, device, address: ptr u8) -> bool` (secondary address 0: to the given address); `save(name, n, device, first, last: ptr u8) -> bool` (`asm fn`; `last` is included, the end passed to SAVE is `last + 1`, so `last` must be below `$FFFF`, a KERNAL limit, documented; the start goes through a private `@ zp` pointer; secondary address 1). Both return the KERNAL's carry.
+  - Sequential files: `open(lfn, device, channel, name, n) -> bool`, `read(lfn, dst, max) -> u8` (stops at end of file, which counts the last byte, at a timeout bit (a missing file: status $42 at the first read), which counts nothing, or at `max`), `write(lfn, src, n) -> bool` (true on carry or any status bit), `close`, `status() -> u8` (inline `readst`). Counts are `u8`, like `c64.print`; larger blocks are several calls. Constants `ST_EOF`, `ST_TIMEOUT`, `ST_NO_DEVICE`.
+  - Command channel (review finding 1: closing channel 15 closes every file on a real drive, so it is opened once and closed last): `command_open(device) -> bool`, `command_close()`, `command(cmd, n) -> bool` (sends the text and a CR through the open channel), `drive_status(dst, max) -> u8` (reads the message from the open channel, without the CR, and leaves it open; 0 if the channel is not open or the drive does not answer), `command_once(device, cmd, n) -> bool` (open, send, close; only when no file is open on the drive; closes only if the open succeeded).
+  - `c64.load` is now plain Tern on `io.setnam`/`setlfs`/`kernal_load_own` (LOAD with no address parameter): same signature, same call sequence (`SETNAM`, `SETLFS` 1,device,1, `LOAD`).
+  - Tests: `IoTests` (38), KERNAL and a disk drive as a C# class (`FakeKernal`) behind `Run.Program` traps: arguments and call order of every function, carry results, end of file, and the real-1541 behavior from the review (closing channel 15 closes all files, a missing file gives no error at open and status $42 at the first read, a send clears the status), a save followed by a load, every drive-status message case, and `examples/highscore.tern`.
+  - Example: `examples/highscore.tern` (commands for the disk image in its header).
+
 
 - **M13 follow-up** (2026-11-07; settled 2026-11-03/04).
   - *`volatile` over an overlay (spec 8.5).* A `volatile` fixed-address variable may overlap an overlay's file; without it the error suggests `volatile` or the overlay's own name. Overlap with the resident program is still an error. A write to a fixed variable that lies in an overlay area (`VariableSymbol.InOverlayArea`, set in the checker) makes the optimizer forget every variable (`Optimizer.ForgetWrite`), like a write through a pointer, whatever other volatile ranges it is in. Overlap is now checked against each section of the overlay, not its whole span.
@@ -267,6 +277,7 @@ Not bugs; things to improve, mostly in M7 (optimizer).
 
 44. **Spec 10.1 tables for M10.** The roadmap asks for the signatures as built in spec 10.1; the coding session cannot edit the spec. They are listed in the M10 entry under "Done". Please copy them in (including `text.dec8z`/`dec16z`, `bcd.text`, `random.below`).
 45. **Part and handler in one function.** Spec 6.3 says "each `interrupt fn` is compiled in the forms that are used" (as a handler if its address is taken, as a part if it is called). Provisional: one form per function; using both is an error ("is called by another interrupt fn ... and its address is also used"). Two copies would need two labels and two frame views for one body. Say if it is wanted.
+59. **Spec 10.1 for `io` (M14).** The roadmap asks for the signatures as built in spec 10.1; they are in the M14 entry under "Done" and in the comments of `src/lib/c64/io.tern`. Please copy them in. Choices to confirm: the module is called `io` (the command-channel functions are as listed in the M14 entry); address parameters are `ptr u8` (`addr(x)` is a `ptr u8`, and a plain number converts); `save`'s `last` is the last byte (included), like a `..=` range; counts of `read`/`write` are `u8`; `OPEN` is `kernal_open` and `kernal_load` is public, `SAVE` has no raw form. The roadmap's `chrout` is `io.chrout` (a second declaration next to `c64.chrout`, same address).
 
 
 
