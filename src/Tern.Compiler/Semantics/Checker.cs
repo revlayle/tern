@@ -547,11 +547,20 @@ public sealed partial class Checker
         if (!ok) throw new CompileError(pos, $"A {type} value cannot be passed using {reg}");
     }
 
+    /// <summary>Set while a global's type is resolved: a byte array there may be longer than 256 (spec 3.2).</summary>
+    private bool _allowLongBytes;
+
     private void DeclareGlobal(VarDecl decl)
     {
         // A string or include_bytes() gives a [u8; N] array, which may be longer than 256 bytes.
         var bytes = decl.Init is null ? null : ByteSource(decl.Init);
-        var type = bytes is not null && decl.TypeSyntax is null ? TernType.ArrayOf(TernType.U8, bytes.Length) : DeclaredType(decl);
+        _allowLongBytes = !decl.IsLinear;
+        TernType type;
+        try { type = bytes is not null && decl.TypeSyntax is null ? TernType.ArrayOf(TernType.U8, bytes.Length) : DeclaredType(decl); }
+        finally { _allowLongBytes = false; }
+        if (!decl.IsData && decl.TypeSyntax is not null && decl.Init is not null && type.IsArray && type.Length > 256)
+            throw new CompileError(decl.Init.Pos,
+                $"'{decl.Name}' is a long byte array ({type.Length} bytes), which is zeroed at startup and has no initial value. Fill it at run time, or declare it with 'data'");
         var v = new VariableSymbol(_module.Qualify(decl.Name), decl.Pos, type, VariableKind.Global, null)
         {
             IsData = decl.IsData, NoInit = decl.IsNoinit, DeclaredVolatile = decl.IsVolatile,
@@ -785,8 +794,10 @@ public sealed partial class Checker
                 CheckExpr(a.Length);
                 if (a.Length.ConstValue is not long len)
                     throw new CompileError(a.Length.Pos, "Array length must be known at compile time");
-                if (len < 1 || len > 256)
-                    throw new CompileError(a.Length.Pos, $"Array length must be 1 to 256, not {len}");
+                if (len < 1 || len > 256 && !(_allowLongBytes && element.Size == 1 && element.IsInteger))
+                    throw new CompileError(a.Length.Pos, len > 256
+                        ? $"An array of {element} has at most 256 elements. Only a global var or data of u8 or i8 may be longer (spec 3.2), and it is used through a pointer"
+                        : $"Array length must be 1 to 256, not {len}");
                 return TernType.ArrayOf(element, (int)len);
             default:
                 throw new InvalidOperationException();
