@@ -141,30 +141,24 @@ public class DeadStoreTests
     // ---------- Programs ----------
 
     [Fact]
-    public void A_local_copy_used_from_a_is_not_stored()
+    public void A_local_used_only_from_a_is_not_stored()
     {
-        byte[] input = [5, 0, 255, 3, 3, 128, 1, 254, 0, 255];
+        byte[] input = [0, 1, 97, 98, 252, 253, 255, 128, 127, 0];
         var r = Run.Program($$"""
             var values: [u8; 10] = [{{string.Join(", ", input)}}]
+            var out: [u8; 10]
+            var big: u8
             fn main() {
-                var last: u8 = 9
-                while last > 0 {
-                    for i in 0..last {
-                        var a: u8 = values[i]
-                        var b: u8 = values[i + 1]
-                        if a > b {
-                            values[i] = b
-                            values[i + 1] = a
-                        }
-                    }
-                    last -= 1
+                for i in 0..10 {
+                    var t: u8 = values[i] + 3
+                    if t > 100 { big += 1 }
+                    out[i] = t
                 }
             }
             """);
-        var sorted = input.Order().ToArray();
-        for (int k = 0; k < sorted.Length; k++) Assert.Equal(sorted[k], r.U8("values", k));
-        Assert.DoesNotContain("sta main.b", r.Result.Listing);
-        Assert.Contains("sta main.a", r.Result.Listing);   // read in the swap
+        for (int k = 0; k < input.Length; k++) Assert.Equal((byte)(input[k] + 3), r.U8("out", k));
+        Assert.Equal(input.Count(v => (byte)(v + 3) > 100), r.U8("big"));
+        Assert.DoesNotContain("sta main.t", r.Result.Listing);
     }
 
     [Fact]

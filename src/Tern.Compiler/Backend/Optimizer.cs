@@ -28,7 +28,8 @@ public static class Optimizer
     private static void Improve(List<AsmItem> code, FunctionSymbol function)
     {
         while (RemoveRedundant(code, function) | FoldShiftTests(code, function) | UseOperandInA(code, function)
-            | RemoveDeadLoads(code, function) | RemoveDeadStores(code, function) | GroupConstantStores(code)) { }
+            | RemoveDeadLoads(code, function) | RemoveDeadStores(code, function) | ReadCopiesFromSource(code, function)
+            | GroupConstantStores(code)) { }
     }
 
     // ---------- Dead stores ----------
@@ -86,10 +87,7 @@ public static class Optimizer
     {
         var positions = Positions(code);
         // Assembly that patches code, or calls a subroutine of its own block: not followed.
-        if (function.CodePatched || code.Any(item => item is Instr { AsmPos: not null } w
-                && ((w.Operand is LabelOperand && (AsmEffects.WritesMemory(w.Mnemonic, w.Mode) || Stored(w.Mnemonic) is not null))
-                    || (w.Mnemonic == Jsr && w.Operand is LabelOperand { Label: var l } && positions.ContainsKey(l)))))
-            return false;
+        if (SelfModifying(code, function) || CallsOwnSubroutine(code, positions)) return false;
         var unknown = UnknownEntries(code).Where(positions.ContainsKey).Select(l => positions[l]).ToList();
 
         (VariableSymbol, int) Byte(VarOperand o) => (o.Variable.Storage, o.Variable.AliasOffset + o.Offset);
@@ -163,6 +161,225 @@ public static class Optimizer
         return removed;
     }
 
+    /// <summary>Assembly that calls a subroutine of its own block (<c>jsr .sub</c>): its <c>rts</c> returns into this code.</summary>
+    private static bool CallsOwnSubroutine(List<AsmItem> code, Dictionary<Label, int> positions) =>
+        code.Any(item => item is Instr { Mnemonic: Jsr, Operand: LabelOperand { Label: var l } } && positions.ContainsKey(l));
+
+    private static CpuState Flag(Reg r) => r switch { Reg.A => CpuState.A, Reg.X => CpuState.X, _ => CpuState.Y };
+
+    /// <summary>
+    /// The registers (A, X, Y) that may be read before they are written, before each item. A call
+    /// may read all three (arguments); <c>rts</c> reads the return value's registers, or what the
+    /// labels of a jump table read; anything the analysis cannot follow reads all three.
+    /// </summary>
+    private static CpuState[] RegistersLive(List<AsmItem> code, FunctionSymbol function, Dictionary<Label, int> positions)
+    {
+        const CpuState all = CpuState.A | CpuState.X | CpuState.Y;
+        var unknown = UnknownEntries(code).Where(positions.ContainsKey).Select(l => positions[l]).ToList();
+        var returned = CpuState.None;
+        foreach (var r in new[] { Reg.A, Reg.X, Reg.Y })
+            if (function.ReturnRegister is { } ret && ret.Uses(r switch { Reg.A => Register.A, Reg.X => Register.X, _ => Register.Y }))
+                returned |= Flag(r);
+        var live = new CpuState[code.Count + 1];
+        for (bool changed = true; changed;)
+        {
+            changed = false;
+            for (int k = code.Count - 1; k >= 0; k--)
+            {
+                var item = code[k];
+                CpuState after = CpuState.None, result;
+                if (FallsThrough(item)) after |= live[k + 1];
+                if (item is Instr i)
+                {
+                    if (Target(i) is { } t) after |= positions.TryGetValue(t, out int tp) ? live[tp] : all;
+                    if (i.Mnemonic == Rts) { after |= returned; foreach (int u in unknown) after |= live[u]; }
+                    if (i.Mnemonic is Brk or Rti || (i.Mnemonic == Mnemonic.Jmp && Target(i) is null)) after = all;
+                    var (reads, writes) = AsmEffects.Of(i.Mnemonic, i.Mode);
+                    result = i.Mnemonic == Jsr ? all : ((after & ~writes) | reads) & all;
+                }
+                else result = after;
+                if (result != live[k]) { live[k] = result; changed = true; }
+            }
+        }
+        return live;
+    }
+
+    /// <summary>
+    /// For each item, whether a fact holds before it on every path, given where it starts
+    /// (<paramref name="makes"/>: true after the item) and what ends it. Nothing holds at the start of
+    /// the function or at a label entered from where the analysis cannot see.
+    /// </summary>
+    private static bool[] HoldsBefore(List<AsmItem> code, Dictionary<Label, int> positions, Func<int, bool> makes, Func<int, bool> ends)
+    {
+        var unknown = UnknownEntries(code);
+        var before = new bool?[code.Count + 1];
+        before[0] = false;
+        foreach (var l in unknown) if (positions.TryGetValue(l, out int p)) before[p] = false;
+        var work = new Stack<int>();
+        for (int k = 0; k < code.Count; k++) if (before[k] is not null) work.Push(k);
+        void Join(int k, bool value)
+        {
+            if (before[k] is null) { before[k] = value; work.Push(k); }
+            else if (before[k] == true && !value) { before[k] = false; work.Push(k); }
+        }
+        while (work.Count > 0)
+        {
+            int k = work.Pop();
+            if (k >= code.Count) continue;
+            bool after = makes(k) || (before[k] == true && !ends(k));
+            if (code[k] is Instr i && Target(i) is { } t && positions.TryGetValue(t, out int tp)) Join(tp, after);
+            if (FallsThrough(code[k])) Join(k + 1, after);
+        }
+        return before.Select(b => b == true).ToArray();
+    }
+
+    /// <summary>True if item <paramref name="k"/> can run again without passing <paramref name="avoid"/> (it is in a loop that does not contain it).</summary>
+    private static bool RepeatsWithout(List<AsmItem> code, Dictionary<Label, int> positions, int k, int avoid)
+    {
+        var seen = new HashSet<int>();
+        var work = new Stack<int>();
+        void Next(int j)
+        {
+            if (code[j] is Instr i && Target(i) is { } t && positions.TryGetValue(t, out int tp)) work.Push(tp);
+            if (FallsThrough(code[j]) && j + 1 < code.Count) work.Push(j + 1);
+        }
+        Next(k);
+        while (work.Count > 0)
+        {
+            int j = work.Pop();
+            if (j == k) return true;
+            if (j == avoid || !seen.Add(j)) continue;
+            Next(j);
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// A one-byte local that is a copy of other memory (<c>var a = values[i]</c>: <c>lda values,x / sta a</c>,
+    /// its only store) is read from that memory instead while neither the memory nor its index
+    /// register has changed (<c>cmp a</c> becomes <c>cmp values,x</c>). Where the memory is overwritten
+    /// and the copy is still needed after (a swap), the value is loaded into a free index register
+    /// just before the overwriting store and <c>lda a</c> becomes a transfer. The copy's store and the
+    /// first load then go (<see cref="RemoveDeadStores"/>, <see cref="RemoveDeadLoads"/>). Only when that
+    /// takes no more bytes, and no read moved to the other memory runs more often than the store.
+    /// Returns true if a copy was changed.
+    /// </summary>
+    private static bool ReadCopiesFromSource(List<AsmItem> code, FunctionSymbol function)
+    {
+        var positions = Positions(code);
+        if (SelfModifying(code, function) || CallsOwnSubroutine(code, positions)) return false;
+        CpuState[]? live = null;
+        for (int s = 0; s < code.Count; s++)
+        {
+            if (code[s] is not Instr { Mnemonic: Sta, AsmPos: null, Mode: Absolute or ZeroPage, Operand: VarOperand { Offset: 0, Variable: var v } }) continue;
+            if (v.AliasOf is not null || v.Type.Size != 1 || !OwnMemory(v, function)) continue;
+            int l = PreviousReal(code, s - 1);
+            if (l < 0 || code[l] is not Instr { Mnemonic: Lda, AsmPos: null, Operand: VarOperand { Variable: var from } } load
+                || load.Mode is not (Absolute or ZeroPage or AbsoluteX or ZeroPageX or AbsoluteY or ZeroPageY)) continue;
+            Reg? index = load.Mode is AbsoluteX or ZeroPageX ? Reg.X : load.Mode is AbsoluteY or ZeroPageY ? Reg.Y : null;
+            var source = from.Storage;
+            if (source == v.Storage || source.IsVolatile || source.FixedAddress is not null || source.InOverlayArea
+                || (source.Owner is { } o && o != function)) continue;
+
+            // Every other use of v is a plain read by the compiler's code.
+            var reads = new List<int>();
+            bool usable = true;
+            for (int k = 0; k < code.Count && usable; k++)
+            {
+                if (k == s || code[k] is not Instr i) continue;
+                bool names = (i.Operand is VarOperand w && w.Variable.Storage == v.Storage) || (i.Operand is ImmVarByte b && b.Variable.Storage == v.Storage);
+                if (!names) continue;
+                usable = !FromAsm(i) && i.Mode is Absolute or ZeroPage && i.Operand is VarOperand { Offset: 0 }
+                    && Stored(i.Mnemonic) is null && !AsmEffects.WritesMemory(i.Mnemonic, i.Mode);
+                reads.Add(k);
+            }
+            if (!usable || reads.Count == 0) continue;
+
+            // Where v equals the source memory.
+            bool Ends(int k)
+            {
+                if (code[k] is not Instr i) return false;
+                if (i.Mnemonic is Jsr or Brk) return true;
+                if (index is Reg r && AsmEffects.Of(i.Mnemonic, i.Mode).Writes.HasFlag(Flag(r))) return true;
+                if (i.Mode == Accumulator || !(AsmEffects.WritesMemory(i.Mnemonic, i.Mode) || Stored(i.Mnemonic) is not null)) return false;
+                if (i.Mode is IndirectIndexed or IndexedIndirect or Indirect || i.Operand is not VarOperand { Variable: var w }) return true;
+                return w.Storage == source || w.Storage == v.Storage || w.Storage.InOverlayArea;
+            }
+            var same = HoldsBefore(code, positions, k => k == s, Ends);
+
+            var fromSource = new List<int>();
+            var fromRegister = new List<int>();
+            foreach (int r in reads)
+            {
+                var i = (Instr)code[r];
+                if (same[r] && InstructionSet.TryGet(i.Mnemonic, load.Mode, out _)) fromSource.Add(r);
+                else if (i.Mnemonic == Lda) fromRegister.Add(r);
+                else { usable = false; break; }
+            }
+            if (!usable || fromSource.Any(r => RepeatsWithout(code, positions, r, s))) continue;
+
+            // A store into the source memory that ends the copy while it is still needed: load the
+            // value into a free register just before it.
+            var loads = new List<int>();
+            Reg held = Reg.A;
+            if (fromRegister.Count > 0)
+            {
+                var needed = fromRegister.ToHashSet();
+                bool StillNeeded(int k)
+                {
+                    var seen = new HashSet<int>();
+                    var work = new Stack<int>();
+                    work.Push(k + 1);
+                    while (work.Count > 0)
+                    {
+                        int j = work.Pop();
+                        if (j >= code.Count || j == s || !seen.Add(j)) continue;
+                        if (needed.Contains(j)) return true;
+                        if (code[j] is Instr ji && Target(ji) is { } t && positions.TryGetValue(t, out int tp)) work.Push(tp);
+                        if (FallsThrough(code[j])) work.Push(j + 1);
+                    }
+                    return false;
+                }
+                for (int k = 0; k < code.Count && usable; k++)
+                {
+                    if (k == s || !same[k] || !Ends(k) || !StillNeeded(k)) continue;
+                    // Only a store into the source memory, not a call or a change of the index.
+                    usable = code[k] is Instr { AsmPos: null } i && (Stored(i.Mnemonic) is not null || AsmEffects.WritesMemory(i.Mnemonic, i.Mode))
+                        && i.Operand is VarOperand { Variable: var w } && w.Storage == source && i.Mode is not (IndirectIndexed or IndexedIndirect or Indirect)
+                        && !(index is Reg r && AsmEffects.Of(i.Mnemonic, i.Mode).Writes.HasFlag(Flag(r)));
+                    loads.Add(k);
+                }
+                if (!usable) continue;
+                live ??= RegistersLive(code, function, positions);
+                var choices = new[] { Reg.Y, Reg.X }.Where(r => r != index
+                    && InstructionSet.TryGet(r == Reg.Y ? Ldy : Ldx, load.Mode, out _)
+                    && loads.All(k => (live[k] & Flag(r)) == 0 && !NzLiveAfter(code, k - 1, function, positions))).ToList();
+                if (choices.Count == 0) continue;
+                held = choices[0];
+                // The register still holds v at each lda v.
+                var regFlag = Flag(held);
+                var loadSet = loads.ToHashSet();
+                var holds = HoldsBefore(code, positions, k => loadSet.Contains(k) && !EndsHold(k), EndsHold);
+                bool EndsHold(int k) => k == s || (code[k] is Instr i && (i.Mnemonic is Jsr or Brk || AsmEffects.Of(i.Mnemonic, i.Mode).Writes.HasFlag(regFlag)));
+                if (!fromRegister.All(r => holds[r])) continue;
+            }
+
+            // Bytes: the store (2, a local in zero page at best), each read moved (one more with an
+            // absolute address), each load added, each lda v as a transfer, and the first load if it dies.
+            int sourceSize = 1 + InstructionSet.OperandSize(load.Mode);
+            int next = NextReal(code, s + 1);
+            bool firstLoadDies = next < code.Count && code[next] is Instr { AsmPos: null, Mnemonic: Lda or Txa or Tya };
+            int delta = -2 + fromSource.Count * (sourceSize - 2) + loads.Count * sourceSize - fromRegister.Count - (firstLoadDies ? sourceSize : 0);
+            if (delta > 0) continue;
+
+            foreach (int r in fromSource) code[r] = (Instr)code[r] with { Mode = load.Mode, Operand = load.Operand };
+            foreach (int r in fromRegister) code[r] = new Instr(held == Reg.Y ? Tya : Txa);
+            foreach (int k in loads.OrderByDescending(k => k)) code.Insert(k, new Instr(held == Reg.Y ? Ldy : Ldx, load.Mode, load.Operand));
+            return true;
+        }
+        return false;
+    }
+
     /// <summary>
     /// At the start of main, before any label, branch, call or assembly, a store of 0 into a global
     /// the startup code cleared, and that main has not written yet, changes nothing (<c>fib[0] = 0</c>).
@@ -219,8 +436,10 @@ public static class Optimizer
         // From the end, so each decision sees the code after it as it will be.
         for (int k = code.Count - 1; k >= 0; k--)
         {
-            if (code[k] is not Instr { AsmPos: null } i || Loaded(i.Mnemonic) is not Reg load || !Trackable(i)
-                || i.Operand is VarOperand { Variable.FixedAddress: not null }) continue;
+            // An indexed read of ordinary memory has no effect either (not through a pointer: it may reach I/O).
+            if (code[k] is not Instr { AsmPos: null } i || Loaded(i.Mnemonic) is not Reg load
+                || !(Trackable(i) || (i.Mode is AbsoluteX or AbsoluteY or ZeroPageX or ZeroPageY && i.Operand is VarOperand { Variable.IsVolatile: false }))
+                || i.Operand is VarOperand { Variable.FixedAddress: not null } or VarOperand { Variable.Storage.FixedAddress: not null }) continue;
             var reg = load switch { Reg.A => CpuState.A, Reg.X => CpuState.X, _ => CpuState.Y };
             var register = load switch { Reg.A => Register.A, Reg.X => Register.X, _ => Register.Y };
             for (int j = k + 1; j < code.Count; j++)
@@ -603,12 +822,15 @@ public static class Optimizer
         return z;
     }
 
+    /// <summary>An asm instruction writes to a code label, so it changes the code itself (or another function patches this one).</summary>
+    private static bool SelfModifying(List<AsmItem> code, FunctionSymbol function) =>
+        function.CodePatched || code.Any(item => item is Instr { AsmPos: not null, Operand: LabelOperand } w
+            && (AsmEffects.WritesMemory(w.Mnemonic, w.Mode) || Stored(w.Mnemonic) is not null));
+
     /// <summary>The state before each item, from the start of the function and every jump into a label.</summary>
     private static State?[] Analyse(List<AsmItem> code, FunctionSymbol function)
     {
-        // An asm instruction that writes to a code label changes the code itself.
-        bool selfModifying = function.CodePatched || code.Any(item => item is Instr { AsmPos: not null, Operand: LabelOperand } w
-            && (AsmEffects.WritesMemory(w.Mnemonic, w.Mode) || Stored(w.Mnemonic) is not null));
+        bool selfModifying = SelfModifying(code, function);
         var positions = Positions(code);
         var unknown = UnknownEntries(code);
         var before = new State?[code.Count + 1];

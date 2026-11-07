@@ -349,3 +349,10 @@ After part 1 (F2, F1, F4, F6, F8, F10, F19, F21), `comparison.md`: Tern 1036 / 3
 | F10 carry known clear | 128 / 4 | 128 / 4 | `enemies` init: `(i << 3) + i + 10` with `i < 16` |
 | F10 a field as a bound | 6 / 4 | 6 / 4 | `copy`: `for i in 0..n.lo` is `cpy n` |
 | F10 stores of 0 into cleared memory, zeros stored together | 16 / 13, 2 / 2 | 22 / 19 | `fib16` 18 / 15; `copy` 4 / 4 (the zeros of `copy(DST, SRC, 1000)`'s arguments) |
+
+Part 2 (dataflow), as each fix is built:
+
+| finding | estimate | measured | where |
+|---|--:|--:|---|
+| F3 | 19,872 / 8 | 15,083 / 4 | `bubble` 14,850 / 2 (`sta b`), `interp` 233 / 2 (`sta op`, with 11 cycles of page crossings). `enemies`' `sta main.x` / `main.y` stay: on the bounce path A is overwritten and `lda main.x` after the `if` reads memory, so "nothing reads them after F4" holds only on the other path; removing them needs x kept in a free register on the bounce path |
+| F18 | 23,094 / 2 | 23,204 / 5 | `bubble` 23,094 / 2: the inner loop is the assembly's (`lda values+1,x / cmp values,x / bcs`, swap `ldy values,x / sta values,x / tya / sta values+1,x`); `interp` 110 / 3, beyond the estimate: `SWAP`'s `t` goes the same way |

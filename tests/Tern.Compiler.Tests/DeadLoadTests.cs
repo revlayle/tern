@@ -79,6 +79,18 @@ public class DeadLoadTests
     }
 
     [Fact]
+    public void An_indexed_load_of_ordinary_memory_goes_but_not_through_a_pointer_or_from_volatile_memory()
+    {
+        // M18 F18: the copy's first load (lda values,x) dies once the copy is read from the array.
+        var arr = new VariableSymbol("arr", default, TernType.ArrayOf(TernType.U8, 4), VariableKind.Global, null);
+        Assert.Equal("lda #$02|sta x|rts", Optimize(null, new Instr(Lda, AbsoluteX, new VarOperand(arr)), Imm(Lda, 2), Abs(Sta, X), new Instr(Rts)));
+        var ports = new VariableSymbol("ports", default, TernType.ArrayOf(TernType.U8, 4), VariableKind.Global, null) { DeclaredVolatile = true };
+        Assert.Equal("lda ports|lda #$02|sta x|rts", Optimize(null, new Instr(Lda, AbsoluteX, new VarOperand(ports)), Imm(Lda, 2), Abs(Sta, X), new Instr(Rts)));
+        var p = new VariableSymbol("p", default, TernType.U16, VariableKind.Global, null);
+        Assert.Equal("lda p|lda #$02|sta x|rts", Optimize(null, new Instr(Lda, IndirectIndexed, new VarOperand(p)), Imm(Lda, 2), Abs(Sta, X), new Instr(Rts)));
+    }
+
+    [Fact]
     public void A_function_result_in_A_survives_in_a_program()
     {
         var r = Run.Program("""
