@@ -384,103 +384,107 @@ asm fn divs8(a: i8 using A, b: i8 using X) -> i8 {
     lda w4
 }
 
-// Work bytes of min8, max8, clamp8 and the signed versions. They are not the multiply and divide
-// routines' bytes, so main may call mul8 while a handler calls min8.
-private var n0: u8
-private var n1: u8
-private var n2: u8
-
 // The smaller of a and b (unsigned).
 inline asm fn min8(a: u8 using A, b: u8 using X) -> u8 {
-    stx n0
-    cmp n0
+    var tmp: u8
+    stx tmp
+    cmp tmp
     bcc .done
-    lda n0
+    lda tmp
 .done:
 }
 
 // The larger of a and b (unsigned).
 inline asm fn max8(a: u8 using A, b: u8 using X) -> u8 {
-    stx n0
-    cmp n0
+    var tmp: u8
+    stx tmp
+    cmp tmp
     bcs .done
-    lda n0
+    lda tmp
 .done:
 }
 
 // x limited to lo..=hi (unsigned). lo must not be above hi.
 inline asm fn clamp8(x: u8 using A, lo: u8 using X, hi: u8 using Y) -> u8 {
-    stx n0
-    cmp n0
+    var tmp: u8
+    stx tmp
+    cmp tmp
     bcs .above_lo
-    lda n0
+    lda tmp
 .above_lo:
-    sty n0
-    cmp n0
+    sty tmp
+    cmp tmp
     bcc .done
-    lda n0
+    lda tmp
 .done:
 }
 
 // The smaller of a and b (signed).
 inline asm fn mins8(a: i8 using A, b: i8 using X) -> i8 {
-    sta n1
-    stx n0
+    var ta: u8
+    var tb: u8
+    sta ta
+    stx tb
     sec
-    sbc n0
+    sbc tb
     bvc .no_overflow
     eor #$80
 .no_overflow:
     bmi .first
-    lda n0
+    lda tb
     jmp .done
 .first:
-    lda n1
+    lda ta
 .done:
 }
 
 // The larger of a and b (signed).
 inline asm fn maxs8(a: i8 using A, b: i8 using X) -> i8 {
-    sta n1
-    stx n0
+    var ta: u8
+    var tb: u8
+    sta ta
+    stx tb
     sec
-    sbc n0
+    sbc tb
     bvc .no_overflow
     eor #$80
 .no_overflow:
     bmi .second
-    lda n1
+    lda ta
     jmp .done
 .second:
-    lda n0
+    lda tb
 .done:
 }
 
 // x limited to lo..=hi (signed). lo must not be above hi.
 inline asm fn clamps8(x: i8 using A, lo: i8 using X, hi: i8 using Y) -> i8 {
-    sta n1
-    stx n0
-    sty n2
+    var tx: u8
+    var tlo: u8
+    var thi: u8
+    sta tx
+    stx tlo
+    sty thi
     sec
-    sbc n0              // x - lo
+    sbc tlo              // x - lo
     bvc .lo_no_overflow
     eor #$80
 .lo_no_overflow:
     bpl .above_lo
-    lda n0
-    sta n1
+    lda tlo
+    sta tx
 .above_lo:
-    lda n2
+    lda thi
     sec
-    sbc n1              // hi - x
+    sbc tx              // hi - x
     bvc .hi_no_overflow
     eor #$80
 .hi_no_overflow:
     bpl .below_hi
-    lda n2
+    lda thi
     jmp .done
 .below_hi:
-    lda n1
+    lda tx
 .done:
 }
 

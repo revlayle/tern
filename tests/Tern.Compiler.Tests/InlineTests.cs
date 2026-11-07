@@ -41,7 +41,7 @@ public class InlineTests
         Assert.Equal(99, r.U8("z"));
         Assert.DoesNotContain("jsr", Code(r));
         Assert.DoesNotContain("clamp", r.Result.Symbols.Keys);
-        Assert.Contains("clamp.v", r.Result.Symbols.Keys); // its frame is still there
+        Assert.Contains("main.clamp.v", r.Result.Symbols.Keys); // its parameter is in main's frame
     }
 
     [Fact]
@@ -192,8 +192,8 @@ public class InlineTests
             """);
         Assert.Equal(3 + 1 + 3 + 4, r.U8("out"));
         var s = r.Result.Symbols;
-        Assert.NotEqual(s["f.t"], s["h.k"]);
-        Assert.NotEqual(s["f.a"], s["h.k"]);
+        Assert.NotEqual(s["main.f.t"], s["h.k"]);
+        Assert.NotEqual(s["main.f.a"], s["h.k"]);
     }
 
     [Fact]
@@ -239,7 +239,13 @@ public class InlineTests
     [InlineData("inline fn f() @ $1000\nfn main() { }", "An inline function needs a body")]
     [InlineData("inline fn f() { }\nfn main() { asm {\n jsr f\n } }", "'f' is inline: it is copied into each Tern caller and has no address of its own")]
     [InlineData("inline fn f() { g() }\ninline fn g() { f() }\nfn main() { f() }", "Recursion is not allowed: f -> g -> f")]
-    [InlineData("var v: u8\ninline fn f() { var t = v\n v = t + 1 }\ninterrupt fn h() { f() }\nfn main() { f() }", "'f' is called from main and from the interrupt handler 'h'")]
+    [InlineData("var v: u8\nfn g(k: u8) { v = k }\ninline fn f() { g(1) }\ninterrupt fn h() { f() }\nfn main() { f() }", "'g' is called from main and from the interrupt handler 'h'")]
+    [InlineData("var v: u8\ninline fn f() { var t = v\n v = t + 1 }\nfn g() { f() }\ninterrupt fn h() { g() }\nfn main() { g() }",
+        "'g' is called from main and from the interrupt handler 'h'. An interrupt can stop it halfway and run it again, which would overwrite its memory: the variable 't' of the inline function 'f', which is copied into it")]
+    [InlineData("inline asm fn f() {\n var t: u8\n lda t\n var u: u8\n}\nfn main() { f() }", "'var' lines go at the start of an inline asm fn, before the first instruction")]
+    [InlineData("inline asm fn f() {\n var t: u8 = 3\n lda t\n}\nfn main() { f() }", "'t' in an inline asm fn has no initial value: the assembly sets it")]
+    [InlineData("asm fn f() {\n var t: u8\n lda t\n}\nfn main() { f() }", "An asm fn has no variables of its own")]
+    [InlineData("fn main() {\n asm {\n var t: u8\n lda t\n }\n}", "'var' is not allowed inside an asm block")]
     public void Reports_errors(string source, string expected)
     {
         var e = Assert.Throws<CompileError>(() => TernCompiler.Compile(source));

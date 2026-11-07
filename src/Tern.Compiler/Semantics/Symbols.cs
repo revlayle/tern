@@ -216,6 +216,12 @@ public sealed class VariableSymbol(string name, SourcePos pos, TernType type, Va
     /// <summary>The variable that owns the memory: itself, or the variable a view is part of.</summary>
     public VariableSymbol Storage => AliasOf ?? this;
 
+    /// <summary>
+    /// Set for the copy of an inline function's variable that lives in a caller's frame (<see cref="Owner"/>):
+    /// the inline function it comes from (spec 6.2).
+    /// </summary>
+    public FunctionSymbol? InlineOf { get; set; }
+
     /// <summary>Declared <c>indexed var</c>: whole records, a variable index goes through <see cref="OffsetTable"/>.</summary>
     public bool IsIndexed { get; init; }
     /// <summary>For an indexed array: the compile-time table of <c>i * sizeof(T)</c>; made at the first variable index.</summary>
@@ -263,7 +269,7 @@ public sealed class FunctionSymbol(string name, SourcePos pos) : Symbol(name, po
     public bool IsInterrupt { get; set; }
     /// <summary>An interrupt fn that another interrupt fn calls: compiled as a part (ends with rts, saves nothing). Set by the checker.</summary>
     public bool IsPart { get; set; }
-    /// <summary>An <c>inline fn</c>: copied into each caller. It keeps its frame, but has no code of its own.</summary>
+    /// <summary>An <c>inline fn</c>: copied into each caller, with its parameters, locals and temporaries in that caller's frame. It has no code or frame of its own.</summary>
     public bool IsInline { get; set; }
     /// <summary>Assembly writes into this function's code (<c>sta f+1</c>): the optimizer trusts none of its instructions.</summary>
     public bool CodePatched { get; set; }

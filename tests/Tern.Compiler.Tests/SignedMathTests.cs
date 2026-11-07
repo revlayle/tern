@@ -240,15 +240,39 @@ public class SignedMathTests
     }
 
     [Fact]
-    public void Min8_from_main_and_a_handler_is_an_error()
+    public void Min8_from_main_and_a_handler_compiles_and_runs()
     {
-        var e = Assert.Throws<Syntax.CompileError>(() => TernCompiler.Compile("""
+        // The helpers' work bytes are locals in each caller's frame (M16), so both roots may use them.
+        var r = Run.Program("""
             import math
             var a: u8
             var b: u8
-            interrupt fn h() { b = math.min8(b, 5) }
-            fn main() { a = math.min8(a, 3) }
-            """));
-        Assert.Contains("a private variable of its module", e.Description);
+            var bad: u8
+            interrupt fn h() {
+                b = math.min8(b + 3, 200)
+                b = math.maxs8(b as i8, -3) as u8
+            }
+            fn main() {
+                asm {
+                    sei
+                    lda #h.lo
+                    sta $FFFE
+                    lda #h.hi
+                    sta $FFFF
+                    cli
+                }
+                for i in 0..=200 {
+                    a = math.min8(i, 100)
+                    var want = i
+                    if i > 100 { want = 100 }
+                    if a != want { bad += 1 }
+                }
+            }
+            """, maxCycles: 4_000_000, irqEvery: 151);
+        Assert.True(r.Interrupts > 50);
+        Assert.Equal(0, r.U8("bad"));
+        Assert.Equal(100, r.U8("a"));
+        Assert.Contains("main.math.min8.tmp", r.Result.Symbols.Keys);
+        Assert.Contains("h.math.min8.tmp", r.Result.Symbols.Keys);
     }
 }

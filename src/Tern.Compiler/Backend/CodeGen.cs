@@ -65,6 +65,9 @@ public sealed class CodeGen
             FunctionItems[f] = _out.ToList();
             all.AddRange(_out);
         }
+        // An inline function has no frame of its own: what it used is in its callers' frames.
+        foreach (var f in _program.Functions.Where(f => f.IsInline)) f.FrameVariables.Clear();
+        foreach (var ((_, original), copy) in _instances) copy.Weight = original.Weight;
         return all;
     }
 
@@ -145,6 +148,7 @@ public sealed class CodeGen
     private void GenFunction(FunctionSymbol f)
     {
         _fn = f;
+        _frameOwner = f;
         _out = [];
         _freeTemps.Clear();
         _lastSource = default;
@@ -276,6 +280,52 @@ public sealed class CodeGen
     private Label? _inlineExit;
     /// <summary>Free temporaries of each inline function, kept between its copies, which never run at the same time.</summary>
     private readonly Dictionary<FunctionSymbol, List<VariableSymbol>> _inlineTemps = new();
+    /// <summary>The function whose code is being generated: the one whose frame holds the variables of the inline copies in it.</summary>
+    private FunctionSymbol _frameOwner = null!;
+    /// <summary>The copy of an inline function's variable in a caller's frame (spec 6.2), for each caller.</summary>
+    private readonly Dictionary<(FunctionSymbol Owner, VariableSymbol Original), VariableSymbol> _instances = new();
+
+    /// <summary>
+    /// Moves the variables of the inline function <paramref name="f"/>, in the code from
+    /// <paramref name="start"/> on (the arguments and the copy of the body), into the frame of the
+    /// function being generated. All copies of <paramref name="f"/> in one caller share these
+    /// variables, as the calls of an ordinary function share its frame; two callers have two sets,
+    /// so an inline function may be used from main and from an interrupt handler.
+    /// </summary>
+    private void MoveInlineFrame(FunctionSymbol f, int start)
+    {
+        VariableSymbol InstanceOf(VariableSymbol original)
+        {
+            if (_instances.TryGetValue((_frameOwner, original), out var copy)) return copy;
+            copy = new VariableSymbol($"{f.Name}.{original.Name}", original.Pos, original.Type, original.Kind, _frameOwner)
+            {
+                InlineOf = f,
+                IsIndexed = original.IsIndexed,
+                PassedIn = original.PassedIn,
+                ReadOnly = original.ReadOnly,
+                RequireZeroPage = original.RequireZeroPage,
+                Dereferenced = original.Dereferenced,
+                AddressTaken = original.AddressTaken,
+                AsmZeroPage = original.AsmZeroPage,
+                OffsetTable = original.OffsetTable,
+            };
+            copy.JumpVectorOffsets.UnionWith(original.JumpVectorOffsets);
+            _instances[(_frameOwner, original)] = copy;
+            _frameOwner.FrameVariables.Add(copy);
+            return copy;
+        }
+        for (int i = start; i < _out.Count; i++)
+        {
+            if (_out[i] is not Instr { Operand: { } operand } instr) continue;
+            Operand? moved = operand switch
+            {
+                VarOperand v when v.Variable.Owner == f => v with { Variable = InstanceOf(v.Variable) },
+                ImmVarByte v when v.Variable.Owner == f => v with { Variable = InstanceOf(v.Variable) },
+                _ => null,
+            };
+            if (moved is not null) _out[i] = instr with { Operand = moved };
+        }
+    }
 
     /// <summary>Leaves the function: <c>rts</c>, or a jump to the end of an inline copy or of an interrupt handler.</summary>
     private void ReturnJump()
@@ -1626,6 +1676,7 @@ public sealed class CodeGen
     private void GenCall(CallExpr call)
     {
         var fn = call.Function!;
+        int start = _out.Count;
         var temps = new List<VariableSymbol>();
         var early = new Dictionary<int, VariableSymbol>();
 
@@ -1721,7 +1772,11 @@ public sealed class CodeGen
         foreach (var (reg, value) in fn.FixedInputs)
             if (reg == Register.Carry) Emit(value != 0 ? Sec : Clc);
 
-        if (fn.IsInline) GenInline(fn);
+        if (fn.IsInline)
+        {
+            GenInline(fn);
+            MoveInlineFrame(fn, start);
+        }
         else Emit(Jsr, Absolute, fn.FixedAddress is int at ? new AddrOperand(at) : new LabelOperand(_functionLabels[fn]));
         foreach (var t in temps) Release(t);
     }
