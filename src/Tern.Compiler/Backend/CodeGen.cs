@@ -2185,12 +2185,15 @@ public sealed class CodeGen
     }
 
     /// <summary>
-    /// The largest value a u8 counter takes in the body, from the loop header only: a constant end
-    /// (counting up) or start (counting down), or a variable u8 end that is excluded (at most 254).
+    /// The largest value a u8 counter takes in the body, from the loop header only: the checker's
+    /// last value for constant bounds, else a constant end (counting up) or start (counting down),
+    /// or a variable u8 end that is excluded (at most 254).
     /// </summary>
     private static long? CounterMax(ForStmt f)
     {
         if (f.Symbol!.Type is not { Size: 1, IsSigned: false }) return null;
+        if (f.From.ConstValue is long from && f.To.ConstValue is long last)
+            return Checker.LargestLoopValue(from, last, f.Inclusive, f.StepValue);
         if (f.StepValue < 0) return f.From.ConstValue;
         if (f.To.ConstValue is long to) return f.Inclusive ? to : to - 1;
         if (!f.Inclusive && f.To.Type is { Size: 1, IsSigned: false }) return 254;

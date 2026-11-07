@@ -131,6 +131,20 @@ public class IndexOffsetTests
     }
 
     [Fact]
+    public void A_step_folds_from_the_last_value_the_loop_reaches()
+    {
+        // Review M18 suggestion 5: 0..=250 step 7 ends at 245, so i + 10 <= 255.
+        var r = Run.Program($$"""
+            {{Arrays}}
+            fn main() {
+                for i in 0..=250 step 7 { b[i] = a[i + 10] }
+            }
+            """);
+        for (int i = 0; i <= 250; i += 7) Assert.Equal(Ring[i + 10], r.U8("b", i));
+        Assert.Contains("a+10,x", r.Result.Listing);
+    }
+
+    [Fact]
     public void A_constant_offset_folds_on_16_bit_arrays_and_with_the_constant_first()
     {
         var r = Run.Program($$"""
