@@ -346,6 +346,58 @@ public class OverlayTests
         Assert.Contains("never loaded together and share their memory", message);
     }
 
+    private static string SiblingMessage(string level1) => Message($$"""
+        {{Header}}
+        fn main() { load(1); level1.peek() }
+        """, new Dictionary<string, string> { ["level1"] = "import level2\n" + level1, ["level2"] = "var lives: u8 = 3\ndata T: [u8; 2] = [5, 6]\nfn five() { }" });
+
+    [Fact]
+    public void Using_or_taking_the_address_of_data_or_a_function_of_a_sibling_overlay_is_an_error()
+    {
+        Assert.Contains("'level2.T' belongs to level2", SiblingMessage("fn peek() -> u8 using A { return level2.T[1] }"));
+        Assert.Contains("'level2.T' belongs to level2", SiblingMessage("fn peek() -> u16 using AX { return addr(level2.T) }"));
+        Assert.Contains("'level2.lives' belongs to level2", SiblingMessage("fn peek() -> u16 using AX { return addr(level2.lives) }"));
+        var message = SiblingMessage("fn peek() -> u16 using AX { return addr(level2.five) }");
+        Assert.Contains("addr(level2.five) is in level2, which is in the same overlay area 'levels' as level1", message);
+        Assert.Contains("Take the address in resident code", message);
+    }
+
+    [Fact]
+    public void Resident_code_may_take_addresses_in_any_overlay_and_so_may_an_overlay_in_another_area()
+    {
+        var modules = new Dictionary<string, string>
+        {
+            ["level1"] = "fn one() -> u8 using A { return 1 }",
+            ["level2"] = "data T: [u8; 2] = [5, 6]\nfn five() -> u8 using A { return 5 }",
+        };
+        var r = Compile($$"""
+            {{Header}}
+            var f: u16
+            var t: ptr u8
+            fn main() { f = addr(level2.five); t = addr(level2.T); load(1); level1.one() }
+            """, modules);
+        Assert.Equal(r.Address("level2.five"), r.U16("f"));
+        Assert.Equal(r.Address("level2.T"), r.U16("t"));
+        var other = new Dictionary<string, string>
+        {
+            ["level1"] = "import level2\nfn peek() -> u16 using AX { return addr(level2.five) }",
+            ["level2"] = "fn five() -> u8 using A { return 5 }",
+        };
+        var r2 = Compile("""
+            import level1 @ a
+            import level2 @ b
+            memory {
+                $0801..=$4FFF  program
+                $5000..=$5FFF  overlay a
+                $6000..=$6FFF  overlay b
+            }
+            var p: u16
+            fn load(n: u8 using A) @ $C000 keeps X, Y
+            fn main() { load(2); p = level1.peek() }   // level2 comes first in the list: level1 imports it
+            """, other);
+        Assert.Equal(r2.Address("level2.five"), r2.U16("p"));
+    }
+
     [Fact]
     public void An_overlay_that_does_not_fit_its_area_is_an_error_with_its_size()
     {

@@ -270,7 +270,7 @@ public sealed partial class Checker
     {
         if (v.Kind != VariableKind.Global || _function is null) return;
         // Overlays in one area share their memory: another one's variables are not there while this one runs.
-        if (_function.OverlayArea is { } area && v.OverlayArea == area && v.Module != _function.Module && v.FixedAddress is null && v.Region is null)
+        if (_function.OverlayArea is { } area && v.OverlayArea == area && v.Module != _function.Module && (v.FixedAddress is null || v.IsData) && v.Region is null)
             throw new CompileError(pos,
                 $"'{v.Name}' belongs to {v.Module!.Name}, which is in the same overlay area '{area}' as {_function.Module!.Name}. They are never loaded together and share their memory. " +
                 "Keep shared state in a resident module or the main file");
@@ -1525,6 +1525,10 @@ public sealed partial class Checker
             throw new CompileError(pos,
                 $"'{f.Name}' takes '{memoryParam.Name}' in memory, which a call through an address cannot set. " +
                 $"Pass it in a register ({memoryParam.Name}: {memoryParam.Type} using A)");
+        if (_function?.OverlayArea is { } area && f.OverlayArea == area && f.Module != _function.Module)
+            throw new CompileError(pos,
+                $"addr({f.Name}) is in {f.Module!.Name}, which is in the same overlay area '{area}' as {_function.Module!.Name}. They are never loaded together, so the address would point at the wrong code. " +
+                "Take the address in resident code, or put one of them in another area");
         if (!_dead) f.AddressTaken = true;
         c.FunctionAddress = f;
         c.Type = TernType.U16;
