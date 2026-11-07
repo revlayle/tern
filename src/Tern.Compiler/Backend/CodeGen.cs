@@ -728,7 +728,7 @@ public sealed class CodeGen
         {
             if (target is IndexExpr pix && IsPointerIndex(pix) && StorePointerByteIndexFirst(pix, value)) return;
             // arr[expensive index] = v: load the index, then the value, so nothing has to be saved.
-            if (target is IndexExpr aix && !IsPointerIndex(aix) && aix.Index.ConstValue is null && Simple1(value) is { } simple
+            if (target is IndexExpr aix && !IsPointerIndex(aix) && aix.Index.ConstValue is null && !ContainsCall(aix.Index) && Simple1(value) is { } simple
                 && FoldIndexOffset(aix.Index, ArrayOf(aix)) is var (index, shift) && !IndexIsCheap(index))
             {
                 var reg = LoadIndex(index);

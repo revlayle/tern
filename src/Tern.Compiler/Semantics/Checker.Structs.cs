@@ -258,7 +258,7 @@ public sealed partial class Checker
         int size = arr.Type.Element!.Size, n = arr.Type.Length;
         var bytes = new byte[n];
         for (int i = 0; i < n; i++) bytes[i] = (byte)(i * size);
-        var table = new VariableSymbol($"{arr.QualifiedName}_offsets", arr.Pos, TernType.ArrayOf(TernType.U8, n), VariableKind.Global, null)
+        var table = new VariableSymbol($"{arr.QualifiedName}.offsets", arr.Pos, TernType.ArrayOf(TernType.U8, n), VariableKind.Global, null)
         {
             IsData = true, IsOffsetTable = true, InitialBytes = bytes, Module = arr.Module ?? _module,
         };

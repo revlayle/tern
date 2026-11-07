@@ -59,10 +59,10 @@ public class RecordIndexTests
         Assert.Equal(expected, Shape(declaration, statement));
 
     [Theory]
-    [InlineData("indexed var list: [S5; 20]", "v = list[i].c", "ldx i|ldy list_offsets,x|lda list+2,y|sta v|rts")]
-    [InlineData("indexed var list: [S5; 20]", "list[i].b = v", "ldx i|ldy list_offsets,x|lda v|sta list+1,y|rts")]
-    [InlineData("indexed var list: [S5; 20]", "w = list[i].w", "ldx i|ldy list_offsets,x|lda list+3,y|sta w|lda list+4,y|sta w+1|rts")]
-    [InlineData("indexed var list: [S4; 20]", "v = list[i].a", "ldx i|ldy list_offsets,x|lda list,y|sta v|rts")]
+    [InlineData("indexed var list: [S5; 20]", "v = list[i].c", "ldx i|ldy list.offsets,x|lda list+2,y|sta v|rts")]
+    [InlineData("indexed var list: [S5; 20]", "list[i].b = v", "ldx i|ldy list.offsets,x|lda v|sta list+1,y|rts")]
+    [InlineData("indexed var list: [S5; 20]", "w = list[i].w", "ldx i|ldy list.offsets,x|lda list+3,y|sta w|lda list+4,y|sta w+1|rts")]
+    [InlineData("indexed var list: [S4; 20]", "v = list[i].a", "ldx i|ldy list.offsets,x|lda list,y|sta v|rts")]
     public void Indexed_shape(string declaration, string statement, string expected) =>
         Assert.Equal(expected, Shape(declaration, statement));
 
@@ -70,7 +70,7 @@ public class RecordIndexTests
     public void A_loop_variable_in_X_is_the_table_index()
     {
         var code = Shape("indexed var list: [S5; 20]", "for k in 0..20 using X { v = list[k].a }");
-        Assert.Contains("ldy list_offsets,x|lda list,y", code);
+        Assert.Contains("ldy list.offsets,x|lda list,y", code);
     }
 
     // ---------- Behaviour: every element and field against C# ----------
@@ -141,7 +141,7 @@ public class RecordIndexTests
             indexed var list: [Odd; 10]
             fn main() { var k: u8 = 3; list[k].a = 1 }
             """);
-        var table = r.Address("list_offsets");
+        var table = r.Address("list.offsets");
         for (int i = 0; i < 10; i++) Assert.Equal(i * 5, r.Ram.Bytes[table + i]);
         Assert.Equal(1, r.Ram.Bytes[r.Address("list") + 15]);
     }
@@ -271,14 +271,38 @@ public class RecordIndexTests
             indexed var list: [Odd; 6]
             fn main() { list[2].a = 9 }
             """);
-        Assert.DoesNotContain("list_offsets", r.Result.Listing);
+        Assert.DoesNotContain("list.offsets", r.Result.Listing);
         var used = Run.Program(Header + """
             indexed var list: [Odd; 6]
             fn main() { var i: u8 = 2; list[i].a = 9 }
             """);
-        Assert.Contains("list_offsets", used.Result.Listing);
-        Assert.Contains("Offset table list_offsets: 6 bytes", used.Result.Report);
+        Assert.Contains("list.offsets", used.Result.Listing);
+        Assert.Contains("Offset table list.offsets: 6 bytes", used.Result.Report);
         Assert.DoesNotContain("Offset table", r.Result.Report);
+    }
+
+    [Fact]
+    public void A_value_changed_by_the_index_call_is_read_before_the_call()
+    {
+        var r = Run.Program("""
+            var arr: [u8; 10]
+            var v: u8 = 1
+            fn h() -> u8 { v = 7; return 2 }
+            fn main() { arr[h()] = v }
+            """);
+        Assert.Equal(1, r.U8("arr", 2));
+    }
+
+    [Fact]
+    public void A_user_name_cannot_clash_with_the_offset_table()
+    {
+        var r = Run.Program(Header + """
+            indexed var list: [Odd; 6]
+            var list_offsets: u8 = 3
+            fn main() { var i: u8 = 2; list[i].a = list_offsets }
+            """);
+        Assert.Equal(3, r.Ram.Bytes[r.Address("list") + 10]);
+        Assert.Contains("list.offsets:", r.Result.Listing);
     }
 
     // ---------- Errors ----------
@@ -287,6 +311,7 @@ public class RecordIndexTests
     [InlineData("linear var list: [Odd; 4]\nvar i: u8\nfn main() { i = list[i].a }",
         "'list' has records of 5 bytes, and a variable index into a linear array needs 1, 2, 4 or 8. Pad Odd with '_' fields to 8 bytes (e.g. _: [u8; 3]), or declare the array 'indexed var list' to use a table of 4 bytes")]
     [InlineData("linear var list: [Pair; 130]\nvar i: u8\nfn main() { i = list[i].x }", "more than the 256 an 8-bit offset reaches")]
+    [InlineData("linear var list: [Pair; 130]\nvar i: u8\nfn main() { i = list[i].x }", "Step through it with a pointer: p = p + sizeof(Pair)")]
     [InlineData("linear var list: [Pair; 4]\nvar i: u8\nfn main() { i = list[4].x }", "Index 4 is past the end of 'list'")]
     [InlineData("indexed var list: [Pair; 130]\nfn main() { }", "An indexed array is at most 256 bytes")]
     [InlineData("indexed var list: [u8; 10]\nfn main() { }", "'indexed' is for arrays of structs")]

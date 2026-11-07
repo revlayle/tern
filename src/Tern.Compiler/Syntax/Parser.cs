@@ -340,10 +340,8 @@ public sealed class Parser
         var word = Advance();
         if (At(TokenKind.Linear))
             throw new CompileError(word.Pos, "'indexed' replaces 'linear': it stores records the same way. Write 'indexed var', not 'indexed linear var'");
-        if (!At(TokenKind.Var))
-            throw new CompileError(word.Pos, At(TokenKind.Data)
-                ? "'indexed' is for arrays of structs, which cannot be data. Write 'indexed var list: [Enemy; 8]'"
-                : $"'indexed' goes before 'var', e.g. 'indexed var list: [Enemy; 8]'; found {Describe(Current)}");
+        if (At(TokenKind.Data))
+            throw new CompileError(word.Pos, "'indexed' is for arrays of structs, which cannot be data. Write 'indexed var list: [Enemy; 8]'");
         var decl = ParseVar();
         return new VarDecl(word.Pos, decl.Name, decl.TypeSyntax, decl.Placement, decl.Init) { IsIndexed = true };
     }
