@@ -282,6 +282,8 @@ Done when the report covers every benchmark and the chosen library routines, the
 
 Spec: 3.2, 11; decisions 2026-11-07. All class 1 (optimizer) items from `tests/benchmarks/analysis.md` section 7; no language change. Three parts, each reviewed before the next starts; the `F` numbers are the report's findings, with its estimated savings (cycles / bytes over the nine benchmarks).
 
+Working material: `analysis.md` section 2 gives each finding with Tern's instructions against the assembly's, section 3 the items per benchmark; `tests/benchmarks/profiles/<task>.txt` and `<task>.asm.txt` give every instruction with its execution count and cycles (regenerate with `TERN_COMPARE=1 dotnet test`, which needs 64tass for the assembly side). Start each fix from the benchmark where the report counts it, then generalize it with tests of its own.
+
 **Part 1: local code shapes** (code generator and peepholes, about 90,000 / 190)
 
 - F2: `a[i + c]` folded into the address (`lda a+c,x`) when the loop counter's bounds prove `i + c` does not wrap: constant bounds, or a variable end of the counter's type (`for i in 0..last` with `last: u8` gives `i <= 254`, so `i + 1` folds). Not from other accesses in the body (question 63 (b), deferred). Tests: the fold in a loop with constant and with variable bounds (listing); no fold for a 256-element ring buffer `buf[head + 1]` with `head = 255` (result is `buf[0]`), for `i + 2` under `0..last`, and outside a loop
