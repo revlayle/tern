@@ -1,5 +1,29 @@
 # Review: M13 follow-up, branch `m13-followup`
 
+## Second re-review (`33ceba5`), 2026-11-07
+
+**Ready to merge.** 1339 tests pass (36 CPU, 1303 compiler). `BenchmarkTests` is unchanged. `main` was merged in (`5049fa4`), including the spec change for finding 6 (`aa3f3da`: long `data` may come from a list literal).
+
+- **7.** `CheckSiblingAddress` (`Checker.cs:1537`) is now the one check for `addr()` and for `#f.lo` / `#f.hi` in assembly. The re-review's probe (`asm { lda #level2.five.lo }` in `level1`) is now "addr(level2.five) is in level2, which is in the same overlay area 'levels' as level1". The same holds for an `inline asm fn` in `level1` that does it. `Taking_the_address_of_a_sibling_overlays_function_in_assembly_is_an_error` tests `.lo` and `.hi`.
+- **a.** The inline error now says "uses 'level2.T', data of level2".
+- **b.** `The_overlay_size_error_gives_the_fixed_data_separately` checks the new wording.
+
+### Suggestion (no need to block)
+
+- `Checker.cs:1535`: the doc comment of `TakeFunctionAddress` ("`addr(f)`: a `u16` known when the program is placed") was left above the new `CheckSiblingAddress`. That method now has two `<summary>` lines, and `TakeFunctionAddress` has none. Move line 1535 down to `TakeFunctionAddress`.
+
+### Checklist (roadmap, M13 follow-up)
+
+Every item is met:
+
+- `volatile` over an overlay, including the optimizer forget
+- fixed `data` in an overlay
+- uses of a sibling overlay, now also through inline functions and assembly
+- fixed zero-page addresses in an overlay
+- long byte buffers
+- `const` before the memory block
+- the `OverlayTests` the roadmap lists
+
 ## Re-review of the fixes (`ca1162b`), 2026-11-07
 
 **Not ready to merge: one small must-fix item.** Findings 1-5 are fixed. While checking finding 3 I found one more way to reach a sibling's address, through assembly. 1337 tests pass (36 CPU, 1301 compiler). `BenchmarkTests` is unchanged. `main` was merged in (`c534553`).
