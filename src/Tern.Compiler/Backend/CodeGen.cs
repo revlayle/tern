@@ -804,6 +804,10 @@ public sealed class CodeGen
             case IndexExpr ix:
             {
                 var arr = ArrayOf(ix);
+                // a[i] = b[j] + c[k]: each byte straight into the element (lda b,x / adc c,x / sta a,x).
+                if (value is BinaryExpr bv && Simple2(value) is null && IndexedOperand(ix, 2) is { } element
+                    && Binary16InPlace(bv, element, arr))
+                    break;
                 VariableSymbol? temp = null;
                 var pair = Simple2(value);
                 if (pair is null)
@@ -910,6 +914,30 @@ public sealed class CodeGen
             default:
                 return null;
         }
+    }
+
+    /// <summary>
+    /// An element used as the operand of an instruction without a temporary (<c>adc b,x</c>,
+    /// <c>cmp (q),y</c>): an array element whose index loads without changing A, or a byte of
+    /// <c>p[i]</c> through a zero-page pointer with such an index. The action loads the index
+    /// register and emits the instruction on byte 0 or 1 of the element. Null for anything else.
+    /// </summary>
+    private Action<Mnemonic, int>? IndexedOperand(Expr e, int size = 1)
+    {
+        if (e is not IndexExpr ix || ix.Type.Size != size || ix.Index.ConstValue is not null || ContainsCall(ix.Index)) return null;
+        if (IsPointerIndex(ix))
+        {
+            if (ix.Type.Size != 1 || DirectPointer(ix.Target) is not { } p || !PointerIndexIsCheap(ix)) return null;
+            return (m, _) => { LoadPointerIndex(ix, 0); Emit(m, IndirectIndexed, Var(p)); };
+        }
+        var arr = ArrayOf(ix);
+        var (index, shift) = FoldIndexOffset(ix.Index, arr);
+        if (!IndexIsCheap(index)) return null;
+        return (m, b) =>
+        {
+            var reg = LoadIndex(index);
+            Emit(m, reg == Register.X ? AbsoluteX : AbsoluteY, Var(arr, (b == 0 ? 0 : HighTable(arr)) + shift));
+        };
     }
 
     /// <summary>Loading this index into X or Y does not change A.</summary>
@@ -1112,6 +1140,17 @@ public sealed class CodeGen
             Op(m, right);
             return;
         }
+        // An element as the operand: lda a,x / adc b,x.
+        var indexed = IndexedOperand(b.Right);
+        var other = b.Left;
+        if (indexed is null && commutative && IndexedOperand(b.Left) is { } li) (indexed, other) = (li, b.Right);
+        if (indexed is not null)
+        {
+            GenA(other);
+            CarryFor(b.Op);
+            indexed(m, 0);
+            return;
+        }
         var temp = AcquireTemp(1);
         GenA(b.Right);
         Op(Sta, Var(temp));
@@ -1172,6 +1211,36 @@ public sealed class CodeGen
             default:
                 return null;
         }
+    }
+
+    /// <summary>
+    /// One byte of a 16-bit operand used in place: a simple operand, or an element of a split array
+    /// whose index loads without changing A (<c>adc w,x</c>). Neither may read <paramref name="written"/>
+    /// (the index, for an element), which the low byte of the result changes before the high byte is
+    /// read; the variable itself is fine, since each byte is read before it is written. Null otherwise.
+    /// </summary>
+    private Action<Mnemonic, int>? InPlace16(Expr e, VariableSymbol written)
+    {
+        if (Simple2(e) is { } p)
+            return e is NameExpr { Symbol: { } s } && s == written || !ReadsVar(e, written) ? (m, b) => Op(m, b == 0 ? p.Lo : p.Hi) : null;
+        return e is IndexExpr ix && !ReadsVar(ix.Index, written) ? IndexedOperand(e, 2) : null;
+    }
+
+    /// <summary>
+    /// <c>l op r</c> (+, -, &amp;, |, ^) one byte at a time with both operands in place:
+    /// <c>lda l / clc / adc r / sta d</c>, then the high bytes. False if an operand needs code.
+    /// </summary>
+    private bool Binary16InPlace(BinaryExpr b, Action<Mnemonic, int> store, VariableSymbol written)
+    {
+        if (b.Op is TokenKind.Shl or TokenKind.Shr) return false;
+        var l = InPlace16(b.Left, written);
+        var r = InPlace16(b.Right, written);
+        if (l is null || r is null) return false;
+        var m = ArithMnemonic(b.Op);
+        CarryFor(b.Op);
+        l(Lda, 0); r(m, 0); store(Sta, 0);
+        l(Lda, 1); r(m, 1); store(Sta, 1);
+        return true;
     }
 
     private void Gen16(Expr e, Loc d)
@@ -1280,6 +1349,11 @@ public sealed class CodeGen
             case BinaryExpr b:
             {
                 var right = Simple2(b.Right);
+                // An element on either side: lda a,x / adc b,x / sta d. Not for w + (u8 operand), which adds with bcc / inc.
+                if (d.Offset == 0 && !(b.Op == TokenKind.Plus && right is { Hi: Imm { Value: 0 } })
+                    && (right is null || Simple2(b.Left) is null)
+                    && Binary16InPlace(b, (m, k) => Op(m, k == 0 ? d.Lo : d.Hi), d.Var))
+                    return;
                 if (right is not null && ReadsVar(b.Right, d.Var)) right = null;
                 VariableSymbol? temp = null;
                 if (right is null)
@@ -1412,23 +1486,37 @@ public sealed class CodeGen
     private void Compare8(Expr left, Expr right, TokenKind op, bool signed, Label target)
     {
         VariableSymbol? temp = null;
+        bool equality = op is TokenKind.EqEq or TokenKind.NotEq;
         var rop = Simple1(right);
-        if (rop is null && op is TokenKind.EqEq or TokenKind.NotEq && Simple1(left) is { } lop)
+        if (rop is null && equality && Simple1(left) is { } lop)
         {
             (left, right) = (right, left);
             rop = lop;
         }
-        if (rop is null)
+        // An element compared from A: lda (p),y / cmp (q),y. cpx and cpy have no indexed forms.
+        bool inRegister = !signed && left is NameExpr { Symbol.Register: not null };
+        var indexed = rop is null && !inRegister ? IndexedOperand(right) : null;
+        if (rop is null && indexed is null && equality && !inRegister && IndexedOperand(left) is { } li)
+        {
+            (left, right) = (right, left);
+            indexed = li;
+        }
+        if (rop is null && indexed is null)
         {
             temp = AcquireTemp(1);
             GenA(right);
             Op(Sta, Var(temp));
             rop = Var(temp);
         }
-
-        if (!signed && left is NameExpr { Symbol.Register: { } reg })
+        void Use(Mnemonic m)
         {
-            Op(reg == Register.X ? Cpx : Cpy, rop);
+            if (indexed is not null) indexed(m, 0);
+            else Op(m, rop!);
+        }
+
+        if (inRegister && left is NameExpr { Symbol.Register: { } reg })
+        {
+            Op(reg == Register.X ? Cpx : Cpy, rop!);
         }
         else
         {
@@ -1438,7 +1526,7 @@ public sealed class CodeGen
                 // N = (left < right) after correcting for overflow.
                 var noOverflow = NewLabel("v");
                 Emit(Sec);
-                Op(Sbc, rop);
+                Use(Sbc);
                 Branch(Bvc, noOverflow);
                 Op(Eor, Byte(0x80));
                 Place(noOverflow);
@@ -1446,8 +1534,8 @@ public sealed class CodeGen
                 if (temp is not null) Release(temp);
                 return;
             }
-            if (!(rop is Imm { Value: 0 } && op is TokenKind.EqEq or TokenKind.NotEq && FlagsMatchA()))
-                Op(Cmp, rop);
+            if (!(rop is Imm { Value: 0 } && equality && FlagsMatchA()))
+                Use(Cmp);
         }
         Branch(op switch
         {
@@ -1467,26 +1555,33 @@ public sealed class CodeGen
             Gen16(e, new Loc(t));
             return (Var(t), Var(t, 1));
         }
-        var l = Operands(left);
-        var r = Operands(right);
+        // An element on either side is used in place (lda u,x / cmp v,x / lda u+n,x / sbc v+n,x).
+        Action<Mnemonic, int> Side(Expr e)
+        {
+            if (Simple2(e) is null && IndexedOperand(e, 2) is { } element) return element;
+            var p = Operands(e);
+            return (m, b) => Op(m, b == 0 ? p.Lo : p.Hi);
+        }
+        var l = Side(left);
+        var r = Side(right);
 
         switch (op)
         {
             case TokenKind.EqEq:
             {
                 var skip = NewLabel("ne");
-                Op(Lda, l.Lo); Op(Cmp, r.Lo); Branch(Bne, skip);
-                Op(Lda, l.Hi); Op(Cmp, r.Hi); Branch(Beq, target);
+                l(Lda, 0); r(Cmp, 0); Branch(Bne, skip);
+                l(Lda, 1); r(Cmp, 1); Branch(Beq, target);
                 Place(skip);
                 break;
             }
             case TokenKind.NotEq:
-                Op(Lda, l.Lo); Op(Cmp, r.Lo); Branch(Bne, target);
-                Op(Lda, l.Hi); Op(Cmp, r.Hi); Branch(Bne, target);
+                l(Lda, 0); r(Cmp, 0); Branch(Bne, target);
+                l(Lda, 1); r(Cmp, 1); Branch(Bne, target);
                 break;
             default: // < or >=
-                Op(Lda, l.Lo); Op(Cmp, r.Lo);
-                Op(Lda, l.Hi); Op(Sbc, r.Hi);
+                l(Lda, 0); r(Cmp, 0);
+                l(Lda, 1); r(Sbc, 1);
                 if (signed)
                 {
                     var noOverflow = NewLabel("v");
