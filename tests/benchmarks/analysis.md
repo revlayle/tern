@@ -336,3 +336,4 @@ Each fix as built, against the estimate above. Measured on `BenchmarkTests` (`ba
 | F1 | 21,252 / 64 | 21,590 / 60 | `enemies` 9,855 / 8 (of which 255 is F12: `enemies` no longer crosses a page), `copy` 6,000 / 4 (the estimate's 8 bytes were on the pages form), `sum16` 4,864 / 16, `fib16` 811 / 24, `interp` 60 / 8 |
 | F4 | 4,752 / 4 | 4,752 / 4 | `enemies` |
 | F6 | 3,048 / 10 | 3,048 / 10 | `calls` |
+| F8 | 3,000 / 7 | 3,636 / 9 | `sum16`; beyond the estimate, the optimizer now drops `lda v+1` at the loop top (A holds it from the store at the end of the pass), 597, which the assembly does not do; the rest is page crossings |

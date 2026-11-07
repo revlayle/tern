@@ -1263,6 +1263,41 @@ public sealed class CodeGen
         return IsDest(b.Left, d) && Narrow(b.Right) is { } s && (Simple1(s) is not null || IndexedOperand(s) is not null) ? s : null;
     }
 
+    /// <summary>
+    /// <c>x op (y &gt;&gt; k)</c> (or <c>&lt;&lt;</c>, either side unless op is <c>-</c>) with y and x
+    /// needing no code: the shifted low byte stays in A and only its high byte goes to a temporary,
+    /// <c>lda y+1 / sta t / lda y / lsr t / ror a ... / clc / adc x / sta d / lda t / adc x+1 / sta d+1</c>.
+    /// Not for a signed <c>&gt;&gt;</c>. False if the expression is not of this form.
+    /// </summary>
+    private bool ShiftedOperand16(BinaryExpr b, Loc d)
+    {
+        if (b.Op is not (TokenKind.Plus or TokenKind.Minus or TokenKind.Amp or TokenKind.Pipe or TokenKind.Caret) || d.Offset != 0)
+            return false;
+        static bool IsShift(Expr e) =>
+            e is BinaryExpr { Op: TokenKind.Shl or TokenKind.Shr, Type.Size: 2, Right.ConstValue: not null } s
+            && !(s.Op == TokenKind.Shr && s.Type.IsSigned);
+        Expr shift, other;
+        if (IsShift(b.Right) && b.Op != TokenKind.Minus) (shift, other) = (b.Right, b.Left);
+        else if (IsShift(b.Left)) (shift, other) = (b.Left, b.Right);
+        else return false;
+        var s = (BinaryExpr)shift;
+        if (Simple2(s.Left) is not { } y || InPlace16(other, d.Var) is not { } x) return false;
+
+        var t = AcquireTemp(1);
+        Op(Lda, y.Hi); Op(Sta, Var(t)); Op(Lda, y.Lo);
+        for (int i = 0; i < s.Right.ConstValue; i++)
+        {
+            if (s.Op == TokenKind.Shl) { Emit(Asl, Accumulator); Op(Rol, Var(t)); }
+            else { Op(Lsr, Var(t)); Emit(Ror, Accumulator); }
+        }
+        var m = ArithMnemonic(b.Op);
+        CarryFor(b.Op);
+        x(m, 0); Op(Sta, d.Lo);
+        Op(Lda, Var(t)); x(m, 1); Op(Sta, d.Hi);
+        Release(t);
+        return true;
+    }
+
     private void Gen16(Expr e, Loc d)
     {
         if (e.ConstValue is long c)
@@ -1393,6 +1428,7 @@ public sealed class CodeGen
 
             case BinaryExpr b:
             {
+                if (ShiftedOperand16(b, d)) return;
                 var right = Simple2(b.Right);
                 // An element on either side: lda a,x / adc b,x / sta d. Not for w + (u8 operand), which adds with bcc / inc.
                 if (d.Offset == 0 && !(b.Op == TokenKind.Plus && right is { Hi: Imm { Value: 0 } })
