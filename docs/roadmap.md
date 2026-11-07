@@ -363,7 +363,6 @@ Done when: the benchmarks compile for the 65C02 and use the new instructions whe
 ## Later (not yet ordered)
 
 - Floats as a library with a 4-byte format, built on `wide` (not a priority)
-- `using` on local variables (spec 14.6)
 - **Developer guide** (spec session work, after M19, which with M17 gives most of its content): user documentation that explains how the language behaves on the machine, with examples; it informs and does not forbid. It grows out of the quick guide in `docs/guide.md`, whose section 6 lists these behaviors briefly. It must cover each behavior below. The spec session adds to this list whenever a decision leaves a behavior that the programmer may rely on, or that may surprise them:
   - all arithmetic wraps, including index expressions: `buf[head + 1]` with `head = 255` is `buf[0]` (3.1, 3.2); when the optimizer folds a constant offset into the address
   - an index outside the array is not checked, and the optimizer assumes it does not happen (3.2)

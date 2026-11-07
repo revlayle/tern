@@ -368,3 +368,7 @@ Decided:
 - **Then M20 checks in the emulator and signed loop variables** (needs M19's source-to-instruction map), **M21 plug-ins** (already designed), **M22 `const fn` and generators** (one milestone, two "done when" steps), **M23 doc comments and a language server**.
 - **New platforms: Atari 8-bit (M24), Apple II (M25), NES (M26), 65C02 and Commander X16 (M27)**, each starting with a spec session. Reason: the developer's priority. The Atari and Apple II need no new language machinery, so they test portability first; the NES needs bank switching (14.1) settled; the 65C02 changes code shapes, so it comes after the plain 6502 platforms.
 - Not scheduled: `using` on locals (decided from M17's evidence), floats; the developer guide is spec-session work after M19.
+
+## 2026-11-07: no `using` on local variables
+
+- **`using` on local variables is not planned** (spec 14.6; removed from the roadmap). Reason: the cases where a register-held value pays are already covered (loop counters in X or Y, `for ... using`, kept register parameters, redundant-load removal, the `crc8` shift-and-test fold), and A, X and Y are needed by almost every expression and index, so a local pinned to one would mostly turn ordinary statements into errors; saving and reloading it silently would be hidden cost (rule 1). Code that needs exact register use is written as an `asm` block or an `inline asm fn`. It comes back only if the M17 analysis finds a gap, with numbers, that nothing else closes.

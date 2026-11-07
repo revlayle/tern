@@ -570,7 +570,7 @@ Signed loop variables; `match` on 16-bit values (match on `.lo` / `.hi`); arrays
 - **Checks in test runs**: overflow and array-index checks in the built-in emulator, at no cost in the real program.
 - **Tooling**: doc comments (`///`) and a language server that shows them in your editor.
 - **A full developer guide**, growing out of this one, with an example for each machine-level behavior.
-- Signed loop variables, `using` on local variables, floats as a library (low priority).
+- Signed loop variables, and floats as a library (low priority).
 
 ### New platforms (last)
 
