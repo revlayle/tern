@@ -127,16 +127,20 @@ public static class Optimizer
         {
             // The run: from an lda #c, every instruction an lda #c or an sta to a trackable byte.
             if (code[k] is not Instr { Mnemonic: Lda, Mode: Immediate, AsmPos: null }) continue;
-            var stores = new List<(Operand Value, Instr Store)>();
+            // Each store with the source lines and comments since the store before it.
+            var stores = new List<(Operand Value, Instr Store, List<AsmItem> Lines)>();
+            var lines = new List<AsmItem>();
             Operand? value = null;
             int end = k;
             for (int j = k; j < code.Count; j++)
             {
-                if (code[j] is Comment or SourceLine) continue;
+                if (code[j] is Comment or SourceLine) { lines.Add(code[j]); continue; }
                 if (code[j] is Instr { Mnemonic: Lda, Mode: Immediate, AsmPos: null } l) { value = l.Operand; end = j; continue; }
-                if (code[j] is Instr { Mnemonic: Sta, AsmPos: null, Operand: VarOperand } s && Trackable(s)) { stores.Add((value!, s)); end = j; continue; }
+                if (code[j] is Instr { Mnemonic: Sta, AsmPos: null, Operand: VarOperand } s && Trackable(s)) { stores.Add((value!, s, lines)); lines = []; end = j; continue; }
                 break;
             }
+            // Lines after the last store belong to what follows the run, unless an lda in the run follows them.
+            var trailing = code.GetRange(k, end - k + 1).Where(lines.Contains).ToList();
             var run = code.GetRange(k, end - k + 1);
             // Each value once; the last value loaded (even with no store after it) goes last.
             var values = stores.Select(s => s.Value).Where(v => !v.Equals(value)).Distinct().Append(value!).ToList();
@@ -147,12 +151,20 @@ public static class Optimizer
                 || (a.Variable.Owner is { } oa && b.Variable.Owner is { } ob && oa != ob);
             if (targets.SelectMany((a, x) => targets.Skip(x + 1).Select(b => (a, b))).Any(p => MayShare(p.a, p.b))) continue;
 
-            // The source lines of the run go first.
-            var grouped = run.Where(item => item is Comment or SourceLine).ToList();
+            // Each source line stays in front of the code of its statement: the first store of a
+            // value takes its lines in front of the lda, the others in front of the store.
+            var grouped = new List<AsmItem>();
             foreach (var v in values)
             {
+                var group = stores.Where(s => s.Value.Equals(v)).ToList();
+                if (group.Count > 0) grouped.AddRange(group[0].Lines);
+                if (v.Equals(values[^1])) grouped.AddRange(trailing);
                 grouped.Add(new Instr(Lda, Immediate, v));
-                grouped.AddRange(stores.Where(s => s.Value.Equals(v)).Select(s => s.Store));
+                for (int g = 0; g < group.Count; g++)
+                {
+                    if (g > 0) grouped.AddRange(group[g].Lines);
+                    grouped.Add(group[g].Store);
+                }
             }
             code.RemoveRange(k, end - k + 1);
             code.InsertRange(k, grouped);
