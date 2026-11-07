@@ -78,7 +78,8 @@ public class WideningAddTests
             }
             """);
         Assert.Equal(300, r.U16("w"));
-        Assert.Equal("lda b|clc|adc w|sta w|bcc main.c0|inc w+1|lda w|sec|sbc b|sta w|bcs main.c1|dec w+1|rts", Code(r));
+        // A still holds w after the inc w+1 (F17), so the subtraction does not load it.
+        Assert.Equal("lda b|clc|adc w|sta w|bcc main.c0|inc w+1|sec|sbc b|sta w|bcs main.c1|dec w+1|rts", Code(r));
     }
 
     private static string Code(Run r, string function = "main")

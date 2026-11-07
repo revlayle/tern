@@ -723,7 +723,8 @@ public static class Optimizer
     /// functions it calls (they may share memory with each other) and fixed-address variables (which
     /// may overlap each other).
     /// </summary>
-    private static void ForgetWrite(State s, VariableSymbol written, FunctionSymbol function)
+    /// <param name="offset">The byte written, for a write to a fixed byte (<c>inc v+1</c> leaves what is known of <c>v</c>); null for an indexed write.</param>
+    private static void ForgetWrite(State s, VariableSymbol written, FunctionSymbol function, int? offset = null)
     {
         bool callee = written.Owner is { } o && o != function;
         bool fixedAt = written.FixedAddress is not null;
@@ -733,7 +734,7 @@ public static class Optimizer
             s.Forget(op => op is VarOperand);
             return;
         }
-        s.Forget(op => op is VarOperand { Variable: var v } && (v == written
+        s.Forget(op => op is VarOperand { Variable: var v, Offset: var at } && ((v == written && (offset is null || at == offset))
             || (callee && v.Owner is { } vo && vo != function)
             || (fixedAt && v.FixedAddress is not null)));
     }
@@ -777,9 +778,9 @@ public static class Optimizer
         var (_, writes) = AsmEffects.Of(m, i.Mode);
         if (i.Mode != Accumulator && (AsmEffects.WritesMemory(m, i.Mode) || i.Mode is IndirectIndexed or IndexedIndirect))
         {
-            if (i.Mode is Absolute or ZeroPage && i.Operand is VarOperand { Variable: var v })
+            if (i.Mode is Absolute or ZeroPage && i.Operand is VarOperand { Variable: var v, Offset: var at })
             {
-                ForgetWrite(s, v, function);
+                ForgetWrite(s, v, function, at);
                 if (Stored(m) is Reg st && Trackable(i)) s.Regs[(int)st].Add(i.Operand!);
             }
             else if (i.Mode is AbsoluteX or AbsoluteY or ZeroPageX or ZeroPageY && i.Operand is VarOperand { Variable: var array })
