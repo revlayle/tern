@@ -7,11 +7,11 @@ namespace Tern.Compiler.Tests;
 
 /// <summary>
 /// Runs the benchmarks of <c>tests/benchmarks</c> written in Tern, hand-written assembly (<c>asm</c>, 64tass),
-/// Prog8 (<c>prog8</c>) and C (<c>c</c>, cc65), all in the Tern emulator, checks each result against the same
+/// Prog8 (<c>prog8</c>) and C (<c>c</c>, cc65 and llvm-mos), all in the Tern emulator, checks each result against the same
 /// C# computation as <see cref="BenchmarkTests"/>, and writes <c>tests/benchmarks/comparison.md</c>.
 ///
-/// It needs Java and the Prog8 jar, 64tass and cc65, so it only runs when <c>TERN_COMPARE=1</c>.
-/// Paths can be set with <c>PROG8_JAR</c>, <c>TASS64</c> and <c>CL65</c>.
+/// It needs Java and the Prog8 jar, 64tass, cc65 and llvm-mos, so it only runs when <c>TERN_COMPARE=1</c>.
+/// Paths can be set with <c>PROG8_JAR</c>, <c>TASS64</c>, <c>CL65</c> and <c>MOS_CLANG</c>.
 /// </summary>
 public class ComparisonTests
 {
@@ -19,6 +19,8 @@ public class ComparisonTests
     private const ushort Sentinel = 0xFFF0;
 
     private sealed record Measure(int Bytes, long Cycles);
+
+    private sealed record Row(string Name, Measure Tern, Measure Asm, Measure Prog8, Measure C, Measure Mos);
 
     [Fact]
     public void Every_implementation_gives_the_right_results_and_the_comparison_report_is_written()
@@ -29,14 +31,14 @@ public class ComparisonTests
         string work = Path.Combine(Path.GetTempPath(), "tern-compare-" + Guid.NewGuid().ToString("N")[..8]);
         Directory.CreateDirectory(work);
         var names = BenchmarkTests.Checks.Keys.Order(StringComparer.Ordinal).ToList();
-        var rows = new List<(string Name, Measure Tern, Measure Asm, Measure Prog8, Measure C)>();
+        var rows = new List<Row>();
         try
         {
             foreach (var name in names)
             {
                 var tern = RunTern(dir, name);
 
-                rows.Add((name, tern, RunAsm(dir, work, name), RunProg8(dir, work, name), RunC(dir, work, name)));
+                rows.Add(new Row(name, tern, RunAsm(dir, work, name), RunProg8(dir, work, name), RunC(dir, work, name), RunMos(dir, work, name)));
             }
         }
         finally
@@ -172,6 +174,67 @@ public class ComparisonTests
         return new Measure(bytes, cycles);
     }
 
+    // ---- C (llvm-mos) ----
+
+    /// <summary>
+    /// The same C source with <c>mos-c64-clang -Os</c> (without LTO, which would delete the result variables nobody reads). The startup code runs in the emulator
+    /// (the KERNAL's CHROUT at $FFD2 is an <c>rts</c>), then main alone is timed, as for cc65. Bytes are the sections of
+    /// the program and of any library routine it calls (<c>memcpy</c>, multiply), without the startup modules, the BASIC
+    /// header, <c>exit</c> and <c>__memset</c> (only the startup's BSS clearing calls it) and without BSS.
+    /// </summary>
+    private static Measure RunMos(string dir, string work, string name)
+    {
+        string clang = Tool("MOS_CLANG", @"C:\llvm-mos\bin\mos-clang.exe", "mos-clang");
+        string bin = Path.GetDirectoryName(clang) is { Length: > 0 } d ? d : "";
+        string prg = Path.Combine(work, name + "-mos.prg"), map = Path.Combine(work, name + "-mos.map");
+        // The SDK's mos-c64-clang.bat is mos-clang with --config mos-c64.cfg.
+        var arguments = new List<string> { "--config", "mos-c64.cfg" };
+        arguments.AddRange(["-Os", "-fno-lto", "-w", "-o", prg, "-Wl,-Map=" + map, Path.Combine(dir, "c", name + ".c")]);
+        Exec(clang, arguments, work);
+
+        var file = File.ReadAllBytes(prg);
+        var ram = new Ram();
+        ram.Load((ushort)(file[0] | (file[1] << 8)), file.AsSpan(2));
+        ram.Bytes[0xFFD2] = 0x60; // KERNAL CHROUT: the startup code prints one character
+        string nm = Path.Combine(bin, "llvm-nm.exe");
+        var symbols = new Dictionary<string, int>();
+        foreach (var line in ExecOutput(File.Exists(nm) ? nm : "llvm-nm", [prg + ".elf"], work).Split('\n'))
+        {
+            var m = Regex.Match(line, @"^([0-9a-fA-F]{8})\s+\w\s+(\S+)\s*$");
+            if (m.Success) symbols.TryAdd(m.Groups[2].Value, Convert.ToInt32(m.Groups[1].Value, 16));
+        }
+
+        // Run the startup code, then time main alone.
+        // The BASIC header is a line of tokens, not code: start at _start.
+        var cpu = new Cpu6502(ram) { PC = (ushort)symbols["_start"], SP = 0xFF, I = true };
+        int main = symbols["main"];
+        while (cpu.PC != main) Step(cpu, name + " (llvm-mos) startup");
+        int returnTo = (ram.Bytes[0x100 + cpu.SP + 1] | (ram.Bytes[0x100 + cpu.SP + 2] << 8)) + 1;
+        long from = cpu.Cycles;
+        while (cpu.PC != returnTo) Step(cpu, name + ".c (llvm-mos)");
+        long cycles = cpu.Cycles - from;
+
+        Verify(name, new Results(ram, (v, o) =>
+        {
+            if (v != "enemies") return symbols[v] + o;
+            int field = o / 16, i = o % 16;
+            return symbols["enemies"] + 5 * i + field; // struct Enemy { x, y, dx, dy, hits }
+        }, splitWords: false), "C (llvm-mos)");
+
+        int bytes = 0;
+        foreach (var line in File.ReadAllLines(map))
+        {
+            var m = Regex.Match(line, @"^\s+[0-9a-f]+\s+[0-9a-f]+\s+([0-9a-f]+)\s+1\s+(.+?):\((\.\S+)\)\s*$");
+            if (!m.Success) continue;
+            string obj = m.Groups[2].Value, section = m.Groups[3].Value;
+            if (Regex.IsMatch(obj, @"crt0|unmap-basic|basic-header|libcrt0")) continue;
+            if (section is ".text.exit" or ".text.__memset") continue;
+            if (Regex.IsMatch(section, @"^\.(text|rodata|data|zp\.data|zp\.rodata)(\.|$)"))
+                bytes += Convert.ToInt32(m.Groups[1].Value, 16);
+        }
+        return new Measure(bytes, cycles);
+    }
+
     // ---- shared ----
 
     /// <summary>Runs a subroutine as if called with jsr, and returns the cycles it took including its final rts.</summary>
@@ -213,6 +276,17 @@ public class ComparisonTests
     private static string Tool(string variable, string defaultPath, string fallback) =>
         Environment.GetEnvironmentVariable(variable) ?? (File.Exists(defaultPath) ? defaultPath : fallback);
 
+    private static string ExecOutput(string program, IEnumerable<string> arguments, string workingDirectory)
+    {
+        var info = new ProcessStartInfo(program) { WorkingDirectory = workingDirectory, RedirectStandardOutput = true, RedirectStandardError = true };
+        foreach (var a in arguments) info.ArgumentList.Add(a);
+        using var process = Process.Start(info)!;
+        var output = process.StandardOutput.ReadToEndAsync();
+        process.StandardError.ReadToEndAsync();
+        process.WaitForExit();
+        return output.Result;
+    }
+
     private static void Exec(string program, IEnumerable<string> arguments, string workingDirectory, string? tassDirectory = null)
     {
         var info = new ProcessStartInfo(program)
@@ -231,53 +305,55 @@ public class ComparisonTests
             throw new Xunit.Sdk.XunitException($"{program} failed with exit code {process.ExitCode}:\n{output.Result}\n{error.Result}");
     }
 
-    private static string Report(List<(string Name, Measure Tern, Measure Asm, Measure Prog8, Measure C)> rows)
+    private static string Report(List<Row> rows)
     {
         var sb = new StringBuilder();
         sb.AppendLine("# Benchmark comparison");
         sb.AppendLine();
         sb.AppendLine("Generated by `ComparisonTests` (`TERN_COMPARE=1 dotnet test`). Bytes and cycles of the same nine tasks");
-        sb.AppendLine("in Tern, hand-written assembly (64tass), Prog8 and C (cc65). Every version runs in the Tern emulator and");
-        sb.AppendLine("its results are checked against the same C# computation. Lower is better.");
+        sb.AppendLine("in Tern, hand-written assembly (64tass), Prog8 and C (cc65 and llvm-mos). Every version runs in the Tern");
+        sb.AppendLine("emulator and its results are checked against the same C# computation. Lower is better.");
         sb.AppendLine();
-        sb.AppendLine("| task | | Tern | assembly | Prog8 | cc65 |");
-        sb.AppendLine("|---|---|--:|--:|--:|--:|");
+        sb.AppendLine("| task | | Tern | assembly | Prog8 | cc65 | llvm-mos |");
+        sb.AppendLine("|---|---|--:|--:|--:|--:|--:|");
         foreach (var r in rows)
         {
-            sb.AppendLine($"| {r.Name} | bytes | {r.Tern.Bytes} | {r.Asm.Bytes} | {r.Prog8.Bytes} | {r.C.Bytes} |");
-            sb.AppendLine($"| | cycles | {r.Tern.Cycles:N0} | {r.Asm.Cycles:N0} | {r.Prog8.Cycles:N0} | {r.C.Cycles:N0} |");
+            sb.AppendLine($"| {r.Name} | bytes | {r.Tern.Bytes} | {r.Asm.Bytes} | {r.Prog8.Bytes} | {r.C.Bytes} | {r.Mos.Bytes} |");
+            sb.AppendLine($"| | cycles | {r.Tern.Cycles:N0} | {r.Asm.Cycles:N0} | {r.Prog8.Cycles:N0} | {r.C.Cycles:N0} | {r.Mos.Cycles:N0} |");
         }
-        long Bytes(Func<(string Name, Measure Tern, Measure Asm, Measure Prog8, Measure C), Measure> f) => rows.Sum(r => f(r).Bytes);
-        long Cycles(Func<(string Name, Measure Tern, Measure Asm, Measure Prog8, Measure C), Measure> f) => rows.Sum(r => f(r).Cycles);
-        sb.AppendLine($"| **total** | bytes | {Bytes(r => r.Tern)} | {Bytes(r => r.Asm)} | {Bytes(r => r.Prog8)} | {Bytes(r => r.C)} |");
-        sb.AppendLine($"| | cycles | {Cycles(r => r.Tern):N0} | {Cycles(r => r.Asm):N0} | {Cycles(r => r.Prog8):N0} | {Cycles(r => r.C):N0} |");
+        long Bytes(Func<Row, Measure> f) => rows.Sum(r => f(r).Bytes);
+        long Cycles(Func<Row, Measure> f) => rows.Sum(r => f(r).Cycles);
+        sb.AppendLine($"| **total** | bytes | {Bytes(r => r.Tern)} | {Bytes(r => r.Asm)} | {Bytes(r => r.Prog8)} | {Bytes(r => r.C)} | {Bytes(r => r.Mos)} |");
+        sb.AppendLine($"| | cycles | {Cycles(r => r.Tern):N0} | {Cycles(r => r.Asm):N0} | {Cycles(r => r.Prog8):N0} | {Cycles(r => r.C):N0} | {Cycles(r => r.Mos):N0} |");
         sb.AppendLine();
         sb.AppendLine("Relative to the Tern version (total, Tern = 100%):");
         sb.AppendLine();
-        sb.AppendLine("| | assembly | Prog8 | cc65 |");
-        sb.AppendLine("|---|--:|--:|--:|");
-        sb.AppendLine($"| bytes | {100.0 * Bytes(r => r.Asm) / Bytes(r => r.Tern):F0}% | {100.0 * Bytes(r => r.Prog8) / Bytes(r => r.Tern):F0}% | {100.0 * Bytes(r => r.C) / Bytes(r => r.Tern):F0}% |");
-        sb.AppendLine($"| cycles | {100.0 * Cycles(r => r.Asm) / Cycles(r => r.Tern):F0}% | {100.0 * Cycles(r => r.Prog8) / Cycles(r => r.Tern):F0}% | {100.0 * Cycles(r => r.C) / Cycles(r => r.Tern):F0}% |");
+        sb.AppendLine("| | assembly | Prog8 | cc65 | llvm-mos |");
+        sb.AppendLine("|---|--:|--:|--:|--:|");
+        sb.AppendLine($"| bytes | {100.0 * Bytes(r => r.Asm) / Bytes(r => r.Tern):F0}% | {100.0 * Bytes(r => r.Prog8) / Bytes(r => r.Tern):F0}% | {100.0 * Bytes(r => r.C) / Bytes(r => r.Tern):F0}% | {100.0 * Bytes(r => r.Mos) / Bytes(r => r.Tern):F0}% |");
+        sb.AppendLine($"| cycles | {100.0 * Cycles(r => r.Asm) / Cycles(r => r.Tern):F0}% | {100.0 * Cycles(r => r.Prog8) / Cycles(r => r.Tern):F0}% | {100.0 * Cycles(r => r.C) / Cycles(r => r.Tern):F0}% | {100.0 * Cycles(r => r.Mos) / Cycles(r => r.Tern):F0}% |");
         sb.AppendLine();
         sb.AppendLine("## How the numbers are taken");
         sb.AppendLine();
         sb.AppendLine("- **Cycles** run from the first instruction of the program's `main` to its final `rts`. Startup is not counted:");
-        sb.AppendLine("  for Tern and cc65 the startup code runs first and timing starts when `main` is entered; the assembly has none.");
+        sb.AppendLine("  for Tern, cc65 and llvm-mos the startup code runs first and timing starts when `main` is entered; the assembly has none.");
         sb.AppendLine("  The numbers in `baseline.txt` are different: they cover the whole Tern program, startup included.");
-        sb.AppendLine("- **Bytes** are the program's code and data, and for Prog8 and cc65 the library routines it uses. Left out: the BASIC");
+        sb.AppendLine("- **Bytes** are the program's code and data, and for Prog8, cc65 and llvm-mos the library routines it uses. Left out: the BASIC");
         sb.AppendLine("  line and startup code (Tern, from the `main` label on); the BASIC line, entry code and the C64 startup/exit block");
-        sb.AppendLine("  (Prog8); the startup modules (cc65); variables in BSS (all).");
-        sb.AppendLine("- Variables start at zero in every version. Tern, the assembly and cc65 do the clearing outside the measured part");
-        sb.AppendLine("  (Tern's startup, zeroed memory, cc65's `zerobss`). Prog8 clears its BSS and initialises variables at the start of");
+        sb.AppendLine("  (Prog8); the startup modules (cc65); the BASIC header, startup modules, `exit` and `__memset` (llvm-mos); variables in BSS (all).");
+        sb.AppendLine("- Variables start at zero in every version. Tern, the assembly, cc65 and llvm-mos do the clearing outside the measured part");
+        sb.AppendLine("  (Tern's startup, zeroed memory, cc65's `zerobss`, llvm-mos's `__zero_bss`). Prog8 clears its BSS and initialises variables at the start of");
         sb.AppendLine("  `main`, so its bytes and cycles include that.");
         sb.AppendLine("- **Prog8**: 12.0-SNAPSHOT, `%zeropage basicsafe`, `%option no_sysinit`, default optimisation.");
         sb.AppendLine("- **cc65**: `cl65 -t none -Oirs -Cl` (inlining, register variables, static locals).");
+        sb.AppendLine("- **llvm-mos**: `mos-c64-clang -Os -fno-lto` (the llvm-mos SDK; without link-time optimisation, which would remove the result variables that only the test reads). The same C sources as cc65.");
+        sb.AppendLine("  Its startup code runs in the emulator with the KERNAL's `CHROUT` stubbed out as an `rts`. It keeps small globals in zero page.");
         sb.AppendLine("- **Assembly**: written for the task, in the style of an experienced programmer: registers and zero page for");
         sb.AppendLine("  values, constants where the task fixes them (the copy sizes), no generic library routines. The `interp` dispatch");
         sb.AppendLine("  does not range-check the opcode, where Tern's `match` sends other values to the `_` arm.");
-        sb.AppendLine("- **Data layout**: Tern, the assembly and Prog8 keep `enemies` as one table per field; the C version uses an array of");
-        sb.AppendLine("  structs (natural C), so each access multiplies the index by 5. Its large `enemies` cycle count is that choice, not");
-        sb.AppendLine("  only cc65's code generation.");
+        sb.AppendLine("- **Data layout**: Tern, the assembly and Prog8 keep `enemies` as one table per field; the C versions use an array of");
+        sb.AppendLine("  structs (natural C), so each access multiplies the index by 5. Their large `enemies` cycle counts are that choice, not");
+        sb.AppendLine("  only the C compilers' code generation.");
         return sb.ToString();
     }
 }
