@@ -23,175 +23,136 @@
     250 x      500  $0824  8A        txa                   ; 2
     250 x     1500  $0825  91 03     sta (main.p),y        ; 6
                                                      ;   20: p[1] = k ^ $FF
-    250 x      500  $0827  A0 01     ldy #$01              ; 2
-    250 x      500  $0829  49 FF     eor #$FF              ; 2
-    250 x     1500  $082B  91 03     sta (main.p),y        ; 6
+    250 x      500  $0827  C8        iny                   ; 2
+    250 x      500  $0828  49 FF     eor #$FF              ; 2
+    250 x     1500  $082A  91 03     sta (main.p),y        ; 6
                                                      ;   21: p[2] = k + 1
-    250 x      500  $082D  A0 02     ldy #$02              ; 2
-    250 x      500  $082F  8A        txa                   ; 2
-    250 x      500  $0830  18        clc                   ; 2
-    250 x      500  $0831  69 01     adc #$01              ; 2
-    250 x     1500  $0833  91 03     sta (main.p),y        ; 6
+    250 x      500  $082C  C8        iny                   ; 2
+    250 x      500  $082D  8A        txa                   ; 2
+    250 x      500  $082E  18        clc                   ; 2
+    250 x      500  $082F  69 01     adc #$01              ; 2
+    250 x     1500  $0831  91 03     sta (main.p),y        ; 6
                                                      ;   22: p[3] = k >> 1
-    250 x      500  $0835  A0 03     ldy #$03              ; 2
-    250 x      500  $0837  8A        txa                   ; 2
-    250 x      500  $0838  4A        lsr a                 ; 2
-    250 x     1500  $0839  91 03     sta (main.p),y        ; 6
+    250 x      500  $0833  C8        iny                   ; 2
+    250 x      500  $0834  8A        txa                   ; 2
+    250 x      500  $0835  4A        lsr a                 ; 2
+    250 x     1500  $0836  91 03     sta (main.p),y        ; 6
                                                      ;   23: p += 4
-    250 x      500  $083B  18        clc                   ; 2
-    250 x      750  $083C  A5 03     lda main.p            ; 3
-    250 x      500  $083E  69 04     adc #$04              ; 2
-    250 x      750  $0840  85 03     sta main.p            ; 3
-    250 x      747  $0842  90 02     bcc main.c3           ; 2+
-      3 x       15  $0844  E6 04     inc main.p+1          ; 5
+    250 x      500  $0838  18        clc                   ; 2
+    250 x      750  $0839  A5 03     lda main.p            ; 3
+    250 x      500  $083B  69 04     adc #$04              ; 2
+    250 x      750  $083D  85 03     sta main.p            ; 3
+    250 x      747  $083F  90 02     bcc main.c3           ; 2+
+      3 x       15  $0841  E6 04     inc main.p+1          ; 5
                      main.c3:
                      main.fnext1:
-    250 x      500  $0846  E8        inx                   ; 2
-    250 x      500  $0847  E0 FA     cpx #$FA              ; 2
-    250 x      749  $0849  D0 D7     bne main.for2         ; 2+
+    250 x      500  $0843  E8        inx                   ; 2
+    250 x      500  $0844  E0 FA     cpx #$FA              ; 2
+    250 x      749  $0846  D0 DA     bne main.for2         ; 2+
                      main.fend0:
                                                      ;   25: copy(DST, SRC, 1000)
-      1 x        2  $084B  A9 00     lda #$00              ; 2
-      1 x        3  $084D  85 0B     sta copy.to           ; 3
-      1 x        2  $084F  A9 50     lda #$50              ; 2
-      1 x        3  $0851  85 0C     sta copy.to+1         ; 3
-      1 x        2  $0853  A9 00     lda #$00              ; 2
-      1 x        3  $0855  85 0D     sta copy.from         ; 3
-      1 x        2  $0857  A9 40     lda #$40              ; 2
-      1 x        3  $0859  85 0E     sta copy.from+1       ; 3
-      1 x        2  $085B  A9 E8     lda #$E8              ; 2
-      1 x        3  $085D  85 0F     sta copy.n            ; 3
-      1 x        2  $085F  A9 03     lda #$03              ; 2
-      1 x        3  $0861  85 10     sta copy.n+1          ; 3
-      1 x        6  $0863  20 C5 08  jsr copy              ; 6
+      1 x        2  $0848  A9 00     lda #$00              ; 2
+      1 x        3  $084A  85 0A     sta copy.to           ; 3
+      1 x        3  $084C  85 0C     sta copy.from         ; 3
+      1 x        2  $084E  A9 50     lda #$50              ; 2
+      1 x        3  $0850  85 0B     sta copy.to+1         ; 3
+      1 x        2  $0852  A9 40     lda #$40              ; 2
+      1 x        3  $0854  85 0D     sta copy.from+1       ; 3
+      1 x        2  $0856  A9 E8     lda #$E8              ; 2
+      1 x        3  $0858  85 0E     sta copy.n            ; 3
+      1 x        2  $085A  98        tya                   ; 2
+      1 x        3  $085B  85 0F     sta copy.n+1          ; 3
+      1 x        6  $085D  20 9D 08  jsr copy              ; 6
                                                      ;   26: var a: ptr u8 = SRC
-      1 x        2  $0866  A9 00     lda #$00              ; 2
-      1 x        3  $0868  85 05     sta main.a            ; 3
-      1 x        2  $086A  A9 40     lda #$40              ; 2
-      1 x        3  $086C  85 06     sta main.a+1          ; 3
                                                      ;   27: var b: ptr u8 = DST
-      1 x        2  $086E  A9 00     lda #$00              ; 2
-      1 x        3  $0870  85 07     sta main.b            ; 3
-      1 x        2  $0872  A9 50     lda #$50              ; 2
-      1 x        3  $0874  85 08     sta main.b+1          ; 3
                                                      ;   28: same = 1
-      1 x        2  $0876  A9 01     lda #$01              ; 2
-      1 x        3  $0878  85 02     sta same              ; 3
                                                      ;   29: for _ in 0..3 {
                                                      ; repeat 3 times
-      1 x        2  $087A  A9 03     lda #$03              ; 2
-      1 x        3  $087C  85 09     sta main._loop0       ; 3
+      1 x        2  $0860  A9 00     lda #$00              ; 2
+      1 x        3  $0862  85 05     sta main.a            ; 3
+      1 x        3  $0864  85 07     sta main.b            ; 3
+      1 x        2  $0866  A9 40     lda #$40              ; 2
+      1 x        3  $0868  85 06     sta main.a+1          ; 3
+      1 x        2  $086A  A9 50     lda #$50              ; 2
+      1 x        3  $086C  85 08     sta main.b+1          ; 3
+      1 x        2  $086E  A9 01     lda #$01              ; 2
+      1 x        3  $0870  85 02     sta same              ; 3
+      1 x        2  $0872  A9 03     lda #$03              ; 2
+      1 x        3  $0874  85 09     sta main._loop0       ; 3
                      main.for6:
                                                      ;   30: for j in 0..=255 using Y {
-      3 x        6  $087E  A0 00     ldy #$00              ; 2
+      3 x        6  $0876  A0 00     ldy #$00              ; 2
                      main.for9:
                                                      ;   31: if a[j] != b[j] { same = 0 }
-    768 x     3840  $0880  B1 07     lda (main.b),y        ; 5+
-    768 x     2304  $0882  85 0A     sta main._t0          ; 3
-    768 x     3840  $0884  B1 05     lda (main.a),y        ; 5+
-    768 x     2304  $0886  C5 0A     cmp main._t0          ; 3
-    768 x     2304  $0888  F0 04     beq main.endif10      ; 2+
-                     $088A  A9 00     lda #$00              ; 2
-                     $088C  85 02     sta same              ; 3
+    768 x     3840  $0878  B1 05     lda (main.a),y        ; 5+
+    768 x     3840  $087A  D1 07     cmp (main.b),y        ; 5+
+    768 x     2304  $087C  F0 04     beq main.endif10      ; 2+
+                     $087E  A9 00     lda #$00              ; 2
+                     $0880  85 02     sta same              ; 3
                      main.endif10:
                      main.fnext8:
-    768 x     1536  $088E  C8        iny                   ; 2
-    768 x     2301  $088F  D0 EF     bne main.for9         ; 2+
+    768 x     1536  $0882  C8        iny                   ; 2
+    768 x     2301  $0883  D0 F3     bne main.for9         ; 2+
                      main.fend7:
                                                      ;   33: a += 256
-      3 x        6  $0891  18        clc                   ; 2
-      3 x        9  $0892  A5 05     lda main.a            ; 3
-      3 x        6  $0894  69 00     adc #$00              ; 2
-      3 x        9  $0896  85 05     sta main.a            ; 3
-      3 x        9  $0898  A5 06     lda main.a+1          ; 3
-      3 x        6  $089A  69 01     adc #$01              ; 2
-      3 x        9  $089C  85 06     sta main.a+1          ; 3
+      3 x       15  $0885  E6 06     inc main.a+1          ; 5
                                                      ;   34: b += 256
-      3 x        6  $089E  18        clc                   ; 2
-      3 x        9  $089F  A5 07     lda main.b            ; 3
-      3 x        6  $08A1  69 00     adc #$00              ; 2
-      3 x        9  $08A3  85 07     sta main.b            ; 3
-      3 x        9  $08A5  A5 08     lda main.b+1          ; 3
-      3 x        6  $08A7  69 01     adc #$01              ; 2
-      3 x        9  $08A9  85 08     sta main.b+1          ; 3
+      3 x       15  $0887  E6 08     inc main.b+1          ; 5
                      main.fnext5:
-      3 x       15  $08AB  C6 09     dec main._loop0       ; 5
-      3 x        8  $08AD  D0 CF     bne main.for6         ; 2+
+      3 x       15  $0889  C6 09     dec main._loop0       ; 5
+      3 x        8  $088B  D0 E9     bne main.for6         ; 2+
                      main.fend4:
                                                      ;   36: for j in 0..232 using Y {
-      1 x        2  $08AF  A0 00     ldy #$00              ; 2
                      main.for13:
                                                      ;   37: if a[j] != b[j] { same = 0 }
-    232 x     1160  $08B1  B1 07     lda (main.b),y        ; 5+
-    232 x      696  $08B3  85 0A     sta main._t0          ; 3
-    232 x     1160  $08B5  B1 05     lda (main.a),y        ; 5+
-    232 x      696  $08B7  C5 0A     cmp main._t0          ; 3
-    232 x      696  $08B9  F0 04     beq main.endif14      ; 2+
-                     $08BB  A9 00     lda #$00              ; 2
-                     $08BD  85 02     sta same              ; 3
+    232 x     1160  $088D  B1 05     lda (main.a),y        ; 5+
+    232 x     1160  $088F  D1 07     cmp (main.b),y        ; 5+
+    232 x      696  $0891  F0 04     beq main.endif14      ; 2+
+                     $0893  A9 00     lda #$00              ; 2
+                     $0895  85 02     sta same              ; 3
                      main.endif14:
                      main.fnext12:
-    232 x      464  $08BF  C8        iny                   ; 2
-    232 x      464  $08C0  C0 E8     cpy #$E8              ; 2
-    232 x      695  $08C2  D0 ED     bne main.for13        ; 2+
+    232 x      464  $0897  C8        iny                   ; 2
+    232 x      464  $0898  C0 E8     cpy #$E8              ; 2
+    232 x      695  $089A  D0 F1     bne main.for13        ; 2+
                      main.fend11:
-      1 x        6  $08C4  60        rts                   ; 6
+      1 x        6  $089C  60        rts                   ; 6
                                                      ;    6: fn copy(to: ptr u8, from: ptr u8, n: u16) {
                      copy:
                                                      ;    7: while n.hi > 0 {
-      1 x        3  $08C5  4C F8 08  jmp copy.test16       ; 3
+      1 x        3  $089D  4C AF 08  jmp copy.test16       ; 3
                      copy.while15:
                                                      ;    8: for i in 0..=255 using Y { to[i] = from[i] }
-      3 x        6  $08C8  A0 00     ldy #$00              ; 2
+      3 x        6  $08A0  A0 00     ldy #$00              ; 2
                      copy.for20:
-    768 x     3840  $08CA  B1 0D     lda (copy.from),y     ; 5+
-    768 x     4608  $08CC  91 0B     sta (copy.to),y       ; 6
+    768 x     3840  $08A2  B1 0C     lda (copy.from),y     ; 5+
+    768 x     4608  $08A4  91 0A     sta (copy.to),y       ; 6
                      copy.fnext19:
-    768 x     1536  $08CE  C8        iny                   ; 2
-    768 x     2301  $08CF  D0 F9     bne copy.for20        ; 2+
+    768 x     1536  $08A6  C8        iny                   ; 2
+    768 x     2301  $08A7  D0 F9     bne copy.for20        ; 2+
                      copy.fend18:
                                                      ;    9: to += 256
-      3 x        6  $08D1  18        clc                   ; 2
-      3 x        9  $08D2  A5 0B     lda copy.to           ; 3
-      3 x        6  $08D4  69 00     adc #$00              ; 2
-      3 x        9  $08D6  85 0B     sta copy.to           ; 3
-      3 x        9  $08D8  A5 0C     lda copy.to+1         ; 3
-      3 x        6  $08DA  69 01     adc #$01              ; 2
-      3 x        9  $08DC  85 0C     sta copy.to+1         ; 3
+      3 x       15  $08A9  E6 0B     inc copy.to+1         ; 5
                                                      ;   10: from += 256
-      3 x        6  $08DE  18        clc                   ; 2
-      3 x        9  $08DF  A5 0D     lda copy.from         ; 3
-      3 x        6  $08E1  69 00     adc #$00              ; 2
-      3 x        9  $08E3  85 0D     sta copy.from         ; 3
-      3 x        9  $08E5  A5 0E     lda copy.from+1       ; 3
-      3 x        6  $08E7  69 01     adc #$01              ; 2
-      3 x        9  $08E9  85 0E     sta copy.from+1       ; 3
+      3 x       15  $08AB  E6 0D     inc copy.from+1       ; 5
                                                      ;   11: n -= 256
-      3 x        6  $08EB  38        sec                   ; 2
-      3 x        9  $08EC  A5 0F     lda copy.n            ; 3
-      3 x        6  $08EE  E9 00     sbc #$00              ; 2
-      3 x        9  $08F0  85 0F     sta copy.n            ; 3
-      3 x        9  $08F2  A5 10     lda copy.n+1          ; 3
-      3 x        6  $08F4  E9 01     sbc #$01              ; 2
-      3 x        9  $08F6  85 10     sta copy.n+1          ; 3
+      3 x       15  $08AD  C6 0F     dec copy.n+1          ; 5
                      copy.test16:
-      4 x        8  $08F8  A9 00     lda #$00              ; 2
-      4 x       12  $08FA  C5 10     cmp copy.n+1          ; 3
-      4 x       11  $08FC  90 CA     bcc copy.while15      ; 2+
+      4 x       12  $08AF  A5 0F     lda copy.n+1          ; 3
+      4 x        8  $08B1  C9 01     cmp #$01              ; 2
+      4 x       11  $08B3  B0 EB     bcs copy.while15      ; 2+
                      copy.wend17:
                                                      ;   13: for i in 0..n.lo using Y { to[i] = from[i] }
-      1 x        3  $08FE  A5 0F     lda copy.n            ; 3
-      1 x        3  $0900  85 11     sta copy._t1          ; 3
-      1 x        2  $0902  A0 00     ldy #$00              ; 2
-      1 x        3  $0904  C4 11     cpy copy._t1          ; 3
-      1 x        2  $0906  B0 09     bcs copy.fend21       ; 2+
+      1 x        2  $08B5  A0 00     ldy #$00              ; 2
+      1 x        3  $08B7  C4 0E     cpy copy.n            ; 3
+      1 x        2  $08B9  B0 09     bcs copy.fend21       ; 2+
                      copy.for23:
-    232 x     1160  $0908  B1 0D     lda (copy.from),y     ; 5+
-    232 x     1392  $090A  91 0B     sta (copy.to),y       ; 6
+    232 x     1160  $08BB  B1 0C     lda (copy.from),y     ; 5+
+    232 x     1392  $08BD  91 0A     sta (copy.to),y       ; 6
                      copy.fnext22:
-    232 x      464  $090C  C8        iny                   ; 2
-    232 x      696  $090D  C4 11     cpy copy._t1          ; 3
-    232 x      695  $090F  D0 F7     bne copy.for23        ; 2+
+    232 x      464  $08BF  C8        iny                   ; 2
+    232 x      696  $08C0  C4 0E     cpy copy.n            ; 3
+    232 x      695  $08C2  D0 F7     bne copy.for23        ; 2+
                      copy.fend21:
-      1 x        6  $0911  60        rts                   ; 6
+      1 x        6  $08C4  60        rts                   ; 6
                      

@@ -22,29 +22,28 @@
     256 x      512  $0821  69 25     adc #$25              ; 2
     256 x      768  $0823  85 03     sta main.b            ; 3
                                                      ;    8: crc ^= b
-    256 x      768  $0825  A5 02     lda crc               ; 3
-    256 x      768  $0827  45 03     eor main.b            ; 3
-    256 x      768  $0829  85 02     sta crc               ; 3
+    256 x      768  $0825  45 02     eor crc               ; 3
+    256 x      768  $0827  85 02     sta crc               ; 3
                                                      ;    9: for _ in 0..8 {
                                                      ; repeat 8 times
-    256 x      512  $082B  A2 08     ldx #$08              ; 2
+    256 x      512  $0829  A2 08     ldx #$08              ; 2
                      main.for5:
                                                      ;   10: if crc & $80 != 0 { crc = (crc << 1) ^ $07 } else { crc = crc << 1 }
-   2048 x     4096  $082D  0A        asl a                 ; 2
-   2048 x     5108  $082E  90 07     bcc main.else7        ; 2+
-   1036 x     2072  $0830  49 07     eor #$07              ; 2
-   1036 x     3108  $0832  85 02     sta crc               ; 3
-   1036 x     3108  $0834  4C 39 08  jmp main.endif6       ; 3
+   2048 x     4096  $082B  0A        asl a                 ; 2
+   2048 x     5108  $082C  90 07     bcc main.else7        ; 2+
+   1036 x     2072  $082E  49 07     eor #$07              ; 2
+   1036 x     3108  $0830  85 02     sta crc               ; 3
+   1036 x     3108  $0832  4C 37 08  jmp main.endif6       ; 3
                      main.else7:
-   1012 x     3036  $0837  85 02     sta crc               ; 3
+   1012 x     3036  $0835  85 02     sta crc               ; 3
                      main.endif6:
                      main.fnext4:
-   2048 x     4096  $0839  CA        dex                   ; 2
-   2048 x     5888  $083A  D0 F1     bne main.for5         ; 2+
+   2048 x     4096  $0837  CA        dex                   ; 2
+   2048 x     5888  $0838  D0 F1     bne main.for5         ; 2+
                      main.fend3:
                      main.fnext1:
-    256 x     1280  $083C  E6 04     inc main.i            ; 5
-    256 x      767  $083E  D0 DE     bne main.for2         ; 2+
+    256 x     1280  $083A  E6 04     inc main.i            ; 5
+    256 x      767  $083C  D0 E0     bne main.for2         ; 2+
                      main.fend0:
-      1 x        6  $0840  60        rts                   ; 6
+      1 x        6  $083E  60        rts                   ; 6
                      

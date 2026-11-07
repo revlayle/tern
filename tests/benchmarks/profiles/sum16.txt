@@ -11,12 +11,12 @@
                      $0818  A9 00     lda #$00              ; 2
                      $081A  A2 00     ldx #$00              ; 2
                      clear0:
-                     $081C  9D B2 08  sta bss,x             ; 5
+                     $081C  9D 99 08  sta bss,x             ; 5
                      $081F  E8        inx                   ; 2
                      $0820  D0 FA     bne clear0            ; 2+
                      $0822  A2 90     ldx #$90              ; 2
                      clear:
-                     $0824  9D B1 09  sta bss+255,x         ; 5
+                     $0824  9D 98 09  sta bss+255,x         ; 5
                      $0827  CA        dex                   ; 2
                      $0828  D0 FA     bne clear             ; 2+
                      $082A  20 30 08  jsr main              ; 6
@@ -33,74 +33,63 @@
       1 x        2  $0838  A2 00     ldx #$00              ; 2
                      main.for2:
                                                      ;   10: v = v + (v >> 3) + 77
-    200 x      600  $083A  A5 06     lda main.v            ; 3
-    200 x      600  $083C  85 08     sta main._t0          ; 3
-    200 x      600  $083E  A5 07     lda main.v+1          ; 3
-    200 x      600  $0840  85 09     sta main._t0+1        ; 3
-    200 x     1000  $0842  46 09     lsr main._t0+1        ; 5
-    200 x     1000  $0844  66 08     ror main._t0          ; 5
-    200 x     1000  $0846  46 09     lsr main._t0+1        ; 5
-    200 x     1000  $0848  66 08     ror main._t0          ; 5
-    200 x     1000  $084A  46 09     lsr main._t0+1        ; 5
-    200 x     1000  $084C  66 08     ror main._t0          ; 5
-    200 x      400  $084E  18        clc                   ; 2
-    200 x      600  $084F  A5 06     lda main.v            ; 3
-    200 x      600  $0851  65 08     adc main._t0          ; 3
-    200 x      600  $0853  85 06     sta main.v            ; 3
-    200 x      600  $0855  A5 07     lda main.v+1          ; 3
-    200 x      600  $0857  65 09     adc main._t0+1        ; 3
-    200 x      600  $0859  85 07     sta main.v+1          ; 3
-    200 x      400  $085B  18        clc                   ; 2
-    200 x      600  $085C  A5 06     lda main.v            ; 3
-    200 x      400  $085E  69 4D     adc #$4D              ; 2
-    200 x      600  $0860  85 06     sta main.v            ; 3
-    200 x      539  $0862  90 02     bcc main.c3           ; 2+
-     61 x      305  $0864  E6 07     inc main.v+1          ; 5
+    200 x      600  $083A  85 08     sta main._t0          ; 3
+    200 x      600  $083C  A5 06     lda main.v            ; 3
+    200 x     1000  $083E  46 08     lsr main._t0          ; 5
+    200 x      400  $0840  6A        ror a                 ; 2
+    200 x     1000  $0841  46 08     lsr main._t0          ; 5
+    200 x      400  $0843  6A        ror a                 ; 2
+    200 x     1000  $0844  46 08     lsr main._t0          ; 5
+    200 x      400  $0846  6A        ror a                 ; 2
+    200 x      400  $0847  18        clc                   ; 2
+    200 x      600  $0848  65 06     adc main.v            ; 3
+    200 x      600  $084A  85 06     sta main.v            ; 3
+    200 x      600  $084C  A5 08     lda main._t0          ; 3
+    200 x      600  $084E  65 07     adc main.v+1          ; 3
+    200 x      600  $0850  85 07     sta main.v+1          ; 3
+    200 x      400  $0852  18        clc                   ; 2
+    200 x      600  $0853  A5 06     lda main.v            ; 3
+    200 x      400  $0855  69 4D     adc #$4D              ; 2
+    200 x      600  $0857  85 06     sta main.v            ; 3
+    200 x      539  $0859  90 02     bcc main.c3           ; 2+
+     61 x      305  $085B  E6 07     inc main.v+1          ; 5
                      main.c3:
                                                      ;   11: values[i] = v
-    200 x      600  $0866  A5 06     lda main.v            ; 3
-    200 x     1000  $0868  9D B2 08  sta values,x          ; 5
-    200 x      600  $086B  A5 07     lda main.v+1          ; 3
-    200 x     1000  $086D  9D 7A 09  sta values+200,x      ; 5
+    200 x      600  $085D  A5 06     lda main.v            ; 3
+    200 x     1000  $085F  9D 99 08  sta values,x          ; 5
+    200 x      600  $0862  A5 07     lda main.v+1          ; 3
+    200 x     1000  $0864  9D 61 09  sta values+200,x      ; 5
                      main.fnext1:
-    200 x      400  $0870  E8        inx                   ; 2
-    200 x      400  $0871  E0 C8     cpx #$C8              ; 2
-    200 x      599  $0873  D0 C5     bne main.for2         ; 2+
+    200 x      400  $0867  E8        inx                   ; 2
+    200 x      400  $0868  E0 C8     cpx #$C8              ; 2
+    200 x      599  $086A  D0 CE     bne main.for2         ; 2+
                      main.fend0:
                                                      ;   13: for i in 0..N {
-      1 x        2  $0875  A2 00     ldx #$00              ; 2
+      1 x        2  $086C  A2 00     ldx #$00              ; 2
                      main.for6:
                                                      ;   14: total += values[i]
-    200 x      922  $0877  BD B2 08  lda values,x          ; 4+
-    200 x      600  $087A  85 08     sta main._t0          ; 3
-    200 x      866  $087C  BD 7A 09  lda values+200,x      ; 4+
-    200 x      600  $087F  85 09     sta main._t0+1        ; 3
-    200 x      400  $0881  18        clc                   ; 2
-    200 x      600  $0882  A5 02     lda total             ; 3
-    200 x      600  $0884  65 08     adc main._t0          ; 3
-    200 x      600  $0886  85 02     sta total             ; 3
-    200 x      600  $0888  A5 03     lda total+1           ; 3
-    200 x      600  $088A  65 09     adc main._t0+1        ; 3
-    200 x      600  $088C  85 03     sta total+1           ; 3
+    200 x      400  $086E  18        clc                   ; 2
+    200 x      600  $086F  A5 02     lda total             ; 3
+    200 x      897  $0871  7D 99 08  adc values,x          ; 4+
+    200 x      600  $0874  85 02     sta total             ; 3
+    200 x      600  $0876  A5 03     lda total+1           ; 3
+    200 x      841  $0878  7D 61 09  adc values+200,x      ; 4+
+    200 x      600  $087B  85 03     sta total+1           ; 3
                                                      ;   15: if values[i] > largest { largest = values[i] }
-    200 x      922  $088E  BD B2 08  lda values,x          ; 4+
-    200 x      600  $0891  85 08     sta main._t0          ; 3
-    200 x      866  $0893  BD 7A 09  lda values+200,x      ; 4+
-    200 x      600  $0896  85 09     sta main._t0+1        ; 3
-    200 x      600  $0898  A5 04     lda largest           ; 3
-    200 x      600  $089A  C5 08     cmp main._t0          ; 3
-    200 x      600  $089C  A5 05     lda largest+1         ; 3
-    200 x      600  $089E  E5 09     sbc main._t0+1        ; 3
-    200 x      568  $08A0  B0 0A     bcs main.endif7       ; 2+
-     32 x      128  $08A2  BD B2 08  lda values,x          ; 4+
-     32 x       96  $08A5  85 04     sta largest           ; 3
-     32 x      128  $08A7  BD 7A 09  lda values+200,x      ; 4+
-     32 x       96  $08AA  85 05     sta largest+1         ; 3
+    200 x      600  $087D  A5 04     lda largest           ; 3
+    200 x      897  $087F  DD 99 08  cmp values,x          ; 4+
+    200 x      600  $0882  A5 05     lda largest+1         ; 3
+    200 x      841  $0884  FD 61 09  sbc values+200,x      ; 4+
+    200 x      568  $0887  B0 0A     bcs main.endif7       ; 2+
+     32 x      128  $0889  BD 99 08  lda values,x          ; 4+
+     32 x       96  $088C  85 04     sta largest           ; 3
+     32 x      128  $088E  BD 61 09  lda values+200,x      ; 4+
+     32 x       96  $0891  85 05     sta largest+1         ; 3
                      main.endif7:
                      main.fnext5:
-    200 x      400  $08AC  E8        inx                   ; 2
-    200 x      400  $08AD  E0 C8     cpx #$C8              ; 2
-    200 x      599  $08AF  D0 C6     bne main.for6         ; 2+
+    200 x      400  $0893  E8        inx                   ; 2
+    200 x      400  $0894  E0 C8     cpx #$C8              ; 2
+    200 x      599  $0896  D0 D6     bne main.for6         ; 2+
                      main.fend4:
-      1 x        6  $08B1  60        rts                   ; 6
+      1 x        6  $0898  60        rts                   ; 6
                      

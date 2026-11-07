@@ -5,13 +5,13 @@ see `analysis.md`. Bytes and cycles are counted as in `comparison.md`.
 
 | variant | bytes | cycles | task bytes | task cycles |
 |---|--:|--:|--:|--:|
-| bubble.direct | 94 | 253,936 | 83 | 226,948 |
-| bubble.minus | 77 | 179,532 | 83 | 226,948 |
-| calls.bigger | 103 | 29,045 | 107 | 31,754 |
-| calls.inline | 95 | 23,855 | 107 | 31,754 |
-| calls.regs | 101 | 30,104 | 107 | 31,754 |
-| copy.pages | 250 | 58,107 | 227 | 68,281 |
-| enemies.first | 157 | 65,072 | 161 | 70,076 |
-| enemies.inplace | 169 | 78,372 | 161 | 70,076 |
-| fib16.const | 125 | 1,685 | 183 | 2,246 |
-| interp.return | 223 | 5,589 | 241 | 6,149 |
+| bubble.direct | 75 | 149,404 | 73 | 169,732 |
+| bubble.minus | 77 | 179,532 | 73 | 169,732 |
+| calls.bigger | 89 | 25,803 | 93 | 28,203 |
+| calls.inline | 81 | 20,613 | 93 | 28,203 |
+| calls.regs | 91 | 27,953 | 93 | 28,203 |
+| copy.pages | 173 | 51,900 | 178 | 62,154 |
+| enemies.first | 131 | 50,509 | 135 | 55,309 |
+| enemies.inplace | 139 | 58,445 | 135 | 55,309 |
+| fib16.const | 79 | 859 | 140 | 1,389 |
+| interp.return | 209 | 5,418 | 227 | 6,111 |
