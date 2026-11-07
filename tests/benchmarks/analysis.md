@@ -356,3 +356,4 @@ Part 2 (dataflow), as each fix is built:
 |---|--:|--:|---|
 | F3 | 19,872 / 8 | 15,083 / 4 | `bubble` 14,850 / 2 (`sta b`), `interp` 233 / 2 (`sta op`, with 11 cycles of page crossings). `enemies`' `sta main.x` / `main.y` stay: on the bounce path A is overwritten and `lda main.x` after the `if` reads memory, so "nothing reads them after F4" holds only on the other path; removing them needs x kept in a free register on the bounce path |
 | F18 | 23,094 / 2 | 23,204 / 5 | `bubble` 23,094 / 2: the inner loop is the assembly's (`lda values+1,x / cmp values,x / bcs`, swap `ldy values,x / sta values,x / tya / sta values+1,x`); `interp` 110 / 3, beyond the estimate: `SWAP`'s `t` goes the same way |
+| F16 | 1,238 / 3 | 1,238 / 2 | `calls`: `clamp` is `cmp top / bcc / beq / lda top / rts / rts`. The `using AX` case (`math.abs16` written in Tern) is not done: its gap is the signed compare and the negation, which keep the parameter in memory anyway |

@@ -180,10 +180,27 @@ public sealed class CodeGen
             return;
         }
         if (kept is { } k) _reserved.Add(k);
+        var inA = f.Parameters.FirstOrDefault(p => p.InMemory && p.PassedIn == Register.A);
+        _aParameter = inA is null ? null : (inA, _out.Count);
         GenBlock(f.Declaration!.Body);
+        _aParameter = null;
         if (kept is { } r) _reserved.Remove(r);
         if (!EndsWithJump()) Emit(Rts);
     }
+
+    /// <summary>The <c>using A</c> parameter of the function being generated, and where its body's code starts.</summary>
+    private (VariableSymbol Parameter, int From)? _aParameter;
+
+    /// <summary>
+    /// True if A holds <paramref name="e"/> here: it is the <c>using A</c> parameter, and the body's
+    /// code so far is straight-line code (no label) that changes neither A nor the parameter.
+    /// </summary>
+    private bool AHolds(Expr e) =>
+        _aParameter is var (p, from) && e is NameExpr { Symbol: VariableSymbol v } && v == p
+        && _out.Skip(from).All(item => item is Comment or SourceLine
+            || (item is Instr { AsmPos: null } i && i.Mnemonic is not (Jsr or Brk)
+                && !AsmEffects.Of(i.Mnemonic, i.Mode).Writes.HasFlag(CpuState.A)
+                && !(i.Operand is VarOperand { Variable: var w } && w.Storage == p && AsmEffects.WritesMemory(i.Mnemonic, i.Mode))));
 
     /// <summary>Functions already decided by <see cref="KeptRegister"/>, with the register kept (or null).</summary>
     private readonly Dictionary<FunctionSymbol, Register?> _keptRegisters = new();
@@ -1708,6 +1725,26 @@ public sealed class CodeGen
         {
             right = new NumberExpr(right.Pos, c + 1) { Type = right.Type, ConstValue = c + 1 };
             op = op == TokenKind.Greater ? TokenKind.GreaterEq : TokenKind.Less;
+        }
+
+        // The left side already in A (a using A parameter, F16): compare in place with two branches
+        // instead of loading the right side, so the parameter need not be read from memory.
+        if (type.Size == 1 && !signed && op is TokenKind.Greater or TokenKind.LessEq && AHolds(left) && Simple1(right) is { } r)
+        {
+            Op(Cmp, r);
+            if (op == TokenKind.LessEq)
+            {
+                Branch(Bcc, target);
+                Branch(Beq, target);
+            }
+            else
+            {
+                var equal = NewLabel("eq");
+                Branch(Beq, equal);
+                Branch(Bcs, target);
+                Place(equal);
+            }
+            return;
         }
 
         // Only ==, !=, < and >= remain: a > b is b < a, and a <= b is b >= a.

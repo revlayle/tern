@@ -2,7 +2,7 @@
 # Rewritten by running the tests with TERN_UPDATE_BENCHMARKS=1.
 # name        bytes    cycles
 bubble           98    132799
-calls           120     28222
+calls           118     26984
 copy            201     62167
 crc8             62     37194
 enemies         170     56128
@@ -10,4 +10,4 @@ fib16           175      1888
 interp          261      5953
 sieve            79     11299
 sum16           152     30180
-total          1318    365830
+total          1316    364592
