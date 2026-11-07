@@ -762,6 +762,32 @@ public sealed class CodeGen
             return;
         }
 
+        // w += 256 / w -= 256 on a 16-bit variable: inc w+1 / dec w+1; another multiple of 256 adds to the high byte only.
+        if (a.Op is TokenKind.PlusEq or TokenKind.MinusEq && target is NameExpr { Symbol: { InMemory: true, Type.Size: 2 } wv }
+            && a.Value.ConstValue is long whole && (whole & 0xFF) == 0 && whole is > 0 and <= 0xFF00)
+        {
+            long k = whole >> 8;
+            if (k == 1) Op(a.Op == TokenKind.PlusEq ? Inc : Dec, Var(wv, 1));
+            else
+            {
+                Op(Lda, Var(wv, 1));
+                CarryFor(a.Op == TokenKind.PlusEq ? TokenKind.Plus : TokenKind.Minus);
+                Op(a.Op == TokenKind.PlusEq ? Adc : Sbc, Byte(k));
+                Op(Sta, Var(wv, 1));
+            }
+            return;
+        }
+
+        // a[i] += 1 / a[i] -= 1 with the index in X: inc a,x / dec a,x (there is no inc a,y).
+        if (byOne && target is IndexExpr { Type.Size: 1 } incx && !IsPointerIndex(incx) && incx.Index.ConstValue is null
+            && FoldIndexOffset(incx.Index, ArrayOf(incx)) is var (incIndex, incShift) && IndexIsCheap(incIndex)
+            && (incIndex is NameExpr { Symbol.Register: Register.X } || (incIndex is not NameExpr { Symbol.Register: not null } && !_reserved.Contains(Register.X))))
+        {
+            LoadIndex(incIndex);   // X, by the condition above
+            Emit(a.Op == TokenKind.PlusEq ? Inc : Dec, AbsoluteX, Var(ArrayOf(incx), incShift));
+            return;
+        }
+
         // Shifts of a memory byte: shift in place.
         if (a.Op is TokenKind.ShlEq or TokenKind.ShrEq && target is NameExpr { Symbol: { InMemory: true } sv }
             && sv.Type.Size == 1 && !(a.Op == TokenKind.ShrEq && sv.Type.IsSigned))

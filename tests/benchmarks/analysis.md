@@ -339,3 +339,5 @@ Each fix as built, against the estimate above. Measured on `BenchmarkTests` (`ba
 | F8 | 3,000 / 7 | 3,636 / 9 | `sum16`; beyond the estimate, the optimizer now drops `lda v+1` at the loop top (A holds it from the store at the end of the pass), 597, which the assembly does not do; the rest is page crossings |
 | F19 | 768 / 2 | 768 / 2 | `crc8` |
 | F21 | 903 / 5 (about 500 from the source as written) | 503 / 4 | `calls`: `bigger`'s `return a > b` is `lda a / clc / sbc b / rts`; the rest needs the rewrite (section 3) |
+| F10 `± 256` | 195 / 55 | 117 / 33 | `copy`: `to`, `from`, `n`; the estimate also counted `a`, `b`, which step by 256 only in `copy.pages` |
+| F10 `a[i] += 1` | 0 / 6 | 0 / 6 | `enemies` (`hits`, never runs); also `interp`'s `DEC` as `dec stack-1,x`, 6 bytes, but 22 cycles slower in all: the shorter program moves `code` across a page (F12) |

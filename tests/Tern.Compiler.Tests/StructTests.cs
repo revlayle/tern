@@ -461,7 +461,7 @@ public class StructTests
     // Spec 3.3: enemies[i].x is a single lda enemies_x,x. Byte k of the record is the table at k * 8.
     [InlineData("x = enemies[i].x", "ldx i|lda enemies,x|sta x|rts")]
     [InlineData("x = enemies[i].pos.y", "ldx i|lda enemies+32,x|sta x|rts")]
-    [InlineData("enemies[i].hp += 1", "ldx i|lda enemies+40,x|clc|adc #$01|sta enemies+40,x|rts")]
+    [InlineData("enemies[i].hp += 1", "ldx i|inc enemies+40,x|rts")]
     [InlineData("x = enemies[3].hp", "lda enemies+43|sta x|rts")]
     [InlineData("x = enemies[i].name[2]", "ldx i|lda enemies+80,x|sta x|rts")]
     [InlineData("w = enemies[i].vel", "ldx i|lda enemies+48,x|sta w|lda enemies+56,x|sta w+1|rts")]
