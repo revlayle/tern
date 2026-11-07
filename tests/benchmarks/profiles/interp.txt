@@ -41,7 +41,7 @@
                      main.inc3:
                                                      ;   27: match op {
      74 x      148  $0842  C9 09     cmp #$09              ; 2
-     74 x      221  $0844  90 03 4C  bcc *+5 / jmp main.default14; 2+3
+     74 x      224  $0844  90 03 4C  bcc *+5 / jmp main.default14; 2+3
      73 x      146  $0849  AA        tax                   ; 2
      73 x      292  $084A  BD 53 08  lda main.jumphi15,x   ; 4+
      73 x      219  $084D  48        pha                   ; 3
@@ -151,7 +151,7 @@
                      main.mend4:
                      main.test1:
      75 x      225  $08FE  A5 07     lda main.running      ; 3
-     75 x      151  $0900  F0 03 4C  beq *+5 / jmp main.while0; 2+3
+     75 x      373  $0900  F0 03 4C  beq *+5 / jmp main.while0; 2+3
                      main.wend2:
                                                      ;   63: result = stack[0]
       1 x        4  $0905  AD 19 09  lda stack             ; 4

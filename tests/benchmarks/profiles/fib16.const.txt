@@ -1,0 +1,88 @@
+                     $0801  0B 08 0A 00 9E 32 30 36
+                     $0809  31 00 00 00
+                     start:
+                                                     ; startup
+                     $080D  D8        cld                   ; 2
+                     $080E  A9 00     lda #$00              ; 2
+                     $0810  85 02     sta product           ; 3
+                     $0812  85 03     sta product+1         ; 3
+                     $0814  A9 00     lda #$00              ; 2
+                     $0816  A2 30     ldx #$30              ; 2
+                     clear:
+                     $0818  9D A0 08  sta bss-1,x           ; 5
+                     $081B  CA        dex                   ; 2
+                     $081C  D0 FA     bne clear             ; 2+
+                     $081E  20 24 08  jsr main              ; 6
+                     halt:
+                     $0821  4C 21 08  jmp halt              ; 3
+                                                     ;    5: fn main() {
+                     main:
+                                                     ;    6: fib[0] = 0
+      1 x        2  $0824  A9 00     lda #$00              ; 2
+      1 x        4  $0826  8D A1 08  sta fib               ; 4
+      1 x        4  $0829  8D B9 08  sta fib+24            ; 4
+                                                     ;    7: fib[1] = 1
+      1 x        2  $082C  A9 01     lda #$01              ; 2
+      1 x        4  $082E  8D A2 08  sta fib+1             ; 4
+      1 x        2  $0831  A9 00     lda #$00              ; 2
+      1 x        4  $0833  8D BA 08  sta fib+25            ; 4
+                                                     ;    8: for i in 2..24 {
+      1 x        2  $0836  A2 02     ldx #$02              ; 2
+                     main.for2:
+                                                     ;    9: fib[i] = fib[i - 1] + fib[i - 2]
+     22 x       88  $0838  BD 9F 08  lda fib-2,x           ; 4+
+     22 x       66  $083B  85 08     sta main._t1          ; 3
+     22 x       88  $083D  BD B7 08  lda fib+22,x          ; 4+
+     22 x       66  $0840  85 09     sta main._t1+1        ; 3
+     22 x       88  $0842  BD A0 08  lda fib-1,x           ; 4+
+     22 x       66  $0845  85 06     sta main._t0          ; 3
+     22 x       88  $0847  BD B8 08  lda fib+23,x          ; 4+
+     22 x       66  $084A  85 07     sta main._t0+1        ; 3
+     22 x       44  $084C  18        clc                   ; 2
+     22 x       66  $084D  A5 06     lda main._t0          ; 3
+     22 x       66  $084F  65 08     adc main._t1          ; 3
+     22 x       66  $0851  85 06     sta main._t0          ; 3
+     22 x       66  $0853  A5 07     lda main._t0+1        ; 3
+     22 x       66  $0855  65 09     adc main._t1+1        ; 3
+     22 x       66  $0857  85 07     sta main._t0+1        ; 3
+     22 x       66  $0859  A5 06     lda main._t0          ; 3
+     22 x      110  $085B  9D A1 08  sta fib,x             ; 5
+     22 x       66  $085E  A5 07     lda main._t0+1        ; 3
+     22 x      110  $0860  9D B9 08  sta fib+24,x          ; 5
+                     main.fnext1:
+     22 x       44  $0863  E8        inx                   ; 2
+     22 x       44  $0864  E0 18     cpx #$18              ; 2
+     22 x       65  $0866  D0 D0     bne main.for2         ; 2+
+                     main.fend0:
+                                                     ;   11: var f: u16 = fib[20]
+      1 x        4  $0868  AD B5 08  lda fib+20            ; 4
+      1 x        3  $086B  85 04     sta main.f            ; 3
+      1 x        4  $086D  AD CD 08  lda fib+44            ; 4
+      1 x        3  $0870  85 05     sta main.f+1          ; 3
+                                                     ;   12: product = (f << 3) + f + 123 * 45
+      1 x        3  $0872  A5 04     lda main.f            ; 3
+      1 x        3  $0874  85 02     sta product           ; 3
+      1 x        3  $0876  A5 05     lda main.f+1          ; 3
+      1 x        3  $0878  85 03     sta product+1         ; 3
+      1 x        5  $087A  06 02     asl product           ; 5
+      1 x        5  $087C  26 03     rol product+1         ; 5
+      1 x        5  $087E  06 02     asl product           ; 5
+      1 x        5  $0880  26 03     rol product+1         ; 5
+      1 x        5  $0882  06 02     asl product           ; 5
+      1 x        5  $0884  26 03     rol product+1         ; 5
+      1 x        2  $0886  18        clc                   ; 2
+      1 x        3  $0887  A5 02     lda product           ; 3
+      1 x        3  $0889  65 04     adc main.f            ; 3
+      1 x        3  $088B  85 02     sta product           ; 3
+      1 x        3  $088D  A5 03     lda product+1         ; 3
+      1 x        3  $088F  65 05     adc main.f+1          ; 3
+      1 x        3  $0891  85 03     sta product+1         ; 3
+      1 x        2  $0893  18        clc                   ; 2
+      1 x        3  $0894  A5 02     lda product           ; 3
+      1 x        2  $0896  69 9F     adc #$9F              ; 2
+      1 x        3  $0898  85 02     sta product           ; 3
+      1 x        3  $089A  A5 03     lda product+1         ; 3
+      1 x        2  $089C  69 15     adc #$15              ; 2
+      1 x        3  $089E  85 03     sta product+1         ; 3
+      1 x        6  $08A0  60        rts                   ; 6
+                     

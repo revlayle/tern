@@ -40,6 +40,8 @@ public class VariantTests
                 File.WriteAllText(Path.Combine(dir, "profiles", task + ".txt"), ComparisonTests.Profile(Path.Combine(dir, task + ".tern")));
                 File.WriteAllText(Path.Combine(dir, "profiles", task + ".asm.txt"), ComparisonTests.AsmProfile(dir, task));
             }
+            foreach (var file in files)
+                File.WriteAllText(Path.Combine(dir, "profiles", Path.GetFileNameWithoutExtension(file) + ".txt"), ComparisonTests.Profile(file));
         }
     }
 }

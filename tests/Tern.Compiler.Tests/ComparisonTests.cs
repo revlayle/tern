@@ -100,8 +100,18 @@ public class ComparisonTests
             count[pc] = count.GetValueOrDefault(pc) + 1;
             cycles[pc] = cycles.GetValueOrDefault(pc) + (cpu.Cycles - before);
         }
+        // A listing line can hold two instructions (`bcc *+5 / jmp x`): the second one's cycles go to the line it is on.
+        var lines = result.Listing.Split((char)10);
+        var starts = lines.Select(l => Regex.Match(l, @"^\$([0-9A-F]{4})  ")).Where(m => m.Success)
+            .Select(m => int.Parse(m.Groups[1].Value, System.Globalization.NumberStyles.HexNumber)).Distinct().Order().ToList();
+        foreach (var pc in cycles.Keys.Where(pc => !starts.Contains(pc)).ToList())
+        {
+            int at = starts.Last(s => s < pc);
+            cycles[at] = cycles.GetValueOrDefault(at) + cycles[pc];
+            count.TryAdd(at, 0);
+        }
         var sb = new StringBuilder();
-        foreach (var line in result.Listing.Split((char)10))
+        foreach (var line in lines)
         {
             var m = Regex.Match(line, @"^\$([0-9A-F]{4})  ");
             if (m.Success && int.Parse(m.Groups[1].Value, System.Globalization.NumberStyles.HexNumber) is var a && count.TryGetValue(a, out var n))
