@@ -793,6 +793,17 @@ Values wrap modulo 10^(2n). The routines use `sed` and always leave decimal mode
 
 The state is private and starts at 1, so using `random` from main and a handler is an error (8.1); a handler that needs random numbers uses its own generator.
 
+**Planned: `cpu`**: the CPU flags after an `asm` block, platform independent
+
+| Function | Signature | `if f()` compiles to |
+|---|---|---|
+| `carry` | `() -> bool using carry` | `bcc skip` |
+| `zero` | `() -> bool using zero` | `bne skip` |
+| `negative` | `() -> bool using negative` | `bpl skip` |
+| `overflow` | `() -> bool using overflow` | `bvc skip`; added with `using overflow` (6.1) |
+
+Each is an empty-body `inline asm fn` (section 7), so a call adds no instructions: the test branches on the flag that the instructions before it left. It is defined only directly after an `asm` block, under the rules of section 7: `asm { jsr read_byte }` then `if cpu.carry() { ... }`. After compiled Tern code the result is unspecified.
+
 **`c64`**: Commodore 64 only
 
 | Name | Purpose |

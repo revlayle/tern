@@ -390,5 +390,10 @@ Decided:
 
 - **`-> bool using overflow` is planned** (spec 6.1; roadmap, Later). A function returns a `bool` in the V flag, as it can already in carry, zero and negative. Uses: `bit addr` copies bit 6 of memory into V, so testing bit 6 of a hardware or status register is `bit / bvc`, with no `and #$40`; and the signed overflow of an `adc`/`sbc` can be tested after an `asm` block. `using` keeps its meaning ("kept in this flag", rule 3), and the cost is one branch (rule 1).
 - **Only on `inline asm fn`, `asm fn` and routines at a fixed address, and only as a return.** The 6502 has no instruction that sets V (`clv` only clears it), so a plain `fn` could not compile `return true` to a fixed short sequence; rule 2 leaves it out. For the same reason V cannot be a fixed input (6.6), where the carry is allowed because it has `sec` and `clc`.
-- **Not added: flag tests after Tern code** (`if carry`, `if_cs`). Decision 39 stands: the flags after compiled code are unspecified. A library module with ready-made empty-body flag functions (`carry()`, `zero()`, ...) was discussed and not decided.
+- **Not added: flag tests after Tern code** (`if carry`, `if_cs`). Decision 39 stands: the flags after compiled code are unspecified.
 - Timing: not urgent, so it goes into the "Later" list and can join any milestone.
+
+## 2026-11-07: a `cpu` library module for flag tests (planned)
+
+- **`cpu.carry()`, `cpu.zero()`, `cpu.negative()`, and `cpu.overflow()` once `using overflow` is built** (spec 10.1; roadmap, Later). Each is an empty-body `inline asm fn` with a flag return (section 7), so `asm { ... }` followed by `if cpu.carry()` compiles to the branch alone. Reason: every program that tests a flag left by an `asm` block declares these same one-line functions itself; the library gives them one name. No language change: they use only `inline asm fn` and flag returns, which exist. Platform independent, since the flags are the CPU's.
+- Rejected: `carry` and `zero` as keywords (`if carry { }`). It would add syntax for what a library function already does at no cost.
