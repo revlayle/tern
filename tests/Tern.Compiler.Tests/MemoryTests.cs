@@ -72,6 +72,22 @@ public class MemoryTests
     }
 
     [Fact]
+    public void Constants_may_come_before_the_block_and_ranges_may_use_them()
+    {
+        var r = Run.Program("""
+            const SPRITES = $2000
+            const SIZE = $3FF
+            memory { SPRITES..=SPRITES + SIZE reserved }
+            const OTHER = 5
+            data s: [u8; 2] @ SPRITES = [1, 2]
+            var a: u8
+            fn main() { a = s[1] + OTHER }
+            """);
+        Assert.Equal(7, r.U8("a"));
+        Assert.Equal(0x2000, r.Address("s"));
+    }
+
+    [Fact]
     public void Ranges_may_use_constants_from_imports()
     {
         var dir = Directory.CreateTempSubdirectory("tern");
@@ -337,8 +353,8 @@ public class MemoryTests
     [InlineData("memory { $2000..=$2FFF reserved", "The memory block is not closed with '}'")]
     [InlineData("memory { $2000..=$10000 reserved }\nfn main() { }", "is outside memory")]
     [InlineData("memory { NOPE..=$2FFF reserved }\nfn main() { }", "'NOPE' is not declared")]
-    [InlineData("var x: u8\nmemory { $2000..=$2FFF reserved }\nfn main() { }", "The memory block goes right after the imports")]
-    [InlineData("memory { $2000..=$2FFF reserved }\nmemory { $3000..=$3FFF reserved }\nfn main() { }", "The memory block goes right after the imports")]
+    [InlineData("var x: u8\nmemory { $2000..=$2FFF reserved }\nfn main() { }", "The memory block goes after the imports and constants")]
+    [InlineData("memory { $2000..=$2FFF reserved }\nmemory { $3000..=$3FFF reserved }\nfn main() { }", "The memory block goes after the imports and constants")]
     [InlineData("memory { $0900..=$9FFF program }\nfn main() { }", "A program with 'main' starts at $0801")]
     [InlineData("memory { $0800..=$08FF reserved }\nfn main() { }", "A program with 'main' starts at $0801")]
     [InlineData("memory { $0800..=$9FFF reserved }\nfn main() { }", "No program area is left")]

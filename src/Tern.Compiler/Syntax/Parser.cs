@@ -119,6 +119,12 @@ public sealed class Parser
             ExpectEndOfStatement();
             SkipTerminators();
         }
+        // Constants may come before the memory block, so its ranges can use them (spec 8.4).
+        while (At(TokenKind.Const))
+        {
+            consts.Add(ParseConst());
+            SkipTerminators();
+        }
         MemoryDecl? memory = null;
         if (IsMemoryBlock())
         {
@@ -174,7 +180,7 @@ public sealed class Parser
                     return "";
                 }
                 case TokenKind.Identifier when IsMemoryBlock():
-                    throw new CompileError(Current.Pos, "The memory block goes right after the imports, before other declarations, and there is only one");
+                    throw new CompileError(Current.Pos, "The memory block goes after the imports and constants, before other declarations, and there is only one");
                 case TokenKind.Const: { var d = ParseConst(); consts.Add(d); return d.Name; }
                 case TokenKind.Var: { var d = ParseVar(); globals.Add(d); return d.Name; }
                 case TokenKind.Linear: { var d = ParseLinearVar(); globals.Add(d); return d.Name; }
