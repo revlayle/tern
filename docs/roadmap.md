@@ -296,14 +296,14 @@ Decision 2026-11-05; after M18 (decision 2026-11-07), so the skill does not teac
 
 Done when an agent with only the skill and tools can write, check and measure a small program (e.g. a sprite moving under joystick control), and the skill's examples are checked by the test suite.
 
-## M20: Checks in the emulator, and signed loop variables
+## M20: Index checks in the emulator, and signed loop variables
 
 Spec: 14.4, 3.2, 5.1.
 
-- In test runs (`Run.Program`, and the M19 run tool), the built-in emulator reports arithmetic that overflows its type and array indexes outside the array, with the source line, using the compiler's debug information (the M19 source-to-instruction map). No code is added to the program. Overflow that the program means (wrapping counters, hashes) needs a way to say so; the coding session proposes one to the spec session first.
+- In test runs (`Run.Program`, and the M19 run tool), the built-in emulator reports a variable array index outside its array (`a[i]`, not pointer accesses), with the source line, using the compiler's debug information (the M19 source-to-instruction map). No code is added to the program. Arithmetic overflow is not checked (decision 2026-11-07).
 - `for` loops with `i8` and `i16` counters, counting up and down, with constant and variable bounds and steps as for unsigned counters; the spec 5.1 and 11 shapes for them come from the spec session before coding.
 
-Tests: each check fires on a wrong program and stays quiet on a correct one; loops at edge values (-128, 127, 0, wrap) against C#.
+Tests: the check fires on an index past the end (also through a folded offset such as `a[i - 1]`) and stays quiet on a correct program, including one whose arithmetic wraps; loops at edge values (-128, 127, 0, wrap) against C#.
 
 ## M21: Plug-ins against a fixed interface
 
@@ -363,9 +363,9 @@ Done when: the benchmarks compile for the 65C02 and use the new instructions whe
 ## Later (not yet ordered)
 
 - Floats as a library with a 4-byte format, built on `wide` (not a priority)
-- **Developer guide** (spec session work, after M19, which with M17 gives most of its content): user documentation that explains how the language behaves on the machine, with examples; it informs and does not forbid. It grows out of the quick guide in `docs/guide.md`, whose section 6 lists these behaviors briefly. It must cover each behavior below. The spec session adds to this list whenever a decision leaves a behavior that the programmer may rely on, or that may surprise them:
+- **Developer guide** (spec session work, after M19, which with M17 gives most of its content): user documentation that explains how the language behaves on the machine, with examples; it informs and does not forbid. It grows out of the quick guide in `docs/guide.md`, whose section 6 lists these behaviors briefly. It must cover each behavior below, and must exist before the first release, with wrapping arithmetic and unchecked indexes covered in detail (decision 2026-11-07). The spec session adds to this list whenever a decision leaves a behavior that the programmer may rely on, or that may surprise them:
   - all arithmetic wraps, including index expressions: `buf[head + 1]` with `head = 255` is `buf[0]` (3.1, 3.2); when the optimizer folds a constant offset into the address
-  - an index outside the array is not checked, and the optimizer assumes it does not happen (3.2)
+  - an index outside the array is not checked, as in C, and the optimizer assumes it does not happen; reaching other memory on purpose uses a pointer; the emulator reports a bad index in test runs (3.2, 14.4)
   - flags after an `asm` block: `if f()`, `while f()` (first test, and each later test when the body ends with an `asm` block) and `v = f()` with an empty-body flag function; after compiled Tern code the flags are unspecified (7)
   - a variable `for` step of 0 never ends the loop; stepped loops stop when the step carries past the end of the type (5.1)
   - signed `>>` rounds down, not toward zero (3.1)
