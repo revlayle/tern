@@ -406,6 +406,7 @@ inline fn wait_frame() { ... }
 - Tern code cannot read a function's parameters from outside the function. After the call, their memory may already be in use by another function.
 - `using` always means "kept in this register or flag". A parameter written `using A`, `using X` or `using Y` is passed in that register. A `u16` parameter can use a register pair: `using AX`, `using AY` or `using XY` (low byte first).
 - **Return values:** `u8`/`i8` in A; `u16`/`i16` in A (low) and X (high); `bool` in the carry flag. Other placements can be written out: `-> u8 using Y`, `-> u16 using XY` (any register pair `AX`, `AY`, `XY`, low byte first), `-> bool using zero` (the Z flag), `-> bool using negative` (the N flag).
+- **Planned: `-> bool using overflow`** (the V flag), for testing what `bit` copies from bit 6 of memory, or the signed overflow of an `adc`/`sbc`. Allowed on an `inline asm fn`, an `asm fn` and a routine at a fixed address (6.6), where the instructions that set V are visible or documented; not on a plain `fn`, since the 6502 has no instruction that sets V (`clv` only clears it), so `return true` would need a trick such as `bit` on a byte with bit 6 set. A return value only, never a fixed input (6.6). `if f()` is `bvc skip`; an empty body reads the V flag left by the `asm` block before it, under the rules of section 7.
 - Registers not used for return values may be changed by any call. The compiler knows each function's actual register use and uses that instead where it can.
 
 ### 6.2 Inline functions

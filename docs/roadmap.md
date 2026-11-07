@@ -363,6 +363,7 @@ Done when: the benchmarks compile for the 65C02 and use the new instructions whe
 ## Later (not yet ordered)
 
 - Floats as a library with a 4-byte format, built on `wide` (not a priority)
+- `-> bool using overflow` (spec 6.1, decision 2026-11-07): the V flag as a return of `inline asm fn`, `asm fn` and routines at a fixed address. Small; fits into any milestone. Tests: `if f()`, `!f()`, `while f()` and `v = f()` on a flag set by `bit` (bit 6) and by a signed `adc` overflow; the empty-body form after an `asm` block; the error on a plain `fn` and as a fixed input
 - **Developer guide** (spec session work, after M19, which with M17 gives most of its content): user documentation that explains how the language behaves on the machine, with examples; it informs and does not forbid. It grows out of the quick guide in `docs/guide.md`, whose section 6 lists these behaviors briefly. It must cover each behavior below, and must exist before the first release, with wrapping arithmetic and unchecked indexes covered in detail (decision 2026-11-07). The spec session adds to this list whenever a decision leaves a behavior that the programmer may rely on, or that may surprise them:
   - all arithmetic wraps, including index expressions: `buf[head + 1]` with `head = 255` is `buf[0]` (3.1, 3.2); when the optimizer folds a constant offset into the address
   - an index outside the array is not checked, as in C, and the optimizer assumes it does not happen; reaching other memory on purpose uses a pointer; the emulator reports a bad index in test runs (3.2, 14.4)
