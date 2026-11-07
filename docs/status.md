@@ -4,11 +4,21 @@ Owned by the coding session. Updated at the end of every coding session.
 
 ## Current
 
-- **Milestone:** M14, the C64 device I/O library (roadmap), is built and tested. Ready for `/review`.
-- **Branch:** `m14-device-io` (from `main`, after the M13 follow-up merge). 1341 compiler tests pass plus 36 CPU tests (38 new in `IoTests`). Review findings 1-5 (`docs/reviews/m14.md`) are fixed; the code generator part of 5 (`return f()` of a carry routine as `jsr f / rts`) is for the M17 list. `BenchmarkTests` unchanged. Checked in VICE with a `.d64` image, with the virtual drive and with true drive emulation (also a second run on the same disk, which replaces the file).
-- **Next step:** M15, indexing small linear struct arrays (`docs/roadmap.md`), on a new branch from `main` once M14 is merged.
+- **Milestone:** M15, indexing small linear struct arrays (roadmap), is built and tested. Ready for `/review`.
+- **Branch:** `m15-struct-arrays` (from `main`, after the M14 merge). 1376 compiler tests pass plus 36 CPU tests (35 new in `RecordIndexTests`). `BenchmarkTests` baseline rewritten (see M15 below): 1516 bytes / 509175 cycles -> 1512 bytes / 495963 cycles.
+- **Next step:** M16, locals of inline functions in each caller's frame (`docs/roadmap.md`), on a new branch from `main` once M15 is merged. Spec 3.3 still says "Planned" for this feature; the spec session updates it (question 60).
 
 ## Done
+
+- **M15, indexing small linear struct arrays** (2026-11-07).
+  - `linear var list: [T; n]` with a variable index: the checker lowers `list[i].f` to a view of the array at the field's offset, indexed by `i << k` for struct size 1, 2, 4, 8 (`Checker.CheckRecordIndex`, new `PlaceKind.Records`). The code generator is unchanged for this: `lda i / asl / asl / tax / lda list+off,x`. Size 1 is no shift: `ldx i / lda list,x`. Linear struct arrays of one-byte structs are now allowed (they were an error "elements are one byte").
+  - `indexed var list: [T; n]` (a word only before `var`, also after `noinit`, `volatile`, `private`; also for locals): same layout as `linear`; a variable index goes through a hidden read-only table `<name>_offsets` of `i * sizeof(T)`, created at the first variable index and kept only if used (`VariableSymbol.OffsetTable`, `IsOffsetTable`). `CodeGen.LoadIndex` loads it straight into Y: `ldx i / ldy list_offsets,x / lda list+off,y`; with a `using X` loop variable it is `ldy list_offsets,x`. The listing shows the table after main's code; the report has a line `Offset table list_offsets: 20 bytes, in the program`.
+  - Constant index into a linear or indexed array: a fixed address (`list+295`), any struct size and any array size.
+  - Padding fields `_`: several allowed, may have `@`, take space, error on read or write.
+  - Errors (all tested in `RecordIndexTests.Reports_errors`): record size not 1, 2, 4, 8 on a variable index (names the size, suggests `_` padding and `indexed`, with the table size); variable index into a linear array over 256 bytes (suggests a pointer); `indexed` on a non-struct array, on one over 256 bytes, on `data`, with `linear` in either order; `addr()` of a field with a variable index; variable index into an array field of such a record.
+  - Code generator, beyond the milestone: `arr[i] = v` and `arr[i] op= v` where the index needs code (a shift, the offset table, `a[j + 1]`) now load the index first and the value after, instead of saving A in a temporary or computing the index twice. Without it the record stores cost 4 to 6 extra instructions. It also shortened `bubble` (116 -> 112 bytes, 241171 -> 227959 cycles).
+  - Removed the `StructTests` case that expected "'ps' is linear, so it cannot be indexed" for a constant index; constant indexes work now.
+  - Not done: the `linear` 16-bit element arrays and pointers are unchanged; `data` cannot hold structs, so `indexed data` is an error.
 
 - **M14, C64 device I/O library** (2026-11-07).
   - `src/lib/c64/io.tern` (module `io`). Raw KERNAL routines at their addresses (spec 6.6, direct `jsr`): `setlfs`, `setnam`, `kernal_open`, `close`, `chkin`, `chkout`, `clrchn`, `chrin`, `chrout`, `readst`, `kernal_load` (A fixed to 0). `OPEN` is `kernal_open` because `open` is the wrapper below. `LOAD`/`SAVE` raw forms: only `kernal_load` is public; `SAVE` is inside `save` (it needs a zero-page pointer).
@@ -279,6 +289,7 @@ Not bugs; things to improve, mostly in M7 (optimizer).
 45. **Part and handler in one function.** Spec 6.3 says "each `interrupt fn` is compiled in the forms that are used" (as a handler if its address is taken, as a part if it is called). Provisional: one form per function; using both is an error ("is called by another interrupt fn ... and its address is also used"). Two copies would need two labels and two frame views for one body. Say if it is wanted.
 59. **Spec 10.1 for `io` (M14).** The roadmap asks for the signatures as built in spec 10.1; they are in the M14 entry under "Done" and in the comments of `src/lib/c64/io.tern`. Please copy them in. Choices to confirm: the module is called `io` (the command-channel functions are as listed in the M14 entry); address parameters are `ptr u8` (`addr(x)` is a `ptr u8`, and a plain number converts); `save`'s `last` is the last byte (included), like a `..=` range; counts of `read`/`write` are `u8`; `OPEN` is `kernal_open` and `kernal_load` is public, `SAVE` has no raw form. The roadmap's `chrout` is `io.chrout` (a second declaration next to `c64.chrout`, same address).
 
+60. **Spec 3.3 and 11 for M15.** The "Planned" paragraphs of 3.3 should now describe the feature as built, and section 11 needs the two code shapes (`lda i / asl / asl / tax / lda list+off,x`; `ldx i / ldy list_offsets,x / lda list+off,y`). Differences from the plan: the shift shape ends in `tax` (X), not `tay`, because the code generator takes X first; the table shape uses Y as written. A `linear` array of 1-byte structs is allowed (no shift). The report names the offset table. Also confirm that `arr[i] = v` with an index needing code is now loaded index first (a generator improvement that also changed `bubble`).
 
 
 Questions 1-37 are settled (decisions.md, 2026-11-01 and 2026-11-02). Questions 55-58 are settled (decisions.md, 2026-11-03) and built in the M13 follow-up. Questions 46-54 are settled (decisions.md, 2026-11-03); 48, 49 and 51 were built in M13, the rest in M11 and M12. 
