@@ -36,7 +36,7 @@ public sealed partial class Checker
         int next = 0;
         foreach (var f in decl.Fields)
         {
-            if (s.Field(f.Name) is { } twice)
+            if (f.Name != "_" && s.Field(f.Name) is { } twice)
                 throw new CompileError(f.Pos, $"Field '{f.Name}' is declared twice in '{s.Name}' (first at {twice.Pos})");
             var type = ResolveType(f.Type);
             if (type.IsArray && type.Element!.IsStruct)
@@ -104,8 +104,10 @@ public sealed partial class Checker
             place = m.Target.Place!;
         }
 
+        if (m.Member == "_")
+            throw new CompileError(m.Pos, $"'_' is padding in struct '{s.Name}': it takes space but has no name, so it cannot be read or written");
         var field = s.Field(m.Member)
-            ?? throw new CompileError(m.Pos, $"Struct '{s.Name}' has no field '{m.Member}'. Its fields: {string.Join(", ", s.Fields.Select(f => f.Name))}");
+            ?? throw new CompileError(m.Pos, $"Struct '{s.Name}' has no field '{m.Member}'. Its fields: {string.Join(", ", s.Fields.Where(f => f.Name != "_").Select(f => f.Name))}");
         var type = field.Type;
         m.Type = type;
         var at = place with { Offset = place.Offset + field.Offset };
@@ -139,6 +141,12 @@ public sealed partial class Checker
                 var table = View(at.Base, at.Offset * n, TernType.ArrayOf(type, n), name, highTable: secondByte * n);
                 return new IndexExpr(pos, ViewName(pos, table), at.Index!) { Type = type };
             }
+            case PlaceKind.Records:
+            {
+                // Y = the record's offset: byte k of the record is at Base + k + Y, in a table of 256 at most.
+                var records = View(at.Base!, at.Offset, TernType.ArrayOf(type, at.Base!.Type.Size - at.Offset), name, highTable: secondByte);
+                return new IndexExpr(pos, ViewName(pos, records), at.Index!) { Type = type };
+            }
             default:
             {
                 int last = at.Offset + (type.Size == 2 ? secondByte : 0);
@@ -156,17 +164,18 @@ public sealed partial class Checker
     /// </summary>
     private bool CheckArrayFieldIndex(IndexExpr ix)
     {
-        if (ix.Target.Place is not { Kind: PlaceKind.Table or PlaceKind.Pointer } at || !ix.Target.Type.IsArray) return false;
+        if (ix.Target.Place is not { Kind: PlaceKind.Table or PlaceKind.Pointer or PlaceKind.Records } at || !ix.Target.Type.IsArray) return false;
         var array = ix.Target.Type;
         var element = array.Element!;
         string name = DescribePlace(ix.Target);
         ix.Type = element;
         // Element j of a split array field: the low byte at j, the high byte at length + j.
-        if (at.Kind == PlaceKind.Table)
+        if (at.Kind is PlaceKind.Table or PlaceKind.Records)
         {
             if (ix.Index.ConstValue is not long j)
-                throw new CompileError(ix.Index.Pos,
-                    "An array field in an array of structs needs a constant index, since a variable one would need a multiply. Declare the array 'linear' and step through it with a pointer");
+                throw new CompileError(ix.Index.Pos, at.Kind == PlaceKind.Table
+                    ? "An array field in an array of structs needs a constant index, since a variable one would need a multiply. Declare the array 'linear' and step through it with a pointer"
+                    : "An array field in an array of structs needs a constant index, since the record's offset is already in the index register. Step through the array with a pointer");
             if (j >= array.Length)
                 throw new CompileError(ix.Index.Pos, $"Index {j} is past the end of '{name}' (length {array.Length})");
             ix.Lowered = LowerScalar(ix.Pos, at with { Offset = at.Offset + (int)j }, element, $"{name}[{j}]", secondByte: array.Length);
@@ -197,14 +206,64 @@ public sealed partial class Checker
     /// <summary><c>enemies[i]</c>: a record of an array of structs.</summary>
     private void CheckRecordIndex(IndexExpr ix, VariableSymbol arr)
     {
-        if (arr.Type.Linear)
-            throw new CompileError(ix.Pos,
-                $"'{arr.Name}' is linear, so it cannot be indexed: that would need a multiply by the record size. Step through it with a pointer: p = p + sizeof({arr.Type.Element})");
         if (ix.Index.ConstValue is long idx && idx >= arr.Type.Length)
             throw new CompileError(ix.Index.Pos, $"Index {idx} is past the end of '{arr.Name}' (length {arr.Type.Length})");
         CheckLoopIndex(ix.Index, arr.Name, arr.Type.Length);
-        ix.Type = arr.Type.Element!;
-        ix.Place = new StructPlace(PlaceKind.Table, 0, Base: arr, Index: ix.Index);
+        var element = arr.Type.Element!;
+        ix.Type = element;
+        if (!arr.Type.Linear)
+        {
+            ix.Place = new StructPlace(PlaceKind.Table, 0, Base: arr, Index: ix.Index);
+            return;
+        }
+        // Whole records one after another: a constant index is a fixed address.
+        if (ix.Index.ConstValue is long c)
+        {
+            ix.Place = new StructPlace(PlaceKind.Memory, (int)c * element.Size, Base: arr);
+            return;
+        }
+        int size = element.Size;
+        if (arr.Type.Size > 256)
+            throw new CompileError(ix.Pos,
+                $"'{arr.Name}' is {arr.Type.Size} bytes, more than the 256 an 8-bit offset reaches, so it cannot be indexed with a variable. Step through it with a pointer: p = p + sizeof({element})");
+        var u8 = TernType.U8;
+        Expr offset;
+        if (arr.IsIndexed)
+        {
+            var table = OffsetTable(arr);
+            UseGlobal(table, ix.Pos);
+            offset = new IndexExpr(ix.Pos, ViewName(ix.Pos, table), ix.Index) { Type = u8 };
+        }
+        else if (size is 1 or 2 or 4 or 8)
+        {
+            int shift = size switch { 1 => 0, 2 => 1, 4 => 2, _ => 3 };
+            offset = shift == 0
+                ? ix.Index
+                : new BinaryExpr(ix.Index.Pos, TokenKind.Shl, ix.Index, new NumberExpr(ix.Index.Pos, shift) { Type = u8, ConstValue = shift }) { Type = u8 };
+        }
+        else
+        {
+            int next = size < 4 ? 4 : size < 8 ? 8 : 16;
+            throw new CompileError(ix.Pos,
+                $"'{arr.Name}' has records of {size} bytes, and a variable index into a linear array needs 1, 2, 4 or 8. " +
+                $"Pad {element} with '_' fields to {next} bytes (e.g. _: [u8; {next - size}]), or declare the array 'indexed var {arr.Name}' to use a table of {arr.Type.Length} bytes");
+        }
+        ix.Place = new StructPlace(PlaceKind.Records, 0, Base: arr, Index: offset);
+    }
+
+    /// <summary>The read-only table of <c>i * sizeof(T)</c> for an indexed array, made at its first variable index.</summary>
+    private VariableSymbol OffsetTable(VariableSymbol arr)
+    {
+        if (arr.OffsetTable is { } made) return made;
+        int size = arr.Type.Element!.Size, n = arr.Type.Length;
+        var bytes = new byte[n];
+        for (int i = 0; i < n; i++) bytes[i] = (byte)(i * size);
+        var table = new VariableSymbol($"{arr.QualifiedName}.offsets", arr.Pos, TernType.ArrayOf(TernType.U8, n), VariableKind.Global, null)
+        {
+            IsData = true, IsOffsetTable = true, InitialBytes = bytes, Module = arr.Module ?? _module,
+        };
+        _globals.Add(table);
+        return arr.OffsetTable = table;
     }
 
     /// <summary>A short name for messages and listings: <c>player.pos</c>, <c>enemies.x</c>.</summary>
@@ -212,7 +271,7 @@ public sealed partial class Checker
     {
         NameExpr n => n.Name,
         MemberExpr m => $"{DescribePlace(m.Target)}.{m.Member}",
-        IndexExpr ix when ix.Place?.Kind == PlaceKind.Table => DescribePlace(ix.Target),
+        IndexExpr ix when ix.Place?.Kind is PlaceKind.Table or PlaceKind.Records => DescribePlace(ix.Target),
         IndexExpr ix => $"{DescribePlace(ix.Target)}[]",
         CastExpr c => DescribePlace(c.Operand),
         _ => "p",

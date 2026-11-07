@@ -139,7 +139,7 @@ public sealed class Parser
             {
                 var p = Advance();
                 if (!(Current.Kind is TokenKind.Const or TokenKind.Var or TokenKind.Linear or TokenKind.Struct or TokenKind.Data or TokenKind.Fn
-                      or TokenKind.Interrupt or TokenKind.Noinit or TokenKind.Volatile or TokenKind.Inline || (At(TokenKind.Asm) && PeekAt(1).Kind == TokenKind.Fn)))
+                      or TokenKind.Interrupt or TokenKind.Noinit or TokenKind.Volatile or TokenKind.Inline || IsIndexedWord() || (At(TokenKind.Asm) && PeekAt(1).Kind == TokenKind.Fn)))
                     throw new CompileError(p.Pos, $"'private' goes before a declaration (const, var, data, struct or fn); found {Describe(Current)}");
                 privateNames.Add(ParseDeclaration());
             }
@@ -181,6 +181,8 @@ public sealed class Parser
                 }
                 case TokenKind.Identifier when IsMemoryBlock():
                     throw new CompileError(Current.Pos, "The memory block goes after the imports and constants, before other declarations, and there is only one");
+                case TokenKind.Identifier when IsIndexedWord():
+                { var d = ParseIndexedVar(); globals.Add(d); return d.Name; }
                 case TokenKind.Const: { var d = ParseConst(); consts.Add(d); return d.Name; }
                 case TokenKind.Var: { var d = ParseVar(); globals.Add(d); return d.Name; }
                 case TokenKind.Linear: { var d = ParseLinearVar(); globals.Add(d); return d.Name; }
@@ -204,7 +206,7 @@ public sealed class Parser
                 case TokenKind.Noinit:
                 {
                     var t = Advance();
-                    if (!(Current.Kind is TokenKind.Var or TokenKind.Linear or TokenKind.Volatile or TokenKind.Noinit))
+                    if (!(Current.Kind is TokenKind.Var or TokenKind.Linear or TokenKind.Volatile or TokenKind.Noinit || IsIndexedWord()))
                         throw new CompileError(t.Pos, $"'noinit' goes before 'var', e.g. 'noinit var buffer: [u8; 256]'; found {Describe(Current)}");
                     var name = ParseDeclaration();
                     var d = globals[^1];
@@ -216,7 +218,7 @@ public sealed class Parser
                 case TokenKind.Volatile:
                 {
                     var t = Advance();
-                    if (!(Current.Kind is TokenKind.Var or TokenKind.Linear or TokenKind.Noinit or TokenKind.Volatile))
+                    if (!(Current.Kind is TokenKind.Var or TokenKind.Linear or TokenKind.Noinit or TokenKind.Volatile || IsIndexedWord()))
                         throw new CompileError(t.Pos, $"'volatile' goes before 'var', e.g. 'volatile var flags: u8 @ $C000'; found {Describe(Current)}");
                     var name = ParseDeclaration();
                     var d = globals[^1];
@@ -329,10 +331,27 @@ public sealed class Parser
         return new StructDecl(start.Pos, name.Text, fields);
     }
 
+    /// <summary><c>indexed</c> is a word only before <c>var</c> (spec 3.3), so it is still a usable name elsewhere.</summary>
+    private bool IsIndexedWord() => At(TokenKind.Identifier) && Current.Text == "indexed" && PeekAt(1).Kind is TokenKind.Var or TokenKind.Linear or TokenKind.Data;
+
+    /// <summary><c>indexed var name: [T; n]</c></summary>
+    private VarDecl ParseIndexedVar()
+    {
+        var word = Advance();
+        if (At(TokenKind.Linear))
+            throw new CompileError(word.Pos, "'indexed' replaces 'linear': it stores records the same way. Write 'indexed var', not 'indexed linear var'");
+        if (At(TokenKind.Data))
+            throw new CompileError(word.Pos, "'indexed' is for arrays of structs, which cannot be data. Write 'indexed var list: [Enemy; 8]'");
+        var decl = ParseVar();
+        return new VarDecl(word.Pos, decl.Name, decl.TypeSyntax, decl.Placement, decl.Init) { IsIndexed = true };
+    }
+
     /// <summary><c>linear var name: [T; n]</c> or <c>linear data name: [T; n] = ...</c></summary>
     private VarDecl ParseLinearVar()
     {
         var linear = Expect(TokenKind.Linear, "'linear'");
+        if (At(TokenKind.Identifier) && Current.Text == "indexed")
+            throw new CompileError(Current.Pos, "'indexed' replaces 'linear': it stores records the same way. Write 'indexed var', not 'linear indexed var'");
         if (!At(TokenKind.Var) && !At(TokenKind.Data))
             throw new CompileError(Current.Pos, $"'linear' goes before 'var' or 'data', e.g. 'linear var list: [Enemy; 8]'; found {Describe(Current)}");
         var decl = At(TokenKind.Data) ? ParseData() : ParseVar();
@@ -516,6 +535,7 @@ public sealed class Parser
             case TokenKind.Linear when PeekAt(1).Kind == TokenKind.Data:
                 throw new CompileError(PeekAt(1).Pos, "'data' must be declared outside functions");
             case TokenKind.Linear: return ParseLinearVar();
+            case TokenKind.Identifier when IsIndexedWord(): return ParseIndexedVar();
             case TokenKind.Struct: throw new CompileError(Current.Pos, "A struct must be declared outside functions");
             case TokenKind.Private:
                 throw new CompileError(Current.Pos, "'private' is only for top-level declarations; names inside a function are always private to it");
