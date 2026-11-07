@@ -5,10 +5,17 @@ Owned by the coding session. Updated at the end of every coding session.
 ## Current
 
 - **Milestone:** M18, fixes from the analysis (roadmap). Part 1 (local code shapes: F2, F1, F4, F6, F8, F10, F19, F21) is done. Parts 2 (dataflow: F3, F18, F16, F17, F5) and 3 (registers across loops, layout: F7/F11/F15, F13, F9, F12) are not started; each part is reviewed before the next starts.
-- **Branch:** `m18-fixes` (from `main` after the M17 merge). 1547 compiler tests pass plus 36 CPU tests. `baseline.txt` total 1512 / 495963 -> 1327 / 404117; `comparison.md` Tern 1221 / 486,802 -> 1036 / 394,956 (assembly 947 / 324,419).
-- **Next step:** `/review` of part 1. After the review is clean, part 2 on the same branch, starting with F3 (`bubble`'s `sta b`, `enemies`' `sta main.x` / `main.y`, `interp`'s `sta op`), then F18 (needs F2 and F3, both in place for F2).
+- **Branch:** `m18-fixes` (`main` merged in, with the review). 1565 compiler tests pass plus 36 CPU tests. `baseline.txt` total 1512 / 495963 -> 1327 / 404117; `comparison.md` Tern 1221 / 486,802 -> 1036 / 394,956 (assembly 947 / 324,419).
+- **Next step:** re-review of part 1 (`docs/reviews/m18.md`: both must-fix findings and suggestions 4 and 5 are fixed). After the review is clean, part 2 on the same branch, starting with F3 (`bubble`'s `sta b`, `enemies`' `sta main.x` / `main.y`, `interp`'s `sta op`), then F18 (needs F2 and F3).
 
 ## Done
+
+- **M18 part 1, review fixes** (2026-11-07, `docs/reviews/m18.md`).
+  - Finding 1 (must fix, `533d0b8`): a 16-bit element whose index reads volatile memory is no longer used in place (`IndexedOperand(e, 2)`, `ReadsVolatile`), since the in-place shapes load the index once per byte. `IndexedOperandTests.A_volatile_index_of_a_16_bit_element_is_read_once` covers the four shapes and fails without the fix.
+  - Finding 2 (must fix, `21f19b2`): `DeadLoadTests` runs `Optimizer.Run` on hand-written code for each rule of `RemoveDeadLoads` (overwritten loads, each return register at `rts`, fixed and volatile loads, branch and `jsr`, a load read through an index), plus one program.
+  - Suggestion 4 (`030b598`): `GroupConstantStores` keeps each source line in front of its own statement's code (listing only).
+  - Suggestion 5 (`a44be19`): `CounterMax` uses `Checker.LargestLoopValue` for constant bounds (`0..=250 step 7` ends at 245).
+  - Suggestion 3 is question 66 below; suggestion 6 (pre-existing) is under "Known limitations".
 
 - **M18 part 1, local code shapes** (2026-11-07). Each fix has its benchmark delta in its commit message and its measured saving next to the estimate in `analysis.md` section 8.
   - *F2* (`CodeGen.FoldIndexOffset`, `_counterMax`, `CounterMax`): `a[i + c]` / `a[c + i]` is `lda a+c,x` when `i` is the counter of an enclosing `for` whose header proves `i + c <= 255`: a constant end counting up (inclusive or not), a constant start counting down, or an excluded `u8` variable end (`i <= 254`). From the header only (spec 3.2). `IndexOffsetTests`.
@@ -304,6 +311,7 @@ Not bugs; things to improve, mostly in M7 (optimizer).
 - Inside a `for ... using X` loop, only routines that declare `keeps X` may be called. An `asm fn` that never touches X is still rejected; `AsmEffects` would make allowing it easy (spec 6.1: the compiler may use each function's actual register use).
 - `mem.fill` reloads `value` on every byte (`lda value` / `sta (dst),y`): 13 cycles per byte instead of 11. Loop-invariant loads are for the optimizer.
 - A `for` bound such as `count.hi` is used in place only when `count` is a local or parameter the body does not change; a global's byte is copied to a temporary before the loop.
+- Evaluation order (spec 5, review M18 suggestion 6, pre-existing): in a 16-bit assignment to an element with a simple index (`k[vi] = k[j] + w`), the index is loaded after the value is computed, although spec 5 says the index is evaluated first. Observable only with a volatile index or value.
 - Layout changes move arrays and routines across page boundaries: M18 part 1 made `interp` 22 cycles slower that way (its `code` table now crosses a page) and `math.mul16`'s `beq` cross a page. F12 (part 3) places arrays; branches inside routines are not placed.
 - Import cycles: declarations are processed module by module, so in a cycle (a imports b, b imports a) a constant of the later module cannot be used in a declaration of the earlier one. The error says so and suggests moving the constant. Function bodies are not affected.
 - A pointer that is a field of a struct variable (`player.next.hp`) is always copied to a zero-page temporary, even when the struct is in zero page and could be used as `(player+3),y` directly.
@@ -325,6 +333,8 @@ Not bugs; things to improve, mostly in M7 (optimizer).
 ## Questions for the spec session
 
 65. **Reads of a fixed address outside the volatile areas (spec 4).** Spec 4 makes only the platform's volatile areas, `volatile` variables and two-root globals volatile, so `var reg: u8 @ $C000` is ordinary memory whose reads may be removed. `MatchTests.A_match_with_only_a_default_still_reads_a_volatile_value` (M6 review) expects the read of such a variable to stay. Provisional: M18's dead-load removal never removes a load from a fixed address (hardware the platform table does not list, such as a cartridge register); the older redundant-load removal (M7) already removes a re-read of one when a register holds its value. Should a fixed address outside the volatile areas be ordinary memory, as spec 4 says, or should every read of a fixed address happen?
+
+66. **Spec 11 rows after M18 part 1** (review M18, suggestion 3). `-x` (u8) is now `lda #0 / sec / sbc x` (5 bytes, 7 cycles), shorter than the row's `lda x / eor #$FF / clc / adc #1`; the row could state the real code. Also: `x = 0` (and any store of 0) at the start of `main`, before any label, branch, call or asm, into a global the startup cleared and main has not written, now generates no code (`RemoveStoresOfStartupZeros`), so the cost of `x = 0` depends on where it is; the spec may want to say so next to the `x = 0` row or in 8.
 
 Questions 1-63 are settled (decisions.md; 44, 45 and 59-63 on 2026-11-07). Question 64 was withdrawn.
 
