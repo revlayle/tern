@@ -1,0 +1,63 @@
+                     $0801  0B 08 0A 00 9E 32 30 36
+                     $0809  31 00 00 00
+                     start:
+                                                     ; startup
+                     $080D  D8        cld                   ; 2
+                     $080E  A9 00     lda #$00              ; 2
+                     $0810  85 02     sta count             ; 3
+                     $0812  A9 00     lda #$00              ; 2
+                     $0814  A2 00     ldx #$00              ; 2
+                     clear0:
+                     $0816  9D 52 08  sta bss,x             ; 5
+                     $0819  E8        inx                   ; 2
+                     $081A  D0 FA     bne clear0            ; 2+
+                     $081C  20 22 08  jsr main              ; 6
+                     halt:
+                     $081F  4C 1F 08  jmp halt              ; 3
+                                                     ;    5: fn main() {
+                     main:
+                                                     ;    6: var n: u8 = 2
+      1 x        2  $0822  A9 02     lda #$02              ; 2
+      1 x        3  $0824  85 03     sta main.n            ; 3
+                                                     ;    7: while n < 16 {
+      1 x        3  $0826  4C 3F 08  jmp main.test1        ; 3
+                     main.while0:
+                                                     ;    8: if composite[n] == 0 {
+     14 x       42  $0829  A6 03     ldx main.n            ; 3
+     14 x       56  $082B  BD 52 08  lda composite,x       ; 4+
+     14 x       36  $082E  D0 0D     bne main.endif3       ; 2+
+                                                     ;   10: for m in (n << 1)..=255 step n using Y {
+      6 x       18  $0830  A5 03     lda main.n            ; 3
+      6 x       12  $0832  0A        asl a                 ; 2
+      6 x       12  $0833  A8        tay                   ; 2
+                     main.for6:
+                                                     ;   11: composite[m] = m
+    335 x     1675  $0834  99 52 08  sta composite,y       ; 5
+                     main.fnext5:
+    335 x      670  $0837  18        clc                   ; 2
+    335 x     1005  $0838  65 03     adc main.n            ; 3
+    335 x      670  $083A  A8        tay                   ; 2
+    335 x      999  $083B  90 F7     bcc main.for6         ; 2+
+                     main.fend4:
+                     main.endif3:
+                                                     ;   14: n += 1
+     14 x       70  $083D  E6 03     inc main.n            ; 5
+                     main.test1:
+     15 x       45  $083F  A5 03     lda main.n            ; 3
+     15 x       30  $0841  C9 10     cmp #$10              ; 2
+     15 x       44  $0843  90 E4     bcc main.while0       ; 2+
+                     main.wend2:
+                                                     ;   16: for i in 2..=255 {
+      1 x        2  $0845  A2 02     ldx #$02              ; 2
+                     main.for9:
+                                                     ;   17: if composite[i] == 0 { count += 1 }
+    254 x     1098  $0847  BD 52 08  lda composite,x       ; 4+
+    254 x      708  $084A  D0 02     bne main.endif10      ; 2+
+     54 x      270  $084C  E6 02     inc count             ; 5
+                     main.endif10:
+                     main.fnext8:
+    254 x      508  $084E  E8        inx                   ; 2
+    254 x      761  $084F  D0 F6     bne main.for9         ; 2+
+                     main.fend7:
+      1 x        6  $0851  60        rts                   ; 6
+                     

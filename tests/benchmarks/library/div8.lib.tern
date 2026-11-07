@@ -1,0 +1,13 @@
+// math.div8 (asm): quotients and remainders of a counter by a running odd value.
+import math
+
+var acc: u16
+
+fn main() {
+    var d: u8 = 1
+    for i in 0..=255 {
+        d = (d + 37) | 1
+        acc += math.div8(i, d) as u16
+        acc += math.remainder8 as u16
+    }
+}

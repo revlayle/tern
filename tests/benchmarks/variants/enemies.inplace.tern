@@ -1,4 +1,4 @@
-// Sixteen enemies: the new position is added in place and the bounce tests read it back.
+// Sixteen enemies: the new position is added in place and the bounce tests read the element back (worse: the compiler reloads it).
 struct Enemy { x: u8, y: u8, dx: i8, dy: i8, hits: u8 }
 var enemies: [Enemy; 16]
 var bounces: u16

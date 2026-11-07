@@ -57,7 +57,11 @@ public class ComparisonTests
     private static Measure RunTern(string dir, string name) => MeasureTern(Path.Combine(dir, name + ".tern"), name);
 
     /// <summary>Compiles, runs and checks one Tern source against the result check of benchmark <paramref name="check"/>.</summary>
-    internal static (int Bytes, long Cycles) MeasureTern(string path, string check)
+    internal static (int Bytes, long Cycles) MeasureTern(string path, string check) =>
+        MeasureTern(path, BenchmarkTests.Checks[check]);
+
+    /// <summary>Same, with the result check given as a function.</summary>
+    internal static (int Bytes, long Cycles) MeasureTern(string path, Action<Results> check)
     {
         var name = Path.GetFileName(path);
         var result = TernCompiler.Compile(File.ReadAllText(path), sourcePath: path);
@@ -69,8 +73,43 @@ public class ComparisonTests
         long from = cpu.Cycles;
         while (cpu.PC != result.HaltAddress) Step(cpu, name);
         long cycles = cpu.Cycles - from;
-        Verify(check, new Results(ram, (n, o) => result.Symbols[n] + o), "Tern " + name);
+        try { check(new Results(ram, (n, o) => result.Symbols[n] + o)); }
+        catch (Exception e) { throw new Xunit.Sdk.XunitException($"{name} gives the wrong result: {e.Message}"); }
         return (result.LoadAddress + result.Image.Length - main, cycles);
+    }
+
+    /// <summary>
+    /// The listing of a Tern program with, in front of each instruction, how many times main ran it and the cycles it took in all
+    /// (from entering main to its return). The exact counts behind the estimates in <c>analysis.md</c>.
+    /// </summary>
+    internal static string Profile(string path)
+    {
+        var result = TernCompiler.Compile(File.ReadAllText(path), sourcePath: path);
+        var ram = new Ram();
+        ram.Load((ushort)result.LoadAddress, result.Image);
+        var cpu = new Cpu6502(ram) { PC = (ushort)result.Entry, SP = 0xFF, I = true };
+        int main = result.Symbols["main"];
+        while (cpu.PC != main) Step(cpu, "startup");
+        var count = new Dictionary<int, int>();
+        var cycles = new Dictionary<int, long>();
+        while (cpu.PC != result.HaltAddress)
+        {
+            int pc = cpu.PC;
+            long before = cpu.Cycles;
+            Step(cpu, path);
+            count[pc] = count.GetValueOrDefault(pc) + 1;
+            cycles[pc] = cycles.GetValueOrDefault(pc) + (cpu.Cycles - before);
+        }
+        var sb = new StringBuilder();
+        foreach (var line in result.Listing.Split((char)10))
+        {
+            var m = Regex.Match(line, @"^\$([0-9A-F]{4})  ");
+            if (m.Success && int.Parse(m.Groups[1].Value, System.Globalization.NumberStyles.HexNumber) is var a && count.TryGetValue(a, out var n))
+                sb.AppendLine($"{n,7} x {cycles[a],8}  {line.TrimEnd((char)13)}");
+            else
+                sb.AppendLine($"{"",19}  {line.TrimEnd((char)13)}");
+        }
+        return sb.ToString();
     }
 
     // ---- hand-written assembly ----

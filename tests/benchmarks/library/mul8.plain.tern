@@ -1,0 +1,21 @@
+// The same in plain Tern: shift and add on a 16-bit copy of a.
+var acc: u16
+
+fn mul8(a: u8, b: u8) -> u16 {
+    var r: u16 = 0
+    var s: u16 = a
+    for _ in 0..8 {
+        if b & 1 != 0 { r += s }
+        s = s << 1
+        b = b >> 1
+    }
+    return r
+}
+
+fn main() {
+    var b: u8 = 0
+    for i in 0..=255 {
+        b = b + 37
+        acc += mul8(i, b)
+    }
+}

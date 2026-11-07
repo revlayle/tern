@@ -30,6 +30,13 @@ public class VariantTests
             var t = ComparisonTests.MeasureTern(Path.Combine(dir, task + ".tern"), task);
             sb.AppendLine($"| {Path.GetFileNameWithoutExtension(file)} | {v.Bytes} | {v.Cycles:N0} | {t.Bytes} | {t.Cycles:N0} |");
         }
-        if (Environment.GetEnvironmentVariable("TERN_COMPARE") == "1") File.WriteAllText(Path.Combine(dir, "variants.md"), sb.ToString());
+        if (Environment.GetEnvironmentVariable("TERN_COMPARE") == "1")
+        {
+            File.WriteAllText(Path.Combine(dir, "variants.md"), sb.ToString());
+            // How often each instruction ran, for the numbers in analysis.md.
+            Directory.CreateDirectory(Path.Combine(dir, "profiles"));
+            foreach (var task in BenchmarkTests.Checks.Keys)
+                File.WriteAllText(Path.Combine(dir, "profiles", task + ".txt"), ComparisonTests.Profile(Path.Combine(dir, task + ".tern")));
+        }
     }
 }

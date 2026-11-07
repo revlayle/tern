@@ -1,0 +1,50 @@
+                     $0801  0B 08 0A 00 9E 32 30 36
+                     $0809  31 00 00 00
+                     start:
+                                                     ; startup
+                     $080D  D8        cld                   ; 2
+                     $080E  A9 00     lda #$00              ; 2
+                     $0810  85 02     sta crc               ; 3
+                     $0812  20 18 08  jsr main              ; 6
+                     halt:
+                     $0815  4C 15 08  jmp halt              ; 3
+                                                     ;    4: fn main() {
+                     main:
+                                                     ;    5: var b: u8 = 0
+      1 x        2  $0818  A9 00     lda #$00              ; 2
+      1 x        3  $081A  85 03     sta main.b            ; 3
+                                                     ;    6: for i in 0..=255 {
+      1 x        3  $081C  85 04     sta main.i            ; 3
+                     main.for2:
+                                                     ;    7: b = b + 37
+    256 x      768  $081E  A5 03     lda main.b            ; 3
+    256 x      512  $0820  18        clc                   ; 2
+    256 x      512  $0821  69 25     adc #$25              ; 2
+    256 x      768  $0823  85 03     sta main.b            ; 3
+                                                     ;    8: crc ^= b
+    256 x      768  $0825  A5 02     lda crc               ; 3
+    256 x      768  $0827  45 03     eor main.b            ; 3
+    256 x      768  $0829  85 02     sta crc               ; 3
+                                                     ;    9: for _ in 0..8 {
+                                                     ; repeat 8 times
+    256 x      512  $082B  A2 08     ldx #$08              ; 2
+                     main.for5:
+                                                     ;   10: if crc & $80 != 0 { crc = (crc << 1) ^ $07 } else { crc = crc << 1 }
+   2048 x     4096  $082D  0A        asl a                 ; 2
+   2048 x     5108  $082E  90 07     bcc main.else7        ; 2+
+   1036 x     2072  $0830  49 07     eor #$07              ; 2
+   1036 x     3108  $0832  85 02     sta crc               ; 3
+   1036 x     3108  $0834  4C 39 08  jmp main.endif6       ; 3
+                     main.else7:
+   1012 x     3036  $0837  85 02     sta crc               ; 3
+                     main.endif6:
+                     main.fnext4:
+   2048 x     4096  $0839  CA        dex                   ; 2
+   2048 x     5888  $083A  D0 F1     bne main.for5         ; 2+
+                     main.fend3:
+                     main.fnext1:
+    256 x     1280  $083C  E6 04     inc main.i            ; 5
+    256 x      767  $083E  D0 DE     bne main.for2         ; 2+
+                     main.fend0:
+      1 x        6  $0840  60        rts                   ; 6
+                     

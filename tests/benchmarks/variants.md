@@ -7,6 +7,10 @@ see `analysis.md`. Bytes and cycles are counted as in `comparison.md`.
 |---|--:|--:|--:|--:|
 | bubble.direct | 94 | 253,936 | 83 | 226,948 |
 | bubble.minus | 77 | 179,532 | 83 | 226,948 |
+| calls.inline | 95 | 23,855 | 107 | 31,754 |
 | calls.regs | 101 | 30,104 | 107 | 31,754 |
+| copy.pages | 250 | 58,107 | 227 | 68,281 |
+| enemies.first | 157 | 65,072 | 161 | 70,076 |
 | enemies.inplace | 169 | 78,372 | 161 | 70,076 |
+| fib16.const | 125 | 1,685 | 183 | 2,246 |
 | interp.return | 223 | 5,589 | 241 | 6,149 |

@@ -1,0 +1,14 @@
+// bcd.add (asm, decimal mode): a 4-byte packed decimal score plus a delta, 100 times.
+import bcd
+
+var score: [u8; 4]
+var delta: [u8; 4]
+
+fn main() {
+    delta[0] = $37
+    delta[1] = $19
+    delta[2] = $02
+    for _ in 0..100 {
+        bcd.add(addr(score), addr(delta), 4)
+    }
+}
