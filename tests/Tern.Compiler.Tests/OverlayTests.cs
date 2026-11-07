@@ -346,6 +346,120 @@ public class OverlayTests
         Assert.Contains("never loaded together and share their memory", message);
     }
 
+    private static string SiblingMessage(string level1) => Message($$"""
+        {{Header}}
+        fn main() { load(1); level1.peek() }
+        """, new Dictionary<string, string> { ["level1"] = "import level2\n" + level1, ["level2"] = "var lives: u8 = 3\ndata T: [u8; 2] = [5, 6]\nfn five() { }" });
+
+    [Fact]
+    public void Using_or_taking_the_address_of_data_or_a_function_of_a_sibling_overlay_is_an_error()
+    {
+        Assert.Contains("'level2.T' belongs to level2", SiblingMessage("fn peek() -> u8 using A { return level2.T[1] }"));
+        Assert.Contains("'level2.T' belongs to level2", SiblingMessage("fn peek() -> u16 using AX { return addr(level2.T) }"));
+        Assert.Contains("'level2.lives' belongs to level2", SiblingMessage("fn peek() -> u16 using AX { return addr(level2.lives) }"));
+        var message = SiblingMessage("fn peek() -> u16 using AX { return addr(level2.five) }");
+        Assert.Contains("addr(level2.five) is in level2, which is in the same overlay area 'levels' as level1", message);
+        Assert.Contains("Take the address in resident code", message);
+    }
+
+    [Fact]
+    public void An_inline_function_of_a_sibling_overlay_may_not_use_its_data_or_take_addresses_of_its_functions()
+    {
+        const string level2 = "data T: [u8; 2] @ $6100 = [5, 6]\nfn five() -> u8 using A { return 5 }\n" +
+            "inline fn peek() -> u8 using A { return T[1] }\ninline fn where() -> u16 using AX { return addr(five) }";
+        var message = Message($$"""
+            {{Header}}
+            fn main() { load(1); level1.go() }
+            """, new Dictionary<string, string>
+            {
+                ["level1"] = "import level2\nfn go() -> u8 using A { return level2.peek() }",
+                ["level2"] = level2,
+            });
+        Assert.Contains("calls the inline function 'level2.peek'", message);
+        Assert.Contains("'level2.T'", message);
+        message = Message($$"""
+            {{Header}}
+            fn main() { load(1); level1.go() }
+            """, new Dictionary<string, string>
+            {
+                ["level1"] = "import level2\nfn go() -> u16 using AX { return level2.where() }",
+                ["level2"] = level2,
+            });
+        Assert.Contains("takes addr(level2.five)", message);
+        Assert.Contains("Take the address in resident code", message);
+    }
+
+    [Fact]
+    public void Taking_the_address_of_a_sibling_overlays_function_in_assembly_is_an_error()
+    {
+        foreach (var part in new[] { "lo", "hi" })
+        {
+            var message = Message($$"""
+                {{Header}}
+                fn main() { load(1); level1.go() }
+                """, new Dictionary<string, string>
+                {
+                    ["level1"] = "import level2\nfn go() -> u8 using A { asm { lda #level2.five." + part + " } return 1 }",
+                    ["level2"] = "fn five() -> u8 using A { return 5 }",
+                });
+            Assert.Contains("addr(level2.five) is in level2, which is in the same overlay area 'levels'", message);
+        }
+    }
+
+    [Fact]
+    public void The_overlay_size_error_gives_the_fixed_data_separately()
+    {
+        var message = Message("""
+            import lv @ levels
+            memory {
+                $0801..=$5FFF  program
+                $6000..=$600F  overlay levels
+            }
+            fn main() { lv.go() }
+            """, new Dictionary<string, string>
+            {
+                ["lv"] = "data hdr: [u8; 4] @ $6008 = [1, 2, 3, 4]\nvar buf: [u8; 12]\nfn go() -> u8 using A { return hdr[0] + buf[1] }",
+            });
+        Assert.Contains("needs ", message);
+        Assert.Contains("bytes of code, data and variables, plus 4 bytes of fixed data", message);
+    }
+
+    [Fact]
+    public void Resident_code_may_take_addresses_in_any_overlay_and_so_may_an_overlay_in_another_area()
+    {
+        var modules = new Dictionary<string, string>
+        {
+            ["level1"] = "fn one() -> u8 using A { return 1 }",
+            ["level2"] = "data T: [u8; 2] = [5, 6]\nfn five() -> u8 using A { return 5 }",
+        };
+        var r = Compile($$"""
+            {{Header}}
+            var f: u16
+            var t: ptr u8
+            fn main() { f = addr(level2.five); t = addr(level2.T); load(1); level1.one() }
+            """, modules);
+        Assert.Equal(r.Address("level2.five"), r.U16("f"));
+        Assert.Equal(r.Address("level2.T"), r.U16("t"));
+        var other = new Dictionary<string, string>
+        {
+            ["level1"] = "import level2\nfn peek() -> u16 using AX { return addr(level2.five) }",
+            ["level2"] = "fn five() -> u8 using A { return 5 }",
+        };
+        var r2 = Compile("""
+            import level1 @ a
+            import level2 @ b
+            memory {
+                $0801..=$4FFF  program
+                $5000..=$5FFF  overlay a
+                $6000..=$6FFF  overlay b
+            }
+            var p: u16
+            fn load(n: u8 using A) @ $C000 keeps X, Y
+            fn main() { load(2); p = level1.peek() }   // level2 comes first in the list: level1 imports it
+            """, other);
+        Assert.Equal(r2.Address("level2.five"), r2.U16("p"));
+    }
+
     [Fact]
     public void An_overlay_that_does_not_fit_its_area_is_an_error_with_its_size()
     {
@@ -427,6 +541,282 @@ public class OverlayTests
         Assert.Contains("'x' at $6000 overlaps the overlay l2 at $6000", message);
     }
 
+    private static readonly IReadOnlyDictionary<string, string> Ov = new Dictionary<string, string>
+    {
+        ["ov"] = "var x: u8 = 7\nfn get() -> u8 using A { return x }\nfn put(v: u8 using A) { x = v }",
+    };
+
+    private const string OvHeader = """
+        import ov @ levels
+        memory {
+            $0801..=$5FFF  program
+            $6000..=$6FFF  overlay levels
+        }
+        fn load(n: u8 using A) @ $C000 keeps X, Y
+        """;
+
+    private static int OvAddress(string name) =>
+        With(Ov, path => Run.Program($"{OvHeader}\nfn main() {{ load(1); ov.put(ov.get()) }}", 100_000, sourcePath: path, traps: Loader).Address(name));
+
+    [Fact]
+    public void A_volatile_fixed_variable_over_an_overlay_reads_and_writes_the_overlays_memory()
+    {
+        int x = OvAddress("ov.x");
+        var r = Compile($$"""
+            {{OvHeader}}
+            volatile var hdr: u8 @ ${{x:X4}}
+            var a: u8
+            var b: u8
+            var c: u8
+            var d: u8
+            fn main() {
+                load(1)
+                a = hdr            // the overlay's initial value
+                hdr = 9
+                b = ov.get()       // the overlay sees the write
+                ov.put(33)
+                c = hdr            // and the write of the overlay is seen
+                d = ov.x
+                hdr = 12
+                d = ov.x           // read again after the write
+            }
+            """, Ov);
+        Assert.Equal(7, r.U8("a"));
+        Assert.Equal(9, r.U8("b"));
+        Assert.Equal(33, r.U8("c"));
+        Assert.Equal(12, r.U8("d"));
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("\n    $6000..=$6FFF  volatile")]   // the variable is in a volatile range too
+    public void A_write_to_a_volatile_fixed_variable_over_an_overlay_makes_the_optimizer_reload_the_overlays_variable(string extraRange)
+    {
+        int x = OvAddress("ov.x");
+        var main = $$"""
+            import ov @ levels
+            memory {
+                $0801..=$5FFF  program
+                $6000..=$6FFF  overlay levels{{extraRange}}
+            }
+            fn load(n: u8 using A) @ $C000 keeps X, Y
+            volatile var hdr: u8 @ ${{x:X4}}
+            var d: u8
+            var e: u8
+            fn main() { load(1); d = ov.get(); d = ov.x; hdr += 1; e = ov.x; ov.put(e) }
+            """;
+        var r = Compile(main, Ov);
+        Assert.Equal(8, r.U8("e"));
+        // ov.x is loaded again after the increment, not taken from the register that held the old value.
+        var lines = r.Result.Listing.Split('\n').Select(l => l.Trim()).ToList();
+        int inc = lines.FindIndex(l => l.Contains("inc hdr"));
+        Assert.True(inc >= 0);
+        Assert.Contains(lines.Skip(inc + 1).Take(2), l => l.Contains("lda ov.x"));
+    }
+
+    [Fact]
+    public void A_volatile_fixed_variable_over_the_first_byte_of_an_overlays_code_reads_the_loaded_file()
+    {
+        var r = Compile($$"""
+            {{OvHeader}}
+            volatile var first: u8 @ $6000
+            var a: u8
+            fn main() { load(1); a = first; ov.put(1) }
+            """, Ov);
+        Assert.Equal(r.Result.Overlays[0].Image[0], r.U8("a"));
+    }
+
+    [Fact]
+    public void A_fixed_variable_over_an_overlay_without_volatile_suggests_volatile_or_the_overlays_own_name()
+    {
+        var message = Message($$"""
+            {{OvHeader}}
+            var first: u8 @ $6000
+            fn main() { load(1); first = 1; ov.put(1) }
+            """, Ov);
+        Assert.Contains("'first' at $6000 overlaps the overlay ov", message);
+        Assert.Contains("volatile var first", message);
+        Assert.Contains("ov.name", message);
+    }
+
+    [Fact]
+    public void A_volatile_fixed_variable_over_the_resident_program_is_still_an_error()
+    {
+        var message = Message($$"""
+            {{OvHeader}}
+            volatile var first: u8 @ $0801
+            fn main() { first = 1; ov.put(1) }
+            """, Ov);
+        Assert.Contains("'first' at $0801 overlaps the program", message);
+    }
+
+    [Fact]
+    public void A_volatile_fixed_variable_in_an_overlay_area_no_file_covers_needs_no_overlap_check()
+    {
+        var r = Compile($$"""
+            {{OvHeader}}
+            volatile var spare: u8 @ $6800
+            var a: u8
+            fn main() { load(1); spare = 5; a = spare; ov.put(1) }
+            """, Ov);
+        Assert.Equal(5, r.U8("a"));
+    }
+
+    // ---------- Fixed data in an overlay ----------
+
+    private const string FixedHeader = """
+        import lv1 @ levels
+        import lv2 @ levels
+        memory {
+            $0801..=$5FFF  program
+            $6000..=$6FFF  overlay levels
+        }
+        fn load(n: u8 using A) @ $C000 keeps X, Y
+        """;
+
+    private static IReadOnlyDictionary<string, string> Levels(string lv1Extra = "", string lv2Extra = "") => new Dictionary<string, string>
+    {
+        ["lv1"] = "data header: [u8; 3] @ $6000 = [1, 2, 3]\nvar n: u8 = 4\nfn go() -> u8 using A { n += 1; return n + header[2] }\n" + lv1Extra,
+        ["lv2"] = "data header: [u8; 3] @ $6000 = [10, 20, 30]\ndata late: [u8; 2] @ $6010 = [7, 8]\nfn go() -> u8 using A { return late[1] + header[0] }\n" + lv2Extra,
+    };
+
+    [Fact]
+    public void Two_levels_each_with_a_header_at_the_areas_start_and_code_after_it()
+    {
+        var r = Compile($$"""
+            {{FixedHeader}}
+            volatile var h0: u8 @ $6000
+            volatile var h1: u8 @ $6001
+            volatile var h2: u8 @ $6002
+            var a: u8
+            var b: u8
+            var c: u8
+            var d: u8
+            var e: u8
+            fn main() {
+                load(1)
+                a = h0
+                b = h2
+                c = lv1.go()      // 5 + 3
+                load(2)
+                d = h1
+                e = lv2.go()      // 8 + 10
+            }
+            """, Levels());
+        Assert.Equal(1, r.U8("a"));
+        Assert.Equal(3, r.U8("b"));
+        Assert.Equal(8, r.U8("c"));
+        Assert.Equal(20, r.U8("d"));
+        Assert.Equal(18, r.U8("e"));
+        // The files start at the area's start; data is at its address and the gap before $6010 is zeros.
+        var one = r.Result.Overlays.Single(o => o.Name == "lv1");
+        var two = r.Result.Overlays.Single(o => o.Name == "lv2");
+        Assert.Equal(0x6000, one.LoadAddress);
+        Assert.Equal(0x6000, two.LoadAddress);
+        Assert.Equal(new byte[] { 1, 2, 3 }, one.Image[..3]);
+        Assert.Equal(new byte[] { 10, 20, 30 }, two.Image[..3]);
+        Assert.Equal(new byte[] { 7, 8 }, two.Image[0x10..0x12]);
+        Assert.True(r.Address("lv1.go") >= 0x6003);
+        Assert.True(r.Address("lv1.n") >= 0x6003);
+        // The code goes around the data at $6010 in lv2.
+        Assert.True(r.Address("lv2.go") is >= 0x6003 and < 0x6010 || r.Address("lv2.go") >= 0x6012);
+    }
+
+    [Fact]
+    public void Code_goes_around_fixed_data_in_the_middle_of_an_overlay()
+    {
+        var mods = new Dictionary<string, string>
+        {
+            ["lv1"] = "data mid: [u8; 4] @ $6001 = [9, 8, 7, 6]\nfn go() -> u8 using A { return mid[3] }",
+            ["lv2"] = "fn go() -> u8 using A { return 1 }",
+        };
+        var r = Compile($$"""
+            {{FixedHeader}}
+            var a: u8
+            fn main() { load(1); a = lv1.go(); load(2); lv2.go() }
+            """, mods);
+        Assert.Equal(6, r.U8("a"));
+        var one = r.Result.Overlays.Single(o => o.Name == "lv1");
+        Assert.Equal(new byte[] { 9, 8, 7, 6 }, one.Image[1..5]);
+        Assert.True(r.Address("lv1.go") is 0x6000 || r.Address("lv1.go") >= 0x6005);
+    }
+
+    [Fact]
+    public void Fixed_data_of_two_overlays_may_share_an_address()
+    {
+        // Already the case in Two_levels_...: both headers are at $6000. Here the resident program reads it as plain data.
+        var r = Compile($$"""
+            {{FixedHeader}}
+            volatile var h: u8 @ $6000
+            var a: u8
+            var b: u8
+            fn main() { load(1); a = h; lv1.go(); load(2); b = h; lv2.go() }
+            """, Levels());
+        Assert.Equal(1, r.U8("a"));
+        Assert.Equal(10, r.U8("b"));
+    }
+
+    [Fact]
+    public void Fixed_data_in_an_overlay_may_not_overlap_the_modules_other_fixed_data()
+    {
+        var message = Message($$"""
+            {{FixedHeader}}
+            fn main() { lv1.go(); lv1.use(); lv2.go() }
+            """, Levels(lv1Extra: "data clash: [u8; 2] @ $6002 = [1, 1]"+"\nfn use() -> u8 using A { return clash[0] }"));
+        Assert.Contains("overlapping addresses", message);
+    }
+
+    [Fact]
+    public void A_fixed_variable_of_the_module_may_not_overlap_its_fixed_data()
+    {
+        var message = Message($$"""
+            {{FixedHeader}}
+            fn main() { lv1.go(); lv1.use(); lv2.go() }
+            """, Levels(lv1Extra: "volatile var clash: u8 @ $6001"+"\nfn use() -> u8 using A { return clash }"));
+        Assert.Contains("'lv1.clash' at $6001 overlaps the data", message);
+    }
+
+    [Fact]
+    public void An_overlay_modules_fixed_data_outside_its_own_area_is_an_error()
+    {
+        var mods = new Dictionary<string, string> { ["lv1"] = "data d: [u8; 2] @ $7000 = [1, 2]\nfn go() -> u8 using A { return d[0] }", ["lv2"] = "fn go() { }" };
+        var message = Message($$"""
+            {{FixedHeader}}
+            fn main() { lv1.go(); lv2.go() }
+            """, mods);
+        Assert.Contains("'lv1.d' at $7000-$7001 is outside the overlay area levels ($6000-$6FFF)", message);
+
+        mods["lv1"] = "data d: [u8; 2] @ $5000 = [1, 2]\nfn go() -> u8 using A { return d[0] }";
+        message = Message($$"""
+            {{FixedHeader}}
+            fn main() { lv1.go(); lv2.go() }
+            """, mods);
+        Assert.Contains("'lv1.d' at $5000-$5001 is outside the overlay area levels", message);
+    }
+
+    [Fact]
+    public void A_resident_modules_fixed_data_in_an_overlay_area_is_an_error()
+    {
+        var mods = new Dictionary<string, string>
+        {
+            ["lv1"] = "fn go() { }", ["lv2"] = "fn go() { }",
+            ["res"] = "data d: [u8; 2] @ $6100 = [1, 2]\nfn f() -> u8 using A { return d[0] }",
+        };
+        var message = Message($$"""
+            import res
+            {{FixedHeader}}
+            fn main() { res.f(); lv1.go(); lv2.go() }
+            """, mods);
+        Assert.Contains("'res.d' at $6100-$6101 is in the overlay area levels ($6000-$6FFF), but it belongs to the resident program", message);
+        var main = Message($$"""
+            {{FixedHeader}}
+            data d: [u8; 2] @ $6100 = [1, 2]
+            var q: u8
+            fn main() { q = d[0]; lv1.go(); lv2.go() }
+            """, Levels());
+        Assert.Contains("'d' at $6100-$6101 is in the overlay area levels", main);
+    }
+
     [Fact]
     public void The_overlay_that_does_not_fit_error_is_reported_at_its_import()
     {
@@ -473,6 +863,30 @@ public class OverlayTests
     }
 
     [Fact]
+    public void A_fixed_zero_page_pointer_in_an_overlay_works_is_not_in_the_file_and_is_shared_with_the_main_program()
+    {
+        var modules = new Dictionary<string, string>
+        {
+            ["level1"] = "var p: ptr u8 @ $FB\nfn first() -> u8 using A { return p[1] }",
+            ["level2"] = "fn five() { }",
+        };
+        var r = Compile($$"""
+            {{Header}}
+            data T: [u8; 3] = [7, 8, 9]
+            var main_p: ptr u8 @ $FB
+            var a: u8
+            var b: u8
+            fn main() { load(1); main_p = addr(T); a = level1.first(); b = main_p[2] }
+            """, modules);
+        Assert.Equal(8, r.U8("a"));
+        Assert.Equal(9, r.U8("b"));
+        // Not part of the file: it holds only the code (the pointer is a name for $FB and $FC).
+        var file = r.Result.Overlays.Single(o => o.Name == "level1");
+        Assert.True(file.Image.Length < 16);
+        Assert.Equal(0xFB, r.Address("level1.p"));
+    }
+
+    [Fact]
     public void A_zero_page_variable_in_an_overlay_is_an_error_since_loading_cannot_set_it()
     {
         var modules = new Dictionary<string, string>
@@ -485,6 +899,7 @@ public class OverlayTests
             fn main() { load(1); level1.first() }
             """, modules);
         Assert.Contains("'level1.p' must be in zero page, but it belongs to the overlay level1", message);
+        Assert.Contains("name a zero-page address (var p: ptr u8 @ $FB)", message);
         Assert.Contains("local variable", message);
     }
 

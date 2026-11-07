@@ -4,11 +4,20 @@ Owned by the coding session. Updated at the end of every coding session.
 
 ## Current
 
-- **Milestone:** M13 (overlays) is done and merged to `main` (2026-11-03, `c49d88a`) after a clean re-review. The "done when" example runs in VICE with a `.d64` image (`examples/levels.tern`: level1, level2 and level1 loaded in turn into one area from drive 8; the top half shows 'A' and "4", the bottom half 'B' and "8", which shows that the second load of level1 reset its variable).
-- **Branch:** `main`. 1308 tests pass (36 CPU, 1272 compiler). `BenchmarkTests` unchanged. Review finding 5 is question 58.
-- **Next step:** the "M13 follow-up" in `docs/roadmap.md` (a `volatile` fixed-address variable may overlap an overlay's file; settled 2026-11-03), on a new branch from `main`. After that the roadmap's "Later" list (nothing is scheduled yet; the spec session orders it).
+- **Milestone:** the M13 follow-up (roadmap) is built and tested; M13 itself was merged to `main` (`c49d88a`). Ready for `/review`.
+- **Branch:** `m13-followup` (from `main`). Review findings 1-5 of `docs/reviews/m13-followup.md` are fixed (finding 3: inline functions are now checked for data and `addr()` of siblings; 4: the "does not fit" message gives the size without the fixed data and the fixed bytes separately); finding 6 is for the spec session. The re-review (finding 7: `#f.lo`/`#f.hi` in assembly takes a sibling overlay's address) is fixed with `Checker.CheckSiblingAddress`, and its two suggestions too. 1339 tests pass (36 CPU, 1303 compiler). `BenchmarkTests` unchanged.
+- **Next step:** M14, the C64 device I/O library (`docs/roadmap.md`), on a new branch from `main` once this one is merged. After that M15, M16 and so on in roadmap order.
 
 ## Done
+
+- **M13 follow-up** (2026-11-07; settled 2026-11-03/04).
+  - *`volatile` over an overlay (spec 8.5).* A `volatile` fixed-address variable may overlap an overlay's file; without it the error suggests `volatile` or the overlay's own name. Overlap with the resident program is still an error. A write to a fixed variable that lies in an overlay area (`VariableSymbol.InOverlayArea`, set in the checker) makes the optimizer forget every variable (`Optimizer.ForgetWrite`), like a write through a pointer, whatever other volatile ranges it is in. Overlap is now checked against each section of the overlay, not its whole span.
+  - *Fixed data in an overlay module (question 58).* `SectionStart` of such data carries the module; the assembler lays the module's other sections around it (first fit in the area, `Assembler`), gaps zero-filled, and the file starts at the area's start. Fixed data of two overlays may share an address. Errors (`CheckFixedData`): outside the module's own area; a resident module's or the main file's fixed data in an overlay area; overlap with the module's other fixed data (assembler) or fixed variables (`CheckFixedAddresses`). Unused data is dropped, so the checks apply only to data that is used.
+  - *Sibling uses (question 56).* `addr()` of a function of another overlay in the same area is an error (`TakeFunctionAddress`); using fixed data of a sibling too. Resident code and overlays in other areas may still take these addresses.
+  - *Zero page (question 55).* A fixed zero-page variable (`var p: ptr u8 @ $FB`) already worked in an overlay (not in the file, shared with the main program); tested. The `@ zp` error suggests it.
+  - *Long byte buffers (spec 3.2).* `var x: [u8; n]` / `[i8; n]` with `n` above 256 for a global var (`_allowLongBytes` in `Checker`); other element types, locals, struct fields and a var with an initial value are errors; indexing was already an error that suggests `addr(x)`. `LongBufferTests`.
+  - *`const` before the `memory` block (spec 8.4).* `Parser`: after the imports, `const` lines may precede the block; the other-declaration-before-the-block error keeps its test with the new message.
+  - *Tests:* 26 new in `OverlayTests`, `MemoryTests` and `LongBufferTests`. The optimizer test (`hdr += 1` leaves A alone, then `ov.x` must be loaded again) checks the listing and the result, with and without a `volatile` range over the area.
 
 - **M13, overlays** (2026-11-03).
   - **Follow-ups** (roadmap, settled 2026-11-02/03):
@@ -259,13 +268,9 @@ Not bugs; things to improve, mostly in M7 (optimizer).
 44. **Spec 10.1 tables for M10.** The roadmap asks for the signatures as built in spec 10.1; the coding session cannot edit the spec. They are listed in the M10 entry under "Done". Please copy them in (including `text.dec8z`/`dec16z`, `bcd.text`, `random.below`).
 45. **Part and handler in one function.** Spec 6.3 says "each `interrupt fn` is compiled in the forms that are used" (as a handler if its address is taken, as a part if it is called). Provisional: one form per function; using both is an error ("is called by another interrupt fn ... and its address is also used"). Two copies would need two labels and two frame views for one body. Say if it is wanted.
 
-55. **Variables of overlays in zero page.** Spec 8.5 says overlays in one area share their variables' memory "(in the area, and in zero page)". Loading a file cannot set zero page, and startup never touches an overlay's variables, so a zero-page global of an overlay would start as garbage. Provisional: the compiler never puts an overlay's globals in zero page (not even as a best-effort choice), and a global that must be there (`@ zp`, a dereferenced pointer) is an error that suggests a local variable. Locals and parameters of overlay functions are in the usual shared frames, zero page included. Is that enough, or should an overlay be able to declare zero-page variables that its entry code initializes?
-56. **Other uses between overlays of one area.** Spec 8.5 only forbids calls. Provisional: using another overlay's global variable in the same area is an error too (they share memory, so the value is never there); taking `addr(f)` of a function in another overlay of the same area is not checked (the call through the address is invisible to the compiler, as in 6.5). Interrupt handlers in an overlay module are allowed; installing one is the program's responsibility.
-57. **File names and what `c64.load` takes.** Provisional: the file is named after the module (`level1.prg`); the program decides the name on the disk and passes it to `c64.load` as a PETSCII string (`data NAME = "LEVEL1"`, `addr(NAME)`, `len(NAME)`). The signature is `load(name: ptr u8, n: u8, device: u8) -> bool`; the logical file number is 1 and the secondary address 1. No drive-side error check beyond the carry (the error channel is not read).
 
-58. **`data x @ $addr` in an overlay module.** Spec 8.5 says an overlay file holds the module's `data`, and 8.4 says fixed data goes in a program or reserved area. Provisional: `data` with a fixed address inside an overlay area is an error ("not in a program or reserved area"), and fixed data elsewhere goes into the main program file, not the overlay's. Should fixed data lying inside the module's own area go into the module's file?
 
-Questions 1-37 are settled (decisions.md, 2026-11-01 and 2026-11-02). Questions 46-54 are settled (decisions.md, 2026-11-03); 48, 49 and 51 were built in M13, the rest in M11 and M12. 
+Questions 1-37 are settled (decisions.md, 2026-11-01 and 2026-11-02). Questions 55-58 are settled (decisions.md, 2026-11-03) and built in the M13 follow-up. Questions 46-54 are settled (decisions.md, 2026-11-03); 48, 49 and 51 were built in M13, the rest in M11 and M12. 
 
 Questions 38-43 (from the M8 comparison and M9) are settled (decisions.md, 2026-11-02) and implemented in M9.
 

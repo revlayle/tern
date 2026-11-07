@@ -92,7 +92,12 @@ public sealed partial class Checker
         }
 
         foreach (var g in _globals)
-            if (g.FixedAddress is int fixedAt && _layout.IsVolatile(fixedAt, fixedAt + g.Type.Size - 1)) g.InVolatileArea = true;
+        {
+            if (g.FixedAddress is not int fixedAt) continue;
+            var span = new AddressRange(fixedAt, fixedAt + g.Type.Size - 1);
+            if (_layout.IsVolatile(fixedAt, span.Last)) g.InVolatileArea = true;
+            if (_layout.Overlays.Values.Any(a => a.Overlaps(span))) g.InOverlayArea = true;
+        }
 
         var mainModule = modules[^1];
         var exports = new List<FunctionSymbol>();
@@ -270,7 +275,7 @@ public sealed partial class Checker
     {
         if (v.Kind != VariableKind.Global || _function is null) return;
         // Overlays in one area share their memory: another one's variables are not there while this one runs.
-        if (_function.OverlayArea is { } area && v.OverlayArea == area && v.Module != _function.Module && v.FixedAddress is null && v.Region is null)
+        if (_function.OverlayArea is { } area && v.OverlayArea == area && v.Module != _function.Module && (v.FixedAddress is null || v.IsData) && v.Region is null)
             throw new CompileError(pos,
                 $"'{v.Name}' belongs to {v.Module!.Name}, which is in the same overlay area '{area}' as {_function.Module!.Name}. They are never loaded together and share their memory. " +
                 "Keep shared state in a resident module or the main file");
@@ -547,11 +552,20 @@ public sealed partial class Checker
         if (!ok) throw new CompileError(pos, $"A {type} value cannot be passed using {reg}");
     }
 
+    /// <summary>Set while a global's type is resolved: a byte array there may be longer than 256 (spec 3.2).</summary>
+    private bool _allowLongBytes;
+
     private void DeclareGlobal(VarDecl decl)
     {
         // A string or include_bytes() gives a [u8; N] array, which may be longer than 256 bytes.
         var bytes = decl.Init is null ? null : ByteSource(decl.Init);
-        var type = bytes is not null && decl.TypeSyntax is null ? TernType.ArrayOf(TernType.U8, bytes.Length) : DeclaredType(decl);
+        _allowLongBytes = !decl.IsLinear;
+        TernType type;
+        try { type = bytes is not null && decl.TypeSyntax is null ? TernType.ArrayOf(TernType.U8, bytes.Length) : DeclaredType(decl); }
+        finally { _allowLongBytes = false; }
+        if (!decl.IsData && decl.TypeSyntax is not null && decl.Init is not null && type.IsArray && type.Length > 256)
+            throw new CompileError(decl.Init.Pos,
+                $"'{decl.Name}' is a long byte array ({type.Length} bytes), which is zeroed at startup and has no initial value. Fill it at run time, or declare it with 'data'");
         var v = new VariableSymbol(_module.Qualify(decl.Name), decl.Pos, type, VariableKind.Global, null)
         {
             IsData = decl.IsData, NoInit = decl.IsNoinit, DeclaredVolatile = decl.IsVolatile,
@@ -785,8 +799,10 @@ public sealed partial class Checker
                 CheckExpr(a.Length);
                 if (a.Length.ConstValue is not long len)
                     throw new CompileError(a.Length.Pos, "Array length must be known at compile time");
-                if (len < 1 || len > 256)
-                    throw new CompileError(a.Length.Pos, $"Array length must be 1 to 256, not {len}");
+                if (len < 1 || len > 256 && !(_allowLongBytes && element.Size == 1 && element.IsInteger))
+                    throw new CompileError(a.Length.Pos, len > 256
+                        ? $"An array of {element} has at most 256 elements. Only a global var or data of u8 or i8 may be longer (spec 3.2), and it is used through a pointer"
+                        : $"Array length must be 1 to 256, not {len}");
                 return TernType.ArrayOf(element, (int)len);
             default:
                 throw new InvalidOperationException();
@@ -1517,6 +1533,15 @@ public sealed partial class Checker
     }
 
     /// <summary><c>addr(f)</c>: a <c>u16</c> known when the program is placed (spec 6.5).</summary>
+    /// <summary>An overlay may not take the address of a function of another overlay in its area (spec 8.5).</summary>
+    private void CheckSiblingAddress(FunctionSymbol f, SourcePos pos)
+    {
+        if (_function?.OverlayArea is { } area && f.OverlayArea == area && f.Module != _function.Module)
+            throw new CompileError(pos,
+                $"addr({f.Name}) is in {f.Module!.Name}, which is in the same overlay area '{area}' as {_function.Module!.Name}. They are never loaded together, so the address would point at the wrong code. " +
+                "Take the address in resident code, or put one of them in another area");
+    }
+
     private void TakeFunctionAddress(CallExpr c, FunctionSymbol f, SourcePos pos)
     {
         if (f.IsInline)
@@ -1525,6 +1550,7 @@ public sealed partial class Checker
             throw new CompileError(pos,
                 $"'{f.Name}' takes '{memoryParam.Name}' in memory, which a call through an address cannot set. " +
                 $"Pass it in a register ({memoryParam.Name}: {memoryParam.Type} using A)");
+        CheckSiblingAddress(f, pos);
         if (!_dead) f.AddressTaken = true;
         c.FunctionAddress = f;
         c.Type = TernType.U16;
@@ -1662,10 +1688,14 @@ public sealed partial class Checker
             void Visit(FunctionSymbol inline)
             {
                 if (!seen.Add(inline)) return;
-                foreach (var g in inline.UsedGlobals.Where(g => g.OverlayArea == area && g.Module != caller.Module && g.FixedAddress is null && g.Region is null))
+                foreach (var g in inline.UsedGlobals.Where(g => g.OverlayArea == area && g.Module != caller.Module && (g.FixedAddress is null || g.IsData) && g.Region is null))
                     throw new CompileError(pos,
-                        $"'{caller.Name}' calls the inline function '{callee.Name}', which is copied into it and uses '{g.Name}', a variable of {g.Module!.Name}. " +
+                        $"'{caller.Name}' calls the inline function '{callee.Name}', which is copied into it and uses '{g.Name}', {(g.IsData ? "data" : "a variable")} of {g.Module!.Name}. " +
                         $"{caller.Module!.Name} and {g.Module.Name} are both in the overlay area '{area}', never loaded together, and share their memory. Keep shared state in a resident module or the main file");
+                foreach (var f in inline.UsedAddresses.Where(f => f.OverlayArea == area && f.Module != caller.Module))
+                    throw new CompileError(pos,
+                        $"'{caller.Name}' calls the inline function '{callee.Name}', which is copied into it and takes addr({f.Name}). " +
+                        $"{caller.Module!.Name} and {f.Module!.Name} are both in the overlay area '{area}', never loaded together, so the address would point at the wrong code. Take the address in resident code");
                 foreach (var next in inline.Callees)
                     if (next.IsInline) Visit(next);
                     else if (next.OverlayArea == area && next.Module != caller.Module)
