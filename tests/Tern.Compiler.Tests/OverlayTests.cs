@@ -774,6 +774,30 @@ public class OverlayTests
     }
 
     [Fact]
+    public void A_fixed_zero_page_pointer_in_an_overlay_works_is_not_in_the_file_and_is_shared_with_the_main_program()
+    {
+        var modules = new Dictionary<string, string>
+        {
+            ["level1"] = "var p: ptr u8 @ $FB\nfn first() -> u8 using A { return p[1] }",
+            ["level2"] = "fn five() { }",
+        };
+        var r = Compile($$"""
+            {{Header}}
+            data T: [u8; 3] = [7, 8, 9]
+            var main_p: ptr u8 @ $FB
+            var a: u8
+            var b: u8
+            fn main() { load(1); main_p = addr(T); a = level1.first(); b = main_p[2] }
+            """, modules);
+        Assert.Equal(8, r.U8("a"));
+        Assert.Equal(9, r.U8("b"));
+        // Not part of the file: it holds only the code (the pointer is a name for $FB and $FC).
+        var file = r.Result.Overlays.Single(o => o.Name == "level1");
+        Assert.True(file.Image.Length < 16);
+        Assert.Equal(0xFB, r.Address("level1.p"));
+    }
+
+    [Fact]
     public void A_zero_page_variable_in_an_overlay_is_an_error_since_loading_cannot_set_it()
     {
         var modules = new Dictionary<string, string>
@@ -786,6 +810,7 @@ public class OverlayTests
             fn main() { load(1); level1.first() }
             """, modules);
         Assert.Contains("'level1.p' must be in zero page, but it belongs to the overlay level1", message);
+        Assert.Contains("name a zero-page address (var p: ptr u8 @ $FB)", message);
         Assert.Contains("local variable", message);
     }
 

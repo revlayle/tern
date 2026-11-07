@@ -55,7 +55,7 @@ public static class Allocator
             if (g.RequireZeroPage || g.ForcedZeroPage)
                 throw new CompileError(g.Pos,
                     $"'{g.Name}' must be in zero page, but it belongs to the overlay {g.Module!.Name}, whose variables are set by loading its file, and zero page is not part of the file. " +
-                    "Use a local variable in the function that needs it, or move the variable to the main file");
+                    "Use a local variable in the function that needs it, name a zero-page address (var p: ptr u8 @ $FB), or move the variable to the main file");
 
         var placeable = program.Globals.Where(g => g.FixedAddress is null && g.Region is null && !g.IsOverlayImage)
             .Concat(functions.SelectMany(f => f.FrameVariables))
