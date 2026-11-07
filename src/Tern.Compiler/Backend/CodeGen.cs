@@ -1472,6 +1472,23 @@ public sealed class CodeGen
         var type = left.Type.Size >= right.Type.Size ? left.Type : right.Type;
         bool signed = type.IsSigned;
 
+        // A one-byte value against a constant keeps the value in A: c < x is x > c, and x > c is
+        // x >= c + 1 (cmp #c+1), x <= c is x < c + 1. Not when c + 1 does not fit (x > 255).
+        if (type.Size == 1 && left.ConstValue is not null && right.ConstValue is null)
+        {
+            (left, right) = (right, left);
+            op = op switch
+            {
+                TokenKind.Less => TokenKind.Greater, TokenKind.Greater => TokenKind.Less,
+                TokenKind.LessEq => TokenKind.GreaterEq, TokenKind.GreaterEq => TokenKind.LessEq, _ => op,
+            };
+        }
+        if (type.Size == 1 && op is TokenKind.Greater or TokenKind.LessEq && right.ConstValue is long c && c < type.MaxValue)
+        {
+            right = new NumberExpr(right.Pos, c + 1) { Type = right.Type, ConstValue = c + 1 };
+            op = op == TokenKind.Greater ? TokenKind.GreaterEq : TokenKind.Less;
+        }
+
         // Only ==, !=, < and >= remain: a > b is b < a, and a <= b is b >= a.
         if (op is TokenKind.Greater or TokenKind.LessEq)
         {
