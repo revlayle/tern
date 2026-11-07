@@ -424,7 +424,7 @@ public class OptimizerTests
             }
             """);
         Assert.Equal(33, r.U8("b", 2));
-        Assert.Equal(1, Main(r).Split("ldx main.i").Length - 1);
+        Assert.Equal(1, Main(r).Split(" / ").Count(s => s.StartsWith("ldx") || s == "tax"));   // X is loaded once
     }
 
     [Theory]

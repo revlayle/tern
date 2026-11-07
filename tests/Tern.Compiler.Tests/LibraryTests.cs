@@ -137,7 +137,7 @@ public class TextLibraryTests
         lock (Text)
             foreach (int v in values.Concat(Enumerable.Range(0, 1772).Select(i => i * 37)))
                 cycles.Add(Digits("dec16", v, v.ToString(), returnsCount: true));
-        Assert.Equal((297, 1641), Range(cycles));
+        Assert.Equal((293, 1637), Range(cycles));
     }
 
     [Fact]

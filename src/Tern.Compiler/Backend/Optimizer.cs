@@ -302,6 +302,18 @@ public static class Optimizer
         if (m is Plp or Rti) s.Flags = null;
     }
 
+    /// <summary>
+    /// The state where Z is set: the register N and Z were set from is 0 (after <c>iny / bne loop</c>
+    /// falls through, Y is 0).
+    /// </summary>
+    private static State IsZero(State s)
+    {
+        if (s.Flags is not Reg f) return s;
+        var z = s.Copy();
+        z.Regs[(int)f].Add(new Imm(0));
+        return z;
+    }
+
     /// <summary>The state before each item, from the start of the function and every jump into a label.</summary>
     private static State?[] Analyse(List<AsmItem> code, FunctionSymbol function)
     {
@@ -331,7 +343,8 @@ public static class Optimizer
             if (code[k] is Instr i)
             {
                 Step(s, i, function, selfModifying);
-                if (Target(i) is { } t && positions.TryGetValue(t, out int tp)) Join(tp, s);
+                if (Target(i) is { } t && positions.TryGetValue(t, out int tp)) Join(tp, i.Mnemonic == Beq ? IsZero(s) : s);
+                if (i.Mnemonic == Bne) s = IsZero(s);
             }
             if (FallsThrough(code[k])) Join(k + 1, s);
         }
@@ -396,7 +409,7 @@ public static class Optimizer
         var positions = Positions(code);
         var before = Analyse(code, function);
         var kept = new List<AsmItem>(code.Count);
-        bool flagsChanged = false;
+        bool flagsChanged = false, replaced = false;
         for (int k = 0; k < code.Count; k++)
         {
             if (code[k] is not Instr i || FromAsm(i) || before[k] is not { } s)
@@ -414,12 +427,40 @@ public static class Optimizer
             else if (Transfer(i.Mnemonic) is var (from, to))
                 redundant = s.Regs[(int)from].Overlaps(s.Regs[(int)to]) && FlagsMatch(s.Regs[(int)from]);
             if (redundant) flagsChanged |= setsFlags;
+            else if (Shorter(i, s) is { } shorter) { kept.Add(shorter); replaced = true; }
             else kept.Add(i);
         }
-        if (kept.Count == code.Count) return false;
+        if (kept.Count == code.Count && !replaced) return false;
         code.Clear();
         code.AddRange(kept);
         return true;
+    }
+
+    /// <summary>
+    /// A one-byte instruction that loads the same value and sets N and Z the same way, or null:
+    /// <c>lda v</c> as <c>txa</c> when X holds v (also <c>tya</c>, <c>tax</c>, <c>tay</c>), and
+    /// <c>ldy #c</c> as <c>iny</c> when Y holds c - 1 (<c>dey</c> for c + 1; also X).
+    /// </summary>
+    private static Instr? Shorter(Instr i, State s)
+    {
+        if (Loaded(i.Mnemonic) is not Reg load || !Trackable(i)) return null;
+        var op = i.Operand!;
+        Mnemonic? transfer = load switch
+        {
+            Reg.A when s.Regs[(int)Reg.X].Contains(op) => Txa,
+            Reg.A when s.Regs[(int)Reg.Y].Contains(op) => Tya,
+            Reg.X when s.Regs[(int)Reg.A].Contains(op) => Tax,
+            Reg.Y when s.Regs[(int)Reg.A].Contains(op) => Tay,
+            _ => null,
+        };
+        if (transfer is { } t) return new Instr(t);
+        if (load != Reg.A && op is Imm { Value: var c })
+        {
+            var held = s.Regs[(int)load];
+            if (held.Contains(new Imm((c - 1) & 0xFF))) return new Instr(load == Reg.X ? Inx : Iny);
+            if (held.Contains(new Imm((c + 1) & 0xFF))) return new Instr(load == Reg.X ? Dex : Dey);
+        }
+        return null;
     }
 
     // ---------- Bit test and shift ----------
