@@ -390,6 +390,41 @@ public class OverlayTests
     }
 
     [Fact]
+    public void Taking_the_address_of_a_sibling_overlays_function_in_assembly_is_an_error()
+    {
+        foreach (var part in new[] { "lo", "hi" })
+        {
+            var message = Message($$"""
+                {{Header}}
+                fn main() { load(1); level1.go() }
+                """, new Dictionary<string, string>
+                {
+                    ["level1"] = "import level2\nfn go() -> u8 using A { asm { lda #level2.five." + part + " } return 1 }",
+                    ["level2"] = "fn five() -> u8 using A { return 5 }",
+                });
+            Assert.Contains("addr(level2.five) is in level2, which is in the same overlay area 'levels'", message);
+        }
+    }
+
+    [Fact]
+    public void The_overlay_size_error_gives_the_fixed_data_separately()
+    {
+        var message = Message("""
+            import lv @ levels
+            memory {
+                $0801..=$5FFF  program
+                $6000..=$600F  overlay levels
+            }
+            fn main() { lv.go() }
+            """, new Dictionary<string, string>
+            {
+                ["lv"] = "data hdr: [u8; 4] @ $6008 = [1, 2, 3, 4]\nvar buf: [u8; 12]\nfn go() -> u8 using A { return hdr[0] + buf[1] }",
+            });
+        Assert.Contains("needs ", message);
+        Assert.Contains("bytes of code, data and variables, plus 4 bytes of fixed data", message);
+    }
+
+    [Fact]
     public void Resident_code_may_take_addresses_in_any_overlay_and_so_may_an_overlay_in_another_area()
     {
         var modules = new Dictionary<string, string>

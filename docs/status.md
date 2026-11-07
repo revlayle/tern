@@ -5,7 +5,7 @@ Owned by the coding session. Updated at the end of every coding session.
 ## Current
 
 - **Milestone:** the M13 follow-up (roadmap) is built and tested; M13 itself was merged to `main` (`c49d88a`). Ready for `/review`.
-- **Branch:** `m13-followup` (from `main`). Review findings 1-5 of `docs/reviews/m13-followup.md` are fixed (finding 3: inline functions are now checked for data and `addr()` of siblings; 4: the "does not fit" message gives the size without the fixed data and the fixed bytes separately); finding 6 is for the spec session. 1337 tests pass (36 CPU, 1301 compiler). `BenchmarkTests` unchanged.
+- **Branch:** `m13-followup` (from `main`). Review findings 1-5 of `docs/reviews/m13-followup.md` are fixed (finding 3: inline functions are now checked for data and `addr()` of siblings; 4: the "does not fit" message gives the size without the fixed data and the fixed bytes separately); finding 6 is for the spec session. The re-review (finding 7: `#f.lo`/`#f.hi` in assembly takes a sibling overlay's address) is fixed with `Checker.CheckSiblingAddress`, and its two suggestions too. 1339 tests pass (36 CPU, 1303 compiler). `BenchmarkTests` unchanged.
 - **Next step:** M14, the C64 device I/O library (`docs/roadmap.md`), on a new branch from `main` once this one is merged. After that M15, M16 and so on in roadmap order.
 
 ## Done

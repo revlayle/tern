@@ -247,6 +247,7 @@ public sealed partial class Checker
         {
             // #f.lo / #f.hi takes the function's address, as addr(f) does (spec 6.5). Assembly may
             // take it even with memory parameters: it can set them itself before calling.
+            CheckSiblingAddress(named, ins.Operand!.Pos);
             if (!_dead)
             {
                 named.AddressTaken = true;

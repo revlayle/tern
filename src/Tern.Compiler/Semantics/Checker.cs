@@ -1533,6 +1533,15 @@ public sealed partial class Checker
     }
 
     /// <summary><c>addr(f)</c>: a <c>u16</c> known when the program is placed (spec 6.5).</summary>
+    /// <summary>An overlay may not take the address of a function of another overlay in its area (spec 8.5).</summary>
+    private void CheckSiblingAddress(FunctionSymbol f, SourcePos pos)
+    {
+        if (_function?.OverlayArea is { } area && f.OverlayArea == area && f.Module != _function.Module)
+            throw new CompileError(pos,
+                $"addr({f.Name}) is in {f.Module!.Name}, which is in the same overlay area '{area}' as {_function.Module!.Name}. They are never loaded together, so the address would point at the wrong code. " +
+                "Take the address in resident code, or put one of them in another area");
+    }
+
     private void TakeFunctionAddress(CallExpr c, FunctionSymbol f, SourcePos pos)
     {
         if (f.IsInline)
@@ -1541,10 +1550,7 @@ public sealed partial class Checker
             throw new CompileError(pos,
                 $"'{f.Name}' takes '{memoryParam.Name}' in memory, which a call through an address cannot set. " +
                 $"Pass it in a register ({memoryParam.Name}: {memoryParam.Type} using A)");
-        if (_function?.OverlayArea is { } area && f.OverlayArea == area && f.Module != _function.Module)
-            throw new CompileError(pos,
-                $"addr({f.Name}) is in {f.Module!.Name}, which is in the same overlay area '{area}' as {_function.Module!.Name}. They are never loaded together, so the address would point at the wrong code. " +
-                "Take the address in resident code, or put one of them in another area");
+        CheckSiblingAddress(f, pos);
         if (!_dead) f.AddressTaken = true;
         c.FunctionAddress = f;
         c.Type = TernType.U16;
@@ -1684,7 +1690,7 @@ public sealed partial class Checker
                 if (!seen.Add(inline)) return;
                 foreach (var g in inline.UsedGlobals.Where(g => g.OverlayArea == area && g.Module != caller.Module && (g.FixedAddress is null || g.IsData) && g.Region is null))
                     throw new CompileError(pos,
-                        $"'{caller.Name}' calls the inline function '{callee.Name}', which is copied into it and uses '{g.Name}', a variable of {g.Module!.Name}. " +
+                        $"'{caller.Name}' calls the inline function '{callee.Name}', which is copied into it and uses '{g.Name}', {(g.IsData ? "data" : "a variable")} of {g.Module!.Name}. " +
                         $"{caller.Module!.Name} and {g.Module.Name} are both in the overlay area '{area}', never loaded together, and share their memory. Keep shared state in a resident module or the main file");
                 foreach (var f in inline.UsedAddresses.Where(f => f.OverlayArea == area && f.Module != caller.Module))
                     throw new CompileError(pos,
