@@ -427,6 +427,100 @@ public class OverlayTests
         Assert.Contains("'x' at $6000 overlaps the overlay l2 at $6000", message);
     }
 
+    private static readonly IReadOnlyDictionary<string, string> Ov = new Dictionary<string, string>
+    {
+        ["ov"] = "var x: u8 = 7\nfn get() -> u8 using A { return x }\nfn put(v: u8 using A) { x = v }",
+    };
+
+    private const string OvHeader = """
+        import ov @ levels
+        memory {
+            $0801..=$5FFF  program
+            $6000..=$6FFF  overlay levels
+        }
+        fn load(n: u8 using A) @ $C000 keeps X, Y
+        """;
+
+    private static int OvAddress(string name) =>
+        With(Ov, path => Run.Program($"{OvHeader}\nfn main() {{ load(1); ov.put(ov.get()) }}", 100_000, sourcePath: path, traps: Loader).Address(name));
+
+    [Fact]
+    public void A_volatile_fixed_variable_over_an_overlay_reads_and_writes_the_overlays_memory()
+    {
+        int x = OvAddress("ov.x");
+        var r = Compile($$"""
+            {{OvHeader}}
+            volatile var hdr: u8 @ ${{x:X4}}
+            var a: u8
+            var b: u8
+            var c: u8
+            var d: u8
+            fn main() {
+                load(1)
+                a = hdr            // the overlay's initial value
+                hdr = 9
+                b = ov.get()       // the overlay sees the write
+                ov.put(33)
+                c = hdr            // and the write of the overlay is seen
+                d = ov.x
+                hdr = 12
+                d = ov.x           // read again after the write
+            }
+            """, Ov);
+        Assert.Equal(7, r.U8("a"));
+        Assert.Equal(9, r.U8("b"));
+        Assert.Equal(33, r.U8("c"));
+        Assert.Equal(12, r.U8("d"));
+    }
+
+    [Fact]
+    public void A_volatile_fixed_variable_over_the_first_byte_of_an_overlays_code_reads_the_loaded_file()
+    {
+        var r = Compile($$"""
+            {{OvHeader}}
+            volatile var first: u8 @ $6000
+            var a: u8
+            fn main() { load(1); a = first; ov.put(1) }
+            """, Ov);
+        Assert.Equal(r.Result.Overlays[0].Image[0], r.U8("a"));
+    }
+
+    [Fact]
+    public void A_fixed_variable_over_an_overlay_without_volatile_suggests_volatile_or_the_overlays_own_name()
+    {
+        var message = Message($$"""
+            {{OvHeader}}
+            var first: u8 @ $6000
+            fn main() { load(1); first = 1; ov.put(1) }
+            """, Ov);
+        Assert.Contains("'first' at $6000 overlaps the overlay ov", message);
+        Assert.Contains("volatile var first", message);
+        Assert.Contains("ov.name", message);
+    }
+
+    [Fact]
+    public void A_volatile_fixed_variable_over_the_resident_program_is_still_an_error()
+    {
+        var message = Message($$"""
+            {{OvHeader}}
+            volatile var first: u8 @ $0801
+            fn main() { first = 1; ov.put(1) }
+            """, Ov);
+        Assert.Contains("'first' at $0801 overlaps the program", message);
+    }
+
+    [Fact]
+    public void A_volatile_fixed_variable_in_an_overlay_area_no_file_covers_needs_no_overlap_check()
+    {
+        var r = Compile($$"""
+            {{OvHeader}}
+            volatile var spare: u8 @ $6800
+            var a: u8
+            fn main() { load(1); spare = 5; a = spare; ov.put(1) }
+            """, Ov);
+        Assert.Equal(5, r.U8("a"));
+    }
+
     [Fact]
     public void The_overlay_that_does_not_fit_error_is_reported_at_its_import()
     {

@@ -194,6 +194,12 @@ public static class Optimizer
     {
         bool callee = written.Owner is { } o && o != function;
         bool fixedAt = written.FixedAddress is not null;
+        if (fixedAt && written.Storage.DeclaredVolatile && !written.Storage.InVolatileArea)
+        {
+            // RAM that something else shares, e.g. an overlay's file (spec 8.5): like a write through a pointer.
+            s.Forget(op => op is VarOperand);
+            return;
+        }
         s.Forget(op => op is VarOperand { Variable: var v } && (v == written
             || (callee && v.Owner is { } vo && vo != function)
             || (fixedAt && v.FixedAddress is not null)));

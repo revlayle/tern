@@ -318,9 +318,10 @@ public static class TernCompiler
             foreach (var module in code.Sections.Where(s => s.Overlay is not null && s.Size > 0).GroupBy(s => s.Overlay!))
             {
                 var file = new AddressRange(module.Min(s => s.Address), module.Max(s => s.Address + s.Size - 1));
-                if (range.Overlaps(file))
+                if (range.Overlaps(file) && !g.DeclaredVolatile)
                     throw new CompileError(g.Pos,
-                        $"'{g.Name}' at {range} overlaps the overlay {module.Key} at {file}, which is loaded there. Move '{g.Name}' out of the overlay's area");
+                        $"'{g.Name}' at {range} overlaps the overlay {module.Key} at {file}, which is loaded there. " +
+                        $"If the overlap is intended, declare it 'volatile var {g.Name}'; otherwise name the overlay's own variable ({module.Key}.name) or move '{g.Name}' out of the overlay's area");
             }
             foreach (var (regionName, use) in plan.RegionUse)
                 if (range.Overlaps(use))
