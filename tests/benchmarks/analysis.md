@@ -344,3 +344,5 @@ Each fix as built, against the estimate above. Measured on `BenchmarkTests` (`ba
 | F10 register transfers, `iny` | A known from X 6 / 1, `ldy #c` 0 / 3, Y known 0 2 / 2 | 22 / 6 | `sieve` 22 / 2 (`ldx n` as `tax` after the loop test, `lda n` as `txa`), `copy` 0 / 4 (`iny` for `ldy #2`, `#3`). `copy`'s `ldy #0` after the pages loop stays: the `while` can be skipped on entry, so Y is not known there (it would need F9) |
 | F10 negation | 32 / 4 | 32 / 4 | `enemies` |
 | F10 `cmp #0` | 28 / 4 | 28 / 4 | `fib16` (`while b != 0`, 16-bit) |
+| F10 carry known clear | 128 / 4 | 128 / 4 | `enemies` init: `(i << 3) + i + 10` with `i < 16` |
+| F10 a field as a bound | 6 / 4 | 6 / 4 | `copy`: `for i in 0..n.lo` is `cpy n` |

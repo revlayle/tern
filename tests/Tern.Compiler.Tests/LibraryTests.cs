@@ -79,7 +79,7 @@ public class MemLibraryTests
             Mem.Set16("mem.copy.count", 1000);
             long copy = Mem.Call("mem.copy");
             // About 15 cycles per byte for fill and 17 for copy (13 and 16 inside whole pages).
-            Assert.Equal((14795, 16810), (fill, copy));
+            Assert.Equal((14783, 16798), (fill, copy));
         }
     }
 }

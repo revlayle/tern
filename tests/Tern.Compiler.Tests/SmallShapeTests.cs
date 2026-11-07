@@ -208,4 +208,64 @@ public class SmallShapeTests
         Assert.DoesNotContain("cmp #$00", Code(r));
         Assert.Contains("cmp #$01", Code(r));
     }
+
+    [Fact]
+    public void No_clc_when_the_carry_is_known_clear()
+    {
+        var r = Run.Program("""
+            var a: [u8; 32]
+            var b: [u8; 32]
+            var c: [u8; 32]
+            fn main() {
+                for i in 0..16 {
+                    a[i] = (i << 3) + i + 10      // i <= 15: no carry out of either shift or the first add
+                    b[i] = (i << 4) + i + 250     // 240 + 15 = 255: still no carry before the last add
+                }
+                for i in 0..17 { c[i] = (i << 4) + 1 }   // 16 << 4 carries: clc stays
+            }
+            """);
+        for (int i = 0; i < 16; i++)
+        {
+            Assert.Equal((byte)((i << 3) + i + 10), r.U8("a", i));
+            Assert.Equal((byte)((i << 4) + i + 250), r.U8("b", i));
+        }
+        for (int i = 0; i < 17; i++) Assert.Equal((byte)((i << 4) + 1), r.U8("c", i));
+        Assert.Equal(1, Code(r).Split('|').Count(s => s == "clc"));
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(127)]
+    [InlineData(254)]
+    public void A_counter_with_a_variable_end_keeps_its_clc(int last)
+    {
+        var r = Run.Program($$"""
+            var a: [u8; 256]
+            var n: u8 = {{last + 1}}
+            fn main() {
+                for i in 0..n { a[i] = (i << 1) + 1 }
+            }
+            """);
+        Assert.Equal((byte)((last << 1) + 1), r.U8("a", last));
+        Assert.Contains("clc", Code(r));
+    }
+
+    [Theory]
+    [InlineData(0x0100)]
+    [InlineData(0x0005)]
+    [InlineData(0x01FF)]
+    public void A_byte_of_a_parameter_is_a_loop_bound_in_place(int n)
+    {
+        var r = Run.Program($$"""
+            var buf: [u8; 256]
+            fn fill(n: u16) {
+                var p: ptr u8 = addr(buf)
+                for i in 0..n.lo using Y { p[i] = 1 }
+            }
+            fn main() { fill({{n}}) }
+            """);
+        for (int k = 0; k < 256; k++) Assert.Equal(k < (n & 0xFF) ? 1 : 0, r.U8("buf", k));
+        Assert.Contains("cpy fill.n|", Code(r, "fill"));
+        Assert.DoesNotContain("_t0", Code(r, "fill"));
+    }
 }

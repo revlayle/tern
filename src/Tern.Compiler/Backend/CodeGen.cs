@@ -1201,6 +1201,43 @@ public sealed class CodeGen
         else if (op == TokenKind.Minus) Emit(Sec);
     }
 
+    /// <summary>As <see cref="CarryFor(TokenKind)"/>, with no <c>clc</c> when the code for <paramref name="last"/>, just generated, left the carry clear.</summary>
+    private void CarryFor(TokenKind op, Expr last)
+    {
+        if (op == TokenKind.Plus && CarryClearAfter(last)) return;
+        CarryFor(op);
+    }
+
+    /// <summary>
+    /// The largest value of an unsigned one-byte expression, from constants and the enclosing
+    /// <c>for</c> counters' bounds (as for <see cref="FoldIndexOffset"/>); 255 when nothing is known.
+    /// </summary>
+    private long MaxOf(Expr e)
+    {
+        if (e.ConstValue is long c) return c & 0xFF;
+        if (e.Type is not { Size: 1, IsSigned: false }) return 255;
+        return e switch
+        {
+            NameExpr { Symbol: VariableSymbol v } when _counterMax.TryGetValue(v, out long m) => m,
+            BinaryExpr { Op: TokenKind.Shl, Right.ConstValue: long k } b => Math.Min(255, MaxOf(b.Left) << (int)k),
+            BinaryExpr { Op: TokenKind.Shr, Right.ConstValue: long k } b => MaxOf(b.Left) >> (int)k,
+            BinaryExpr { Op: TokenKind.Plus } b => Math.Min(255, MaxOf(b.Left) + MaxOf(b.Right)),
+            BinaryExpr { Op: TokenKind.Amp } b => Math.Min(MaxOf(b.Left), MaxOf(b.Right)),
+            _ => 255,
+        };
+    }
+
+    /// <summary>
+    /// True if <see cref="GenA"/> of e ends with the carry clear: an <c>asl</c> that shifts out a 0
+    /// bit (x &lt;&lt; k with x &lt;&lt; k below 256), or an <c>adc</c> whose sum cannot pass 255.
+    /// </summary>
+    private bool CarryClearAfter(Expr e) => e.ConstValue is null && e.Type is { Size: 1, IsSigned: false } && e switch
+    {
+        BinaryExpr { Op: TokenKind.Shl, Right.ConstValue: long k } b => k >= 1 && MaxOf(b.Left) << (int)k <= 255,
+        BinaryExpr { Op: TokenKind.Plus } b => MaxOf(b.Left) + MaxOf(b.Right) <= 255,
+        _ => false,
+    };
+
     private void GenBinaryA(BinaryExpr b)
     {
         if (b.Op is TokenKind.Shl or TokenKind.Shr)
@@ -1216,14 +1253,14 @@ public sealed class CodeGen
         if (right is null && commutative && Simple1(b.Left) is { } left)
         {
             GenA(b.Right);
-            CarryFor(b.Op);
+            CarryFor(b.Op, b.Right);
             Op(m, left);
             return;
         }
         if (right is not null)
         {
             GenA(b.Left);
-            CarryFor(b.Op);
+            CarryFor(b.Op, b.Left);
             Op(m, right);
             return;
         }
@@ -1234,7 +1271,7 @@ public sealed class CodeGen
         if (indexed is not null)
         {
             GenA(other);
-            CarryFor(b.Op);
+            CarryFor(b.Op, other);
             indexed(m, 0);
             return;
         }
@@ -1242,7 +1279,7 @@ public sealed class CodeGen
         GenA(b.Right);
         Op(Sta, Var(temp));
         GenA(b.Left);
-        CarryFor(b.Op);
+        CarryFor(b.Op, b.Left);
         Op(m, Var(temp));
         Release(temp);
     }
@@ -2201,6 +2238,9 @@ public sealed class CodeGen
         else if (f.To is NameExpr { Symbol: { InMemory: true, AliasOf: null, Kind: VariableKind.Local or VariableKind.Parameter } bv }
                  && bv.Type.Size == type.Size && bv != c && !bv.AddressTaken && !AssignsVar(f.Body, bv))
             bound = (Var(bv), Var(bv, 1));
+        else if (type.Size == 1 && f.To is MemberExpr { Target: NameExpr { Symbol: { InMemory: true, AliasOf: null, Kind: VariableKind.Local or VariableKind.Parameter } mv } }
+                 && mv != c && !mv.AddressTaken && !AssignsVar(f.Body, mv) && Simple1(f.To) is { } half)
+            bound = (half, Byte(0));   // n.lo of a local or parameter the body does not change: cpy n
         else
         {
             boundTemp = AcquireTemp(type.Size);
