@@ -272,6 +272,24 @@ public class IndexedOperandTests
         Assert.DoesNotContain("_t0", r.Result.Listing);
     }
 
+    [Theory]
+    [InlineData("k[vi] = k[j] + w")]
+    [InlineData("w = k[vi] + w")]
+    [InlineData("if k[vi] < w { w = 0 }")]
+    [InlineData("w = (w >> 2) + k[vi]")]
+    public void A_volatile_index_of_a_16_bit_element_is_read_once(string statement)
+    {
+        // Review M18 finding 1: in-place shapes load the index for each byte (spec 4).
+        var r = Run.Program($$"""
+            volatile var vi: u8 = 1
+            var j: u8 = 2
+            var k: [u16; 4] = [1, 2, 3, 4]
+            var w: u16 = 5
+            fn main() { {{statement}} }
+            """);
+        Assert.Equal(1, r.Result.Listing.Split('\n').Count(l => l.Contains("ldx vi") || l.Contains("ldy vi") || l.Contains("lda vi")));
+    }
+
     [Fact]
     public void An_index_that_reads_the_result_is_not_used_in_place()
     {

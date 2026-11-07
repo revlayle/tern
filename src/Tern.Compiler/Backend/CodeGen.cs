@@ -1014,12 +1014,26 @@ public sealed class CodeGen
         var arr = ArrayOf(ix);
         var (index, shift) = FoldIndexOffset(ix.Index, arr);
         if (!IndexIsCheap(index)) return null;
+        // Each byte of a 16-bit element loads the index again: a volatile index must be read once (spec 4).
+        if (size == 2 && ReadsVolatile(index)) return null;
         return (m, b) =>
         {
             var reg = LoadIndex(index);
             Emit(m, reg == Register.X ? AbsoluteX : AbsoluteY, Var(arr, (b == 0 ? 0 : HighTable(arr)) + shift));
         };
     }
+
+    /// <summary>True if evaluating e reads volatile memory.</summary>
+    private static bool ReadsVolatile(Expr e) => e switch
+    {
+        NameExpr { Symbol: VariableSymbol v } => v.IsVolatile,
+        UnaryExpr u => ReadsVolatile(u.Operand),
+        BinaryExpr b => ReadsVolatile(b.Left) || ReadsVolatile(b.Right),
+        IndexExpr ix => ReadsVolatile(ix.Target) || ReadsVolatile(ix.Index),
+        MemberExpr m => ReadsVolatile(m.Target),
+        CastExpr c => ReadsVolatile(c.Operand),
+        _ => false,
+    };
 
     /// <summary>Loading this index into X or Y does not change A.</summary>
     private bool IndexIsCheap(Expr index) =>
