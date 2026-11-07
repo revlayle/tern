@@ -278,9 +278,15 @@ The result is a report, `tests/benchmarks/analysis.md`, not features. The spec s
 
 Done when the report covers every benchmark and the chosen library routines, the class totals add up to the measured gap, and the spec session has a ranked list to schedule from.
 
-## M18: Tools and skills for coding agents
+## M18: Fixes from the analysis
 
-Decision 2026-11-05. Tern is new, so a model has seen no Tern code; what it needs must come from a skill and from tools that answer quickly and exactly. Scope to confirm when scheduled.
+Spec: 11; decision 2026-11-07. Scope set by the spec session from M17's ranked list: the optimizer changes, and any language changes it approves, with the largest savings first. Each change with its benchmark delta in the commit message, as in M9.
+
+Done when: the scheduled fixes are in, `comparison.md` has the new totals, and the "how the Tern is written" advice that the fixes made unnecessary is dropped from the report.
+
+## M19: Tools and skills for coding agents
+
+Decision 2026-11-05; after M18 (decision 2026-11-07), so the skill does not teach workarounds the optimizer has since removed. Tern is new, so a model has seen no Tern code; what it needs must come from a skill and from tools that answer quickly and exactly. Scope to confirm when scheduled.
 
 - **A Tern skill** (a Claude Code skill in this repository, usable as a plugin elsewhere): the language in brief, with the restrictions an agent would not guess (no recursion, arrays of at most 256, one-byte indexes, `using` registers, roots and private variables, flags as values); the cost of each construct; the "how the Tern is written" advice from M17; common errors and their fixes; when to use an `asm` block.
 - **Agent-friendly compiler output**: diagnostics as JSON (`tern --json`: file, line, column, message, suggestion); a listing that links each source line to its instructions, bytes and cycles.
@@ -290,16 +296,75 @@ Decision 2026-11-05. Tern is new, so a model has seen no Tern code; what it need
 
 Done when an agent with only the skill and tools can write, check and measure a small program (e.g. a sprite moving under joystick control), and the skill's examples are checked by the test suite.
 
-## Later (not yet ordered, except that new platforms come last)
+## M20: Checks in the emulator, and signed loop variables
+
+Spec: 14.4, 3.2, 5.1.
+
+- In test runs (`Run.Program`, and the M19 run tool), the built-in emulator reports arithmetic that overflows its type and array indexes outside the array, with the source line, using the compiler's debug information (the M19 source-to-instruction map). No code is added to the program. Overflow that the program means (wrapping counters, hashes) needs a way to say so; the coding session proposes one to the spec session first.
+- `for` loops with `i8` and `i16` counters, counting up and down, with constant and variable bounds and steps as for unsigned counters; the spec 5.1 and 11 shapes for them come from the spec session before coding.
+
+Tests: each check fires on a wrong program and stays quiet on a correct one; loops at edge values (-128, 127, 0, wrap) against C#.
+
+## M21: Plug-ins against a fixed interface
+
+Spec: 12.3 (planned).
+
+`export module` in a binary (exports matched by name to the module's fixed-address routines, with checks on parameters, return, `keeps`, the interface's fixed variables defined as `data`, `setup` at entry 0) and `export f, g @ addr` in a program with `main` (a jump table at a fixed address, `name_api.tern` written). Tests: two level binaries built against one interface module, exported in different source orders, loaded in turn into one reserved slot and called by a host; a level calling the host's table; each error. Example: a game with levels on disk plus one built separately, checked in VICE
+
+## M22: `const fn` and code generators
+
+Spec: 4.1 (planned). One milestone, since generators are most of the reason to build `const fn` (decision 2026-11-03); it may take the full three sessions.
+
+- Part 1: `const fn` with compile-time `int` and `real`, the step limit, `const fn` in modules, array-building syntax for `data` tables.
+- Part 2: `emit` fragments in asm blocks, `label()`, the listing naming the `emit` line and the call for each generated instruction.
+
+Done when: (part 1) a sine table and a screen-row address table are built by `const fn`s from a module and match C#; (part 2) an unrolled screen copy that skips given rows is generated, runs correctly in the emulator and its listing shows the source of each instruction.
+
+## M23: Doc comments and a language server
+
+- `///` doc comments before declarations, kept by the compiler.
+- A Tern language server (LSP): errors as you type (in the M19 JSON format), hover with the doc comment, type and cost (bytes, cycles where fixed), go to definition, e.g. showing that `set_irq` needs an `interrupt fn`.
+
+## New platforms
+
+In this order (decision 2026-11-07). Each starts with a spec session for the platform's memory map, output format, encoding and library; the scope below is a first outline.
+
+### M24: Atari 8-bit
+
+- Platform description: memory map, free zero page, volatile areas (hardware registers, OS variables), ATASCII and screen-code encodings
+- `.xex` output (load segments, run address); the `memory` block's areas map to segments
+- `lib/atari`: OS routines (CIO) as routines at a fixed address; register structs for ANTIC, GTIA, POKEY, PIA; display lists; VBI and DLI handlers through the OS vectors
+- Library modules that are not C64-only (`math`, `mem`, `text`, `wide`, `bcd`, `random`) work unchanged
+
+Done when: an example with a display list and a DLI color change runs in an Atari emulator (Altirra), and the benchmarks compile for the Atari.
+
+### M25: Apple II
+
+- Platform description and memory map (no interrupt source by default, text and hi-res pages, soft switches as volatile areas), high-bit ASCII
+- Output: a DOS 3.3 binary and/or ProDOS system file (spec session decides), with disk image creation for testing
+- `lib/apple2`: monitor and DOS/ProDOS routines as routines at a fixed address; text and hi-res screen helpers (row address tables)
+
+Done when: an example draws text and hi-res graphics in an Apple II emulator (AppleWin or MAME).
+
+### M26: NES
+
+- Bank switching settled first (spec 14.1): `@ bank(n)`, calls between banks through generated stubs, a first mapper (likely NROM, then UxROM or MMC1)
+- iNES output; 2 KB of RAM, so frame sharing and zero page matter most; PPU and APU register structs; NMI-driven frame loop; user-defined encodings for tiles (14.5)
+
+Done when: an example scrolls a background and moves sprites in a NES emulator (Mesen), with code in more than one bank.
+
+### M27: 65C02 and Commander X16
+
+- The 65C02 CPU variant (spec 12.1): new instructions in the CPU table, emulator and code generator (`stz`, `bra`, `phx`/`phy`, `inc a`, `(zp)` addressing); code shapes per variant
+- X16 platform: memory map, banked RAM, VERA register structs, KERNAL routines
+
+Done when: the benchmarks compile for the 65C02 and use the new instructions where shorter (listing tests), and an X16 example runs in its emulator.
+
+## Later (not yet ordered)
 
 - Floats as a library with a 4-byte format, built on `wide` (not a priority)
-- **Plug-ins against a fixed interface** (spec 12.3, planned): `export module` in a binary (exports matched by name to the module's fixed-address routines, with checks on parameters, return, `keeps`, the interface's fixed variables defined as `data`, `setup` at entry 0) and `export f, g @ addr` in a program with `main` (a jump table at a fixed address, `name_api.tern` written). Tests: two level binaries built against one interface module, exported in different source orders, loaded in turn into one reserved slot and called by a host; a level calling the host's table; each error. Example: a game with levels on disk plus one built separately, checked in VICE
-- Signed loop variables
-- `const fn` with compile-time `int` and `real`, array-building syntax, and code generators with `emit` and `label()` (spec 4.1); plan as one milestone, since generators are most of the reason to build `const fn`
 - `using` on local variables (spec 14.6)
-- Overflow checking and array index checking in the emulator for test runs (spec 14.4, 3.2)
-- Doc comments (`///` before a declaration) and a Tern language server (LSP) that shows them, e.g. that `set_irq` needs an `interrupt fn`
-- **Developer guide**: user documentation that explains how the language behaves on the machine, with examples; it informs and does not forbid. It grows out of the quick guide in `docs/guide.md`, whose section 6 lists these behaviors briefly. It must cover each behavior below. The spec session adds to this list whenever a decision leaves a behavior that the programmer may rely on, or that may surprise them:
+- **Developer guide** (spec session work, after M19, which with M17 gives most of its content): user documentation that explains how the language behaves on the machine, with examples; it informs and does not forbid. It grows out of the quick guide in `docs/guide.md`, whose section 6 lists these behaviors briefly. It must cover each behavior below. The spec session adds to this list whenever a decision leaves a behavior that the programmer may rely on, or that may surprise them:
   - all arithmetic wraps, including index expressions: `buf[head + 1]` with `head = 255` is `buf[0]` (3.1, 3.2); when the optimizer folds a constant offset into the address
   - an index outside the array is not checked, and the optimizer assumes it does not happen (3.2)
   - flags after an `asm` block: `if f()`, `while f()` (first test, and each later test when the body ends with an `asm` block) and `v = f()` with an empty-body flag function; after compiled Tern code the flags are unspecified (7)
@@ -312,12 +377,6 @@ Done when an agent with only the skill and tools can write, check and measure a 
   - an overlay's zero-page bytes at a fixed address hold whatever was there before it loaded; the overlay sets them (8.5)
   - a `volatile` fixed-address variable over an overlay reads whatever overlay is loaded; addresses inside an overlay's file move when the overlay changes (8.5)
   - a binary's entries are one root: the host must not call one from an interrupt while another runs (12.3)
-
-New platforms, last:
-
-- 65C02 CPU variant and Commander X16 platform
-- NES: iNES output, `@ bank(n)`, calls between banks (spec 14.1)
-- Apple II and Atari 8-bit platforms
 
 After the compiler is complete (far off, not planned):
 

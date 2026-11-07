@@ -73,7 +73,7 @@ x64sc -autostart examples/hello.prg
 
 ## Status
 
-The compiler is complete through milestone M13 for the Commodore 64. Planned next (`docs/roadmap.md`): compile-time functions and code generators, a C64 disk and tape I/O library, emulator checks in test runs, a language server, and then new platforms: the 65C02 and Commander X16, the NES, the Apple II and Atari 8-bit computers.
+The compiler is complete through milestone M13 for the Commodore 64. Planned next (`docs/roadmap.md`): a C64 disk and tape I/O library, indexing of small record arrays, an analysis of the gap to hand-written assembly and the fixes it leads to, tools for coding agents, emulator checks in test runs, plug-ins, compile-time functions and code generators, a language server, and then new platforms: the Atari 8-bit, the Apple II, the NES, and the 65C02 with the Commander X16.
 
 ## Project layout
 

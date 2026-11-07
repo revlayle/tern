@@ -574,8 +574,9 @@ Signed loop variables; `match` on 16-bit values (match on `.lo` / `.hi`); arrays
 
 ### New platforms (last)
 
-- 65C02 CPU and the Commander X16
+- Atari 8-bit
+- Apple II
 - NES, with ROM banks (`@ bank(n)`) and calls between banks
-- Apple II and Atari 8-bit
+- 65C02 CPU and the Commander X16
 
 Far off, after the compiler is complete: a standalone assembler extracted from Tern, with its generators, memory block and listing.
