@@ -268,4 +268,107 @@ public class SmallShapeTests
         Assert.Contains("cpy fill.n|", Code(r, "fill"));
         Assert.DoesNotContain("_t0", Code(r, "fill"));
     }
+
+    [Fact]
+    public void Stores_of_0_at_the_start_of_main_into_cleared_globals_go()
+    {
+        var r = Run.Program("""
+            var a: [u16; 4]
+            var b: u8
+            var c: u8
+            var d: u8 = 7
+            noinit var e: u8
+            var f: u8
+            var g: u8
+            fn main() {
+                a[0] = 0
+                a[1] = 1
+                b = 0
+                c = 5
+                c = 0
+                d = 0
+                e = 0
+                f = 0
+                g = f + 1
+                b = 0
+            }
+            """, setup: ram => ram.Bytes[0x0900] = 0);
+        Assert.Equal(1, r.U16At("a", 1, 4));
+        Assert.Equal(0, r.U8("c"));
+        Assert.Equal(0, r.U8("d"));
+        Assert.Equal(0, r.U8("e"));
+        Assert.Equal(1, r.U8("g"));
+        var code = Code(r);
+        Assert.DoesNotContain("sta a|", code);
+        Assert.DoesNotContain("sta a+4|", code);
+        Assert.DoesNotContain("sta b|", code);   // also the second b = 0: main has not written b
+        Assert.DoesNotContain("sta f|", code);
+        Assert.Contains("sta c|", code);          // c = 0 after c = 5
+        Assert.Contains("sta d|", code);          // initialized: in the file, not cleared
+        Assert.Contains("sta e|", code);          // noinit
+    }
+
+    [Fact]
+    public void Stores_of_0_stay_after_a_label_a_call_or_in_another_function()
+    {
+        var r = Run.Program("""
+            var x: u8
+            var y: u8
+            var z: u8
+            var n: u8 = 3
+            fn f() { y = 0 }
+            fn main() {
+                while n > 0 {
+                    x = 0
+                    x += 1
+                    n -= 1
+                }
+                f()
+                z = 0
+            }
+            """);
+        Assert.Equal(1, r.U8("x"));
+        Assert.Contains("sta x", Code(r));
+        Assert.Contains("sta z", Code(r));
+        Assert.Contains("sta y", Code(r, "f"));
+    }
+
+    [Fact]
+    public void Constants_stored_together()
+    {
+        var r = Run.Program("""
+            var out: u16
+            fn mul(a: u16, b: u16) -> u16 { return a + b }
+            fn main() { out = mul(123, 45) }
+            """);
+        Assert.Equal(168, r.U16("out"));
+        Assert.Equal("lda #$7B|sta mul.a|lda #$2D|sta mul.b|lda #$00|sta mul.a+1|sta mul.b+1|jsr mul|sta out|stx out+1|rts", Code(r));
+    }
+
+    [Fact]
+    public void Volatile_stores_keep_their_order()
+    {
+        var r = Run.Program("""
+            var border: u8 @ $D020
+            var x: u8
+            var y: u8
+            fn main() {
+                x = 0
+                border = 1
+                y = 0
+            }
+            """, setup: ram => ram.Bytes[0x0900] = 0);
+        Assert.Equal("lda #$01|sta border|rts", Code(r));   // the zeros go: x and y were cleared
+        var r2 = Run.Program("""
+            var border: u8 @ $D020
+            var x: u8
+            var y: u8
+            fn main() {
+                x = 5
+                border = 0
+                y = 5
+            }
+            """);
+        Assert.Equal("lda #$05|sta x|lda #$00|sta border|lda #$05|sta y|rts", Code(r2));
+    }
 }

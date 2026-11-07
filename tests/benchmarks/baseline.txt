@@ -3,11 +3,11 @@
 # name        bytes    cycles
 bubble          102    170743
 calls           120     28222
-copy            205     62171
+copy            201     62167
 crc8             62     37194
 enemies         170     56128
-fib16           190      1906
+fib16           175      1888
 interp          266      6296
 sieve            79     11299
 sum16           152     30180
-total          1346    404139
+total          1327    404117

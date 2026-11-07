@@ -63,7 +63,9 @@ public sealed class CodeGen
             GenFunction(f);
             all.Add(new SectionStart(f.Name, Overlay: f.OverlayArea is null ? null : f.Module!.Name));
             // An interrupt handler's body is optimized before its saving code is added.
-            if (!f.Declaration!.IsAsm && !(f.IsInterrupt && !f.IsPart)) Optimizer.Run(_out, f);
+            // main runs once, right after the startup code has cleared memory.
+            bool startsProgram = f == _program.Main && !_program.IsBinary && !f.AddressTaken;
+            if (!f.Declaration!.IsAsm && !(f.IsInterrupt && !f.IsPart)) Optimizer.Run(_out, f, startsProgram);
             FunctionItems[f] = _out.ToList();
             all.AddRange(_out);
         }
