@@ -355,3 +355,9 @@ Decided:
 ## 2026-11-06: llvm-mos in the comparison
 
 - **The llvm-mos C compiler joins the benchmark comparison** at the start of M17, built from the same C sources as cc65 with `-Os`. Reason: it is the 6502 compiler most often used to judge how good compiled 6502 code can be (an LLVM backend with zero-page "imaginary registers" and whole-program static allocation of locals, close to Tern's frames), so it is a stronger comparison than cc65, and its output may show techniques the analysis should consider. Same C sources, so the two C columns differ only by compiler. An external tool like the others; no NuGet dependency, and normal test runs do not need it.
+
+## 2026-11-07: the developer chooses shifts or an offset table for linear struct arrays
+
+- **`linear var` indexes by shifting and needs a struct size of 1, 2, 4 or 8; `indexed var` adds an offset table and works for any size** (spec 3.3, planned for M15; replaces the automatic choice of 2026-11-03). Reason: the table is a memory cost the source did not show (design rule 1), and the trade-off depends on the program: the table is faster even for sizes 4 and 8 (7 cycles to the offset against 9 and 11), while shifts use no memory. Now the declaration states it. The word is `indexed`, a word only before `var`: it names what the developer gets. Rejected: `linear(table)` (new modifier syntax), and `table`, which reads like the default layout the spec calls "one table per field", and is a common variable name.
+- **The size error is at a variable index, not at the declaration**, so a `linear` array of 5-byte records stays valid for pointer use and constant indexes. The message suggests `_` padding or `indexed`.
+- **`_` fields pad a struct**: unnamed space, as `_` already means "nothing named here" in `for` and `match` (rule 3). Also useful for hardware and file layouts.

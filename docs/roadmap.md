@@ -235,14 +235,17 @@ Done when: an example saves a high-score file to disk, reads it back and shows t
 
 ## M15: Indexing small linear struct arrays
 
-Spec: 3.3 (planned; decision 2026-11-03).
+Spec: 3.3 (planned; decisions 2026-11-03 and 2026-11-07).
 
-- `list[i].field` on a `linear` array of structs whose whole size is at most 256 bytes: shifts for struct sizes 1, 2, 4, 8; otherwise a compile-time table of `i * sizeof(T)` (n bytes, only when indexed with a variable); a constant index is a fixed address
-- Larger arrays stay an error, with a message giving the size and the limit
+- `list[i].field` with a variable index on a struct array of at most 256 bytes stored as records:
+  - `linear var`: shifts; struct size 1, 2, 4 or 8, otherwise an error at the index suggesting `_` padding (to the next size) or `indexed` (with the table's size)
+  - `indexed var`: a compile-time table of `i * sizeof(T)` (n bytes, only when indexed with a variable), any struct size; a word only before `var`; `indexed linear`, `indexed` on a non-struct array or on one over 256 bytes are errors
+  - a constant index is a fixed address; a variable index into a linear array over 256 bytes is an error suggesting a pointer
+- Padding fields `_` in structs: several allowed, may have `@`, cannot be read or written (error)
 
-Tests: listing tests for both shapes, the table's bytes in the report, every element and field against C#, the error.
+Tests: listing tests for the shift shapes (sizes 1, 2, 4, 8) and the table shape, the table's bytes in the report, every element and field against C# for both forms, `_` padding giving the expected `sizeof` and offsets, each error and its suggestion.
 
-Done when: the tests pass and the spec 3.3 text describes the feature as built.
+Done when: the tests pass and spec 3.3 describes the feature as built.
 
 ## M16: Locals of inline functions in each caller's frame
 
