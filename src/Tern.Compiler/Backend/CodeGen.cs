@@ -656,6 +656,10 @@ public sealed class CodeGen
                 {
                     if (c != 0) Set(setTrue, trueOp); else Set(setFalse, falseOp);
                 }
+                else if (_fn.ReturnRegister == Register.Carry && CompareIntoCarry(value))
+                {
+                    // The compare left the result in the carry.
+                }
                 else
                 {
                     var isTrue = NewLabel("rtrue");
@@ -669,6 +673,53 @@ public sealed class CodeGen
             }
         }
         ReturnJump();
+    }
+
+    /// <summary>
+    /// An unsigned one-byte <c>&lt;</c>, <c>&lt;=</c>, <c>&gt;</c> or <c>&gt;=</c> computed straight into the
+    /// carry, with no branches: <c>l &gt;= r</c> is <c>lda l / cmp r</c>, <c>l &gt; r</c> is
+    /// <c>lda l / clc / sbc r</c> (C is set when l - r - 1 does not borrow), or <c>cmp #c+1</c> for a
+    /// constant; <c>&lt;</c> and <c>&lt;=</c> swap the operands. False (nothing emitted) for anything else.
+    /// </summary>
+    private bool CompareIntoCarry(Expr value)
+    {
+        if (value is not BinaryExpr { Op: TokenKind.Less or TokenKind.LessEq or TokenKind.Greater or TokenKind.GreaterEq } b
+            || b.Left.Type is not { Size: 1, IsSigned: false } || b.Right.Type is not { Size: 1, IsSigned: false })
+            return false;
+        Expr l = b.Left, r = b.Right;
+        var op = b.Op;
+        if (op is TokenKind.Less or TokenKind.LessEq)
+        {
+            (l, r) = (r, l);
+            op = op == TokenKind.Less ? TokenKind.Greater : TokenKind.GreaterEq;
+        }
+        if (op == TokenKind.Greater && r.ConstValue is long c && c < 255)
+        {
+            r = new NumberExpr(r.Pos, c + 1) { Type = r.Type, ConstValue = c + 1 };
+            op = TokenKind.GreaterEq;
+        }
+
+        VariableSymbol? temp = null;
+        Action<Mnemonic> use;
+        if (Simple1(r) is { } rop) use = m => Op(m, rop);
+        else if (IndexedOperand(r) is { } element) use = m => element(m, 0);
+        else
+        {
+            temp = AcquireTemp(1);
+            GenA(r);
+            Op(Sta, Var(temp));
+            use = m => Op(m, Var(temp));
+        }
+        if (op == TokenKind.GreaterEq && l is NameExpr { Symbol.Register: { } reg } && Simple1(r) is { } simple)
+            Op(reg == Register.X ? Cpx : Cpy, simple);
+        else
+        {
+            GenA(l);
+            if (op == TokenKind.GreaterEq) use(Cmp);
+            else { Emit(Clc); use(Sbc); }
+        }
+        if (temp is not null) Release(temp);
+        return true;
     }
 
     // ---------- Assignment ----------

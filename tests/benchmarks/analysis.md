@@ -338,3 +338,4 @@ Each fix as built, against the estimate above. Measured on `BenchmarkTests` (`ba
 | F6 | 3,048 / 10 | 3,048 / 10 | `calls` |
 | F8 | 3,000 / 7 | 3,636 / 9 | `sum16`; beyond the estimate, the optimizer now drops `lda v+1` at the loop top (A holds it from the store at the end of the pass), 597, which the assembly does not do; the rest is page crossings |
 | F19 | 768 / 2 | 768 / 2 | `crc8` |
+| F21 | 903 / 5 (about 500 from the source as written) | 503 / 4 | `calls`: `bigger`'s `return a > b` is `lda a / clc / sbc b / rts`; the rest needs the rewrite (section 3) |
