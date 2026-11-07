@@ -160,4 +160,52 @@ public class SmallShapeTests
         Assert.Equal(x == 0 ? 0 : 7, r.U8("y"));
         Assert.Equal("lda x|bne main.endif0|sta y|rts", Code(r));
     }
+
+    [Fact]
+    public void Negation_subtracts_from_zero()
+    {
+        int[] values = [0, 1, 2, 127, 128, 129, 254, 255];
+        var r = Run.Program($$"""
+            var a: [u8; 8] = [{{string.Join(", ", values)}}]
+            var n: [u8; 8]
+            var s: [i8; 8]
+            fn main() {
+                for i in 0..8 {
+                    var m: u8 = a[i]
+                    n[i] = -m
+                    s[i] = -(a[i] as i8)
+                }
+            }
+            """);
+        for (int i = 0; i < 8; i++)
+        {
+            Assert.Equal((byte)-values[i], r.U8("n", i));
+            Assert.Equal((sbyte)-(sbyte)values[i], r.I8("s", i));
+        }
+        Assert.Contains("lda #$00|sec|sbc main.m", Code(r));
+        Assert.DoesNotContain("eor #$FF", Code(r));
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1)]
+    [InlineData(255)]
+    [InlineData(256)]
+    [InlineData(65535)]
+    public void A_16_bit_test_for_zero_needs_no_cmp(int w)
+    {
+        var r = Run.Program($$"""
+            var w: u16 = {{w}}
+            var f: u8
+            fn main() {
+                if w == 0 { f |= 1 }
+                if w != 0 { f |= 2 }
+                if 0 == w { f |= 4 }
+                if w != $0100 { f |= 8 }
+            }
+            """);
+        Assert.Equal((w == 0 ? 5 : 2) | (w != 256 ? 8 : 0), r.U8("f"));
+        Assert.DoesNotContain("cmp #$00", Code(r));
+        Assert.Contains("cmp #$01", Code(r));
+    }
 }

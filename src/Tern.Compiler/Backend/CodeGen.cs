@@ -1001,6 +1001,8 @@ public sealed class CodeGen
     /// </summary>
     private Action<Mnemonic, int>? IndexedOperand(Expr e, int size = 1)
     {
+        // A cast between types of the same size is no code.
+        if (e is CastExpr cast && cast.Type.Size == size && cast.Operand.Type.Size == size) return IndexedOperand(cast.Operand, size);
         if (e is not IndexExpr ix || ix.Type.Size != size || ix.Index.ConstValue is not null || ContainsCall(ix.Index)) return null;
         if (IsPointerIndex(ix))
         {
@@ -1122,6 +1124,14 @@ public sealed class CodeGen
                 Release(temp);
                 return;
             }
+
+            case UnaryExpr { Op: TokenKind.Minus } neg when Simple1(neg.Operand) is not null || IndexedOperand(neg.Operand) is not null:
+                // -m as 0 - m: lda #0 / sec / sbc m, shorter than lda m / eor #$FF / clc / adc #1.
+                Op(Lda, Byte(0));
+                Emit(Sec);
+                if (Simple1(neg.Operand) is { } nop) Op(Sbc, nop);
+                else IndexedOperand(neg.Operand)!(Sbc, 0);
+                return;
 
             case UnaryExpr u:
                 GenA(u.Operand);
@@ -1737,22 +1747,30 @@ public sealed class CodeGen
             var p = Operands(e);
             return (m, b) => Op(m, b == 0 ? p.Lo : p.Hi);
         }
+        if (op is TokenKind.EqEq or TokenKind.NotEq && left.ConstValue is not null && right.ConstValue is null)
+            (left, right) = (right, left);
         var l = Side(left);
         var r = Side(right);
+        // One byte loaded and compared for == and !=; lda sets Z, so a zero byte needs no cmp #0.
+        void LoadAndCompare(int b)
+        {
+            l(Lda, b);
+            if (right.ConstValue is not long c || ((c >> (8 * b)) & 0xFF) != 0) r(Cmp, b);
+        }
 
         switch (op)
         {
             case TokenKind.EqEq:
             {
                 var skip = NewLabel("ne");
-                l(Lda, 0); r(Cmp, 0); Branch(Bne, skip);
-                l(Lda, 1); r(Cmp, 1); Branch(Beq, target);
+                LoadAndCompare(0); Branch(Bne, skip);
+                LoadAndCompare(1); Branch(Beq, target);
                 Place(skip);
                 break;
             }
             case TokenKind.NotEq:
-                l(Lda, 0); r(Cmp, 0); Branch(Bne, target);
-                l(Lda, 1); r(Cmp, 1); Branch(Bne, target);
+                LoadAndCompare(0); Branch(Bne, target);
+                LoadAndCompare(1); Branch(Bne, target);
                 break;
             default: // < or >=
                 l(Lda, 0); r(Cmp, 0);

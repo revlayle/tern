@@ -5,9 +5,9 @@ bubble          102    170743
 calls           120     28222
 copy            209     62177
 crc8             62     37194
-enemies         178     56288
-fib16           194      1934
+enemies         174     56256
+fib16           190      1906
 interp          266      6296
 sieve            79     11299
 sum16           152     30180
-total          1362    404333
+total          1354    404273

@@ -342,3 +342,5 @@ Each fix as built, against the estimate above. Measured on `BenchmarkTests` (`ba
 | F10 `± 256` | 195 / 55 | 117 / 33 | `copy`: `to`, `from`, `n`; the estimate also counted `a`, `b`, which step by 256 only in `copy.pages` |
 | F10 `a[i] += 1` | 0 / 6 | 0 / 6 | `enemies` (`hits`, never runs); also `interp`'s `DEC` as `dec stack-1,x`, 6 bytes, but 22 cycles slower in all: the shorter program moves `code` across a page (F12) |
 | F10 register transfers, `iny` | A known from X 6 / 1, `ldy #c` 0 / 3, Y known 0 2 / 2 | 22 / 6 | `sieve` 22 / 2 (`ldx n` as `tax` after the loop test, `lda n` as `txa`), `copy` 0 / 4 (`iny` for `ldy #2`, `#3`). `copy`'s `ldy #0` after the pages loop stays: the `while` can be skipped on entry, so Y is not known there (it would need F9) |
+| F10 negation | 32 / 4 | 32 / 4 | `enemies` |
+| F10 `cmp #0` | 28 / 4 | 28 / 4 | `fib16` (`while b != 0`, 16-bit) |
