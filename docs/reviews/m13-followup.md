@@ -1,5 +1,43 @@
 # Review: M13 follow-up, branch `m13-followup`
 
+## Re-review of the fixes (`ca1162b`), 2026-11-07
+
+**Not ready to merge: one small must-fix item.** Findings 1-5 are fixed. While checking finding 3 I found one more way to reach a sibling's address, through assembly. 1337 tests pass (36 CPU, 1301 compiler). `BenchmarkTests` is unchanged. `main` was merged in (`c534553`).
+
+I reran every probe from the first review:
+
+- **1.** `A_write_to_a_volatile_fixed_variable_over_an_overlay_makes_the_optimizer_reload_the_overlays_variable` checks `e` (8) and that `lda ov.x` follows `inc hdr` in the listing. `docs/status.md` is corrected.
+- **2.** The forget now depends on `VariableSymbol.InOverlayArea`, which is set for any fixed variable that overlaps an overlay area. It no longer depends on `DeclaredVolatile`/`InVolatileArea`. The first review's probe, with a `volatile` range over the area, now gives `inc hdr / lda ov.x / sta e`, and the test runs with and without that range. A volatile struct field (`hdr.b += 1`) also reloads `ov.x`. I/O writes outside overlay areas keep their old behavior.
+- **3.** Both of the first review's inline probes are errors, and each has a test. Line 1680 now uses `(g.FixedAddress is null || g.IsData)`, and `UsedAddresses` of inline bodies is checked.
+- **4.** The message is now "needs 36 bytes of code, data and variables, plus 4 bytes of fixed data, but its area $6000-$601F has 32", and the size no longer depends on where the data is. No test checks the fixed-data wording (see suggestion b).
+- **5.** The repeated tests are gone, and the message now reads "but it belongs to the resident program".
+- **6** is left for the spec session, as intended.
+
+### 7. Must fix: `#f.lo` / `#f.hi` in assembly takes a sibling overlay's address
+
+```
+// level1.tern (level1 and level2 both @ levels)
+import level2
+fn go() -> u8 using A { asm { lda #level2.five.lo } return 1 }
+```
+
+This compiles. Spec 6.5 says `#f.lo` / `#f.hi` take the function's address "as `addr(f)` does", and spec 8.5 makes `addr()` of a sibling's function an error. M13 already rejects `jsr`/`jmp` to a sibling inside assembly, so this is the same rule. The branch `Checker.Asm.cs:247-255` records the address in `UsedAddresses` but runs no overlay check. Add the same check as `TakeFunctionAddress` (`Checker.cs:1541`) there, with an error test. Through an inline asm function, the new `UsedAddresses` check already covers it.
+
+### Suggestions (no need to block)
+
+- **a.** The inline error for sibling data says "uses 'level2.T', a variable of level2". For `data`, "data of level2" would be accurate.
+- **b.** No test checks the new "plus N bytes of fixed data" wording of the "does not fit" message. A one-line `Assert.Contains` on a module with fixed data would cover it.
+
+### Checklist (roadmap, M13 follow-up)
+
+- [x] `volatile` fixed variable over an overlay's file. All parts, including the optimizer forget, now also in a volatile range.
+- [x] Fixed `data` in an overlay module.
+- [ ] Uses of a sibling overlay. **Almost met:** `#f.lo` / `#f.hi` in assembly (finding 7).
+- [x] Fixed zero-page addresses in an overlay.
+- [x] Long byte buffers.
+- [x] `const` before the memory block.
+- [x] `OverlayTests`, including the optimizer test.
+
 ## First review (`8d558de`), 2026-11-07
 
 **Not ready to merge: three must-fix items.** Most of the follow-up is sound. Long byte buffers, `const` before the memory block, fixed zero-page pointers in overlays and the layout of fixed data in an overlay file all behave as spec 3.2, 8.4 and 8.5 say. The problems are in the optimizer change and the sibling-overlay checks:
