@@ -852,6 +852,22 @@ public sealed class CodeGen
     private Register LoadIndex(Expr index)
     {
         if (index is NameExpr { Symbol.Register: { } r }) return r;
+        // The offset table of an indexed record array: ldx i / ldy table,x (spec 3.3).
+        if (index is IndexExpr { Target: NameExpr { Symbol: VariableSymbol { IsOffsetTable: true } table } } tix && !_reserved.Contains(Register.Y))
+        {
+            if (tix.Index is NameExpr { Symbol.Register: Register.X })
+            {
+                Emit(Ldy, AbsoluteX, Var(table));
+                return Register.Y;
+            }
+            if (!_reserved.Contains(Register.X))
+            {
+                if (Simple1(tix.Index) is { } inner) Op(Ldx, inner);
+                else { GenA(tix.Index); Emit(Tax); }
+                Emit(Ldy, AbsoluteX, Var(table));
+                return Register.Y;
+            }
+        }
         var reg = FreeIndexRegister(index.Pos);
         if (Simple1(index) is { } op)
             Op(reg == Register.X ? Ldx : Ldy, op);

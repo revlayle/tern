@@ -142,6 +142,12 @@ public enum PlaceKind
     Table,
     /// <summary>Where <see cref="StructPlace.Pointer"/> points, plus offset.</summary>
     Pointer,
+    /// <summary>
+    /// Record <see cref="StructPlace.Index"/> of an array of structs stored as whole records
+    /// (<c>linear</c> or <c>indexed</c>), with a variable index: Y = the record's offset (a shift or
+    /// a table), and byte k of the record is at Base + k + Y.
+    /// </summary>
+    Records,
 }
 
 /// <summary>Where a struct (or an array field of one) is: <see cref="Offset"/> is the byte offset inside the record.</summary>
@@ -209,6 +215,13 @@ public sealed class VariableSymbol(string name, SourcePos pos, TernType type, Va
     public int? HighTable { get; init; }
     /// <summary>The variable that owns the memory: itself, or the variable a view is part of.</summary>
     public VariableSymbol Storage => AliasOf ?? this;
+
+    /// <summary>Declared <c>indexed var</c>: whole records, a variable index goes through <see cref="OffsetTable"/>.</summary>
+    public bool IsIndexed { get; init; }
+    /// <summary>For an indexed array: the compile-time table of <c>i * sizeof(T)</c>; made at the first variable index.</summary>
+    public VariableSymbol? OffsetTable { get; set; }
+    /// <summary>The table made for an indexed array: <c>table[i]</c> is the offset of record i, so it is loaded straight into Y.</summary>
+    public bool IsOffsetTable { get; init; }
 
     /// <summary>Declared <c>volatile var</c>.</summary>
     public bool DeclaredVolatile { get; init; }

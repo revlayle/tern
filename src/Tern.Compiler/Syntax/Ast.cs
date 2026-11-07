@@ -146,6 +146,8 @@ public sealed class VarDecl(SourcePos pos, string name, TypeSyntax? type, Placem
     public bool IsData { get; init; }
     /// <summary>Declared <c>linear var</c>: an array of structs stored as whole records.</summary>
     public bool IsLinear { get; init; }
+    /// <summary>Declared <c>indexed var</c>: an array of structs stored as whole records, with an offset table for variable indexes.</summary>
+    public bool IsIndexed { get; init; }
     /// <summary>Declared <c>noinit var</c>: a global that is not zeroed at startup.</summary>
     public bool IsNoinit { get; set; }
     /// <summary>Declared <c>volatile var</c>: memory that something else changes (spec 4).</summary>

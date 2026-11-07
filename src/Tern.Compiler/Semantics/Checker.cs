@@ -559,7 +559,7 @@ public sealed partial class Checker
     {
         // A string or include_bytes() gives a [u8; N] array, which may be longer than 256 bytes.
         var bytes = decl.Init is null ? null : ByteSource(decl.Init);
-        _allowLongBytes = !decl.IsLinear;
+        _allowLongBytes = !decl.IsLinear && !decl.IsIndexed;
         TernType type;
         try { type = bytes is not null && decl.TypeSyntax is null ? TernType.ArrayOf(TernType.U8, bytes.Length) : DeclaredType(decl); }
         finally { _allowLongBytes = false; }
@@ -568,7 +568,7 @@ public sealed partial class Checker
                 $"'{decl.Name}' is a long byte array ({type.Length} bytes), which is zeroed at startup and has no initial value. Fill it at run time, or declare it with 'data'");
         var v = new VariableSymbol(_module.Qualify(decl.Name), decl.Pos, type, VariableKind.Global, null)
         {
-            IsData = decl.IsData, NoInit = decl.IsNoinit, DeclaredVolatile = decl.IsVolatile,
+            IsData = decl.IsData, NoInit = decl.IsNoinit, DeclaredVolatile = decl.IsVolatile, IsIndexed = decl.IsIndexed,
         };
         decl.Symbol = v;
         v.Module = _module;
@@ -658,13 +658,25 @@ public sealed partial class Checker
     /// <summary>The variable's type: written out, or taken from the initializer.</summary>
     private TernType DeclaredType(VarDecl decl)
     {
+        if (decl.IsIndexed)
+        {
+            var t = decl.TypeSyntax is null ? null : ResolveType(decl.TypeSyntax);
+            if (t is null || !t.IsStructArray)
+                throw new CompileError(decl.Pos,
+                    "'indexed' is for arrays of structs, e.g. 'indexed var list: [Enemy; 20]'. Arrays of numbers are indexed directly");
+            if (t.Size > 256)
+                throw new CompileError(decl.Pos,
+                    $"An indexed array is at most 256 bytes, so that every byte is reachable with an 8-bit offset; '{decl.Name}' is {t.Size} ({t.Length} records of {t.Element!.Size}). " +
+                    "Use fewer records, or step through it with a pointer");
+            return TernType.ArrayOf(t.Element!, t.Length, linear: true);
+        }
         if (decl.IsLinear)
         {
             var t = decl.TypeSyntax is null ? null : ResolveType(decl.TypeSyntax);
             if (t is null || !t.IsArray)
                 throw new CompileError(decl.Pos,
                     "'linear' is for arrays of 16-bit values or structs, e.g. 'linear var pts: [u16; 32]' or 'linear var list: [Enemy; 8]'");
-            if (t.Element!.Size == 1)
+            if (t.Element!.Size == 1 && !t.Element.IsStruct)
                 throw new CompileError(decl.Pos, $"'linear' is only for arrays of 16-bit values or structs: the elements of a {t} are one byte each, so they are already stored in order");
             if (!t.Element.IsStruct && t.Length > 128)
                 throw new CompileError(decl.Pos,
@@ -903,7 +915,7 @@ public sealed partial class Checker
     private void CheckLocal(VarDecl decl)
     {
         var type = DeclaredType(decl);
-        var v = new VariableSymbol(decl.Name, decl.Pos, type, VariableKind.Local, _function);
+        var v = new VariableSymbol(decl.Name, decl.Pos, type, VariableKind.Local, _function) { IsIndexed = decl.IsIndexed };
         decl.Symbol = v;
         ApplyPlacement(decl, v, allowAddress: false);
 
@@ -1565,6 +1577,7 @@ public sealed partial class Checker
         var place = field.Place ?? Unwrap(field) switch
         {
             NameExpr { Symbol: { AliasOf: not null } } => null,
+            IndexExpr { Target: NameExpr { Symbol.AliasOf.Type.Linear: true } } => new StructPlace(PlaceKind.Records, 0),
             IndexExpr { Target.Type.IsArray: true } => new StructPlace(PlaceKind.Table, 0),
             _ => new StructPlace(PlaceKind.Pointer, 0),
         };
@@ -1576,6 +1589,9 @@ public sealed partial class Checker
             case PlaceKind.Table:
                 throw new CompileError(field.Pos,
                     $"'{name}' is in an array of structs, which is stored as one table per field, so the record has no address. addr() works on fields of struct variables");
+            case PlaceKind.Records:
+                throw new CompileError(field.Pos,
+                    $"'{name}' has a variable index, so its address is not known at compile time. Use a constant index, or add the record's offset to the array's address");
         }
         var view = place is { Kind: PlaceKind.Memory } at
             ? View(at.Base!, at.Offset, field.Type, name)
