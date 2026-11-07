@@ -10,10 +10,11 @@
 // sequential file carries its type and mode: "SCORES,S,W" to write, "SCORES,S,R" to read.
 //
 // Errors. A function that returns a bool returns true on failure. That is the KERNAL's carry, which
-// catches problems the KERNAL itself sees (no such device, too many open files, ...). A disk drive
-// reports its own errors (file not found, disk full) only through the status byte and the command
-// channel: after opening or loading a disk file, call status() or drive_status(). Bits of status():
-const ST_TIMEOUT = $03          // the device did not answer (bit 0 or 1)
+// catches problems the KERNAL itself sees (no such device, too many open files, a file that load()
+// cannot find). A disk drive reports its other errors only through the command channel: open() of a
+// missing file and save() to a full disk return false. A missing file shows at the first read (status
+// $42, no byte read) and as "62, FILE NOT FOUND" from drive_status(). Bits of status():
+const ST_TIMEOUT = $03          // the device did not answer (bit 0 or 1); no byte was read
 const ST_EOF = $40              // end of file; the byte just read is the last one
 const ST_NO_DEVICE = $80        // device not present
 
@@ -34,11 +35,12 @@ fn readst() -> u8 using A @ $FFB7
 // LOAD with A = 0 (load, not verify). With secondary address 0 the file goes to the address in X, Y;
 // with 1, to the address stored in the file.
 fn kernal_load(0 using A, address: ptr u8 using XY) -> bool using carry @ $FFD5
+fn kernal_load_own(0 using A) -> bool using carry @ $FFD5      // the same, address from the file (secondary address 1)
 
 // ---------- Whole files ----------
 
 // Load the file `name` from `device` (8 is the first disk drive) to `address`, ignoring the address
-// stored in the file. Returns true if the KERNAL reported a failure.
+// stored in the file. Returns true if the KERNAL reported a failure, e.g. no such file.
 fn load(name: ptr u8, n: u8, device: u8, address: ptr u8) -> bool {
     setnam(n, name)
     setlfs(1, device, 0)
@@ -48,9 +50,10 @@ fn load(name: ptr u8, n: u8, device: u8, address: ptr u8) -> bool {
 // The two bytes SAVE reads the first address from; it takes the zero-page address of the pointer.
 private var save_from: u16 @ zp
 
-// Save the bytes from `first` to `last`, both included, as the file `name` on `device`. To replace
-// a file, start the name with "@0:" (the drive's own convention). Returns true if the KERNAL
-// reported a failure; a full disk shows only in the drive's status.
+// Save the bytes from `first` to `last`, both included, as the file `name` on `device`. `last` must
+// be below $FFFF: the KERNAL ends at `last` + 1, and an end of $0000 saves nothing. To replace a file,
+// start the name with "@0:" (the drive's own convention). Returns true if the KERNAL reported a
+// failure; a full disk shows only in drive_status().
 asm fn save(name: ptr u8, n: u8, device: u8, first: ptr u8, last: ptr u8) -> bool using carry {
     lda n
     ldx name
@@ -78,7 +81,8 @@ asm fn save(name: ptr u8, n: u8, device: u8, first: ptr u8, last: ptr u8) -> boo
 
 // Open logical file `lfn` (1 to 255; at most 10 files are open at once) on `device`. `channel` is the
 // secondary address: for a disk file 2 to 14 (the mode comes from the name, "NAME,S,R"). Returns
-// true if the KERNAL reported a failure; a missing file shows in status() or drive_status().
+// true if the KERNAL reported a failure. A missing file is not one: it shows at the first read, and
+// in drive_status().
 fn open(lfn: u8, device: u8, channel: u8, name: ptr u8, n: u8) -> bool {
     setnam(n, name)
     setlfs(lfn, device, channel)
@@ -86,14 +90,18 @@ fn open(lfn: u8, device: u8, channel: u8, name: ptr u8, n: u8) -> bool {
 }
 
 // Read up to `max` bytes from the open file `lfn` into `dst`. Returns how many bytes were read. Stops
-// at the end of the file (status() & ST_EOF) or on an error (any other bit of status()).
+// at the end of the file (status() & ST_EOF; that last byte counts) or on an error (ST_TIMEOUT, e.g. a
+// missing file; that byte does not count).
 fn read(lfn: u8, dst: ptr u8, max: u8) -> u8 {
     var count: u8 = 0
     if chkin(lfn) { return 0 }
     while count < max {
-        dst[count] = chrin()
+        var ch = chrin()
+        var s = readst()
+        if s & ST_TIMEOUT != 0 { break }
+        dst[count] = ch
         count += 1
-        if readst() != 0 { break }
+        if s != 0 { break }
     }
     clrchn()
     return count
@@ -116,32 +124,66 @@ inline fn status() -> u8 {
 }
 
 // ---------- The drive's command channel ----------
+//
+// The command channel is logical file 15 on the drive. Open it once, before the data files, and close
+// it last: closing channel 15 closes every file open on that drive (a real 1541 does; VICE's virtual
+// drive does not).
+//
+//     io.command_open(8)
+//     io.open(2, 8, 2, addr(WNAME), len(WNAME))
+//     io.write(2, addr(data), 10)
+//     n = io.drive_status(addr(message), 40)      // the file is still open
+//     io.close(2)
+//     io.command_close()
 
-// Send a command (scratch, rename, ...) to the drive: "S0:OLDFILE", "R0:NEW=OLD", "I0".
-// Returns true if the KERNAL reported a failure; read the result with drive_status().
-fn command(device: u8, cmd: ptr u8, n: u8) -> bool {
-    setnam(n, cmd)
+// Open the command channel of `device`. Returns true if the KERNAL reported a failure, e.g. when
+// logical file 15 is already open.
+fn command_open(device: u8) -> bool {
+    setnam(0, 0)
     setlfs(15, device, 15)
-    var failed = kernal_open()
-    close(15)
-    return failed
+    return kernal_open()
 }
 
-// Read the drive's status message ("00, OK,00,00") as PETSCII text into `dst`, at most `max`
-// characters, without the final carriage return. Returns the length, 0 if the drive did not answer.
-fn drive_status(device: u8, dst: ptr u8, max: u8) -> u8 {
+// Close the command channel, and with it every file open on that drive.
+fn command_close() {
+    close(15)
+}
+
+// Send a command to the drive through the open command channel: "S0:OLDFILE" (scratch),
+// "R0:NEW=OLD" (rename), "I0" (initialize). The carriage return is added. Returns true on failure;
+// read the drive's answer with drive_status().
+fn command(cmd: ptr u8, n: u8) -> bool {
+    if chkout(15) { return true }
+    for i in 0..n using Y {
+        chrout(cmd[i])
+    }
+    chrout(13)
+    clrchn()
+    return readst() != 0
+}
+
+// Read the drive's status message ("00, OK,00,00") from the open command channel as PETSCII text
+// into `dst`, at most `max` characters, without the final carriage return. Returns the length, 0
+// if the channel is not open or the drive did not answer. A missing file shows here
+// ("62, FILE NOT FOUND,00,00").
+fn drive_status(dst: ptr u8, max: u8) -> u8 {
     var count: u8 = 0
-    setnam(0, dst)
-    setlfs(15, device, 15)
-    if !kernal_open() && !chkin(15) {
-        while count < max {
-            var ch = chrin()
-            if ch == 13 || readst() & ST_NO_DEVICE != 0 { break }
-            dst[count] = ch
-            count += 1
-        }
+    if chkin(15) { return 0 }
+    while count < max {
+        var ch = chrin()
+        if ch == 13 || readst() & ST_NO_DEVICE != 0 { break }
+        dst[count] = ch
+        count += 1
     }
     clrchn()
-    close(15)
     return count
+}
+
+// One command when no file is open on the drive: opens the command channel, sends `cmd`, closes it
+// again (which closes every file open on that drive). Returns true on failure.
+fn command_once(device: u8, cmd: ptr u8, n: u8) -> bool {
+    if command_open(device) { return true }
+    var failed = command(cmd, n)
+    command_close()
+    return failed
 }

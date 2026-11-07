@@ -21,8 +21,11 @@ public class IoTests
         public string DriveMessage = "00, OK,00,00";
         public readonly List<byte> Written = [];
         public readonly List<byte> Screen = [];
+        public readonly List<string> Commands = [];
+        public IEnumerable<int> OpenFiles => _open.Keys;
 
         private readonly Dictionary<int, (string Name, int Pos)> _open = [];
+        private readonly List<byte> _command = [];
         private int _in = -1, _out = -1;
 
         public IReadOnlyDictionary<int, Action<Run>> Traps => new Dictionary<int, Action<Run>>
@@ -52,10 +55,15 @@ public class IoTests
                 bool write = Name.EndsWith(",S,W");
                 var file = Name.Split(',')[0];
                 if (write) Files[file] = [];
-                else if (!Files.ContainsKey(file)) Status = 0x02;           // a missing file shows in the status, not the carry
+                else if (!Files.ContainsKey(file)) DriveMessage = "62, FILE NOT FOUND,00,00";   // as on a 1541: neither carry nor status shows it yet
                 _open[Lfn] = (file, 0);
             },
-            [0xFFC3] = run => { Calls.Add($"CLOSE {run.Cpu.A}"); _open.Remove(run.Cpu.A); },
+            [0xFFC3] = run =>
+            {
+                Calls.Add($"CLOSE {run.Cpu.A}");
+                if (run.Cpu.A == 15) _open.Clear();                         // closing the command channel closes every file on the drive
+                else _open.Remove(run.Cpu.A);
+            },
             [0xFFC6] = run =>
             {
                 Calls.Add($"CHKIN {run.Cpu.X}");
@@ -72,14 +80,33 @@ public class IoTests
             [0xFFCF] = run =>
             {
                 var (name, pos) = _open[_in];
+                if (_in != 15 && !Files.ContainsKey(name))
+                {
+                    run.Cpu.A = 0;                                          // a missing file: end of file and timeout at the first byte
+                    Status = (byte)(Eof | 0x02 | StatusOnRead);
+                    return;
+                }
                 byte[] data = _in == 15 ? Encoding.Latin1.GetBytes(DriveMessage + "\r") : Files[name];
                 run.Cpu.A = data[pos];
-                _open[_in] = (name, pos + 1);
+                _open[_in] = (name, _in == 15 && pos + 1 == data.Length ? 0 : pos + 1);
                 Status = (byte)((pos + 1 == data.Length ? Eof : 0) | StatusOnRead);
             },
             [0xFFD2] = run =>
             {
                 if (_out == -1) { Screen.Add(run.Cpu.A); return; }       // the default output: the screen
+                if (_out == 15)
+                {
+                    if (run.Cpu.A != 13) _command.Add(run.Cpu.A);
+                    else
+                    {
+                        var text = Encoding.Latin1.GetString([.. _command]);
+                        Commands.Add(text);
+                        _command.Clear();
+                        if (text.StartsWith("S0:") && Files.Remove(text[3..])) DriveMessage = "01, FILES SCRATCHED,01,00";
+                    }
+                    return;
+                }
+                Status = 0;                                                 // a successful send clears the status, as on a real bus
                 Written.Add(run.Cpu.A);
                 var name = _open[_out].Name;
                 Files[name] = [.. Files[name], run.Cpu.A];
@@ -166,14 +193,6 @@ public class IoTests
         Assert.Equal(last + 1, k.SaveEnd);
         Assert.True(k.SaveA < 256);                                 // a zero-page address
         Assert.Equal(last - first + 1, k.Files["SCORES"].Length);
-    }
-
-    [Fact]
-    public void Save_to_the_last_byte_of_memory_wraps_the_end_address_to_zero()
-    {
-        var k = new FakeKernal();
-        Go("failed = io.save(addr(NAME), len(NAME), 8, $FFF0, $FFFF)", k);
-        Assert.Equal(0, k.SaveEnd);                                 // $FFFF + 1
     }
 
     [Fact]
@@ -330,47 +349,123 @@ public class IoTests
     }
 
     [Fact]
-    public void Read_stops_on_an_error_status()
+    public void Read_stops_on_a_timeout_without_counting_the_byte()
     {
-        var k = new FakeKernal { StatusOnRead = 0x01 };             // a device that times out
+        var k = new FakeKernal { StatusOnRead = 0x02 };             // a device that times out
         k.Files["SCORES"] = [1, 2, 3, 4];
         var r = Go("""
             failed = io.open(2, 8, 2, addr(RNAME), len(RNAME))
             n = io.read(2, addr(buf), 4)
             """, k);
-        Assert.Equal(1, r.U8("n"));                                 // the first byte, then the error
+        Assert.Equal(0, r.U8("n"));
+        Assert.Equal(0, r.U8("buf"));                               // and no junk byte stored
     }
 
     [Fact]
-    public void A_missing_file_shows_in_the_status_and_not_in_the_carry()
+    public void A_missing_file_gives_no_error_at_open_and_no_bytes_at_read()
     {
         var k = new FakeKernal();
         var r = Go("""
             failed = io.open(2, 8, 2, addr(RNAME), len(RNAME))
             st = io.status()
+            n = io.read(2, addr(buf), 40)
             """, k);
         Assert.False(r.U8("failed") != 0);
-        Assert.Equal(0x02, r.U8("st"));
+        Assert.Equal(0, r.U8("st"));
+        Assert.Equal(0, r.U8("n"));
+        Assert.Equal(0, r.U8("buf"));
+    }
+
+    [Fact]
+    public void A_missing_file_shows_in_the_status_message()
+    {
+        var k = new FakeKernal();
+        var r = Go("""
+            failed = io.command_open(8)
+            failed = failed || io.open(2, 8, 2, addr(RNAME), len(RNAME))
+            n = io.drive_status(addr(buf), 40)
+            """, k);
+        Assert.Equal("62, FILE NOT FOUND,00,00", Encoding.Latin1.GetString(Bytes(r, "buf", r.U8("n"))));
     }
 
     // ---------- Command channel ----------
 
     [Fact]
-    public void Command_sends_the_text_on_channel_15_and_closes_it()
+    public void Command_open_opens_channel_15_without_a_name_and_close_closes_it()
     {
         var k = new FakeKernal();
-        var r = Go("failed = io.command(8, addr(SCRATCH), len(SCRATCH))", k);
+        var r = Go("""
+            failed = io.command_open(9)
+            io.command_close()
+            """, k);
         Assert.False(r.U8("failed") != 0);
-        Assert.Equal(["SETNAM S0:SCORES", "SETLFS 15,8,15", "OPEN", "CLOSE 15"], k.Calls);
+        Assert.Equal(["SETNAM ", "SETLFS 15,9,15", "OPEN", "CLOSE 15"], k.Calls);
     }
 
     [Fact]
-    public void Command_returns_the_carry_and_still_closes()
+    public void Command_open_returns_the_carry()
     {
-        var k = new FakeKernal { Fail = true };
-        var r = Go("failed = io.command(9, addr(NAME), len(NAME))", k);
+        var r = Go("failed = io.command_open(8)", new FakeKernal { Fail = true });
         Assert.True(r.U8("failed") != 0);
-        Assert.Equal("CLOSE 15", k.Calls[^1]);
+    }
+
+    [Fact]
+    public void Command_sends_the_text_and_a_carriage_return_on_channel_15()
+    {
+        var k = new FakeKernal();
+        k.Files["SCORES"] = [1];
+        var r = Go("""
+            failed = io.command_open(8)
+            failed = failed || io.command(addr(SCRATCH), len(SCRATCH))
+            n = io.drive_status(addr(buf), 40)
+            io.command_close()
+            """, k);
+        Assert.False(r.U8("failed") != 0);
+        Assert.Equal(["S0:SCORES"], k.Commands);
+        Assert.Equal(["SETNAM ", "SETLFS 15,8,15", "OPEN", "CHKOUT 15", "CLRCHN", "CHKIN 15", "CLRCHN", "CLOSE 15"], k.Calls);
+        Assert.Equal("01, FILES SCRATCHED,01,00", Encoding.Latin1.GetString(Bytes(r, "buf", r.U8("n"))));
+        Assert.False(k.Files.ContainsKey("SCORES"));
+    }
+
+    [Fact]
+    public void Command_returns_true_when_the_channel_is_not_open()
+    {
+        var k = new FakeKernal();
+        var r = Go("failed = io.command(addr(SCRATCH), len(SCRATCH))", k);
+        Assert.True(r.U8("failed") != 0);
+        Assert.Empty(k.Commands);
+    }
+
+    [Fact]
+    public void Drive_status_leaves_the_channel_and_the_other_files_open()
+    {
+        var k = new FakeKernal();
+        var r = Go("""
+            failed = io.command_open(8)
+            failed = failed || io.open(5, 8, 5, addr(WNAME), len(WNAME))
+            n = io.drive_status(addr(buf), 40)
+            failed = failed || io.write(5, addr(buf), 10)
+            io.close(5)
+            io.command_close()
+            """, k);
+        Assert.False(r.U8("failed") != 0);                          // the documented sequence works
+        Assert.Equal(10, k.Files["SCORES"].Length);
+        Assert.Equal(1, k.Calls.Count(c => c == "CLOSE 15"));       // only the last call closes the channel
+    }
+
+    [Fact]
+    public void Closing_the_command_channel_closes_the_other_files_too()
+    {
+        var k = new FakeKernal();
+        var r = Go("""
+            failed = io.command_open(8)
+            failed = failed || io.open(5, 8, 5, addr(WNAME), len(WNAME))
+            io.command_close()
+            failed = io.write(5, addr(buf), 3)
+            """, k);
+        Assert.Empty(k.OpenFiles);
+        Assert.True(r.U8("failed") != 0);                           // the file is gone: CHKOUT fails
+        Assert.Empty(k.Files["SCORES"]);
     }
 
     [Theory]
@@ -381,27 +476,53 @@ public class IoTests
     public void Drive_status_reads_the_message_without_the_carriage_return(string message, int max, int length)
     {
         var k = new FakeKernal { DriveMessage = message };
-        var r = Go($"n = io.drive_status(8, addr(buf), {max})", k);
+        var r = Go($"""
+            failed = io.command_open(8)
+            n = io.drive_status(addr(buf), {max})
+            """, k);
         Assert.Equal(length, r.U8("n"));
         Assert.Equal(message[..length], Encoding.Latin1.GetString(Bytes(r, "buf", length)));
-        Assert.Equal(["SETNAM ", "SETLFS 15,8,15", "OPEN", "CHKIN 15", "CLRCHN", "CLOSE 15"], k.Calls);
+        Assert.Equal(["SETNAM ", "SETLFS 15,8,15", "OPEN", "CHKIN 15", "CLRCHN"], k.Calls);
     }
 
     [Fact]
-    public void Drive_status_gives_zero_when_the_drive_does_not_answer()
+    public void Drive_status_gives_zero_when_the_channel_is_not_open()
     {
-        var k = new FakeKernal { Fail = true };
-        var r = Go("n = io.drive_status(8, addr(buf), 20)", k);
+        var k = new FakeKernal();
+        var r = Go("n = io.drive_status(addr(buf), 20)", k);
         Assert.Equal(0, r.U8("n"));
-        Assert.Equal(["SETNAM ", "SETLFS 15,8,15", "OPEN", "CLRCHN", "CLOSE 15"], k.Calls);
+        Assert.Equal(["CHKIN 15"], k.Calls);
     }
 
     [Fact]
     public void Drive_status_gives_zero_when_the_device_is_not_present()
     {
         var k = new FakeKernal { DriveMessage = "XX", StatusOnRead = 0x80 };
-        var r = Go("n = io.drive_status(9, addr(buf), 20)", k);
+        var r = Go("""
+            failed = io.command_open(9)
+            n = io.drive_status(addr(buf), 20)
+            """, k);
         Assert.Equal(0, r.U8("n"));
+    }
+
+    [Fact]
+    public void Command_once_opens_sends_and_closes()
+    {
+        var k = new FakeKernal();
+        k.Files["SCORES"] = [1];
+        var r = Go("failed = io.command_once(8, addr(SCRATCH), len(SCRATCH))", k);
+        Assert.False(r.U8("failed") != 0);
+        Assert.Equal(["S0:SCORES"], k.Commands);
+        Assert.Equal(["SETNAM ", "SETLFS 15,8,15", "OPEN", "CHKOUT 15", "CLRCHN", "CLOSE 15"], k.Calls);
+    }
+
+    [Fact]
+    public void Command_once_does_not_close_a_channel_it_failed_to_open()
+    {
+        var k = new FakeKernal { Fail = true };                     // e.g. logical file 15 is already open
+        var r = Go("failed = io.command_once(8, addr(SCRATCH), len(SCRATCH))", k);
+        Assert.True(r.U8("failed") != 0);
+        Assert.Equal(["SETNAM ", "SETLFS 15,8,15", "OPEN"], k.Calls);
     }
 
     // ---------- Example ----------

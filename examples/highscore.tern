@@ -24,6 +24,7 @@ var back: [u8; 16]
 var message: [u8; 40]
 
 fn main() {
+    io.command_open(8)              // open the drive's command channel first, close it last
     c64.chrout(147)                 // clear the screen
     c64.print(addr(SAVED), len(SAVED))
     c64.print(addr(SCORE), len(SCORE))
@@ -38,6 +39,7 @@ fn main() {
         c64.print(addr(back), len(back))
     }
     c64.print(addr(STATUS), len(STATUS))
-    var n = io.drive_status(8, addr(message), 40)
+    var n = io.drive_status(addr(message), 40)
     c64.print(addr(message), n)
+    io.command_close()
 }
