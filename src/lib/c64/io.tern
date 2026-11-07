@@ -1,0 +1,147 @@
+// Commodore 64 device I/O: disk drives and other serial devices through the KERNAL.
+//
+//     import io
+//     io.save(addr(NAME), len(NAME), 8, addr(scores), addr(scores) + 15)     // whole file
+//     io.load(addr(NAME), len(NAME), 8, addr(scores))
+//
+// Needs the KERNAL ROM switched in: none of this works after c64.kernal_off().
+//
+// Names are PETSCII strings, passed as a pointer and a length (`data NAME = "SCORES"`). A name for a
+// sequential file carries its type and mode: "SCORES,S,W" to write, "SCORES,S,R" to read.
+//
+// Errors. A function that returns a bool returns true on failure. That is the KERNAL's carry, which
+// catches problems the KERNAL itself sees (no such device, too many open files, ...). A disk drive
+// reports its own errors (file not found, disk full) only through the status byte and the command
+// channel: after opening or loading a disk file, call status() or drive_status(). Bits of status():
+const ST_TIMEOUT = $03          // the device did not answer (bit 0 or 1)
+const ST_EOF = $40              // end of file; the byte just read is the last one
+const ST_NO_DEVICE = $80        // device not present
+
+// ---------- The KERNAL routines ----------
+// Calls go straight to the ROM (spec 6.6). The status of a call is read with readst().
+
+fn setlfs(lfn: u8 using A, device: u8 using X, channel: u8 using Y) @ $FFBA keeps A, X, Y
+fn setnam(n: u8 using A, name: ptr u8 using XY) @ $FFBD keeps A, X, Y
+fn kernal_open() -> bool using carry @ $FFC0
+fn close(lfn: u8 using A) @ $FFC3
+fn chkin(lfn: u8 using X) -> bool using carry @ $FFC6
+fn chkout(lfn: u8 using X) -> bool using carry @ $FFC9
+fn clrchn() @ $FFCC
+fn chrin() -> u8 using A @ $FFCF
+fn chrout(ch: u8 using A) @ $FFD2 keeps X, Y
+fn readst() -> u8 using A @ $FFB7
+
+// LOAD with A = 0 (load, not verify). With secondary address 0 the file goes to the address in X, Y;
+// with 1, to the address stored in the file.
+fn kernal_load(0 using A, address: ptr u8 using XY) -> bool using carry @ $FFD5
+
+// ---------- Whole files ----------
+
+// Load the file `name` from `device` (8 is the first disk drive) to `address`, ignoring the address
+// stored in the file. Returns true if the KERNAL reported a failure.
+fn load(name: ptr u8, n: u8, device: u8, address: ptr u8) -> bool {
+    setnam(n, name)
+    setlfs(1, device, 0)
+    return kernal_load(address)
+}
+
+// The two bytes SAVE reads the first address from; it takes the zero-page address of the pointer.
+private var save_from: u16 @ zp
+
+// Save the bytes from `first` to `last`, both included, as the file `name` on `device`. To replace
+// a file, start the name with "@0:" (the drive's own convention). Returns true if the KERNAL
+// reported a failure; a full disk shows only in the drive's status.
+asm fn save(name: ptr u8, n: u8, device: u8, first: ptr u8, last: ptr u8) -> bool using carry {
+    lda n
+    ldx name
+    ldy name+1
+    jsr $FFBD           // SETNAM
+    lda #1              // logical file number
+    ldx device
+    ldy #1              // secondary address 1: write a program file
+    jsr $FFBA           // SETLFS
+    lda first
+    sta save_from
+    lda first+1
+    sta save_from+1
+    ldx last            // SAVE takes the address after the last byte
+    ldy last+1
+    inx
+    bne .go
+    iny
+.go:
+    lda #save_from.lo   // the zero-page address of the start pointer
+    jsr $FFD8           // SAVE
+}
+
+// ---------- Sequential files ----------
+
+// Open logical file `lfn` (1 to 255; at most 10 files are open at once) on `device`. `channel` is the
+// secondary address: for a disk file 2 to 14 (the mode comes from the name, "NAME,S,R"). Returns
+// true if the KERNAL reported a failure; a missing file shows in status() or drive_status().
+fn open(lfn: u8, device: u8, channel: u8, name: ptr u8, n: u8) -> bool {
+    setnam(n, name)
+    setlfs(lfn, device, channel)
+    return kernal_open()
+}
+
+// Read up to `max` bytes from the open file `lfn` into `dst`. Returns how many bytes were read. Stops
+// at the end of the file (status() & ST_EOF) or on an error (any other bit of status()).
+fn read(lfn: u8, dst: ptr u8, max: u8) -> u8 {
+    var count: u8 = 0
+    if chkin(lfn) { return 0 }
+    while count < max {
+        dst[count] = chrin()
+        count += 1
+        if readst() != 0 { break }
+    }
+    clrchn()
+    return count
+}
+
+// Write n bytes from `src` to the open file `lfn`. Returns true on failure (the KERNAL's carry or
+// any bit of status()).
+fn write(lfn: u8, src: ptr u8, n: u8) -> bool {
+    if chkout(lfn) { return true }
+    for i in 0..n using Y {
+        chrout(src[i])
+    }
+    clrchn()
+    return readst() != 0
+}
+
+// The status byte of the last file operation (ST_ bits above); 0 is success.
+inline fn status() -> u8 {
+    return readst()
+}
+
+// ---------- The drive's command channel ----------
+
+// Send a command (scratch, rename, ...) to the drive: "S0:OLDFILE", "R0:NEW=OLD", "I0".
+// Returns true if the KERNAL reported a failure; read the result with drive_status().
+fn command(device: u8, cmd: ptr u8, n: u8) -> bool {
+    setnam(n, cmd)
+    setlfs(15, device, 15)
+    var failed = kernal_open()
+    close(15)
+    return failed
+}
+
+// Read the drive's status message ("00, OK,00,00") as PETSCII text into `dst`, at most `max`
+// characters, without the final carriage return. Returns the length, 0 if the drive did not answer.
+fn drive_status(device: u8, dst: ptr u8, max: u8) -> u8 {
+    var count: u8 = 0
+    setnam(0, dst)
+    setlfs(15, device, 15)
+    if !kernal_open() && !chkin(15) {
+        while count < max {
+            var ch = chrin()
+            if ch == 13 || readst() & ST_NO_DEVICE != 0 { break }
+            dst[count] = ch
+            count += 1
+        }
+    }
+    clrchn()
+    close(15)
+    return count
+}
