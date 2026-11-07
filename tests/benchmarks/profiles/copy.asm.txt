@@ -1,0 +1,96 @@
+                     
+                     
+                     
+                     
+                     =$4000   SRC  = $4000
+                     =$5000   DST  = $5000
+                     =$c000   same = $c000
+                     =$10   p    = $10                  ; pointers
+                     =$12   q    = $12
+                     .0800   start
+      1 x        2  .0800 a9 00          lda #<SRC
+      1 x        3  .0802 85 10          sta p
+      1 x        2  .0804 a9 40          lda #>SRC
+      1 x        3  .0806 85 11          sta p+1
+      1 x        2  .0808 a2 00          ldx #0
+    250 x      500  .080a 8a  fill    txa
+    250 x      500  .080b a0 00          ldy #0
+    250 x     1500  .080d 91 10          sta (p),y
+    250 x      500  .080f 49 ff          eor #$ff
+    250 x      500  .0811 c8          iny
+    250 x     1500  .0812 91 10          sta (p),y
+    250 x      500  .0814 8a          txa
+    250 x      500  .0815 18          clc
+    250 x      500  .0816 69 01          adc #1
+    250 x      500  .0818 c8          iny
+    250 x     1500  .0819 91 10          sta (p),y
+    250 x      500  .081b 8a          txa
+    250 x      500  .081c 4a          lsr
+    250 x      500  .081d c8          iny
+    250 x     1500  .081e 91 10          sta (p),y
+    250 x      750  .0820 a5 10          lda p
+    250 x      500  .0822 18          clc
+    250 x      500  .0823 69 04          adc #4
+    250 x      750  .0825 85 10          sta p
+    250 x      747  .0827 90 02          bcc nc
+      3 x       15  .0829 e6 11          inc p+1
+    250 x      500  .082b e8  nc      inx
+    250 x      500  .082c e0 fa          cpx #250
+    250 x      749  .082e d0 da          bne fill
+      1 x        2  .0830 a9 00          lda #<SRC
+      1 x        3  .0832 85 10          sta p
+      1 x        2  .0834 a9 40          lda #>SRC
+      1 x        3  .0836 85 11          sta p+1
+      1 x        2  .0838 a9 00          lda #<DST
+      1 x        3  .083a 85 12          sta q
+      1 x        2  .083c a9 50          lda #>DST
+      1 x        3  .083e 85 13          sta q+1
+      1 x        2  .0840 a2 03          ldx #3
+      3 x        6  .0842 a0 00  page    ldy #0
+    768 x     3840  .0844 b1 10  cp      lda (p),y
+    768 x     4608  .0846 91 12          sta (q),y
+    768 x     1536  .0848 c8          iny
+    768 x     2301  .0849 d0 f9          bne cp
+      3 x       15  .084b e6 11          inc p+1
+      3 x       15  .084d e6 13          inc q+1
+      3 x        6  .084f ca          dex
+      3 x        8  .0850 d0 f0          bne page
+    232 x     1160  .0852 b1 10  cp2     lda (p),y
+    232 x     1392  .0854 91 12          sta (q),y
+    232 x      464  .0856 c8          iny
+    232 x      464  .0857 c0 e8          cpy #232
+    232 x      695  .0859 d0 f7          bne cp2
+      1 x        2  .085b a9 01          lda #1
+      1 x        4  .085d 8d 00 c0         sta same
+      1 x        2  .0860 a9 00          lda #<SRC
+      1 x        3  .0862 85 10          sta p
+      1 x        2  .0864 a9 40          lda #>SRC
+      1 x        3  .0866 85 11          sta p+1
+      1 x        2  .0868 a9 00          lda #<DST
+      1 x        3  .086a 85 12          sta q
+      1 x        2  .086c a9 50          lda #>DST
+      1 x        3  .086e 85 13          sta q+1
+      1 x        2  .0870 a2 03          ldx #3
+      3 x        6  .0872 a0 00  cpage   ldy #0
+    768 x     3840  .0874 b1 10  cmp1    lda (p),y
+    768 x     3840  .0876 d1 12          cmp (q),y
+    768 x     2304  .0878 f0 05          beq eq1
+                     .087a a9 00          lda #0
+                     .087c 8d 00 c0         sta same
+    768 x     1536  .087f c8  eq1     iny
+    768 x     2301  .0880 d0 f2          bne cmp1
+      3 x       15  .0882 e6 11          inc p+1
+      3 x       15  .0884 e6 13          inc q+1
+      3 x        6  .0886 ca          dex
+      3 x        8  .0887 d0 e9          bne cpage
+    232 x     1160  .0889 b1 10  cmp2    lda (p),y
+    232 x     1160  .088b d1 12          cmp (q),y
+    232 x      696  .088d f0 05          beq eq2
+                     .088f a9 00          lda #0
+                     .0891 8d 00 c0         sta same
+    232 x      464  .0894 c8  eq2     iny
+    232 x      464  .0895 c0 e8          cpy #232
+    232 x      695  .0897 d0 f0          bne cmp2
+      1 x        6  .0899 60          rts
+                     
+total 51599 cycles

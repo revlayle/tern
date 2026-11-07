@@ -36,7 +36,10 @@ public class VariantTests
             // How often each instruction ran, for the numbers in analysis.md.
             Directory.CreateDirectory(Path.Combine(dir, "profiles"));
             foreach (var task in BenchmarkTests.Checks.Keys)
+            {
                 File.WriteAllText(Path.Combine(dir, "profiles", task + ".txt"), ComparisonTests.Profile(Path.Combine(dir, task + ".tern")));
+                File.WriteAllText(Path.Combine(dir, "profiles", task + ".asm.txt"), ComparisonTests.AsmProfile(dir, task));
+            }
         }
     }
 }

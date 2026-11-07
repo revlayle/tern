@@ -1,0 +1,93 @@
+                     
+                     
+                     
+                     
+                     =0   OP_PUSH = 0
+                     =1   OP_ADD  = 1
+                     =2   OP_SUB  = 2
+                     =3   OP_DUP  = 3
+                     =4   OP_SWAP = 4
+                     =5   OP_DROP = 5
+                     =6   OP_JNZ  = 6
+                     =7   OP_DEC  = 7
+                     =8   OP_OVER = 8
+                     =9   OP_HALT = 9
+                     =$c000   stack  = $c000
+                     =$c010   result = $c010
+                     =$c011   steps  = $c011              ; 16 bits
+                     =$10   pc     = $10
+                     =$11   tmp    = $11
+                     .0800   start
+      1 x        2  .0800 a0 00          ldy #0              ; Y = sp
+     74 x      222  .0802 a6 10  fetch   ldx pc
+     74 x      296  .0804 bd 98 08         lda code,x
+     74 x      370  .0807 e6 10          inc pc
+     74 x      444  .0809 ee 11 c0         inc steps
+     74 x      222  .080c d0 03          bne s1
+                     .080e ee 12 c0         inc steps+1
+     74 x      148  .0811 aa  s1      tax
+     74 x      296  .0812 bd b0 08         lda hi,x
+     74 x      222  .0815 48          pha
+     74 x      296  .0816 bd a6 08         lda lo,x
+     74 x      222  .0819 48          pha
+     74 x      444  .081a 60          rts
+      2 x        6  .081b a6 10  h_push  ldx pc
+      2 x        8  .081d bd 98 08         lda code,x
+      2 x       10  .0820 99 00 c0         sta stack,y
+      2 x        4  .0823 c8          iny
+      2 x       10  .0824 e6 10          inc pc
+      2 x        6  .0826 4c 02 08         jmp fetch
+     10 x       20  .0829 88  h_add   dey
+     10 x       50  .082a b9 ff bf         lda stack-1,y
+     10 x       20  .082d 18          clc
+     10 x       40  .082e 79 00 c0         adc stack,y
+     10 x       50  .0831 99 ff bf         sta stack-1,y
+     10 x       30  .0834 4c 02 08         jmp fetch
+                     .0837 88  h_sub   dey
+                     .0838 b9 ff bf         lda stack-1,y
+                     .083b 38          sec
+                     .083c f9 00 c0         sbc stack,y
+                     .083f 99 ff bf         sta stack-1,y
+                     .0842 4c 02 08         jmp fetch
+     10 x       50  .0845 b9 ff bf h_dup   lda stack-1,y
+     10 x       50  .0848 99 00 c0         sta stack,y
+     10 x       20  .084b c8          iny
+     10 x       30  .084c 4c 02 08         jmp fetch
+     20 x      100  .084f b9 ff bf h_swap  lda stack-1,y
+     20 x       60  .0852 85 11          sta tmp
+     20 x      100  .0854 b9 fe bf         lda stack-2,y
+     20 x      100  .0857 99 ff bf         sta stack-1,y
+     20 x       60  .085a a5 11          lda tmp
+     20 x      100  .085c 99 fe bf         sta stack-2,y
+     20 x       60  .085f 4c 02 08         jmp fetch
+      1 x        2  .0862 88  h_drop  dey
+      1 x        3  .0863 4c 02 08         jmp fetch
+     10 x       20  .0866 88  h_jnz   dey
+     10 x       40  .0867 b9 00 c0         lda stack,y
+     10 x       21  .086a f0 0a          beq nojump
+      9 x       27  .086c a6 10          ldx pc
+      9 x       36  .086e bd 98 08         lda code,x
+      9 x       27  .0871 85 10          sta pc
+      9 x       27  .0873 4c 02 08         jmp fetch
+      1 x        5  .0876 e6 10  nojump  inc pc
+      1 x        3  .0878 4c 02 08         jmp fetch
+     10 x       50  .087b b9 ff bf h_dec   lda stack-1,y
+     10 x       20  .087e 38          sec
+     10 x       20  .087f e9 01          sbc #1
+     10 x       50  .0881 99 ff bf         sta stack-1,y
+     10 x       30  .0884 4c 02 08         jmp fetch
+     10 x       50  .0887 b9 fe bf h_over  lda stack-2,y
+     10 x       50  .088a 99 00 c0         sta stack,y
+     10 x       20  .088d c8          iny
+     10 x       30  .088e 4c 02 08         jmp fetch
+      1 x        4  .0891 ad 00 c0 h_halt  lda stack
+      1 x        4  .0894 8d 10 c0         sta result
+      1 x        6  .0897 60          rts
+                     >0898 00 00 00 0a code    .byte OP_PUSH, 0, OP_PUSH, 10, OP_SWAP, OP_OVER, OP_ADD, OP_SWAP, OP_DEC, OP_DUP, OP_JNZ, 4, OP_DROP, OP_HALT
+                     >089c 04 08 01 04 07 03 06 04 05 09
+                     >08a6 1a 28 36 44 lo      .byte <(h_push-1), <(h_add-1), <(h_sub-1), <(h_dup-1), <(h_swap-1), <(h_drop-1), <(h_jnz-1), <(h_dec-1), <(h_over-1), <(h_halt-1)
+                     >08aa 4e 61 65 7a 86 90
+                     >08b0 08 08 08 08 hi      .byte >(h_push-1), >(h_add-1), >(h_sub-1), >(h_dup-1), >(h_swap-1), >(h_drop-1), >(h_jnz-1), >(h_dec-1), >(h_over-1), >(h_halt-1)
+                     >08b4 08 08 08 08 08 08
+                     
+total 4713 cycles

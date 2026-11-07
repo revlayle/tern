@@ -1,0 +1,57 @@
+                     
+                     
+                     
+                     
+                     =$c000   total   = $c000             ; 16 bits
+                     =$c002   clamped = $c002
+                     =$10   i       = $10
+                     =$11   s       = $11
+                     =$12   t       = $12
+                     .0800   start
+    200 x      600  .0800 a5 10  loop    lda i
+    200 x      400  .0802 4a          lsr
+    200 x      400  .0803 aa          tax                 ; b = i >> 1
+    200 x      400  .0804 a0 03          ldy #3              ; c = 3
+    200 x      600  .0806 a5 10          lda i               ; a = i
+    200 x     1200  .0808 20 3d 08         jsr add3
+    200 x      600  .080b 85 11          sta s
+    200 x      400  .080d 18          clc
+    200 x      800  .080e 6d 00 c0         adc total
+    200 x      800  .0811 8d 00 c0         sta total
+    200 x      512  .0814 90 03          bcc nc1
+     88 x      528  .0816 ee 01 c0         inc total+1
+    200 x      400  .0819 a2 96  nc1     ldx #150
+    200 x      600  .081b a5 11          lda s
+    200 x     1200  .081d 20 48 08         jsr clamp
+    200 x      800  .0820 8d 02 c0         sta clamped
+    200 x      400  .0823 a2 64          ldx #100
+    200 x      600  .0825 a5 11          lda s
+    200 x     1200  .0827 20 53 08         jsr bigger
+    200 x      497  .082a b0 08          bcs notbig          ; carry clear: s > 100
+    103 x      618  .082c ee 00 c0         inc total
+    103 x      309  .082f d0 03          bne notbig
+                     .0831 ee 01 c0         inc total+1
+    200 x     1000  .0834 e6 10  notbig  inc i
+    200 x      600  .0836 a5 10          lda i
+    200 x      400  .0838 c9 c8          cmp #200
+    200 x      599  .083a d0 c4          bne loop
+      1 x        6  .083c 60          rts
+    200 x      600  .083d 86 12  add3    stx t               ; A = a, X = b, Y = c
+    200 x      400  .083f 18          clc
+    200 x      600  .0840 65 12          adc t
+    200 x      600  .0842 84 12          sty t
+    200 x      400  .0844 18          clc
+    200 x      600  .0845 65 12          adc t
+    200 x     1200  .0847 60          rts
+    200 x      600  .0848 86 12  clamp   stx t               ; A = v, X = top
+    200 x      600  .084a c5 12          cmp t
+    200 x      529  .084c 90 04          bcc clamp_ok
+     71 x      143  .084e f0 02          beq clamp_ok
+     70 x      210  .0850 a5 12          lda t
+                     .0852   clamp_ok
+    200 x     1200  .0852 60          rts
+    200 x      600  .0853 85 12  bigger  sta t               ; A = a, X = b; carry clear when a > b
+    200 x      600  .0855 e4 12          cpx t
+    200 x     1200  .0857 60          rts
+                     
+total 26551 cycles

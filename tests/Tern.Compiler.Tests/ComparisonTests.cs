@@ -112,6 +112,47 @@ public class ComparisonTests
         return sb.ToString();
     }
 
+    /// <summary>
+    /// The same for the hand-written assembly version of a task: the 64tass listing with the count and cycles of each instruction,
+    /// from <c>start</c> to its return, and the total at the end.
+    /// </summary>
+    internal static string AsmProfile(string dir, string name)
+    {
+        string work = Path.Combine(Path.GetTempPath(), "tern-asm-profile");
+        Directory.CreateDirectory(work);
+        string prg = Path.Combine(work, name + ".prg"), labels = Path.Combine(work, name + ".lbl"), listing = Path.Combine(work, name + ".lst");
+        Exec(Tool("TASS64", @"C:\prog8-stuff\64tass\64tass.exe", "64tass"),
+            ["-a", Path.Combine(dir, "asm", name + ".asm"), "-o", prg, "-l", labels, "-L", listing, "--no-monitor"], work);
+        var file = File.ReadAllBytes(prg);
+        var ram = new Ram();
+        ram.Load((ushort)(file[0] | (file[1] << 8)), file.AsSpan(2));
+        int entry = ParseLabels(File.ReadAllLines(labels), @"^(\w+)\s*=\s*\$([0-9a-fA-F]+)")["start"];
+        ram.Bytes[0x1FF] = (byte)((Sentinel - 1) >> 8);
+        ram.Bytes[0x1FE] = (byte)((Sentinel - 1) & 0xFF);
+        var cpu = new Cpu6502(ram) { PC = (ushort)entry, SP = 0xFD, I = true };
+        var count = new Dictionary<int, int>();
+        var cycles = new Dictionary<int, long>();
+        while (cpu.PC != Sentinel)
+        {
+            int pc = cpu.PC;
+            long before = cpu.Cycles;
+            Step(cpu, name);
+            count[pc] = count.GetValueOrDefault(pc) + 1;
+            cycles[pc] = cycles.GetValueOrDefault(pc) + (cpu.Cycles - before);
+        }
+        var sb = new StringBuilder();
+        foreach (var line in File.ReadAllLines(listing).Where(l => !l.StartsWith(';')))
+        {
+            var m = Regex.Match(line, @"^\.([0-9a-f]{4})\t[0-9a-f]");
+            if (m.Success && count.TryGetValue(Convert.ToInt32(m.Groups[1].Value, 16), out var n))
+                sb.AppendLine($"{n,7} x {cycles[Convert.ToInt32(m.Groups[1].Value, 16)],8}  {line.Replace('\t', ' ')}");
+            else
+                sb.AppendLine($"{"",19}  {line.Replace('\t', ' ')}");
+        }
+        sb.AppendLine($"total {cpu.Cycles} cycles");
+        return sb.ToString();
+    }
+
     // ---- hand-written assembly ----
 
     private static Measure RunAsm(string dir, string work, string name)
