@@ -8,7 +8,7 @@ Written by the coding session for the spec session, which schedules the fixes (M
 
 - `profiles/<task>.txt`: the Tern listing with how often each instruction ran and the cycles it took. `profiles/<task>.asm.txt`: the same for the assembly version (64tass listing, run from `start` to its return; the total at the end matches `comparison.md`). `profiles/<variant>.txt`: the same for the variants. Every profile's cycles add up to the measured total.
 - Each benchmark was compared instruction by instruction with its `.asm` file. A cell is the sum of the differences of one class. Cycles are count times the cycles saved, taken from the two profiles; page crossings are the profile's cycles above the instruction's base time. Bytes are counted from the two listings.
-- Class 2 cells for `copy`, `enemies` and `interp` are the measured variants (`variants.md`), with any page-crossing change taken out (see each row); the `calls` cell is counted, and its variant measures more.
+- Class 2 "now" cells are measured by variants (`variants.md`): `copy.pages`, `enemies.first`, `interp.return`, and `bigger`'s part of `calls.regs`. Where a variant moves an array across a page boundary, that change is taken out (see each row).
 - Regenerate with `TERN_COMPARE=1 dotnet test` (needs 64tass for the assembly profiles).
 
 **Classes** (roadmap). 1 *optimizer*: the compiler could produce the better code from the same source. 2 *how the Tern is written*: another way of writing it gives the better code (advice for the guide). 3 *language*: a feature would be needed. 4 *assembly only*: a trick that should stay in `asm`.
@@ -22,42 +22,43 @@ Two more columns make every row add up without a remainder hidden in a class:
 
 ### Cycles
 
-| task | gap | 1 optimizer | 2 now (measured) | 2 after F1 + F2 | 3 language | 4 asm only | asm's choices | other |
+| task | gap | 1 optimizer | 2 now (measured) | 2 after a class 1 fix | 3 language | 4 asm only | asm's choices | other |
 |---|--:|--:|--:|--:|--:|--:|--:|--:|
-| bubble | 96,164 | 73,070 | | 23,094 | | | | 0 |
-| calls | 5,203 | 4,286 | 2,103 | | | | −1,186 | 0 |
+| bubble | 96,164 | 96,164 | | | | | | 0 |
+| calls | 5,203 | 4,286 | 1,200 | 903 | | | −1,186 | 0 |
 | copy | 16,682 | 6,236 | 10,174 | | | 273 | −1 | 0 |
 | crc8 | 10,282 | 10,789 | | | | | −507 | 0 |
 | enemies | 24,287 | 19,567 | 4,800 | | | | −80 | 0 |
-| fib16 | 849 | 857 | | | | 62 | −70 | 0 |
+| fib16 | 849 | 907 | | | | 12 | −70 | 0 |
 | interp | 1,436 | 974 | 611 | | | | −149 | 0 |
 | sieve | 256 | 255 | | | | | 1 | 0 |
 | sum16 | 7,224 | 8,776 | | | | | −1,552 | 0 |
-| **total** | **162,383** | **124,810 (77%)** | **17,688 (11%)** | **23,094 (14%)** | **0** | **335 (0.2%)** | **−3,544 (−2%)** | **0** |
+| **total** | **162,383** | **147,954 (91%)** | **16,785 (10%)** | **903 (0.6%)** | **0** | **285 (0.2%)** | **−3,544 (−2%)** | **0** |
 
 ### Bytes
 
-| task | gap | 1 optimizer | 2 now (measured) | 2 after F1 + F2 | 3 language | 4 asm only | asm's choices | other |
+| task | gap | 1 optimizer | 2 now (measured) | 2 after a class 1 fix | 3 language | 4 asm only | asm's choices | other |
 |---|--:|--:|--:|--:|--:|--:|--:|--:|
-| bubble | 27 | 25 | | 2 | | | | 0 |
-| calls | 19 | 13 | 9 | | | | −3 | 0 |
+| bubble | 27 | 27 | | | | | | 0 |
+| calls | 19 | 13 | 4 | 5 | | | −3 | 0 |
 | copy | 73 | 78 | −23 | | | 21 | −3 | 0 |
 | crc8 | 12 | 10 | | | | | 2 | 0 |
 | enemies | 28 | 30 | 4 | | | | −6 | 0 |
-| fib16 | 42 | 43 | | | | 8 | −9 | 0 |
+| fib16 | 42 | 47 | | | | 4 | −9 | 0 |
 | interp | 55 | 36 | 18 | | | | 1 | 0 |
 | sieve | 1 | 1 | | | | | | 0 |
 | sum16 | 17 | 25 | | | | | −8 | 0 |
-| **total** | **274** | **261 (95%)** | **8** | **2** | **0** | **29** | **−26** | **0** |
+| **total** | **274** | **267 (97%)** | **3** | **5** | **0** | **25** | **−26** | **0** |
 
 What the two tables say:
 
-- **Class 1 is three quarters of the cycle gap and almost all of the byte gap.** Bytes do not follow cycles: class 2 saves 17,688 cycles but only 8 bytes, because the faster forms (`copy.pages`) are longer. The largest byte items are F1 (64), F10's 16-bit `± 256` (55) and F11 (21); the largest cycle item, F2, is only 10 bytes.
-- **Class 2 has two parts.** "Now" (17,688) is advice a programmer can follow today; each part is measured by a variant. "After F1 + F2" (23,094, all in `bubble`) can only be reached once F1 and F2 are built: today the rewritten form, `bubble.direct`, is slower (253,936 against 226,948). Of the 23,094, only 5,478 comes from the rewrite; the other 17,616 also needs a register for the swapped element (F18, class 1 on the rewritten source).
-- **The assembly loses 3,544 cycles to its own layout** (absolute addresses, page crossings), so class 1 + class 2 is more than the gap: with all of it, Tern would be about 3,200 cycles below the assembly. With class 1 alone, Tern would be 361,992 cycles (assembly + 12%).
+- **Class 1 is nine tenths of the cycle gap and almost all of the byte gap.** Bytes do not follow cycles: class 2 saves 16,785 cycles but only 3 bytes, because the faster forms (`copy.pages`) are longer. The largest byte items are F1 (64), F10's 16-bit `± 256` (55) and F11 (21); the largest cycle item, F2, is only 10 bytes.
+- **Class 2 has two parts.** "Now" (16,785) is advice a programmer can follow today; each part is measured by a variant. "After a class 1 fix" (903, in `calls`) is a rewrite that only pays once F21 is built: write `bigger` so that its result is the compare's own carry.
+- **`bubble` is all class 1.** The source as written can give the assembly's inner loop (F18); no rewrite is needed.
+- **The assembly loses 3,544 cycles to its own layout** (absolute addresses, page crossings), so class 1 + class 2 is more than the gap: with all of it, Tern would be about 3,300 cycles below the assembly. With class 1 alone, Tern would be 338,848 cycles (assembly + 4%).
 - **Class 3 is empty.** The register-held values in the benchmarks are all class 1 under spec 4 (section 4).
 
-The order the cells are counted in matters where items overlap, and is fixed per row: in `bubble` the class 1 items come first and the 23,094 is what is left after them; in `copy` the class 2 rewrite (pages) comes first and F1 is counted on the rewritten loops (8 bytes there, 4 on the original); in `enemies` F3 is counted after F4.
+The order the cells are counted in matters where items overlap, and is fixed per row: in `bubble` F18 is counted after F2, F3 and F9; in `copy` the class 2 rewrite (pages) comes first and F1 is counted on the rewritten loops (8 bytes there, 4 on the original); in `enemies` F3 is counted after F4.
 
 ## 2. Findings
 
@@ -71,7 +72,7 @@ Each finding: the pattern, Tern's lines against the assembly's, and what it save
 
 **F4. `x > c` with x in A compiles to `lda #c / cmp x / bcs`** instead of `cmp #c+1 / bcc`. 3 cycles and 2 bytes, and the load of A throws away x. `enemies` (`x > 200`, `y > 180`, 1,584 times): **4,752 / 4.**
 
-**F5. After `sta a,x` the optimizer does not know that A holds the element.** `enemies.inplace` (`e[i].x += d`, then tests on `e[i].x`) reloads `lda e,x` after the store and is slower than the locals form: 169 / 78,372 against 161 / 70,076. No benchmark is written that way, so it is in no row; it is part of F18.
+**F5. After `sta a,x` the optimizer does not know that A holds the element.** `enemies.inplace` (`e[i].x += d`, then tests on `e[i].x`) reloads `lda e,x` after the store and is slower than the locals form: 169 / 78,372 against 161 / 70,076. No benchmark is written that way, so it is in no row. It is also why `bubble.direct` keeps a slow swap.
 
 **F6. `u16 += u8 as u16`** goes through a 2-byte temporary and a full 16-bit add: `sta _t0 / lda #0 / sta _t0+1 / clc / lda total / adc _t0 / sta total / lda total+1 / adc _t0+1 / sta total+1` (28 cycles, 19 bytes) where `clc / adc total / sta total / bcc / inc total+1` is 12.8 on average (9 bytes). `calls`: **3,048 / 10.**
 
@@ -127,9 +128,13 @@ Each finding: the pattern, Tern's lines against the assembly's, and what it save
 
 **F17. A is forgotten after `bcc / inc hi`.** `sum16`: `sta v / bcc c3 / inc v+1 / c3: lda v`. `inc` does not change A, so A holds `v` on both paths. **600 / 2.**
 
-**F18. On `bubble.direct`, the swapped element in a register** (needs F1 and F2, and the direct form). With F1 and F2, `bubble.direct`'s compare is the assembly's (`lda values+1,x / cmp values,x / bcs`), but its swap is `lda values,x / sta a / lda values+1,x / sta values,x / lda a / sta values+1,x` (24 cycles) where the assembly does `ldx values,y / sta values,y / txa / sta values+1,y` (16): the element in a free register (Y, since Tern indexes with X) and A known to hold `values[i + 1]` from the compare (F5). 17,616 cycles. Counted in the "after F1 + F2" column together with the 5,478 the rewrite itself saves.
+**F18. A local copy of an element that is only needed later is kept in memory** (`bubble`; after F2). `var a = values[i]; var b = values[i + 1]; if a > b { values[i] = b; values[i + 1] = a }`: `values[i]` is not written between the read of `a` and the first store, so the compare can use it directly, and `a` is needed only on the swap path, where it can be loaded into a free register (Y, since Tern indexes with X) just before `values[i]` is overwritten. With F2 and F3 that is the assembly's inner loop: `lda values+1,x / cmp values,x / bcs / ldy values,x / sta values,x / tya / sta values+1,x`. Today: `lda values,x / sta a / ... / cmp a` on every pass (6 cycles more than `cmp values,x`) and `lda a` on a swap (3 less than `ldy values,x / tya`). **23,094 / 2.** The rewritten form `bubble.direct` gets only 5,478 of it after F1 and F2 (its swap is still `lda values,x / sta a / lda values+1,x / sta values,x / lda a / sta values+1,x`), so it is not advice worth giving if F18 is built.
 
 **F19. A commutative operand order** (`crc8`: `lda crc / eor main.b` where A already holds `b`: `eor crc`). **768 / 2.**
+
+**F20. A bit test where the next shift already gives the bit** (`fib16`'s `mul`; also `math.mul16`). `if b.lo & 1 != 0 { r += a }; a = a << 1; b = b >> 1` is `lda b / and #1 / beq`, then `lsr b+1 / ror b`. `b`'s shift does not depend on the `if`, so it can move before it and the branch can use the carry it leaves (`lsr bh / ror bl / bcc`, the assembly). A reordering inside one function, no source or language change. **50 / 4.**
+
+**F21. A `bool` result is rebuilt from the carry with branches.** `return b >= a` after `cpx a` is `bcs t / clc / rts / t: sec / rts`, although the carry already is the result; `return a > b` likewise. Returning the carry of the compare directly saves 5 cycles and 4 bytes a call where the condition matches the compare's carry. No benchmark as written has such a condition: `calls`' `bigger(a, b)` returns `a > b`, which is the inverse of the compare's carry. The assembly's `bigger` returns the inverted flag ("carry clear when a > b") and its caller branches the other way. Written so in Tern (a function returning `b >= a`, the caller testing `!`), F21 would give the assembly's code: 903 / 5, counted in the "after a class 1 fix" column.
 
 ## 3. Per benchmark
 
@@ -144,9 +149,9 @@ Inner loop, 4,950 passes and 2,202 swaps: Tern `lda values,x / sta a / txa / clc
 | F2: `txa / clc / adc #1 / tay` in the read and in the swap | 57,216 | 10 | 1 |
 | F3: `sta b` | 14,850 | 2 | 1 |
 | F9: outer loop control and the store of `x` | 1,004 | 13 | 1 |
-| `a` in memory: `lda values,x / sta a / cmp a` (10) against `cmp values,y` (4) on every pass, less 3 a swap (Tern's `lda a` against `ldx values,y / txa`) | 23,094 | 2 | after F1 + F2: 5,478 rewrite (`bubble.direct`), 17,616 F18 |
+| F18: `a` in memory: `lda values,x / sta a / cmp a` (10) against `cmp values,y` (4) on every pass, less 3 a swap (Tern's `lda a` against `ldx values,y / txa`) | 23,094 | 2 | 1 |
 
-`bubble.direct` with F1 and F2 is the assembly plus 17,616 (the swap) plus F9; the original source with F2, F3 and F9 is the assembly plus 23,094. Variants today: `bubble.minus` 77 / 179,532 (the F2 workaround), `bubble.direct` 94 / 253,936. The first loop (`x = (x << 2) + x + 17`) is the same in both apart from the store of `x`.
+The original source with F2, F3, F9 and F18 is the assembly's code. `bubble.direct` with F1 and F2 would be the assembly plus 17,616 (its swap) plus F9, so once F18 exists it is the worse form. Variants today: `bubble.minus` 77 / 179,532 (the F2 workaround), `bubble.direct` 94 / 253,936. The first loop (`x = (x << 2) + x + 17`) is the same in both apart from the store of `x`.
 
 ### calls: 107 / 31,754 against 88 / 26,551 (gap 19 / 5,203)
 
@@ -154,13 +159,13 @@ Inner loop, 4,950 passes and 2,202 swaps: Tern `lda values,x / sta a / txa / clc
 |---|--:|--:|---|
 | F6: `total += s as u16` | 3,048 | 10 | 1 |
 | F16: `clamp` stores and reloads its `using A` parameter | 1,238 | 3 | 1 |
-| `bigger`: `b` is a memory parameter (`lda #100 / sta b`, `lda b`) where the assembly passes X | 1,200 | 4 | 2 now |
-| `bigger`: `return a > b` makes a true carry with `bcc / clc / rts / sec / rts`; the assembly returns the inverted carry and the caller branches on it (`rts`) | 903 | 5 | 2 now |
+| `bigger`: `b` is a memory parameter (`lda #100 / sta b`, `lda b`) where the assembly passes X; measured by `calls.regs`, whose `bigger(a: u8 using A, b: u8 using X)` call and compare are the assembly's (`ldx #100 / lda s / jsr`, `sta a / cpx a`) | 1,200 | 4 | 2 now |
+| `bigger`: `return a > b` makes a true carry with `bcc / clc / rts / sec / rts`; the assembly returns the inverted carry and the caller branches on it (`rts`) | 903 | 5 | 2 after F21 |
 | `add3`: Tern's memory parameters are cheaper than the assembly's A/X/Y, which it spills to `t` | −400 | −1 | asm |
 | absolute `total`, `clamped` in the assembly | −791 | −6 | asm |
 | `i = 0`: the assembly relies on zeroed memory | 5 | 4 | asm |
 
-The 2,103 / 9 of class 2 goes away when `bigger` is an `inline fn`: the comparison becomes the caller's branch. The measured variant `calls.inline` (all three functions `inline fn`) does much more: 95 / 23,855, which is −7,899 / −12 and 2,696 cycles below the assembly, because it also removes F6's and F16's parameter passing. `calls.regs` (`using` on every parameter): 101 / 30,104. Advice: small functions in a hot loop are `inline fn`.
+`calls.regs` (`using` on every parameter): 101 / 30,104 in all. Inlining saves something the assembly pays too, the `jsr` / `rts`, so it goes beyond the gap rather than closing these items: `calls.bigger` (only `bigger` as `inline fn`) is 103 / 29,045 (−2,709 / −4), but it still stores both parameters and builds the carry with `clc` / `sec` (and a `jmp`) before the caller's `bcc`; `calls.inline` (all three) is 95 / 23,855 (−7,899 / −12), 2,696 cycles below the assembly. Advice: small functions in a hot loop are `inline fn`, and register parameters (`using`) for the others.
 
 ### copy: 227 / 68,281 against 154 / 51,599 (gap 73 / 16,682)
 
@@ -214,11 +219,11 @@ Per enemy and axis (800 times): Tern `lda dx,x / sta t0 / lda x,x / clc / adc t0
 | F1: `fib[i - 1] + fib[i - 2]`, both 16-bit operands through temporaries (64 against 28 cycles a pass) | 792 | 24 | 1 |
 | F10: `cmp #0` after `lda` in `while b != 0`; stores of 0 into cleared `fib`; `lda #0` twice | 46 | 19 | 1 |
 | F12: `fib+22,x`, `fib+23,x` cross a page | 19 | 0 | 1 |
-| `mul`: the bit test `lda b / and #1 / beq` (7.4 a bit on average) where the assembly shifts `b` first and branches on the carry (`bcc`, 2.4) | 50 | 4 | 4 |
+| F20: `mul`'s bit test `lda b / and #1 / beq` (7.4 a bit on average) where the assembly shifts `b` first and branches on the carry (`bcc`, 2.4) | 50 | 4 | 1 |
 | `mul` returns in A/X (`ldx r+1 / lda r`); the assembly leaves the result in zero page for the caller | 12 | 4 | 4 |
 | the assembly's own crossings (`fib-1,y`, `fib-2,y` at `$bfff`), `ldx #20 / lda fib,x` for `fib[20]`, absolute `product`, and `lda / ora / bne` for the zero test, which is shorter but slower than Tern's two tests once `cmp #0` is gone | −70 | −9 | asm |
 
-The bit test is class 4 here for the reasons in section 4. `fib16.const` (the multiplies by constants written as shifts) is a different task and is not counted: 125 / 1,685. llvm-mos evaluates `mul(123, 45)` at compile time (`const fn`, M22).
+`fib16.const` (the multiplies by constants written as shifts) is a different task and is not counted: 125 / 1,685. llvm-mos evaluates `mul(123, 45)` at compile time (`const fn`, M22).
 
 ### interp: 241 / 6,149 against 186 / 4,713 (gap 55 / 1,436)
 
@@ -266,7 +271,7 @@ The roadmap names both as examples of class 3. Each case in the benchmarks and t
 **Carry as data** (`math.mul8`, `math.div8`, `wide.add32`, the bit test in `fib16`'s `mul` and in `math.mul16`). The assembly uses the bit that a shift or an add leaves in the carry as the input of the next instruction: `ror` chains the halves of a product, `rol` gives the ninth bit of a remainder, `adc` carries between the bytes of a 32-bit add, `lsr` / `bcc` tests the bit it shifted out.
 
 - As a source construct (a carry that one statement leaves and the next reads), it fails **rule 4**: almost every statement changes the carry (`cmp`, `adc`, shifts, a comparison in an `if`), so the meaning of a statement would depend on the instructions the one before it compiled to, and section 11 would have to promise which shapes keep the carry. An "add with carry" or "rotate through carry" operator would also be a second meaning for `+` and `>>` or a new symbol for one instruction (**rule 3**). Tern already passes a carry where the boundary is explicit: `-> bool using carry` on a function result. So **class 4**: these are what `asm fn` is for, and the library has them (rule 2, restriction is acceptable).
-- Inside one function the optimizer could use a carry without any language change, e.g. move `b = b >> 1` before the `if` in `mul` (it does not depend on the `if`) and branch on the shifted-out bit. That is class 1 in principle, but it is a statement reordering for 50 cycles in `fib16` and about 5 cycles a bit in `mul16`; not ranked.
+- Inside one function the optimizer can use a carry without any language change: move `b = b >> 1` before the `if` in `mul` (it does not depend on the `if`) and branch on the shifted-out bit. That is class 1, counted as F20 (50 cycles in `fib16`, about 5 a bit in `mul16`). What stays class 4 is the carry as a value *between* statements in the source.
 
 **Decimal mode** (`bcd.add`): `sed` changes what `adc` does. A decimal `+`, or a mode, would give `+` two meanings (**rule 3**). Class 4.
 
@@ -278,7 +283,7 @@ Same driver, same inputs, results checked against C#. Bytes are driver plus rout
 |---|--:|--:|---|---|
 | `math.mul8` | 67 / 55,565 | 98 / 107,021 | the product's high byte in A, the low byte and the multiplier shifting through `ror`; plain Tern adds 16 bits in memory | 4: carry as data (rules 4, 3) |
 | `math.div8` | 98 / 70,914 | 176 / 246,990 | the ninth bit of the remainder is the carry of `rol`; plain Tern needs a 16-bit remainder | 4: carry as data (rules 4, 3) |
-| `math.mul16` | 130 / 46,086 | 141 / 49,682 | the same algorithm as `fib16`'s `mul`: the bit test through the carry, and `ora` for the zero test | mostly 1 (F9, F10 `cmp #0`); the bit test 4 |
+| `math.mul16` | 130 / 46,086 | 141 / 49,682 | the same algorithm as `fib16`'s `mul`: the bit test through the carry, and `ora` for the zero test | 1 (F9, F10 `cmp #0`, F20) |
 | `math.abs16` | 72 / 22,300 | 103 / 29,574 | `using AX` and a sign test of X | 1: the parameter in memory (F16 for `using AX`), `x < 0` as a full signed compare (`cmp / sbc / bvc / eor / bpl`) where `lda x+1 / bpl` tests the sign, the negation through a copy (F10) |
 | `wide.add32` | 64 / 13,734 | 195 / 27,228 | a byte loop with the carry kept from one byte to the next; plain Tern finds the carry by comparing | 4: carry as data (rule 4); Tern has no 32-bit type by design, `wide` is the library. Each `p.lo` access reloading Y is class 1 |
 | `bcd.add` | 61 / 14,128 | 161 / 65,296 | decimal mode (`sed`) | 4: rule 3 |
@@ -287,7 +292,7 @@ None of the six should become plain Tern. Only `abs16` and `mul16` are class 1, 
 
 ## 6. llvm-mos: what it does that the others do not
 
-Nothing that is not already in the list: (1) it inlines every static function and removes the parameter passing (`calls` 65 / 10,649; Tern's `inline fn` gets to 23,855); (2) it evaluates a constant call (`fib16`'s `mul(123, 45)`) and expands `* 9` into shifts; (3) it folds `i + 1` into the address (F2) because a C index does not wrap; (4) it keeps small globals in zero page. It is slower than Tern in `sieve` (4.3 times the cycles), `crc8` (1.5 times), `sum16`, `interp` and `enemies` (C uses an array of structs, so each access multiplies by 5). Over all nine, llvm-mos is 1359 / 493,092 against Tern's 1221 / 486,802. With the class 1 items, Tern would be about 27% below llvm-mos in cycles. It was built with `-Os -fno-lto`, not the roadmap's `-Os`: with link-time optimization the SDK removes the result variables that only the test reads (`comparison.md`). With LTO its `calls` and `fib16` numbers would probably be lower.
+Nothing that is not already in the list: (1) it inlines every static function and removes the parameter passing (`calls` 65 / 10,649; Tern's `inline fn` gets to 23,855); (2) it evaluates a constant call (`fib16`'s `mul(123, 45)`) and expands `* 9` into shifts; (3) it folds `i + 1` into the address (F2) because a C index does not wrap; (4) it keeps small globals in zero page. It is slower than Tern in `sieve` (4.3 times the cycles), `crc8` (1.5 times), `sum16`, `interp` and `enemies` (C uses an array of structs, so each access multiplies by 5). Over all nine, llvm-mos is 1359 / 493,092 against Tern's 1221 / 486,802. With the class 1 items, Tern would be about 31% below llvm-mos in cycles. It was built with `-Os -fno-lto`, not the roadmap's `-Os`: with link-time optimization the SDK removes the result variables that only the test reads (`comparison.md`). With LTO its `calls` and `fib16` numbers would probably be lower.
 
 ## 7. Ranked list for the spec session
 
@@ -296,25 +301,27 @@ Largest saving first, in cycles over the nine benchmarks (of the 162,383-cycle g
 | # | change | class | cycles | bytes | notes |
 |---|---|---|--:|--:|---|
 | 1 | Fold `a[i + c]` into the address when the loop bounds prove no wrap (F2) | 1 | 57,216 | 10 | allowed by spec 3.2 already; the constant-bounds case is not built either |
-| 2 | Indexed and indirect operands used directly by `adc`/`sbc`/`cmp`/`and`/`ora`/`eor` (F1) | 1 | 21,252 | 64 | with F2, makes `bubble.direct` the fast form |
-| 3 | No store to a local that is never read from memory (F3) | 1 | 19,872 | 8 | `enemies`' part needs F4 |
-| 4 | Keep a single-root global in a register across a loop (F7), also across `interp`'s jump table (F11); the `jmp` over an empty `else` then goes (F15) | 1 | 9,750 | 25 | allowed by spec 4 and 8.1 |
-| 5 | `x > c` as `cmp #c+1` (F4) | 1 | 4,752 | 4 | a peephole |
-| 6 | `u16 += u8` as `clc / adc / sta / bcc / inc` (F6) | 1 | 3,048 | 10 | |
-| 7 | A 16-bit shift by a constant with the low byte in A (F8) | 1 | 3,000 | 7 | |
-| 8 | Keep a `using A` parameter in A (F16) | 1 | 1,238 | 3 | a known limitation |
-| 9 | Loop control: entry `jmp` and empty-range test when the first test is known, `dec / bne` (F9) | 1 | 1,036 | 19 | |
-| 10 | Choose a register for an outer loop counter when the inner loop takes X (F13) | 1 | 781 | 4 | |
-| 11 | Commutative operand order (F19) | 1 | 768 | 2 | |
-| 12 | Place indexed arrays so their range does not cross a page (F12) | 1 | 732 | 0 | allocator; RAM only |
-| 13 | A is not changed by `inc` after `bcc` (F17) | 1 | 600 | 2 | |
-| 14 | Small shapes (F10), led by `p += 256` as `inc p+1` | 1 | 415 | 98 | the `± 256` part is 195 / 55 |
-| 15 | No `match` range check when the value's range is known (F14) | 1 | 350 | 5 | here from a `data` table |
-| 16 | Guide advice, measured today: compare and copy in pages, store an element before testing it, small hot functions as `inline fn`, `return` instead of a loop flag; until F2 is built, `a[i - 1], a[i]` for adjacent pairs (`bubble.minus` −21%) | 2 now | 17,688 | 8 | `copy.pages` −15%, `enemies.first` −7%, `calls.inline` −25% (below the assembly), `interp.return` −9% |
-| 17 | After F1 and F2: compare array elements directly (`bubble.direct`), with the swapped element in a register (F18) | 2 after F1 + F2 | 23,094 | 2 | 5,478 the rewrite, 17,616 F18 |
+| 2 | Keep a local copy of an element out of memory: compare against the element, load it into a free register only on the path that needs it (F18) | 1 | 23,094 | 2 | `bubble`; with F2 and F3, the assembly's inner loop from the source as written |
+| 3 | Indexed and indirect operands used directly by `adc`/`sbc`/`cmp`/`and`/`ora`/`eor` (F1) | 1 | 21,252 | 64 | |
+| 4 | No store to a local that is never read from memory (F3) | 1 | 19,872 | 8 | `enemies`' part needs F4 |
+| 5 | Keep a single-root global in a register across a loop (F7), also across `interp`'s jump table (F11); the `jmp` over an empty `else` then goes (F15) | 1 | 9,750 | 25 | allowed by spec 4 and 8.1 |
+| 6 | `x > c` as `cmp #c+1` (F4) | 1 | 4,752 | 4 | a peephole |
+| 7 | `u16 += u8` as `clc / adc / sta / bcc / inc` (F6) | 1 | 3,048 | 10 | |
+| 8 | A 16-bit shift by a constant with the low byte in A (F8) | 1 | 3,000 | 7 | |
+| 9 | Keep a `using A` parameter in A (F16) | 1 | 1,238 | 3 | a known limitation |
+| 10 | Loop control: entry `jmp` and empty-range test when the first test is known, `dec / bne` (F9) | 1 | 1,036 | 19 | |
+| 11 | Choose a register for an outer loop counter when the inner loop takes X (F13) | 1 | 781 | 4 | |
+| 12 | Commutative operand order (F19) | 1 | 768 | 2 | |
+| 13 | Place indexed arrays so their range does not cross a page (F12) | 1 | 732 | 0 | allocator; RAM only |
+| 14 | A is not changed by `inc` after `bcc` (F17) | 1 | 600 | 2 | |
+| 15 | Small shapes (F10), led by `p += 256` as `inc p+1` | 1 | 415 | 98 | the `± 256` part is 195 / 55 |
+| 16 | No `match` range check when the value's range is known (F14) | 1 | 350 | 5 | here from a `data` table |
+| 17 | Branch on the carry a shift leaves, moving an independent shift before the test (F20) | 1 | 50 | 4 | also `math.mul16` |
+| 18 | Guide advice, measured today: compare and copy in pages, store an element before testing it, register parameters (`using`), `return` instead of a loop flag; until F2 is built, `a[i - 1], a[i]` for adjacent pairs (`bubble.minus` −21%) | 2 now | 16,785 | 3 | `copy.pages` −15%, `enemies.first` −7%, `interp.return` −9%; beyond the gap, small hot functions as `inline fn` (`calls.inline` −25%, below the assembly) |
+| 19 | Return a `bool` as the compare's own carry (F21), and write such functions so their condition is that carry | 1, then 2 | 903 | 5 | F21 alone saves nothing on the benchmarks as written; `calls`' `bigger` must be rewritten too |
 
-Items 1 to 15 add up to the class 1 column: 124,810 cycles and 261 bytes. Class 3 is empty and class 4 (335 cycles, 29 bytes: carry as data, decimal mode, the copy written for one size) stays assembly by design (section 4).
+Items 1 to 17 add up to the class 1 column: 147,954 cycles and 267 bytes. Class 3 is empty. Class 4 (285 cycles, 25 bytes: the assembly's copy written for one size, and `mul` leaving its result in zero page) and, in the library, carry as data and decimal mode stay assembly by design (section 4).
 
-The guide advice in item 16 can be written now. Item 17 and the `bubble.minus` workaround change once M18 builds F1 and F2: `bubble.direct` becomes the best form and `bubble.minus` is no longer needed, so the guide should say so or wait for M18.
+The guide advice in item 18 can be written now. The `bubble.minus` workaround is no longer needed once F2 is built. `bubble.direct` (compare the elements, no locals) should not become advice: with F2 and F18 the source as written gives the assembly's loop, and `bubble.direct` would be 17,616 cycles slower.
 
-Question for the spec session: F2 needs no rule change if "when it can prove the sum does not wrap" in spec 3.2 includes a bound that is a variable (`for i in 0..last` with `last: u8`, so `i + 1 <= 255`). That is how this report reads it. `while` and `step` loops are not needed by the benchmarks.
+Question for the spec session: F2 needs no rule change if "when it can prove the sum does not wrap" in spec 3.2 includes either of two proofs in `bubble`. (a) The loop bound: `for i in 0..last` with `last: u8` gives `i <= 254`, so `i + 1 <= 255`. (b) The other access: the same body reads `values[i]`, and spec 3.2 says an index outside the array "is not supported" and "the compiler may assume it never happens", so `i < 100` and `i + 1 <= 100`. (b) does not depend on the bounds, so it also covers `while` loops and the constant-bounds case, but it uses the out-of-range assumption for more than "a[i] = v changes only a". This report reads (a) as allowed; please decide (b).

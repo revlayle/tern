@@ -7,6 +7,7 @@ see `analysis.md`. Bytes and cycles are counted as in `comparison.md`.
 |---|--:|--:|--:|--:|
 | bubble.direct | 94 | 253,936 | 83 | 226,948 |
 | bubble.minus | 77 | 179,532 | 83 | 226,948 |
+| calls.bigger | 103 | 29,045 | 107 | 31,754 |
 | calls.inline | 95 | 23,855 | 107 | 31,754 |
 | calls.regs | 101 | 30,104 | 107 | 31,754 |
 | copy.pages | 250 | 58,107 | 227 | 68,281 |
