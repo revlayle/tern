@@ -5,7 +5,7 @@ Owned by the coding session. Updated at the end of every coding session.
 ## Current
 
 - **Milestone:** M16, locals of inline functions in each caller's frame (roadmap), is built and tested. Ready for `/review`.
-- **Branch:** `m16-inline-locals` (from `main`, after the M15 merge). 1392 compiler tests pass plus 36 CPU tests (12 new in `InlineLocalsTests`, 6 error rows in `InlineTests`). `BenchmarkTests` baseline unchanged (no benchmark uses an inline function with locals).
+- **Branch:** `m16-inline-locals` (from `main`, after the M15 merge). 1392 compiler tests pass plus 36 CPU tests (9 new in `InlineLocalsTests`, 4 new error rows in `InlineTests`). `BenchmarkTests` baseline unchanged (no benchmark uses an inline function with locals).
 - **Next step:** M17, analysis of the gap to hand-written assembly (`docs/roadmap.md`), on a new branch from `main` once M16 is merged. Spec 6.2 still says "An inline function keeps its frame" and 14.2 may mention the per-root copy; the spec session updates them (question 61).
 
 ## Done
