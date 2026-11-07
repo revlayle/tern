@@ -239,6 +239,8 @@ public sealed class MatchPattern(SourcePos pos, Expr low, Expr? high)
 public sealed class AsmStmt(SourcePos pos, List<AsmLine> lines) : Stmt(pos)
 {
     public List<AsmLine> Lines { get; } = lines;
+    /// <summary>The <c>var</c> lines at the start of an <c>inline asm fn</c> body (spec 6.2): its local variables.</summary>
+    public List<VarDecl> Locals { get; } = [];
     /// <summary>Set by the checker: what the block reads and changes.</summary>
     public AsmEffects? Effects { get; set; }
 }

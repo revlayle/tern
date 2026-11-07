@@ -470,7 +470,7 @@ public sealed class Parser
             };
         }
 
-        var body = isAsm ? new BlockStmt(Current.Pos, [ParseAsmBody()]) : ParseBlock();
+        var body = isAsm ? new BlockStmt(Current.Pos, [ParseAsmBody(isFn: true)]) : ParseBlock();
         return new FnDecl(start.Pos, name.Text, parameters, returnType, returnUsing, body) { IsAsm = isAsm };
     }
 
@@ -696,17 +696,27 @@ public sealed class Parser
     private bool _inAsm;
 
     /// <summary>The <c>{ ... }</c> of an asm block or asm fn: one instruction per line, and <c>.labels:</c>.</summary>
-    private AsmStmt ParseAsmBody()
+    private AsmStmt ParseAsmBody(bool isFn = false)
     {
         SkipBreaksBeforeBrace();
         var start = Expect(TokenKind.LBrace, "'{' after 'asm'");
         var lines = new List<AsmLine>();
+        var locals = new List<VarDecl>();
         _inAsm = true;
         while (true)
         {
             while (Accept(TokenKind.Newline)) { }
             if (At(TokenKind.RBrace)) break;
             if (At(TokenKind.Eof)) throw new CompileError(start.Pos, "asm block is not closed with '}'");
+            if (At(TokenKind.Var))
+            {
+                if (!isFn || lines.Count > 0)
+                    throw new CompileError(Current.Pos, isFn
+                        ? "'var' lines go at the start of an inline asm fn, before the first instruction"
+                        : "'var' is not allowed inside an asm block. Declare the variable before the block, or use 'var' lines at the start of an inline asm fn");
+                locals.Add(ParseVar());
+                continue;
+            }
             if (At(TokenKind.Dot))
             {
                 var dot = Advance();
@@ -729,7 +739,9 @@ public sealed class Parser
         }
         Advance();
         _inAsm = false;
-        return new AsmStmt(start.Pos, lines);
+        var block = new AsmStmt(start.Pos, lines);
+        block.Locals.AddRange(locals);
+        return block;
     }
 
     private CompileError SemicolonInAsm() => new(Current.Pos,

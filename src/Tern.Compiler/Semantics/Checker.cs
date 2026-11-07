@@ -829,6 +829,15 @@ public sealed partial class Checker
         _scopes.Add(new Dictionary<string, Symbol>());
         foreach (var p in _function.Parameters) Declare(p);
 
+        // The var lines of an inline asm fn: locals that live in each caller's frame (spec 6.2).
+        if (decl.IsAsm && ((AsmStmt)decl.Body.Statements[0]).Locals is { Count: > 0 } asmLocals)
+        {
+            if (!decl.IsInline)
+                throw new CompileError(asmLocals[0].Pos,
+                    $"An asm fn has no variables of its own. Use 'inline asm fn', whose 'var' lines live in each caller's frame, or a private global variable");
+            foreach (var local in asmLocals) CheckLocal(local, inAsmFn: true);
+        }
+
         CheckBlock(decl.Body, newScope: false);
 
         // Copied into the caller, an rts or rti would end the caller too.
@@ -912,16 +921,18 @@ public sealed partial class Checker
         }
     }
 
-    private void CheckLocal(VarDecl decl)
+    private void CheckLocal(VarDecl decl, bool inAsmFn = false)
     {
         var type = DeclaredType(decl);
         var v = new VariableSymbol(decl.Name, decl.Pos, type, VariableKind.Local, _function) { IsIndexed = decl.IsIndexed };
         decl.Symbol = v;
         ApplyPlacement(decl, v, allowAddress: false);
 
+        if (inAsmFn && decl.Init is not null)
+            throw new CompileError(decl.Init.Pos, $"'{decl.Name}' in an inline asm fn has no initial value: the assembly sets it");
         if (decl.Init is null)
         {
-            if (!type.IsArray && !type.IsStruct)
+            if (!type.IsArray && !type.IsStruct && !inAsmFn)
                 throw new CompileError(decl.Pos, $"Local variable '{decl.Name}' needs an initial value");
         }
         else
@@ -1923,7 +1934,9 @@ public sealed partial class Checker
             if (f.Roots.Count < 2 || f.FrameVariables.Count == 0) continue;
             var roots = f.Roots.OrderBy(r => r.IsInterrupt).ThenBy(r => r.Pos.File).ThenBy(r => r.Pos.Line).ToList();
             var v = f.FrameVariables[0];
-            string memory = v.Kind switch
+            string memory = v.InlineOf is { } inlined
+                ? $"the {(v.Kind == VariableKind.Temp ? "hidden temporary" : $"variable '{v.Name[(inlined.Name.Length + 1)..]}'")} of the inline function '{inlined.Name}', which is copied into it"
+                : v.Kind switch
             {
                 VariableKind.Temp => $"a hidden temporary for the code at line {v.Pos.Line} (e.g. for 16-bit arithmetic or an argument)",
                 VariableKind.Parameter when v.PassedIn is { } reg => $"the parameter '{v.Name}', which it keeps in memory (it arrives in {reg})",
