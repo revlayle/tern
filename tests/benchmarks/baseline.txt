@@ -4,10 +4,10 @@
 bubble           98    132799
 calls           118     26984
 copy            201     62167
-crc8             60     36426
+crc8             55     27942
 enemies         170     56128
 fib16           168      1878
 interp          261      5953
 sieve            79     11299
 sum16           150     29572
-total          1305    363206
+total          1300    354722
