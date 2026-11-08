@@ -4,11 +4,18 @@ Owned by the coding session. Updated at the end of every coding session.
 
 ## Current
 
-- **Milestone:** M19, tools and skills for coding agents (roadmap). Two reviewed parts. M18 is merged into `main`. Part 1 (compiler, tools and two small features) is done and waits for review; part 2 (the skill) starts after the spec session writes the "writing fast Tern" advice into `docs/guide.md`.
-- **Branch:** `m19-tools`, from `main` after the M18 merge and the 2026-11-08 spec commits. 1850 compiler tests pass plus 36 CPU tests. `baseline.txt` total 1259 / 351130 -> 1254 / 350780 (interp's range check); `comparison.md` Tern 968 / 341,969 -> 963 / 341,619 (assembly 947 / 324,419).
-- **Next step:** review of part 1 (`/review`; `docs/reviews/m19.md`). After it is clean and merged, the spec session writes the guide advice, then part 2 (the skill) is coded on a new branch from `main`.
+- **Milestone:** M19, tools and skills for coding agents (roadmap). Two reviewed parts. M18 is merged into `main`. Part 1 (compiler, tools and two small features) is done; its first review's three findings and suggestion 5 are fixed (see "M19 part 1, review fixes"), and it waits for the re-review; part 2 (the skill) starts after the spec session writes the "writing fast Tern" advice into `docs/guide.md`.
+- **Branch:** `m19-tools`, from `main` after the M18 merge and the 2026-11-08 spec commits (`main` merged in again for the review). 1865 compiler tests pass plus 36 CPU tests. `baseline.txt` total 1259 / 351130 -> 1254 / 350780 (interp's range check); `comparison.md` Tern 968 / 341,969 -> 963 / 341,619 (assembly 947 / 324,419).
+- **Next step:** re-review of part 1 (`/review`; `docs/reviews/m19.md`, part 1 section). After it is clean and merged, the spec session writes the guide advice, then part 2 (the skill) is coded on a new branch from `main`.
 
 ## Done
+
+- **M19 part 1, review fixes** (2026-11-08, `docs/reviews/m19.md`, part 1 section).
+  - Finding 1 (must fix, `0d45fb0`): `CodeGen.GenInline` emits the caller's source line again after the inline body when the body changed it, so the rest of the caller's statement (`sta a,x` after `a[i] = g()`, the branch of `if cpu.carry()`) is on the caller's line in the listing and the source map. `LineTableTests.Code_after_an_inlined_call_belongs_to_the_callers_line` and `A_cpu_flag_test_is_on_the_line_that_uses_it` (`if`, `while`, `v =`; they fail without the fix).
+  - Finding 2 (must fix, `0b8c4c0`): `BenchVariant.Snippet` starts the source with no empty line when there is no `--decl`; `BenchVariant.Place` maps a generated line to `decl N` and its line in that declaration, or to the snippet's line (the generated `fn main() {` and `}` to its first and last lines). `BenchToolTests`.
+  - Finding 3 (must fix, `3de9052`): `MemoryDump.Parse` rejects an empty name (also `:4`), a count of 0, and a variable with a count past `$FFFF` with a `FormatException`. `RunToolTests.A_bad_dump_says_what_is_wrong`.
+  - Suggestion 5 (`fb7738f`): `tern --help` and the `Runner` summary say overlays are not loaded.
+  - Suggestions 4 and 6 are under "Known limitations". No benchmark changed (1254 / 350780). 1865 compiler tests and 36 CPU tests pass.
 
 - **M19 part 1, compiler and tools** (2026-11-08). One commit per step.
   - *`-> bool using overflow`* (`577a458`, spec 6.1): `Register.Overflow`; `if f()` is `bvc`, `!f()` `bvs`, `v = f()` a branch over `lda #1` / `lda #0`. Allowed on an `inline asm fn`, an `asm fn` and a routine at a fixed address; a plain or inline `fn` is an error ("no instruction sets the V flag"), as a parameter or fixed input the usual errors. `OverflowTests`.
@@ -343,6 +350,8 @@ Including `jsr` and `rts`; from the tests.
 - `tern run` / `tern bench` (M19): memory is plain RAM, so the VIC-II, SID and CIAs are not emulated (a raster wait never ends; the cycle limit stops it). The KERNAL stand-ins (CHROUT, GETIN, PLOT) take no cycles; any other ROM call stops the run, so overlays (loaded with KERNAL LOAD) cannot be run. A dumped local may not hold its last value: the compiler may keep it in a register or remove stores nobody reads.
 - The source map gives an instruction to the last source line before it in the listing. Code the optimizer moves (a store sunk out of a loop) counts under the line it lands after.
 - `Diagnostic.Split` finds a suggestion only after a sentence that starts with a fix verb (question 69).
+- An `indexed match` on a value already held in X or Y (a loop counter), with a lowest value of 0, copies it through A (`txa` / `tay`) instead of indexing with that register (review M19, suggestion 4: 4 cycles, 2 bytes). Matches spec 11 as written.
+- The run profile adds cycles by address (`Profile`), so if the runner ever loads overlays, two overlays sharing an area would share their counts (review M19, suggestion 6).
 
 Not bugs; things to improve, mostly in M7 (optimizer).
 
