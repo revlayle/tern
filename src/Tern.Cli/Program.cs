@@ -6,6 +6,7 @@ const string Usage = """
     Usage:
       tern [--json] <file.tern> [-o <output.prg>]
       tern run <file.tern> [options]
+      tern bench [options] <file.tern>... | --code <statements>...
 
     tern <file.tern> compiles a Tern program for the Commodore 64. Writes:
       <output>.prg   the program
@@ -31,6 +32,19 @@ const string Usage = """
       --screen         show the screen at $0400 as text
       --profile        show the cycles of each function and each source line
       --json           print the result as JSON
+
+    tern bench compiles and runs each variant (as tern run does) and compares them:
+    program bytes, the measured function's bytes, its calls and cycles (with what it
+    calls), and the memory chosen for its variables and the program's globals.
+      <file.tern>      a variant: a whole program
+      --code <stmts>   a variant: statements run as the body of main (';' or newlines
+                       between statements); may be given more than once
+      --decl <decls>   declarations before main for every --code variant (globals,
+                       imports, functions); may be given more than once
+      --fn <name>      measure this function instead of main
+      --dump <what>    show a value after each run, to check the variants agree (as for
+                       tern run)
+      --cycles <n>, --irq <n>, --json  as for tern run
     """;
 
 if (args.Length < 1 || args[0] is "-h" or "--help")
@@ -38,7 +52,12 @@ if (args.Length < 1 || args[0] is "-h" or "--help")
     Console.WriteLine(Usage);
     return args.Length < 1 ? 1 : 0;
 }
-return args[0] == "run" ? RunCommand(args[1..]) : CompileCommand(args);
+return args[0] switch
+{
+    "run" => RunCommand(args[1..]),
+    "bench" => BenchCommand(args[1..]),
+    _ => CompileCommand(args),
+};
 
 // ---------- tern <file.tern> ----------
 
@@ -119,6 +138,49 @@ int RunCommand(string[] arguments)
     var lines = profile ? LineTable.Rows(program, Path.GetFileName(input), run.Profile) : null;
     Console.Write(json ? RunReport.Json(run, parsed, screen, lines) + Environment.NewLine : RunReport.Text(run, parsed, screen, lines));
     return run.Returned ? 0 : 2;
+}
+
+// ---------- tern bench ----------
+
+int BenchCommand(string[] arguments)
+{
+    bool json = false;
+    string? function = null;
+    long cycles = new RunOptions().MaxCycles, irq = 0;
+    var declarations = new List<string>();
+    var dumps = new List<string>();
+    var variants = new List<(string? Path, string? Code)>();
+    for (int i = 0; i < arguments.Length; i++)
+    {
+        string a = arguments[i];
+        bool hasValue = i + 1 < arguments.Length;
+        if (a == "--json") json = true;
+        else if (a == "--code" && hasValue) variants.Add((null, arguments[++i]));
+        else if (a == "--decl" && hasValue) declarations.Add(arguments[++i]);
+        else if (a == "--fn" && hasValue) function = arguments[++i];
+        else if (a == "--dump" && hasValue) dumps.Add(arguments[++i]);
+        else if (a == "--cycles" && hasValue && long.TryParse(arguments[i + 1], out cycles) && cycles > 0) i++;
+        else if (a == "--irq" && hasValue && long.TryParse(arguments[i + 1], out irq) && irq > 0) i++;
+        else if (!a.StartsWith('-')) variants.Add((a, null));
+        else return Usage1($"Unknown or incomplete argument: {a}");
+    }
+    if (variants.Count == 0) return Usage1("No variant given: name .tern files or give --code");
+
+    var results = new List<BenchResult>();
+    int snippets = 0;
+    foreach (var (path, code) in variants)
+    {
+        BenchVariant variant;
+        if (code is not null) variant = BenchVariant.Snippet($"code {++snippets}", declarations, code);
+        else
+        {
+            try { variant = new BenchVariant(Path.GetFileName(path!), File.ReadAllText(path!), path); }
+            catch (IOException e) { return Fail(json, new Diagnostic(path!, 0, 0, "error", $"Cannot read {path}: {e.Message}", null), $"Cannot read {path}: {e.Message}"); }
+        }
+        results.Add(Bench.Measure(variant, function, dumps, new RunOptions { MaxCycles = cycles, IrqEvery = irq }));
+    }
+    Console.Write(json ? Bench.Json(results) + Environment.NewLine : Bench.Text(results));
+    return results.All(r => r.Error is null && r.Returned) ? 0 : 1;
 }
 
 // ---------- shared ----------

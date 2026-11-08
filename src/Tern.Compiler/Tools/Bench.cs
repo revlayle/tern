@@ -1,0 +1,142 @@
+using System.Text;
+using System.Text.Encodings.Web;
+using System.Text.Json;
+using Tern.Compiler.Syntax;
+
+namespace Tern.Compiler.Tools;
+
+/// <summary>One way of writing the code: a source file, or a snippet put into <c>main</c> after shared declarations.</summary>
+/// <param name="FirstSnippetLine">For a snippet, the line of the generated source where the snippet starts; errors are given relative to it.</param>
+public sealed record BenchVariant(string Name, string Source, string? Path, int FirstSnippetLine = 0)
+{
+    /// <summary><c>--decl</c> lines, then <c>fn main() {</c>, the snippet and <c>}</c>.</summary>
+    public static BenchVariant Snippet(string name, IReadOnlyList<string> declarations, string code)
+    {
+        var head = string.Join("\n", declarations);
+        int before = declarations.Sum(d => d.Split('\n').Length);
+        return new BenchVariant(name, $"{head}\nfn main() {{\n{code}\n}}\n", null, before + 2);
+    }
+}
+
+/// <summary>
+/// The measurement of one variant. <see cref="Function"/> is what was measured (main, or the
+/// function given with <c>--fn</c>): its code bytes, and the cycles of all its calls with what they
+/// call (<see cref="Cycles"/>) and per call. <see cref="Memory"/> lists its variables and the
+/// program's own globals with the addresses the compiler chose.
+/// </summary>
+public sealed record BenchResult(
+    string Variant, Diagnostic? Error, string Function, int ProgramBytes, int FunctionBytes, long Calls, long Cycles,
+    bool Returned, string Stop, IReadOnlyList<VariableInfo> Memory, IReadOnlyList<(string What, string Value)> Results)
+{
+    public long CyclesPerCall => Calls == 0 ? 0 : Cycles / Calls;
+    public int ZeroPageBytes => Memory.Where(v => v.Address < 0x100).Sum(v => v.Size);
+    public int OtherBytes => Memory.Where(v => v.Address >= 0x100).Sum(v => v.Size);
+}
+
+/// <summary><c>tern bench</c>: compiles and runs each variant and compares bytes, cycles and memory.</summary>
+public static class Bench
+{
+    public static BenchResult Measure(BenchVariant variant, string? function, IReadOnlyList<string> dumps, RunOptions? options = null)
+    {
+        string measured = function ?? "main";
+        CompileResult program;
+        try
+        {
+            program = TernCompiler.Compile(variant.Source, sourcePath: variant.Path);
+        }
+        catch (CompileError e)
+        {
+            var d = Diagnostic.From(e, variant.Name);
+            if (variant.Path is null && e.Pos.File is null)
+                d = d with { Line = e.Pos.Line - variant.FirstSnippetLine + 1, File = variant.Name };
+            return Failed(d);
+        }
+        var section = program.Sections.FirstOrDefault(s => s.Name == measured);
+        if (section is null)
+            return Failed(new Diagnostic(variant.Name, 0, 0, "error",
+                $"There is no function '{measured}' with code of its own (an inline function is copied into each caller, and a function nothing calls is left out).",
+                "Measure a function that calls it"));
+
+        var run = Runner.Run(program, options);
+        var time = run.Functions.FirstOrDefault(f => f.Name == measured);
+        var memory = program.Variables.Values
+            .Where(v => v.Function == measured || (v.Function is null && !v.IsData && !v.Name.Contains('.')))
+            .OrderBy(v => v.Function is not null).ThenBy(v => v.Address).ToList();
+        var results = new List<(string, string)>();
+        foreach (var text in dumps)
+        {
+            string value;
+            try
+            {
+                var d = MemoryDump.Parse(text, program);
+                value = d.Value(run.Ram.Bytes) is { } v ? v.ToString() : string.Join(" ", run.Ram.Bytes.AsSpan(d.Address, d.Size).ToArray().Select(b => b.ToString("X2")));
+            }
+            catch (FormatException e) { value = "(" + e.Message + ")"; }
+            results.Add((text, value));
+        }
+        return new BenchResult(variant.Name, null, measured, program.Image.Length, section.Size, time?.Calls ?? 0, time?.Cycles ?? 0,
+            run.Returned, run.Stop, memory, results);
+
+        BenchResult Failed(Diagnostic d) => new(variant.Name, d, measured, 0, 0, 0, 0, false, d.Message, [], []);
+    }
+
+    public static string Text(IReadOnlyList<BenchResult> results)
+    {
+        var sb = new StringBuilder();
+        string fn = results.Count == 0 ? "main" : results[0].Function;
+        int width = Math.Max(8, results.Max(r => r.Variant.Length));
+        sb.AppendLine($"{"variant".PadRight(width)}  {"program",7}  {fn + " bytes",10}  {"calls",6}  {"cycles",9}  {"per call",8}  {"zp",4}  {"other",5}");
+        foreach (var r in results)
+        {
+            if (r.Error is { } e)
+            {
+                sb.AppendLine($"{r.Variant.PadRight(width)}  error: {(e.Line > 0 ? $"line {e.Line}:{e.Column}: " : "")}{e.Message}{(e.Suggestion is null ? "" : " " + e.Suggestion)}");
+                continue;
+            }
+            sb.AppendLine($"{r.Variant.PadRight(width)}  {r.ProgramBytes,7}  {r.FunctionBytes,10}  {r.Calls,6}  {r.Cycles,9}  {r.CyclesPerCall,8}  {r.ZeroPageBytes,4}  {r.OtherBytes,5}"
+                + (r.Returned ? "" : $"  ({r.Stop})"));
+        }
+        sb.AppendLine("Memory (zp: zero page bytes, other: the rest; the measured function's variables and the program's globals):");
+        foreach (var r in results.Where(r => r.Error is null))
+            sb.AppendLine($"  {r.Variant}: " + (r.Memory.Count == 0 ? "none" : string.Join(", ", r.Memory.Select(v => $"{v.Name} ${v.Address:X4} {v.Type}"))));
+        if (results.Any(r => r.Results.Count > 0))
+        {
+            sb.AppendLine("Results:");
+            foreach (var r in results.Where(r => r.Error is null))
+                sb.AppendLine($"  {r.Variant}: " + string.Join(", ", r.Results.Select(x => $"{x.What} = {x.Value}")));
+            var distinct = results.Where(r => r.Error is null).Select(r => string.Join("|", r.Results.Select(x => x.Value))).Distinct().Count();
+            if (distinct > 1) sb.AppendLine("  The variants give different results.");
+        }
+        return sb.ToString();
+    }
+
+    private static readonly JsonSerializerOptions Options = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        WriteIndented = true,
+        Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+    };
+
+    public static string Json(IReadOnlyList<BenchResult> results) =>
+        JsonSerializer.Serialize(new
+        {
+            ok = results.All(r => r.Error is null),
+            variants = results.Select(r => new
+            {
+                variant = r.Variant,
+                error = r.Error,
+                function = r.Function,
+                programBytes = r.ProgramBytes,
+                functionBytes = r.FunctionBytes,
+                calls = r.Calls,
+                cycles = r.Cycles,
+                cyclesPerCall = r.CyclesPerCall,
+                returned = r.Returned,
+                stop = r.Stop,
+                zeroPageBytes = r.ZeroPageBytes,
+                otherBytes = r.OtherBytes,
+                memory = r.Memory.Select(v => new { name = v.Name, address = v.Address, size = v.Size, type = v.Type }),
+                results = r.Results.Select(x => new { what = x.What, value = x.Value }),
+            }),
+        }, Options);
+}
