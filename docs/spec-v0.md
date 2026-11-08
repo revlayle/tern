@@ -399,6 +399,11 @@ break; continue; return value
 - **Variable bounds:** if the range can be empty at runtime, the compiler adds one check before the loop. This costs a few cycles per loop, not per pass, and is left out when the compiler can prove the range is not empty.
 - `_` as the loop variable means the value is not needed. The compiler may then count in either direction, e.g. `dex` / `bne`.
 - The loop variable is `u8` unless the range needs more. `using X` or `using Y` keeps it in that register.
+- **Signed loop variables.** If a bound is a negative constant or has a signed type, the loop variable is `i8` when the bounds fit in -128..127, and `i16` otherwise: `for i in -10..10`, `for i in n..=0` (n: `i8`). A signed bound with an unsigned variable bound (`-5..n`, n: `u8`) is an error, as mixing signed and unsigned is anywhere (3.1); write `n as i8`. The rules above apply unchanged, with the order of values signed:
+  - With a step of ±1 the code is the unsigned code: the counter steps through the same bytes and is tested for equality. Only where order matters does the code differ.
+  - With variable bounds, the check for an empty range before the loop is a signed compare, a few bytes more than the unsigned check, once per loop. `n..=0` and `n..0` need none: the `ldx n` sets the sign flag, which is the check.
+  - With a step other than ±1 and a variable end, the loop stops when adding the step overflows past the end of the type (the V flag, the signed form of the carry rule above), and the test against the end is a signed compare: the end is flipped (`eor #$80`) once before the loop, and the counter is flipped before each `cmp`.
+  - An `i8` or `i16` counter takes only a constant step; a variable step is an error. `using X` / `using Y` is allowed on an `i8` counter, not on an `i16` one (as for `u16`).
 
 ### 5.2 `match`
 
@@ -903,6 +908,11 @@ These are the intended translations. The optimizer may produce something shorter
 | `for i in 0..=255 using X` | `ldx #0` … `inx` / `bne loop` |
 | `for _ in 0..10` | `ldx #10` … `dex` / `bne loop` |
 | `for m in s..=255 step n using Y` (n a `u8` variable) | `ldy s` … `tya` / `clc` / `adc n` / `tay` / `bcc loop` |
+| `for i in -10..10 using X` | `ldx #$F6` … `inx` / `cpx #10` / `bne loop` (as unsigned) |
+| `for i in n..=0 using X` (n: `i8`) | `ldx n` / `bmi done` / … `dex` / `bpl loop` |
+| `for i in n..0 using X` (n: `i8`) | `ldx n` / `beq done` / `bmi done` / … `dex` / `bne loop` |
+| `for i in a..b using X` (a, b: `i8`), check before the loop | `lda a` / `sec` / `sbc b` / `bvc +` / `eor #$80` / `+ bpl done`, then the unsigned loop |
+| `for i in a..b step 3 using X` (a, b: `i8`) | before the loop `lda b` / `eor #$80` / `sta e`; each pass `txa` / `clc` / `adc #3` / `bvs done` / `tax` / `eor #$80` / `cmp e` / `bcc loop` |
 | `for i in 5..=5` | the body once, with `i` = 5 |
 | `if a == 0 { }` | `lda a` / `bne skip` |
 | `if a < b { }` unsigned | `lda a` / `cmp b` / `bcs skip` |
@@ -993,6 +1003,7 @@ source → lexer → parser → AST
 ```
 
 - **Built-in assembler.** There is no text assembly step. The compiler works on typed instruction objects, which the encoder turns into bytes. The instruction table includes sizes and cycle counts, so layout can pick short branches, avoid page-crossing penalties in marked loops, and report cycles.
+- **Errors for habits from other languages.** Where a C habit does not parse, the error names the habit and gives the Tern spelling, instead of a generic parse error at a later token: `n++` / `n--` at the end of a statement or before a closing bracket ("Write 'n += 1'"; `a++b` stays `a + (+b)`), a `*` dereference such as `*p = 1` ("Write 'p[0]'"), `%0000_1111` where a value is expected ("Write binary numbers as 0b0000_1111"), and a keyword used as a name, such as `fn step()` ("'step' is a keyword; Use another name").
 - **Branch range fixing.** A conditional branch reaches only −128 to +127 bytes. Layout repeats until every branch fits. Branches that do not fit become an inverted branch over a `jmp`.
 - **Outputs:**
   - the program file (`.prg` for C64),
