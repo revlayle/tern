@@ -328,7 +328,8 @@ public class SmallShapeTests
             }
             """);
         Assert.Equal(1, r.U8("x"));
-        Assert.Contains("sta x", Code(r));
+        // x is held in X for the loop (lda #0 / tax / inx), then stored (F7).
+        Assert.Contains("stx x", Code(r));
         Assert.Contains("sta z", Code(r));
         Assert.Contains("sta y", Code(r, "f"));
     }

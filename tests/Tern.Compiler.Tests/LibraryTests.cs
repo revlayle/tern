@@ -126,7 +126,7 @@ public class TextLibraryTests
         var cycles = new List<long>();
         lock (Text)
             for (int v = 0; v < 256; v++) cycles.Add(Digits("dec8", v, v.ToString(), returnsCount: true));
-        Assert.Equal((63, 324), Range(cycles));
+        Assert.Equal((63, 290), Range(cycles));
     }
 
     [Fact]
@@ -137,7 +137,7 @@ public class TextLibraryTests
         lock (Text)
             foreach (int v in values.Concat(Enumerable.Range(0, 1772).Select(i => i * 37)))
                 cycles.Add(Digits("dec16", v, v.ToString(), returnsCount: true));
-        Assert.Equal((293, 1637), Range(cycles));
+        Assert.Equal((285, 1521), Range(cycles));
     }
 
     [Fact]

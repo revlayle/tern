@@ -494,6 +494,8 @@ public sealed class CodeGen
         var top = NewLabel("while");
         var test = NewLabel("test");
         var end = NewLabel("wend");
+        // An endless loop never reaches the store after it.
+        var held = w.Condition.ConstValue == 1 ? null : HoldInRegister(w.Body, w.Condition, null);
         _loopDepth++;
         if (w.Condition.ConstValue == 1)
         {
@@ -516,6 +518,16 @@ public sealed class CodeGen
         }
         _loopDepth--;
         Place(end);
+        ReleaseHeld(held, w.Body);
+    }
+
+    /// <summary>Ends <see cref="HoldInRegister"/>: stores the variable if the loop assigns it, and frees the register.</summary>
+    private void ReleaseHeld(VariableSymbol? held, Stmt body)
+    {
+        if (held?.Register is not { } reg) return;
+        _reserved.Remove(reg);
+        held.Register = null;
+        if (AssignsVar(body, held)) Op(reg == Register.X ? Stx : Sty, Var(held));
     }
 
     /// <summary>
@@ -755,6 +767,14 @@ public sealed class CodeGen
         var target = a.Target;
         bool byOne = a.Value.ConstValue == 1 && a.Op is TokenKind.PlusEq or TokenKind.MinusEq;
 
+        // x += 1 / x -= 1 on a variable held in a register for a loop: inx / dex / iny / dey.
+        if (byOne && target is NameExpr { Symbol.Register: Register.X or Register.Y } held)
+        {
+            bool x = held.Symbol!.Register == Register.X;
+            Emit(a.Op == TokenKind.PlusEq ? (x ? Inx : Iny) : (x ? Dex : Dey));
+            return;
+        }
+
         // x += 1 / x -= 1 on memory: inc / dec.
         if (byOne && target is NameExpr { Symbol: { InMemory: true } v })
         {
@@ -939,6 +959,12 @@ public sealed class CodeGen
     {
         switch (target)
         {
+            case NameExpr { Symbol.Register: Register.X }:
+                Emit(Tax);
+                break;
+            case NameExpr { Symbol.Register: Register.Y }:
+                Emit(Tay);
+                break;
             case NameExpr { Symbol: { } v }:
                 Op(Sta, Var(v));
                 break;
@@ -2363,6 +2389,7 @@ public sealed class CodeGen
 
         SetCounter(c, f.From);
         if (c.Register is { } held) _reserved.Add(held);
+        var inRegister = HoldInRegister(f.Body, null, c);
 
         // Skip the loop if the range is empty, unless the bounds prove it is not.
         long max = type.MaxValue;
@@ -2394,6 +2421,7 @@ public sealed class CodeGen
             StepGeneral(c, up, stepOperand ?? Byte(d), inclusive, to, bound, top, end);
 
         Place(end);
+        ReleaseHeld(inRegister, f.Body);
         if (c.Register is { } r) _reserved.Remove(r);
         if (stepTemp is not null) Release(stepTemp);
         if (boundTemp is not null) Release(boundTemp);
@@ -2417,7 +2445,87 @@ public sealed class CodeGen
         _fn.FrameVariables.Remove(c);
     }
 
-    /// <summary><c>for _ in a..b</c> with constant bounds: count down to zero.</summary>
+    /// <summary>
+    /// M18 F7/F11: a one-byte variable of ordinary memory used in a loop is held in a free index
+    /// register for the loop (spec 4: its values may be kept in registers; spec 7: the compiler
+    /// chooses registers). It is loaded before the loop and, if the loop assigns it, stored after its
+    /// end, where a <c>break</c> goes too. Only for a loop with no call, asm block, <c>return</c> or
+    /// loop inside, so nothing else can read the memory or needs the register, and only when every
+    /// use is one a register serves at least as well as memory: an array index (also <c>a[v - c]</c>),
+    /// a plain read, the left operand of an operator or compare with a simple right one, an
+    /// assignment. At least one use must save more than a cycle: an index (no <c>ldx v</c>) or
+    /// <c>v += 1</c> / <c>v -= 1</c> (<c>inx</c> for <c>inc v</c>); a plain read only trades <c>lda</c>
+    /// for <c>txa</c>, which may lose to what the optimizer does with memory. The variable with the
+    /// most such uses, then the most uses; X unless every
+    /// pointer access is <c>p[v]</c> (then Y). Beside a counter held in a register, only when every
+    /// index in the body is the counter or the variable and nothing else needs an index register.
+    /// Returns the variable, now held, or null.
+    /// </summary>
+    private VariableSymbol? HoldInRegister(Node body, Expr? condition, VariableSymbol? counter)
+    {
+        var nodes = Descendants(body).Concat(condition is null ? [] : Descendants(condition)).ToList();
+        if (nodes.Skip(1).Any(n => n is ForStmt or WhileStmt or ReturnStmt or CallExpr { Function: not null } or AsmStmt)) return null;
+        var heldCounter = counter?.Register is not null ? counter : null;
+        if (heldCounter is null ? _reserved.Count > 0 : _reserved.Count != 1 || !_reserved.Contains(heldCounter.Register!.Value)) return null;
+        if (heldCounter is not null && nodes.Any(n => n is MatchStmt || (n is IndexExpr ix && IsPointerIndex(ix)))) return null;
+
+        var declared = nodes.OfType<VarDecl>().Select(d => d.Symbol).ToHashSet();
+        bool Ordinary(VariableSymbol v) =>
+            v.Type.Kind == TypeKind.U8 && v.AliasOf is null && v.InMemory && v != counter && !declared.Contains(v)
+            && !v.AddressTaken && !v.IsVolatile && v.FixedAddress is null && v.Region is null && !v.IsData && !v.ReadOnly
+            && !v.InOverlayArea && v.OverlayArea is null && v.Kind is VariableKind.Global or VariableKind.Local or VariableKind.Parameter;
+
+        // Each use of a candidate, with the node it is part of.
+        var parents = new Dictionary<Node, Node>();
+        foreach (var n in nodes) foreach (var c in Children(n)) parents[c] = n;
+        // Per candidate: uses where the register saves a load or an inc (an index, v += 1), and all uses.
+        var uses = new Dictionary<VariableSymbol, (int Strong, int All)>();
+        var bad = new HashSet<VariableSymbol>();
+        foreach (var n in nodes.OfType<NameExpr>())
+        {
+            if (n.Symbol is not { } v || !Ordinary(v) || bad.Contains(v)) continue;
+            var parent = parents.GetValueOrDefault(n);
+            if (!Served(n, parent)) { bad.Add(v); uses.Remove(v); continue; }
+            bool strong = parent is IndexExpr || (parent is AssignStmt { Op: TokenKind.PlusEq or TokenKind.MinusEq, Value.ConstValue: 1 } a && a.Target == n);
+            var (st, all) = uses.GetValueOrDefault(v);
+            uses[v] = (st + (strong ? 1 : 0), all + 1);
+        }
+        foreach (var v in uses.Where(u => u.Value.Strong == 0).Select(u => u.Key).ToList()) uses.Remove(v);
+        // Beside a held counter: every index must be the counter or the variable.
+        if (heldCounter is not null)
+            foreach (var v in uses.Keys.ToList())
+                if (!nodes.OfType<IndexExpr>().All(ix => ix.Index.ConstValue is not null
+                        || FoldIndexOffset(ix.Index, ArrayOf(ix)).Index is NameExpr { Symbol: var s } && (s == heldCounter || s == v)))
+                    uses.Remove(v);
+        if (uses.Count == 0) return null;
+        var held = uses.MaxBy(u => (u.Value.Strong, u.Value.All)).Key;
+
+        Register reg;
+        if (heldCounter is not null) reg = heldCounter.Register == Register.X ? Register.Y : Register.X;
+        else
+        {
+            var (plain, other) = PointerIndexes(body, held);
+            reg = plain > 0 && other == 0 ? Register.Y : Register.X;
+        }
+        Op(reg == Register.X ? Ldx : Ldy, Var(held));
+        held.Register = reg;
+        _reserved.Add(reg);
+        return held;
+    }
+
+    /// <summary>A use of a variable that a register serves at least as well as memory (<see cref="HoldInRegister"/>).</summary>
+    private bool Served(NameExpr use, Node? parent) => parent switch
+    {
+        IndexExpr ix => ix.Index == use && (!IsPointerIndex(ix) || PlainPointerIndex(ix)),
+        // txa (or tya) where memory needs lda; the operator's own instruction takes the right operand.
+        BinaryExpr b => b.Left == use && b.Type.Size == 1 && Simple1(b.Right) is not null
+            && b.Op is TokenKind.Plus or TokenKind.Minus or TokenKind.Amp or TokenKind.Pipe or TokenKind.Caret
+                or TokenKind.EqEq or TokenKind.NotEq or TokenKind.Less or TokenKind.LessEq or TokenKind.Greater or TokenKind.GreaterEq,
+        AssignStmt a => a.Target == use ? a.Op == TokenKind.Eq || Simple1(a.Value) is not null || a.Value.ConstValue is not null : a.Value == use,
+        VarDecl d => d.Init == use,
+        MatchStmt m => m.Subject == use,
+        _ => false,
+    };
     private void GenRepeat(ForStmt f, VariableSymbol c, long count, Label top, Label cont, Label end)
     {
         _out.Add(new Comment($"repeat {count} times"));

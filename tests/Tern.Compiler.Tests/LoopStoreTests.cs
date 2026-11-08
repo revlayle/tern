@@ -138,14 +138,14 @@ public class LoopStoreTests
                     look()
                 }
                 for i in 0..4 {
-                    seen += 1
+                    seen += arr[i]
                 }
             }
             """);
-        Assert.Equal(13, r.U8("seen"));
+        Assert.Equal(19, r.U8("seen"));
         Assert.Equal(9, r.U8("total"));
         Assert.Contains("sta total|jsr look", Code(r));
-        Assert.Contains("inc seen", Code(r));
+        Assert.Contains("adc seen|sta seen|inx", Code(r));
     }
 
     [Fact]
