@@ -277,9 +277,11 @@ log $08BE [u8; 16] (10 bytes):
 ```
 
 - There is no C-style `for (;;)` and no `do`/`until`. `a..b` excludes `b`, `a..=b` includes it.
-- `for` bounds are evaluated once, and the counter is read-only in the body. A counter is `u8`; with
-  constant bounds the order gives the direction, an end of `0` counts down, a negative `step` too.
-  Signed loop counters are not supported yet.
+- `for` bounds are evaluated once, and the counter is read-only in the body. A counter is `u8`
+  (`u16` if a bound needs it); with constant bounds the order gives the direction, an end of `0`
+  counts down, a negative `step` too. A negative constant or a signed bound makes it `i8` (`i16` if
+  the bounds do not fit): `for i in -10..10`, `for i in n..=0` with `n: i8`. A signed counter takes
+  only a constant step, and an unsigned variable bound must be converted (`-5..n as i8`).
 - `match` works on `u8` and `i8` (for a `u16`, match `.lo` or `.hi`). Patterns are constants, lists
   `1, 2` and inclusive ranges `3..=7`; `_` is last. One arm per line, no fall-through. A value no
   pattern lists skips the match.

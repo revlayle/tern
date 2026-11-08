@@ -2421,8 +2421,6 @@ public sealed class CodeGen
     {
         var c = f.Symbol!;
         var type = c.Type;
-        if (type.IsSigned)
-            throw new CompileError(f.Pos, "Signed loop variables are not supported yet");
 
         int step = f.StepValue;
         bool up = step > 0;
@@ -2502,15 +2500,36 @@ public sealed class CodeGen
             }
         }
 
+        // A signed loop with a larger step and a variable bound compares the counter with the end
+        // flipped (eor #$80), so that cmp gives the signed order (spec 5.1).
+        VariableSymbol? flippedTemp = null;
+        Operand? flipped = null;
+        bool signedTest = type.IsSigned && d > 1 && !(from is not null && to is not null);
+        if (signedTest && type.Size == 1)
+        {
+            if (to is not null) flipped = Byte(to.Value ^ 0x80);
+            else
+            {
+                flippedTemp = AcquireTemp(1);
+                Op(Lda, bound.Lo); Op(Eor, Byte(0x80)); Op(Sta, Var(flippedTemp));
+                flipped = Var(flippedTemp);
+            }
+        }
+
         SetCounter(c, f.From);
+        int afterSet = _out.Count;
         if (c.Register is { } held) _reserved.Add(held);
         var inRegister = HoldInRegister(f.Body, null, c);
+        // N and Z still hold the start value after a plain ldx / ldy of it.
+        bool flagsHoldStart = c.Register is not null && Simple1(f.From) is not null && _out.Count == afterSet;
 
         // Skip the loop if the range is empty, unless the bounds prove it is not.
         long max = type.MaxValue;
         bool provablyNonEmpty = (from is not null && to is not null)
-            || (inclusive && up && to == max) || (inclusive && !up && to == 0) || _nonEmpty.Contains(f);
-        if (!provablyNonEmpty)
+            || (inclusive && up && to == max) || (inclusive && !up && to == type.MinValue) || _nonEmpty.Contains(f);
+        if (!provablyNonEmpty && type.IsSigned)
+            SignedEmptyCheck(c, up, inclusive, to, bound, end, flagsHoldStart);
+        else if (!provablyNonEmpty)
         {
             var emptyIf = (up, inclusive) switch
             {
@@ -2531,7 +2550,9 @@ public sealed class CodeGen
         Place(cont);
         Source(f); // the step and the test belong to the loop's line (source map)
 
-        if (type.Size == 1 && d == 1 && !f.VariableStep)
+        if (type.IsSigned)
+            StepSigned(c, up, d, inclusive, from, to, bound, flipped, top, end);
+        else if (type.Size == 1 && d == 1 && !f.VariableStep)
             StepByOne(c, up, inclusive, from, to, bound, top, end);
         else
             StepGeneral(c, up, stepOperand ?? Byte(d), inclusive, to, bound, top, end);
@@ -2539,6 +2560,7 @@ public sealed class CodeGen
         Place(end);
         ReleaseHeld(inRegister, f.Body);
         if (c.Register is { } r) _reserved.Remove(r);
+        if (flippedTemp is not null) Release(flippedTemp);
         if (stepTemp is not null) Release(stepTemp);
         if (boundTemp is not null) Release(boundTemp);
     }
@@ -2909,6 +2931,189 @@ public sealed class CodeGen
             DecCounter(c);
             Jmp(top);
         }
+    }
+
+    /// <summary>
+    /// Before a signed loop with variable bounds: leaves if the range is empty (spec 5.1). <c>n..=0</c>
+    /// and <c>n..0</c> test the sign (and zero) of the start, which a plain <c>ldx n</c> has already set
+    /// when <paramref name="flagsHoldStart"/>; other ranges compare signed, once.
+    /// </summary>
+    private void SignedEmptyCheck(VariableSymbol c, bool up, bool inclusive, long? to, (Operand Lo, Operand Hi) bound, Label end, bool flagsHoldStart)
+    {
+        if (!up && to == 0)
+        {
+            if (c.Type.Size == 2)
+            {
+                Op(Lda, Var(c, 1));
+                Branch(Bmi, end);
+                if (!inclusive) { Op(Ora, Var(c)); Branch(Beq, end); }
+                return;
+            }
+            if (!flagsHoldStart)
+            {
+                if (c.Register is { } reg) Op(reg == Register.X ? Cpx : Cpy, Byte(0));
+                else Op(Lda, Var(c));
+            }
+            if (!inclusive) Branch(Beq, end);
+            Branch(Bmi, end);
+            return;
+        }
+        var emptyIf = (up, inclusive) switch
+        {
+            (true, false) => TokenKind.GreaterEq,
+            (true, true) => TokenKind.Greater,
+            (false, false) => TokenKind.LessEq,
+            _ => TokenKind.Less,
+        };
+        SignedCounterBranch(c, emptyIf, bound, end);
+    }
+
+    /// <summary>Branches to <paramref name="target"/> if <c>counter rel bound</c>, in signed order: the subtraction's N, corrected by V.</summary>
+    private void SignedCounterBranch(VariableSymbol c, TokenKind rel, (Operand Lo, Operand Hi) bound, Label target)
+    {
+        var sign = NewLabel("sgn");
+        if (c.Type.Size == 1)
+        {
+            var skip = NewLabel("eq");
+            if (c.Register is { } reg) Emit(reg == Register.X ? Txa : Tya);
+            else Op(Lda, Var(c));
+            Emit(Sec);
+            Op(Sbc, bound.Lo);
+            if (rel == TokenKind.LessEq) Branch(Beq, target);
+            if (rel == TokenKind.Greater) Branch(Beq, skip);
+            Branch(Bvc, sign);
+            Op(Eor, Byte(0x80));
+            Place(sign);
+            Branch(rel is TokenKind.Less or TokenKind.LessEq ? Bmi : Bpl, target);
+            Place(skip);
+            return;
+        }
+        (Operand Lo, Operand Hi) counter = (Var(c), Var(c, 1));
+        var (l, r) = rel is TokenKind.Greater or TokenKind.LessEq ? (bound, counter) : (counter, bound);
+        bool less = rel is TokenKind.Less or TokenKind.Greater;   // l < r
+        Op(Lda, l.Lo); Op(Cmp, r.Lo);
+        Op(Lda, l.Hi); Op(Sbc, r.Hi);
+        Branch(Bvc, sign);
+        Op(Eor, Byte(0x80));
+        Place(sign);
+        Branch(less ? Bmi : Bpl, target);
+    }
+
+    /// <summary>
+    /// The end of a loop with an i8 or i16 counter (spec 5.1). A step of ±1 is the unsigned code:
+    /// tested for equality. A larger step with constant bounds compares with the value after the
+    /// last; with a variable bound it leaves when the step overflows (V), then compares signed.
+    /// </summary>
+    private void StepSigned(VariableSymbol c, bool up, int d, bool inclusive, long? from, long? to,
+        (Operand Lo, Operand Hi) bound, Operand? flipped, Label top, Label end)
+    {
+        bool wide = c.Type.Size == 2;
+        void BranchNotEq(long v, Label target) => CounterBranch(c, TokenKind.NotEq, (Byte(v), Byte(v >> 8)), target);
+
+        if (d == 1)
+        {
+            if (inclusive && to is null)
+            {
+                // Test before stepping, so an end at the type's limit cannot wrap around.
+                CounterBranch(c, TokenKind.EqEq, bound, end);
+                StepByOneSigned(c, up);
+                Jmp(top);
+                return;
+            }
+            StepByOneSigned(c, up);
+            if (!inclusive && !up && to == 0 && !wide) Branch(Bne, top);   // dec sets Z
+            else if (!inclusive) CounterBranch(c, TokenKind.NotEq, bound, top);
+            else if (!up && to == 0)
+            {
+                if (wide) Op(Lda, Var(c, 1));
+                Branch(Bpl, top);
+            }
+            else BranchNotEq(up ? to!.Value + 1 : to!.Value - 1, top);
+            return;
+        }
+
+        if (from is not null && to is not null)
+        {
+            // Constant bounds: the counter steps through distinct values, so the value after the last ends it.
+            long last = up
+                ? Checker.LargestLoopValue(from.Value, to.Value, inclusive, d)!.Value
+                : from.Value - (from.Value - (inclusive ? to.Value : to.Value + 1)) / d * d;
+            AddStep(c, up, d);
+            BranchNotEq(up ? last + d : last - d, top);
+            return;
+        }
+
+        var continueIf = (up, inclusive) switch
+        {
+            (true, false) => TokenKind.Less,
+            (true, true) => TokenKind.LessEq,
+            (false, false) => TokenKind.Greater,
+            _ => TokenKind.GreaterEq,
+        };
+        if (wide)
+        {
+            AddStep(c, up, d);
+            Branch(Bvs, end);
+            SignedCounterBranch(c, continueIf, bound, top);
+            return;
+        }
+        // txa / clc / adc #d / bvs end / tax / eor #$80 / cmp e / bcc top
+        if (c.Register is { } reg) Emit(reg == Register.X ? Txa : Tya);
+        else Op(Lda, Var(c));
+        if (up) { Emit(Clc); Op(Adc, Byte(d)); } else { Emit(Sec); Op(Sbc, Byte(d)); }
+        Branch(Bvs, end);
+        if (c.Register is { } r) Emit(r == Register.X ? Tax : Tay);
+        else Op(Sta, Var(c));
+        Op(Eor, Byte(0x80));
+        Op(Cmp, flipped!);
+        switch (continueIf)
+        {
+            case TokenKind.Less: Branch(Bcc, top); break;
+            case TokenKind.LessEq: Branch(Bcc, top); Branch(Beq, top); break;
+            case TokenKind.Greater: Branch(Beq, end); Branch(Bcs, top); break;
+            default: Branch(Bcs, top); break;
+        }
+    }
+
+    /// <summary>Adds or subtracts a constant step to a signed counter; for a 16-bit one V is the high byte's overflow.</summary>
+    private void AddStep(VariableSymbol c, bool up, int d)
+    {
+        if (c.Register is { } reg)
+        {
+            Emit(reg == Register.X ? Txa : Tya);
+            if (up) { Emit(Clc); Op(Adc, Byte(d)); } else { Emit(Sec); Op(Sbc, Byte(d)); }
+            Emit(reg == Register.X ? Tax : Tay);
+            return;
+        }
+        Op(Lda, Var(c));
+        if (up) { Emit(Clc); Op(Adc, Byte(d)); } else { Emit(Sec); Op(Sbc, Byte(d)); }
+        Op(Sta, Var(c));
+        if (c.Type.Size == 2)
+        {
+            Op(Lda, Var(c, 1));
+            Op(up ? Adc : Sbc, Byte(0));
+            Op(Sta, Var(c, 1));
+        }
+    }
+
+    /// <summary>Steps a signed counter by one: inx / inc c, or the 16-bit inc / bne / inc and lda / bne / dec / dec.</summary>
+    private void StepByOneSigned(VariableSymbol c, bool up)
+    {
+        if (c.Type.Size == 1)
+        {
+            if (up) IncCounter(c); else DecCounter(c);
+            return;
+        }
+        var done = NewLabel(up ? "inc" : "dec");
+        if (up)
+        {
+            Op(Inc, Var(c)); Branch(Bne, done); Op(Inc, Var(c, 1));
+            Place(done);
+            return;
+        }
+        Op(Lda, Var(c)); Branch(Bne, done); Op(Dec, Var(c, 1));
+        Place(done);
+        Op(Dec, Var(c));
     }
 
     /// <summary>The end of a loop with a larger step or a 16-bit counter.</summary>

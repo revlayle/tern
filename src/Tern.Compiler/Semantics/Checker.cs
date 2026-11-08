@@ -1010,10 +1010,27 @@ public sealed partial class Checker
             if (!(bound.Type.IsInteger || bound.Type.Kind == TypeKind.IntLiteral))
                 throw new CompileError(bound.Pos, "Loop bounds must be numbers");
 
-        // The loop variable's type: the wider of the bounds, or u8/u16 for literals.
+        // The loop variable's type: the wider of the bounds, or u8/u16 for literals. A negative
+        // literal or a signed bound makes it i8 if the bounds fit in -128..127, else i16 (spec 5.1).
         TernType type;
-        if (f.From.Type.Kind == TypeKind.IntLiteral && f.To.Type.Kind == TypeKind.IntLiteral)
-            type = DefaultType(f.From).Size >= DefaultType(f.To).Size ? DefaultType(f.From) : DefaultType(f.To);
+        bool fromLiteral = f.From.Type.Kind == TypeKind.IntLiteral, toLiteral = f.To.Type.Kind == TypeKind.IntLiteral;
+        if (fromLiteral && toLiteral)
+        {
+            long a = f.From.ConstValue!.Value, b = f.To.ConstValue!.Value;
+            if (a < 0 || b < 0)
+                type = Math.Min(a, b) >= -128 && Math.Max(a, b) <= 127 ? TernType.I8 : TernType.I16;
+            else
+                type = DefaultType(f.From).Size >= DefaultType(f.To).Size ? DefaultType(f.From) : DefaultType(f.To);
+        }
+        else if (fromLiteral != toLiteral)
+        {
+            var (literal, other) = fromLiteral ? (f.From, f.To) : (f.To, f.From);
+            long v = literal.ConstValue!.Value;
+            if (v < 0 && other.Type.IsInteger && !other.Type.IsSigned)
+                throw new CompileError(literal.Pos,
+                    $"A loop from a negative bound counts with a signed variable, but the other bound is {other.Type}. Convert it with 'as {(v >= -128 && other.Type.Size == 1 ? "i8" : "i16")}'");
+            type = other.Type.IsSigned && other.Type.Size == 1 && (v < -128 || v > 127) ? TernType.I16 : Unify(f.From, f.To, f.Pos);
+        }
         else
             type = Unify(f.From, f.To, f.Pos);
         Coerce(f.From, type);
