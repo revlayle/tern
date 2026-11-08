@@ -189,6 +189,7 @@ public class RunToolTests
         var sw: i16 = -1234
         var flag: bool = true
         var table: [u8; 6] = [1, 2, 3, 4, 5, 6]
+        var high: u8 @ $FFF0
         fn main() {
             var local: u8 = 7
             b += local
@@ -232,6 +233,14 @@ public class RunToolTests
     [InlineData("$C010-$C000", "the end is before the start")]
     [InlineData("$FFFF:2", "goes past $FFFF")]
     [InlineData("$G000", "is not an address or count")]
+    // Review M19, finding 3: no exception other than FormatException.
+    [InlineData("", "--dump needs a variable or an address")]
+    [InlineData(" ", "--dump needs a variable or an address")]
+    [InlineData(":4", "--dump needs a variable or an address")]
+    [InlineData("b:", "'' is not an address or count")]
+    [InlineData("$C000:0", "the byte count must be at least 1")]
+    [InlineData("b:0", "the byte count must be at least 1")]
+    [InlineData("high:100", "'high:100' goes past $FFFF ('high' is at $FFF0)")]
     public void A_bad_dump_says_what_is_wrong(string what, string expected)
     {
         var e = Assert.Throws<FormatException>(() => MemoryDump.Parse(what, TernCompiler.Compile(Values)));
@@ -291,7 +300,7 @@ public class RunToolTests
         Assert.Equal(25, root.GetProperty("screen").GetArrayLength());
         Assert.Contains(root.GetProperty("functions").EnumerateArray(), f => f.GetProperty("name").GetString() == "main");
         var line = root.GetProperty("lines").EnumerateArray().First(l => l.GetProperty("source").GetString() == "b += local");
-        Assert.Equal(9, line.GetProperty("line").GetInt32());
+        Assert.Equal(10, line.GetProperty("line").GetInt32());
         Assert.Equal(1, line.GetProperty("runs").GetInt64());
     }
 }

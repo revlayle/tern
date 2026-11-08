@@ -14,10 +14,13 @@ public sealed record MemoryDump(string What, int Address, int Size, VariableInfo
 {
     public static MemoryDump Parse(string text, CompileResult program)
     {
-        string what = text, count = "";
-        int colon = text.LastIndexOf(':');
-        if (colon > 0) { what = text[..colon]; count = text[(colon + 1)..]; }
-        int? size = count.Length == 0 ? null : Number(count, text);
+        string what = text.Trim(), count = "";
+        int colon = what.LastIndexOf(':');
+        if (colon >= 0) { count = what[(colon + 1)..]; what = what[..colon]; }
+        if (what.Length == 0)
+            throw new FormatException($"'{text}': --dump needs a variable or an address (score, main.count, $C000-$C0FF, $C000:16)");
+        int? size = colon < 0 ? null : Number(count, text);
+        if (size == 0) throw new FormatException($"'{text}': the byte count must be at least 1");
 
         if (what.StartsWith('$') || char.IsDigit(what[0]))
         {
@@ -37,6 +40,7 @@ public sealed record MemoryDump(string What, int Address, int Size, VariableInfo
             var near = program.Variables.Keys.Where(k => k.EndsWith("." + what) || k.Equals(what, StringComparison.OrdinalIgnoreCase)).Take(3).ToList();
             throw new FormatException($"No variable '{what}'" + (near.Count > 0 ? $". Did you mean {string.Join(" or ", near.Select(n => $"'{n}'"))}?" : ". Locals are written 'function.name'"));
         }
+        if (v.Address + (size ?? v.Size) > 0x10000) throw new FormatException($"'{text}' goes past $FFFF ('{v.Name}' is at ${v.Address:X4})");
         return new MemoryDump(text, v.Address, size ?? v.Size, v);
     }
 
