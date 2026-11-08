@@ -18,6 +18,48 @@ public class SmallShapeTests
 
     [Theory]
     [InlineData(0)]
+    [InlineData(1)]
+    [InlineData(127)]
+    [InlineData(128)]
+    [InlineData(254)]
+    [InlineData(255)]
+    public void Adding_two_to_a_byte_in_memory_is_two_inc(int x)
+    {
+        var r = Run.Program($$"""
+            var a: u8 = {{x}}
+            var b: u8 = {{x}}
+            var s: i8 = {{(sbyte)x}}
+            var t: i8 = {{(sbyte)x}}
+            volatile var v: u8 = {{x}}
+            var w: u16 = {{x}}
+            var c: u8 = {{x}}
+            var e: u8
+            fn main() {
+                a += 2
+                b -= 2
+                s += 2
+                t -= 2
+                v += 2
+                w += 2
+                c += 3
+                e = a
+            }
+            """);
+        Assert.Equal((byte)(x + 2), r.U8("a"));
+        Assert.Equal((byte)(x - 2), r.U8("b"));
+        Assert.Equal((sbyte)(x + 2), r.I8("s"));
+        Assert.Equal((sbyte)(x - 2), r.I8("t"));
+        Assert.Equal((byte)(x + 2), r.U8("v"));
+        Assert.Equal((ushort)(x + 2), r.U16("w"));
+        Assert.Equal((byte)(x + 3), r.U8("c"));
+        Assert.Equal((byte)(x + 2), r.U8("e"));
+        // The volatile byte, the u16 and 3 keep the add.
+        Assert.StartsWith("inc a|inc a|dec b|dec b|inc s|inc s|dec t|dec t|lda v|clc|adc #$02|sta v|", Code(r));
+        Assert.Contains("adc #$03", Code(r));
+    }
+
+    [Theory]
+    [InlineData(0)]
     [InlineData(255)]
     [InlineData(256)]
     [InlineData(0xFEFF)]

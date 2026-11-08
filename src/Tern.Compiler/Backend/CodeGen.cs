@@ -902,6 +902,16 @@ public sealed class CodeGen
             return;
         }
 
+        // x += 2 / x -= 2 on a byte in memory: two inc / dec, shorter than the add at the same cycles (spec 11).
+        // Not on a volatile byte, where the value in between would be written to the hardware.
+        if (a.Op is TokenKind.PlusEq or TokenKind.MinusEq && a.Value.ConstValue == 2
+            && target is NameExpr { Symbol: { InMemory: true, Type.Size: 1, IsVolatile: false } v2 })
+        {
+            Op(a.Op == TokenKind.PlusEq ? Inc : Dec, Var(v2));
+            Op(a.Op == TokenKind.PlusEq ? Inc : Dec, Var(v2));
+            return;
+        }
+
         // w += 256 / w -= 256 on a 16-bit variable: inc w+1 / dec w+1; another multiple of 256 adds to the high byte only.
         if (a.Op is TokenKind.PlusEq or TokenKind.MinusEq && target is NameExpr { Symbol: { InMemory: true, Type.Size: 2 } wv }
             && a.Value.ConstValue is long whole && (whole & 0xFF) == 0 && whole is > 0 and <= 0xFF00)

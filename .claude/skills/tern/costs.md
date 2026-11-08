@@ -424,8 +424,8 @@ fn main() {
 ```console
 $ tern bench flag.tern break.tern --fn run --dump steps
 variant     program   run bytes   calls     cycles  per call    zp  other
-flag.tern        91          49       1       1553      1553     3     64
-break.tern       77          35       1       1527      1527     2     64
+flag.tern        88          46       1       1553      1553     3     64
+break.tern       74          32       1       1527      1527     2     64
 Memory (zp: zero page bytes, other: the rest; the measured function's variables and the program's globals):
   flag.tern: steps $0002 u8, codes $0900 [u8; 64], run.pc $0003 u8, run.running $0004 bool
   break.tern: steps $0002 u8, codes $0900 [u8; 64], run.pc $0003 u8
@@ -622,8 +622,8 @@ fn main() {
 ```console
 $ tern bench chain.tern table.tern --fn run --dump acc
 variant     program   run bytes   calls     cycles  per call    zp  other
-chain.tern      296         246       1       3982      3982     1     64
-table.tern      252         202       1       3110      3110     1     64
+chain.tern      290         240       1       3946      3946     1     64
+table.tern      249         199       1       3110      3110     1     64
 Memory (zp: zero page bytes, other: the rest; the measured function's variables and the program's globals):
   chain.tern: acc $0002 u8, ops $0A00 [u8; 64]
   table.tern: acc $0002 u8, ops $0900 [u8; 64]
@@ -689,8 +689,8 @@ fn main() {
 ```console
 $ tern bench chain8.tern table8.tern --fn run --dump acc
 variant      program   run bytes   calls     cycles  per call    zp  other
-chain8.tern      161         111       1       2623      2623     1     64
-table8.tern      157         107       1       2951      2951     1     64
+chain8.tern      158         108       1       2623      2623     1     64
+table8.tern      154         104       1       2951      2951     1     64
 Memory (zp: zero page bytes, other: the rest; the measured function's variables and the program's globals):
   chain8.tern: acc $0002 u8, ops $0900 [u8; 64]
   table8.tern: acc $0002 u8, ops $0900 [u8; 64]
