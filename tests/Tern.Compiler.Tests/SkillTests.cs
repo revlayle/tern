@@ -12,8 +12,8 @@ public class SkillCollection;
 /// shows is what the tools print, so the skill cannot drift from the compiler. In each file, in order:
 /// <list type="bullet">
 /// <item>a <c>```tern</c> block is written to the file its first line names (<c>// name.tern</c>), or
-/// <c>example.tern</c>; with <c>fn main</c> or <c>export</c> it must compile (otherwise it is a module for the
-/// blocks after it). A <c>```tern error</c> block must not compile, and the <c>```text</c> block after it
+/// <c>example.tern</c> (a name may have a folder: <c>// alt/ship.tern</c>); with <c>fn main</c> or <c>export</c> it
+/// must compile, otherwise it is a module, which a program compiled after it (a block or a command) must import. A <c>```tern error</c> block must not compile, and the <c>```text</c> block after it
 /// is what <c>tern name.tern</c> prints.</item>
 /// <item>a <c>```console</c> block holds commands (<c>$ tern ...</c>) each followed by its output; a line
 /// <c>...</c> stands for any number of lines.</item>
@@ -84,6 +84,8 @@ public class SkillTests
         try
         {
             string? lastProgram = null;
+            // Module blocks (no main, no export) not yet imported by a program that was compiled, with where they are.
+            var modules = new Dictionary<string, string>();
             for (int b = 0; b < blocks.Count; b++)
             {
                 var block = blocks[b];
@@ -92,9 +94,11 @@ public class SkillTests
                 {
                     var m = Regex.Match(block.Lines.FirstOrDefault() ?? "", @"^// (\S+\.tern)\b");
                     string name = m.Success ? m.Groups[1].Value : "example.tern";
+                    if (Path.GetDirectoryName(name) is { Length: > 0 } folder) Directory.CreateDirectory(folder);
                     File.WriteAllText(name, string.Join("\n", block.Lines) + "\n");
                     string text = string.Join("\n", block.Lines);
                     bool program = Regex.IsMatch(text, @"^\s*fn main\(", RegexOptions.Multiline) || Regex.IsMatch(text, @"^\s*export\b", RegexOptions.Multiline);
+                    if (!program && block.Info != "tern error") modules[Path.GetFullPath(name)] = where;
                     if (block.Info == "tern error")
                     {
                         var (code, output) = Tern(["tern", name]);
@@ -108,7 +112,7 @@ public class SkillTests
                     {
                         var (code, output) = Tern(["tern", name]);
                         if (code != 0) problems.Add($"{where}: {name} does not compile:\n{string.Join("\n", output)}");
-                        else lastProgram = name;
+                        else { lastProgram = name; Compiled(name); }
                     }
                 }
                 else if (block.Language == "console")
@@ -141,13 +145,14 @@ public class SkillTests
                         actual.Add(command[0]);
                         updated.Add(command[0]);
                         if (args.Count == 0 || args[0] != "tern") { problems.Add($"{where}: '{command[0]}' is not a tern command"); return; }
-                        var (_, output) = Tern(args);
+                        var (code, output) = Tern(args);
                         actual.AddRange(output);
                         var expected = command.Skip(1).ToList();
                         if (Matches(expected, output)) updated.AddRange(expected);
                         else { differs = true; updated.AddRange(Updated(expected, output)); }
                         var input = args.Skip(1).FirstOrDefault(a => a.EndsWith(".tern"));
                         if (args.Count > 1 && args[1] is not ("run" or "bench") && input is not null) lastProgram = input;
+                        if (code == 0) foreach (var f in args.Where(a => a.EndsWith(".tern") && File.Exists(a))) Compiled(f);
                     }
                 }
                 else if (block.Language == "lst")
@@ -164,6 +169,20 @@ public class SkillTests
                     if (Matches(expectedBlock.Lines, output)) return;
                     if (update) replacements.Add((expectedBlock, Updated(expectedBlock.Lines, output)));
                     else problems.Add($"{file}:{expectedBlock.Start + 1}: the output differs. It is:\n{string.Join("\n", output)}");
+                }
+            }
+            // Review M19 part 2, suggestion 6: a module example must be compiled through a program that imports it.
+            foreach (var where in modules.Values)
+                problems.Add($"{where}: this module is not imported by any program the skill compiles after it, so it is not checked");
+
+            // A file was compiled: so were the modules of its folder that it imports, directly or not.
+            void Compiled(string path)
+            {
+                string folder = Path.GetDirectoryName(Path.GetFullPath(path))!;
+                foreach (Match i in Regex.Matches(File.ReadAllText(path), @"^\s*import\s+(\w+)", RegexOptions.Multiline))
+                {
+                    string module = Path.Combine(folder, i.Groups[1].Value + ".tern");
+                    if (modules.Remove(module)) Compiled(module);
                 }
             }
         }
