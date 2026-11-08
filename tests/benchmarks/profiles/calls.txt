@@ -22,7 +22,7 @@
     200 x      600  $0823  85 08     sta add3.b            ; 3
     200 x      400  $0825  A9 03     lda #$03              ; 2
     200 x      600  $0827  85 09     sta add3.c            ; 3
-    200 x     1200  $0829  20 70 08  jsr add3              ; 6
+    200 x     1200  $0829  20 6E 08  jsr add3              ; 6
     200 x      600  $082C  85 06     sta main.s            ; 3
                                                      ;   21: total += s as u16
     200 x      400  $082E  18        clc                   ; 2
@@ -65,23 +65,22 @@
     200 x     1200  $0863  60        rts                   ; 6
                                                      ;    9: fn clamp(v: u8 using A, top: u8) -> u8 {
                      clamp:
-    200 x      600  $0864  85 07     sta clamp.v           ; 3
                                                      ;   10: if v > top { return top }
-    200 x      600  $0866  A5 08     lda clamp.top         ; 3
-    200 x      600  $0868  C5 07     cmp clamp.v           ; 3
-    200 x      530  $086A  B0 01     bcs clamp.endif6      ; 2+
+    200 x      600  $0864  C5 08     cmp clamp.top         ; 3
+    200 x      529  $0866  90 05     bcc clamp.endif6      ; 2+
+     71 x      143  $0868  F0 03     beq clamp.endif6      ; 2+
+     70 x      210  $086A  A5 08     lda clamp.top         ; 3
      70 x      420  $086C  60        rts                   ; 6
                      clamp.endif6:
                                                      ;   11: return v
-    130 x      390  $086D  A5 07     lda clamp.v           ; 3
-    130 x      780  $086F  60        rts                   ; 6
+    130 x      780  $086D  60        rts                   ; 6
                                                      ;    5: fn add3(a: u8, b: u8, c: u8) -> u8 {
                      add3:
                                                      ;    6: return a + b + c
-    200 x      600  $0870  A5 07     lda add3.a            ; 3
-    200 x      400  $0872  18        clc                   ; 2
-    200 x      600  $0873  65 08     adc add3.b            ; 3
-    200 x      400  $0875  18        clc                   ; 2
-    200 x      600  $0876  65 09     adc add3.c            ; 3
-    200 x     1200  $0878  60        rts                   ; 6
+    200 x      600  $086E  A5 07     lda add3.a            ; 3
+    200 x      400  $0870  18        clc                   ; 2
+    200 x      600  $0871  65 08     adc add3.b            ; 3
+    200 x      400  $0873  18        clc                   ; 2
+    200 x      600  $0874  65 09     adc add3.c            ; 3
+    200 x     1200  $0876  60        rts                   ; 6
                      

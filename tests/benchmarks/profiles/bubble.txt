@@ -6,7 +6,7 @@
                      $080E  A9 00     lda #$00              ; 2
                      $0810  A2 64     ldx #$64              ; 2
                      clear:
-                     $0812  9D 66 08  sta bss-1,x           ; 5
+                     $0812  9D 62 08  sta bss-1,x           ; 5
                      $0815  CA        dex                   ; 2
                      $0816  D0 FA     bne clear             ; 2+
                      $0818  20 1E 08  jsr main              ; 6
@@ -29,7 +29,7 @@
     100 x      200  $082A  69 11     adc #$11              ; 2
     100 x      300  $082C  85 02     sta main.x            ; 3
                                                      ;    9: values[i] = x
-    100 x      500  $082E  9D 67 08  sta values,x          ; 5
+    100 x      500  $082E  9D 63 08  sta values,x          ; 5
                      main.fnext1:
     100 x      200  $0831  E8        inx                   ; 2
     100 x      200  $0832  E0 64     cpx #$64              ; 2
@@ -39,39 +39,37 @@
       1 x        2  $0836  A9 63     lda #$63              ; 2
       1 x        3  $0838  85 03     sta main.last         ; 3
                                                      ;   12: while last > 0 {
-      1 x        3  $083A  4C 60 08  jmp main.test4        ; 3
+      1 x        3  $083A  4C 5C 08  jmp main.test4        ; 3
                      main.while3:
                                                      ;   13: for i in 0..last {
      99 x      198  $083D  A2 00     ldx #$00              ; 2
      99 x      297  $083F  E4 03     cpx main.last         ; 3
-     99 x      198  $0841  B0 1B     bcs main.fend6        ; 2+
+     99 x      198  $0841  B0 17     bcs main.fend6        ; 2+
                      main.for8:
                                                      ;   14: var a: u8 = values[i]
-   4950 x    19800  $0843  BD 67 08  lda values,x          ; 4+
-   4950 x    14850  $0846  85 04     sta main.a            ; 3
                                                      ;   15: var b: u8 = values[i + 1]
-   4950 x    19800  $0848  BD 68 08  lda values+1,x        ; 4+
-   4950 x    14850  $084B  85 05     sta main.b            ; 3
+   4950 x    19800  $0843  BD 64 08  lda values+1,x        ; 4+
                                                      ;   16: if a > b {
-   4950 x    14850  $084D  C5 04     cmp main.a            ; 3
-   4950 x    12648  $084F  B0 08     bcs main.endif9       ; 2+
+   4950 x    19800  $0846  DD 63 08  cmp values,x          ; 4+
+   4950 x    12648  $0849  B0 0A     bcs main.endif9       ; 2+
                                                      ;   17: values[i] = b
-   2202 x    11010  $0851  9D 67 08  sta values,x          ; 5
+   2202 x     8808  $084B  BC 63 08  ldy values,x          ; 4+
+   2202 x    11010  $084E  9D 63 08  sta values,x          ; 5
                                                      ;   18: values[i + 1] = a
-   2202 x     6606  $0854  A5 04     lda main.a            ; 3
-   2202 x    11010  $0856  9D 68 08  sta values+1,x        ; 5
+   2202 x     4404  $0851  98        tya                   ; 2
+   2202 x    11010  $0852  9D 64 08  sta values+1,x        ; 5
                      main.endif9:
                      main.fnext7:
-   4950 x     9900  $0859  E8        inx                   ; 2
-   4950 x    14850  $085A  E4 03     cpx main.last         ; 3
-   4950 x    14751  $085C  D0 E5     bne main.for8         ; 2+
+   4950 x     9900  $0855  E8        inx                   ; 2
+   4950 x    14850  $0856  E4 03     cpx main.last         ; 3
+   4950 x    14751  $0858  D0 E9     bne main.for8         ; 2+
                      main.fend6:
                                                      ;   21: last -= 1
-     99 x      495  $085E  C6 03     dec main.last         ; 5
+     99 x      495  $085A  C6 03     dec main.last         ; 5
                      main.test4:
-    100 x      300  $0860  A5 03     lda main.last         ; 3
-    100 x      200  $0862  C9 01     cmp #$01              ; 2
-    100 x      299  $0864  B0 D7     bcs main.while3       ; 2+
+    100 x      300  $085C  A5 03     lda main.last         ; 3
+    100 x      200  $085E  C9 01     cmp #$01              ; 2
+    100 x      299  $0860  B0 DB     bcs main.while3       ; 2+
                      main.wend5:
-      1 x        6  $0866  60        rts                   ; 6
+      1 x        6  $0862  60        rts                   ; 6
                      

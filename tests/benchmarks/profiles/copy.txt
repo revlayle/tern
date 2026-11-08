@@ -64,19 +64,19 @@
       1 x        3  $085B  85 0F     sta copy.n+1          ; 3
       1 x        6  $085D  20 A2 08  jsr copy              ; 6
                                                      ;   26: var a: ptr u8 = SRC
-                                                     ;   27: var b: ptr u8 = DST
-                                                     ;   28: same = 1
-                                                     ;   29: for _ in 0..250 {
-                                                     ; repeat 250 times
       1 x        2  $0860  A9 00     lda #$00              ; 2
       1 x        3  $0862  85 05     sta main.a            ; 3
+                                                     ;   27: var b: ptr u8 = DST
       1 x        3  $0864  85 07     sta main.b            ; 3
       1 x        2  $0866  A9 40     lda #$40              ; 2
       1 x        3  $0868  85 06     sta main.a+1          ; 3
       1 x        2  $086A  A9 50     lda #$50              ; 2
       1 x        3  $086C  85 08     sta main.b+1          ; 3
+                                                     ;   28: same = 1
       1 x        2  $086E  A9 01     lda #$01              ; 2
       1 x        3  $0870  85 02     sta same              ; 3
+                                                     ;   29: for _ in 0..250 {
+                                                     ; repeat 250 times
       1 x        2  $0872  A9 FA     lda #$FA              ; 2
       1 x        3  $0874  85 09     sta main._loop0       ; 3
                      main.for6:

@@ -702,6 +702,24 @@ public static class Optimizer
     /// </summary>
     private sealed record Same(Reg First, Reg Second) : Operand;
 
+    /// <summary>
+    /// An element read or written through an index register (<c>lda e,x</c>, <c>sta e,x</c>): known
+    /// while neither the register nor the array changes (F5).
+    /// </summary>
+    private sealed record Element(VarOperand Base, Reg Index) : Operand;
+
+    /// <summary>The element <paramref name="i"/> reads or writes through X or Y, if it can be remembered: ordinary memory, not at a fixed address.</summary>
+    private static Element? ElementOf(Instr i) =>
+        i.Operand is VarOperand { Variable: var v } b && !v.IsVolatile && v.FixedAddress is null && v.Storage.FixedAddress is null
+            ? i.Mode switch { AbsoluteX or ZeroPageX => new Element(b, Reg.X), AbsoluteY or ZeroPageY => new Element(b, Reg.Y), _ => null }
+            : null;
+
+    /// <summary>The value <paramref name="i"/> loads or stores, if it can be remembered.</summary>
+    private static Operand? Value(Instr i) => Trackable(i) ? i.Operand : ElementOf(i);
+
+    /// <summary>Forgets the elements read through <paramref name="r"/>, which has changed.</summary>
+    private static void ForgetIndex(State s, Reg r) => s.Forget(op => op is Element { Index: var x } && x == r);
+
     private static Reg? Loaded(Mnemonic m) => m switch { Lda => Reg.A, Ldx => Reg.X, Ldy => Reg.Y, _ => null };
     private static Reg? Stored(Mnemonic m) => m switch { Sta => Reg.A, Stx => Reg.X, Sty => Reg.Y, _ => null };
     private static (Reg From, Reg To)? Transfer(Mnemonic m) => m switch
@@ -731,12 +749,17 @@ public static class Optimizer
         if (fixedAt && written.Storage.InOverlayArea)
         {
             // RAM that something else shares, e.g. an overlay's file (spec 8.5): like a write through a pointer.
-            s.Forget(op => op is VarOperand);
+            s.Forget(op => op is VarOperand or Element);
             return;
         }
-        s.Forget(op => op is VarOperand { Variable: var v, Offset: var at } && ((v == written && (offset is null || at == offset))
-            || (callee && v.Owner is { } vo && vo != function)
-            || (fixedAt && v.FixedAddress is not null)));
+        bool Shared(VariableSymbol v) => (callee && v.Owner is { } vo && vo != function) || (fixedAt && v.FixedAddress is not null);
+        // An element of the variable may be any of its bytes.
+        s.Forget(op => op switch
+        {
+            VarOperand { Variable: var v, Offset: var at } => (v == written && (offset is null || at == offset)) || Shared(v),
+            Element { Base.Variable: var v } => v == written || Shared(v),
+            _ => false,
+        });
     }
 
     /// <summary>The state after <paramref name="i"/>, given the state before it.</summary>
@@ -759,7 +782,8 @@ public static class Optimizer
         if (Loaded(m) is Reg load)
         {
             s.Regs[(int)load].Clear();
-            if (Trackable(i)) s.Regs[(int)load].Add(i.Operand!);
+            ForgetIndex(s, load);
+            if (Value(i) is { } loaded) s.Regs[(int)load].Add(loaded);
             s.Flags = load;
             return;
         }
@@ -771,6 +795,7 @@ public static class Optimizer
             s.Regs[(int)to].Clear();
             // Other markers are not copied: "A and X are the same" says nothing about the register copied to.
             s.Regs[(int)to].UnionWith(s.Regs[(int)from].Where(o => o is not Same || o == same));
+            ForgetIndex(s, to);
             s.Flags = to;
             return;
         }
@@ -788,11 +813,12 @@ public static class Optimizer
                 // An indexed write changes only the array (an index outside it is not supported,
                 // provisional); fixed-address arrays may overlap other fixed-address variables.
                 ForgetWrite(s, array, function);
+                if (Stored(m) is Reg st && ElementOf(i) is { } element) s.Regs[(int)st].Add(element);
             }
             else if (AsmEffects.WritesMemory(m, i.Mode) || Stored(m) is not null)
             {
                 // Through a pointer, or at a fixed numeric address: any memory may change.
-                s.Forget(op => op is VarOperand);
+                s.Forget(op => op is VarOperand or Element);
             }
         }
 
@@ -803,6 +829,7 @@ public static class Optimizer
             int delta = m is Inx or Iny ? 1 : m is Dex or Dey ? -1 : 0;
             var known = delta != 0 ? s.Regs[(int)reg].OfType<Imm>().FirstOrDefault() : null;
             s.Regs[(int)reg].Clear();
+            ForgetIndex(s, reg);
             if (known is not null) s.Regs[(int)reg].Add(new Imm((known.Value + delta) & 0xFF));
         }
         if (writes.HasFlag(CpuState.Z))
@@ -932,10 +959,10 @@ public static class Optimizer
             bool FlagsMatch(HashSet<Operand> value) =>
                 (!flagsChanged && s.Flags is Reg f && s.Regs[(int)f].Overlaps(value)) || !NzLiveAfter(code, k, function, positions);
             bool redundant = false, setsFlags = true;
-            if (Loaded(i.Mnemonic) is Reg load && Trackable(i))
-                redundant = s.Regs[(int)load].Contains(i.Operand!) && FlagsMatch([i.Operand!]);
-            else if (Stored(i.Mnemonic) is Reg st && Trackable(i))
-                (redundant, setsFlags) = (s.Regs[(int)st].Contains(i.Operand!), false);
+            if (Loaded(i.Mnemonic) is Reg load && Value(i) is { } loaded)
+                redundant = s.Regs[(int)load].Contains(loaded) && FlagsMatch([loaded]);
+            else if (Stored(i.Mnemonic) is Reg st && Value(i) is { } stored)
+                (redundant, setsFlags) = (s.Regs[(int)st].Contains(stored), false);
             else if (Transfer(i.Mnemonic) is var (from, to))
                 redundant = s.Regs[(int)from].Overlaps(s.Regs[(int)to]) && FlagsMatch(s.Regs[(int)from]);
             if (redundant) flagsChanged |= setsFlags;
@@ -955,8 +982,7 @@ public static class Optimizer
     /// </summary>
     private static Instr? Shorter(Instr i, State s)
     {
-        if (Loaded(i.Mnemonic) is not Reg load || !Trackable(i)) return null;
-        var op = i.Operand!;
+        if (Loaded(i.Mnemonic) is not Reg load || Value(i) is not { } op) return null;
         Mnemonic? transfer = load switch
         {
             Reg.A when s.Regs[(int)Reg.X].Contains(op) => Txa,
