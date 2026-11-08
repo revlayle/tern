@@ -87,6 +87,21 @@ fn main() {
 example.tern:1:13: error: 300 does not fit in u8 (0 to 255)
 ```
 
+Binary numbers are written `0b...`, not `%...`:
+
+```tern error
+var mask: u8 = %0000_1111
+
+fn main() {
+}
+```
+
+```text
+example.tern:1:16: error: Expected an expression, found '%'
+```
+
+Fix: `0b0000_1111`. Hex is `$0F`.
+
 A number is not a `bool`:
 
 ```tern error
@@ -305,6 +320,33 @@ example.tern:6:1: error: 'add' is called from main and from the interrupt handle
 Fix: give each side its own function, make it an `inline fn` (its parameters then go in each
 caller's frame), or pass the values in registers (`x: u8 using A, y: u8 using X`) so that the function has
 no memory.
+
+The same for a library routine whose work bytes are `private`:
+
+```tern error
+import c64
+import math
+
+var a: u16
+var b: u16
+
+interrupt fn irq() {
+    c64.vic.irq_status = 1
+    b = math.mul8(3, 4)
+}
+
+fn main() {
+    c64.set_irq(addr(irq))
+    a = math.mul8(5, 6)
+}
+```
+
+```text
+example.tern:7:11: error: 'math.mul8' (called from main) and 'math.mul8' (called from the interrupt handler 'irq') both use 'math.w0', a private variable of its module. An interrupt could change it while the other is using it. Call functions of this module from only main or only one interrupt handler
+```
+
+Fix: do the multiply on one side only (a table, or shifts), or copy the routine into your own
+module for the handler.
 
 ## Control flow
 

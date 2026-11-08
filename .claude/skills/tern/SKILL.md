@@ -84,6 +84,66 @@ Screen ($0400, 40 x 25):
 - `i as u16` widens: `total += i` with `i: u8` and `total: u16` also works (widening is automatic),
   but there is no automatic narrowing.
 
+An error gives the file, line and column, what is wrong and how to fix it. With `--json` the fix is
+a separate `suggestion`:
+
+```tern error
+// broken.tern
+var total: u16
+var small: u8
+
+fn main() {
+    small = total
+}
+```
+
+```text
+broken.tern:6:13: error: Expected u8, found u16. Convert with 'as u8'
+```
+
+```console
+$ tern --json broken.tern
+{
+  "ok": false,
+  "files": [],
+  "report": [],
+  "diagnostics": [
+    {
+      "file": "broken.tern",
+      "line": 6,
+      "column": 13,
+      "severity": "error",
+      "message": "Expected u8, found u16.",
+      "suggestion": "Convert with 'as u8'"
+    }
+  ]
+}
+```
+
+Where the cycles go: `--profile` lists each function, and each source line with its bytes, the
+cycles of its instructions once each (`+` when a branch or page crossing can add more), how often it
+ran and the cycles it took in the run. The same table without the run counts is in `count.lines`.
+
+```console
+$ tern run count.tern --profile
+Main returned: 3125 cycles (3109 in main)
+A=$04 X=$00 Y=$03 SP=$FF PC=$0817
+Functions (cycles include the functions they call):
+  main                            1 calls       3109 cycles
+  text.dec16                      1 calls        689 cycles
+  text.put                        1 calls        278 cycles
+; Per source line: bytes, the cycles of its instructions once each (+: a branch or page crossing adds more), how often its first instruction ran, and the cycles they took in the run.
+; file        line bytes  cycles     runs run cycles  addresses                source
+  count.tern     9     1       6        1          6  $0855                    fn main() {
+  count.tern    10     7      8+        1        701  $081A-$081B $0826-$082A  for i in 1..=100 {
+  count.tern    11    10     17+      100       1376  $081C-$0825              total += i as u16
+  count.tern    13    23      31        1         31  $082B-$0841              text.put(c64.SCREEN, addr(title), len(title))
+  count.tern    14    19      28        1         28  $0842-$0854              text.dec16(c64.SCREEN + 15, total)
+...
+                 -    13      19        1         16  $080D-$0819              (startup)
+; total 3125 cycles
+```
+
 ## 3. Rules you would not guess
 
 - **No runtime `*`, `/` or `%`.** They work only on constants (`const SIZE = 40 * 25`). At runtime
@@ -106,7 +166,8 @@ Screen ($0400, 40 x 25):
   `-> bool using carry`. A plain parameter is fixed memory the caller stores into.
 - **A function reached from `main` and from an interrupt handler** (two roots) is an error unless it
   has no memory of its own (no memory parameters, locals or temporaries). A global used by both
-  becomes volatile.
+  becomes volatile. A module's `private` variable used from both is an error too: `math.mul8`'s
+  work bytes and `random`'s state are private, so a handler cannot call them while main does.
 - **Inside `for ... using X`, only routines that keep X may be called** (`keeps X`); likewise Y.
 - **A `bool` can live in a flag.** `-> bool using carry` returns in the carry; an `inline asm fn`
   with a flag result tests a flag its instructions set, with no call. After compiled code the flags
