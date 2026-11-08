@@ -549,6 +549,9 @@ public sealed class Parser
             }
             case TokenKind.For: return ParseFor();
             case TokenKind.Match: return ParseMatch();
+            case TokenKind.Identifier when Current.Text == "indexed" && PeekAt(1).Kind == TokenKind.Match:
+                Advance();
+                return ParseMatch(indexed: true);
             case TokenKind.Break:
             {
                 var t = Advance();
@@ -623,7 +626,7 @@ public sealed class Parser
     /// <c>match x { arm... }</c>; one arm per line: patterns separated by ',', then '=>' and a block
     /// or a single statement.
     /// </summary>
-    private MatchStmt ParseMatch()
+    private MatchStmt ParseMatch(bool indexed = false)
     {
         var start = Expect(TokenKind.Match, "'match'");
         var subject = ParseExpr();
@@ -671,7 +674,7 @@ public sealed class Parser
             arms.Add(new MatchArm(armPos, isDefault ? [] : patterns, body));
             SkipTerminators();
         }
-        return new MatchStmt(start.Pos, subject, arms);
+        return new MatchStmt(start.Pos, subject, arms) { IsIndexed = indexed };
     }
 
     private ForStmt ParseFor()

@@ -23,7 +23,7 @@ fn main() {
         var op: u8 = code[pc]
         pc += 1
         steps += 1
-        match op {
+        indexed match op {
             PUSH => {
                 stack[sp] = code[pc]
                 sp += 1
@@ -56,7 +56,7 @@ fn main() {
                 stack[sp] = stack[sp - 2]
                 sp += 1
             }
-            _ => {
+            HALT => {
                 result = stack[0]
                 return
             }

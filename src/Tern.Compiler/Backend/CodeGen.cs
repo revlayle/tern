@@ -616,18 +616,15 @@ public sealed class CodeGen
         if (AssignsVar(body, held)) Op(reg == Register.X ? Stx : Sty, Var(held));
     }
 
-    /// <summary>
-    /// A match uses a jump table when a compare chain would need at least this many compares (a
-    /// range needs two) and the values span at most twice that many. Below that, the chain is
-    /// about as fast (5 cycles per compare against about 30 for the table) and shorter.
-    /// </summary>
-    private const int JumpTableTests = 8;
+    /// <summary>The jump tables of <c>indexed match</c> statements, for the report.</summary>
+    public List<(FunctionSymbol Function, SourcePos Pos, Label High, Label Low, int Span)> MatchTables { get; } = [];
 
     /// <summary>
-    /// <c>match</c>: the value is loaded into A once (for an <c>i8</c>, with <c>eor #$80</c>, so that
-    /// signed order becomes unsigned order). Dense cases use a jump table, others a chain of
-    /// <c>cmp</c> and branches. Arm bodies follow, each ending with a jump to the end; the default
-    /// arm (or the end) is where values that match nothing go.
+    /// <c>match</c>: the value is loaded into A once. A plain match is a chain of <c>cmp</c> and
+    /// branches (for an <c>i8</c>, after <c>eor #$80</c>, so that signed order becomes unsigned
+    /// order); <c>indexed match</c> is a jump table with no range check (spec 5.2). Arm bodies follow,
+    /// each ending with a jump to the end; the default arm (or the end) is where values that match
+    /// nothing go.
     /// </summary>
     private void GenMatch(MatchStmt m)
     {
@@ -644,20 +641,22 @@ public sealed class CodeGen
         var otherwise = fallback is null ? end : NewLabel("default");
 
         GenA(m.Subject);
-        if (m.Subject.Type.IsSigned) Op(Eor, Byte(0x80));
 
+        // Pattern values are biased by 128 for an i8, so that signed order is unsigned order.
+        int bias = m.Subject.Type.IsSigned ? 128 : 0;
         var patterns = arms.SelectMany(a => a.Patterns.Select(p => (Arm: a, p.From, p.To))).ToList();
-        int tests = patterns.Sum(p => p.From == p.To ? 1 : 2);
         int low = patterns.Min(p => p.From), high = patterns.Max(p => p.To);
         int span = high - low + 1;
         List<MatchArm> order;
-        // A jump table needs X or Y; inside loops using both, the compare chain needs neither.
-        bool indexFree = !_reserved.Contains(Register.X) || !_reserved.Contains(Register.Y);
-        if (tests >= JumpTableTests && span <= 2 * tests && indexFree)
+        if (m.IsIndexed)
         {
-            // Jump table: push the target address minus 1, high byte first, and rts to it.
-            if (low > 0) { Emit(Sec); Op(Sbc, Byte(low)); }
-            if (span < 256) { Op(Cmp, Byte(span)); Branch(Bcs, otherwise); }
+            // Jump table: push the target address minus 1, high byte first, and rts to it. The value
+            // minus the lowest pattern value indexes the tables (for an i8, v - low is the same byte
+            // with or without the bias). A value outside the span is not checked (spec 5.2).
+            int offset = (low - bias) & 0xFF;
+            if (offset != 0) { Emit(Sec); Op(Sbc, Byte(offset)); }
+            if (_reserved.Contains(Register.X) && _reserved.Contains(Register.Y))
+                throw new CompileError(m.Pos, "An 'indexed match' needs X or Y to index its table, but both hold loop variables here. Use a plain 'match', or free a register");
             var reg = FreeIndexRegister(m.Pos);
             Emit(reg == Register.X ? Tax : Tay);
             var targets = new Label[span];
@@ -671,10 +670,12 @@ public sealed class CodeGen
             Emit(Rts);
             Place(hiTable); _out.Add(new LabelTable(targets, High: true, Offset: -1));
             Place(loTable); _out.Add(new LabelTable(targets, High: false, Offset: -1));
+            MatchTables.Add((_fn, m.Pos, hiTable, loTable, span));
             order = arms;
         }
         else
         {
+            if (bias != 0) Op(Eor, Byte(0x80));
             // Compare chain, in source order. The last test is inverted to go to the default, so the
             // last arm's body follows it directly.
             for (int i = 0; i < patterns.Count; i++)

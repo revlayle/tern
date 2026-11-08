@@ -56,25 +56,45 @@ public class MatchTests
         }
     }
 
-    [Fact]
-    public void A_dense_match_uses_a_jump_table()
+    /// <summary>Runs <paramref name="classify"/> on the values <paramref name="from"/> to <paramref name="to"/> only (an indexed match does not check its value).</summary>
+    private static Dictionary<int, byte> Over(string classify, int from, int to, string type = "u8")
     {
-        var source = """
-            fn f(v: u8) -> u8 {
-                var r: u8 = 99
-                match v {
-                    10 => r = 0
-                    11 => r = 1
-                    12, 13 => r = 2
-                    14 => r = 3
-                    15 => r = 4
-                    17 => r = 5
-                    18 => r = 6
-                    19..=20 => r = 7
+        var r = Run.Program($$"""
+            var out: [u8; 256]
+            {{classify}}
+            fn main() {
+                for k in 0..={{to - from}} {
+                    var i: u8 = k + {{from & 0xFF}}
+                    out[i] = f(i as {{type}})
                 }
-                return r
             }
-            """;
+            """, maxCycles: 20_000_000);
+        var res = new Dictionary<int, byte>();
+        for (int v = from; v <= to; v++) res[v] = r.U8("out", v & 0xFF);
+        return res;
+    }
+
+    private const string Dense = """
+        fn f(v: u8) -> u8 {
+            var r: u8 = 99
+            MATCH v {
+                10 => r = 0
+                11 => r = 1
+                12, 13 => r = 2
+                14 => r = 3
+                15 => r = 4
+                17 => r = 5
+                18 => r = 6
+                19..=20 => r = 7
+            }
+            return r
+        }
+        """;
+
+    [Fact]
+    public void A_plain_match_of_8_or_more_compares_stays_a_chain()
+    {
+        var source = Dense.Replace("MATCH", "match");
         var res = Table(source);
         int[] expected = [0, 1, 2, 2, 3, 4, 99, 5, 6, 7, 7];
         for (int v = 0; v < 256; v++)
@@ -83,13 +103,107 @@ public class MatchTests
             Assert.True(e == res[v], $"f({v}) = {res[v]}, expected {e}");
         }
         var r = Run.Program("var out: [u8; 256]\n" + source + "\nfn main() { out[0] = f(3) }");
-        Assert.Contains("sec|sbc #$0A|cmp #$0B|bcs f.mend", Code(r, "f"));
-        Assert.Contains("tax|lda f.jumphi", Code(r, "f"));
-        Assert.Matches(@"lda f\.jumphi\d+,x\|pha\|lda f\.jumplo\d+,x\|pha\|rts", Code(r, "f"));
+        Assert.DoesNotContain("jumphi", r.Result.Listing);
+        Assert.DoesNotContain("Jump table of the indexed match", r.Result.Report);
+        Assert.Contains("cmp #$0A|beq", Code(r, "f"));
     }
 
     [Fact]
-    public void A_jump_table_from_zero_with_a_default()
+    public void An_indexed_match_with_gaps_and_ranges_and_no_default_uses_a_jump_table()
+    {
+        var source = Dense.Replace("MATCH", "indexed match");
+        var res = Over(source, 10, 20);
+        int[] expected = [0, 1, 2, 2, 3, 4, 99, 5, 6, 7, 7];
+        for (int v = 10; v <= 20; v++) Assert.True(expected[v - 10] == res[v], $"f({v}) = {res[v]}, expected {expected[v - 10]}");
+        var r = Run.Program("var out: [u8; 256]\n" + source + "\nfn main() { out[0] = f(12) }");
+        Assert.Equal(2, r.U8("out"));
+        // No range check: the value minus the lowest pattern indexes the tables.
+        var code = Code(r, "f");
+        Assert.Matches(@"sec\|sbc #\$0A\|tax\|lda f\.jumphi\d+,x\|pha\|lda f\.jumplo\d+,x\|pha\|rts", code);
+        Assert.DoesNotContain("cmp", code);
+        Assert.Matches(@"Jump table of the indexed match at 4:\d+ in f: \$[0-9A-F]{4}-\$[0-9A-F]{4}, 22 bytes for 11 values", r.Result.Report);
+    }
+
+    [Fact]
+    public void An_indexed_match_from_zero_with_a_default_and_gaps()
+    {
+        var source = """
+            fn f(v: u8) -> u8 {
+                indexed match v {
+                    0 => return 7
+                    1 => return 6
+                    3 => return 4
+                    5..=6 => return 2
+                    _ => return 200
+                }
+            }
+            """;
+        var res = Over(source, 0, 6);
+        for (int v = 0; v <= 6; v++) Assert.Equal(v switch { 0 => 7, 1 => 6, 3 => 4, 5 or 6 => 2, _ => 200 }, res[v]);
+        var r = Run.Program("var out: [u8; 256]\n" + source + "\nfn main() { out[0] = f(3) }");
+        // A lowest value of 0 needs no subtraction.
+        Assert.Matches(@"lda f\.v\|tax\|lda f\.jumphi", Code(r, "f"));
+        Assert.DoesNotContain("sbc", Code(r, "f"));
+    }
+
+    [Fact]
+    public void An_indexed_match_on_a_masked_value_is_safe_for_every_byte()
+    {
+        var res = Table("""
+            fn f(v: u8) -> u8 {
+                indexed match v & 7 {
+                    0 => return 10
+                    1 => return 11
+                    2, 3 => return 12
+                    4..=6 => return 13
+                    7 => return 14
+                }
+                return 0
+            }
+            """);
+        for (int v = 0; v < 256; v++) Assert.Equal((v & 7) switch { 0 => 10, 1 => 11, 2 or 3 => 12, 7 => 14, _ => 13 }, res[v]);
+    }
+
+    [Fact]
+    public void Signed_values_in_an_indexed_match_with_a_negative_lowest_value()
+    {
+        var source = """
+            fn f(v: i8) -> u8 {
+                indexed match v {
+                    -4 => return 1
+                    -3 => return 2
+                    -1 => return 4
+                    0 => return 5
+                    1..=2 => return 6
+                    3 => return 8
+                    _ => return 0
+                }
+            }
+            """;
+        var res = Over(source, -4, 3, "i8");
+        for (int v = -4; v <= 3; v++) Assert.Equal(v switch { -4 => 1, -3 => 2, -1 => 4, 0 => 5, 1 or 2 => 6, 3 => 8, _ => 0 }, res[v]);
+        var r = Run.Program("var out: [u8; 256]\n" + source + "\nfn main() { out[0] = f(-1) }");
+        Assert.Equal(4, r.U8("out"));
+        // v - (-4) is the same byte with or without the bias: no eor #$80.
+        Assert.Matches(@"lda f\.v\|sec\|sbc #\$FC\|tax\|lda f\.jumphi", Code(r, "f"));
+        Assert.DoesNotContain("eor", Code(r, "f"));
+    }
+
+    [Fact]
+    public void Indexed_is_still_a_name_outside_var_and_match()
+    {
+        var r = Run.Program("""
+            var indexed: u8
+            fn main() {
+                indexed = 3
+                indexed += 1
+            }
+            """);
+        Assert.Equal(4, r.U8("indexed"));
+    }
+
+    [Fact]
+    public void A_long_compare_chain_from_zero_with_a_default()
     {
         var res = Table("""
             fn f(v: u8) -> u8 {
@@ -133,7 +247,7 @@ public class MatchTests
     }
 
     [Fact]
-    public void Signed_values_in_a_jump_table()
+    public void Signed_values_in_a_long_compare_chain()
     {
         var res = Table("""
             fn f(v: i8) -> u8 {
@@ -230,13 +344,13 @@ public class MatchTests
     }
 
     [Fact]
-    public void A_jump_table_inside_a_loop_using_x_uses_y()
+    public void An_indexed_match_inside_a_loop_using_x_uses_y()
     {
         var r = Run.Program("""
             var out: [u8; 12]
             fn main() {
                 for i in 0..12 using X {
-                    match i {
+                    indexed match i & 7 {
                         0 => out[i] = 9
                         1 => out[i] = 8
                         2 => out[i] = 7
@@ -250,12 +364,12 @@ public class MatchTests
                 }
             }
             """);
-        Assert.Equal(new byte[] { 9, 8, 7, 6, 5, 4, 3, 2, 1, 1, 1, 1 }, r.Ram.Bytes[r.Address("out")..(r.Address("out") + 12)]);
+        Assert.Equal(new byte[] { 9, 8, 7, 6, 5, 4, 3, 2, 9, 8, 7, 6 }, r.Ram.Bytes[r.Address("out")..(r.Address("out") + 12)]);
         Assert.Matches(@"tay\|lda main\.jumphi\d+,y", Code(r));
     }
 
     [Fact]
-    public void A_dense_match_inside_loops_using_x_and_y_uses_a_compare_chain()
+    public void A_long_plain_match_inside_loops_using_x_and_y_is_a_compare_chain()
     {
         // Review M6, finding 2: a jump table needs X or Y.
         var r = Run.Program("""
@@ -374,6 +488,10 @@ public class MatchTests
     [InlineData("var x: u8\nfn main() { match x 0 => x = 1 }", "Expected '{' after the match value")]
     [InlineData("var x: u8\nfn main() { match x { 0 => break } }", "'break' and 'continue' must be inside a loop")]
     [InlineData("var x: u8\nfn main() { match x { 0 => { var y: u8 = 1 }\n 1 => x = y } }", "'y' is not declared")]
+    [InlineData("var x: u8\nfn main() { indexed match x { _ => x = 1 } }", "An 'indexed match' needs at least one pattern besides '_'")]
+    [InlineData("var x: u8\nfn main() { indexed match x { } }", "An 'indexed match' needs at least one pattern besides '_'")]
+    [InlineData("var x: u8\nvar o: [u8; 4]\nfn main() { for i in 0..2 using X {\n for j in 0..2 using Y {\n indexed match x {\n 0 => o[0] = 1\n 1 => o[1] = 1\n }\n }\n } }",
+        "An 'indexed match' needs X or Y to index its table, but both hold loop variables here")]
     public void Reports_errors(string source, string expected)
     {
         var e = Assert.Throws<CompileError>(() => TernCompiler.Compile(source));

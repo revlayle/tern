@@ -257,6 +257,9 @@ public static class TernCompiler
             : "Variables after the program: 0 bytes");
         foreach (var table in program.Globals.Where(g => g.IsOffsetTable))
             report.AppendLine($"Offset table {table.Name}: {table.Type.Size} bytes, in the program");
+        // The low table follows the high one.
+        foreach (var (function, pos, high, _, span) in gen.MatchTables)
+            report.AppendLine($"Jump table of the indexed match at {pos} in {function.Name}: {new AddressRange(high.Address, high.Address + 2 * span - 1)}, {2 * span} bytes for {span} values");
         if (code.Areas.Count > 1 || layout.Regions.Count > 0)
         {
             report.AppendLine("Program areas:");

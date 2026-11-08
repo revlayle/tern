@@ -37,7 +37,7 @@ public class HeldVariableTests
                 while running {
                     var op: u8 = code[pc]
                     pc += 1
-                    match op {
+                    indexed match op {
                         0 => {
                             stack[sp] = code[pc]
                             sp += 1
@@ -70,7 +70,7 @@ public class HeldVariableTests
                             stack[sp] = stack[sp - 2]
                             sp += 1
                         }
-                        _ => running = false
+                        9 => running = false
                     }
                 }
                 result = stack[3]

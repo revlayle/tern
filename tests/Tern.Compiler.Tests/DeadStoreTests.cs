@@ -275,7 +275,7 @@ public class DeadStoreTests
             var out: [u8; 10]
             fn f(k: u8) -> u8 {
                 var t: u8 = k + 100
-                match k {
+                indexed match k {
                     0 => { return t }
                     1 => { return t + 1 }
                     2 => { return t + 2 }
@@ -284,6 +284,7 @@ public class DeadStoreTests
                     5 => { return t + 5 }
                     6 => { return t + 6 }
                     7 => { return t + 7 }
+                    9 => { return 0 }
                     _ => { return 0 }
                 }
             }

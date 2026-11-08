@@ -1143,6 +1143,8 @@ public sealed partial class Checker
             }
             CheckBlock(arm.Body);
         }
+        if (m.IsIndexed && m.Arms.All(a => a.IsDefault))
+            throw new CompileError(m.Pos, "An 'indexed match' needs at least one pattern besides '_': its table covers the values from the lowest pattern to the highest");
     }
 
     /// <summary>A constant in a match pattern, as a value of the subject's type.</summary>
