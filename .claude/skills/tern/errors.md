@@ -317,9 +317,54 @@ fn main() {
 example.tern:6:1: error: 'add' is called from main and from the interrupt handler 'irq'. An interrupt can stop it halfway and run it again, which would overwrite its memory: the parameter 'x' in memory. Only a function with no memory of its own can be shared between main and interrupt handlers. Use a copy for each
 ```
 
-Fix: give each side its own function, make it an `inline fn` (its parameters then go in each
-caller's frame), or pass the values in registers (`x: u8 using A, y: u8 using X`) so that the function has
-no memory.
+Fix: give each side its own function, or make it an `inline fn`: its parameters then go in each
+caller's frame. Register parameters alone are not enough when the body needs a value in memory, as
+`x + y` does:
+
+```tern error
+import c64
+
+var a: u8
+var b: u8
+
+fn add(x: u8 using A, y: u8 using X) -> u8 { return x + y }
+
+interrupt fn irq() {
+    c64.vic.irq_status = 1
+    b = add(b, 1)
+}
+
+fn main() {
+    c64.set_irq(addr(irq))
+    a = add(a, 2)
+}
+```
+
+```text
+example.tern:6:1: error: 'add' is called from main and from the interrupt handler 'irq'. An interrupt can stop it halfway and run it again, which would overwrite its memory: the parameter 'x', which it keeps in memory (it arrives in A). Only a function with no memory of its own can be shared between main and interrupt handlers. Use a copy for each
+```
+
+The `inline fn` version compiles:
+
+```tern
+// shared.tern
+import c64
+
+var a: u8
+var b: u8
+
+inline fn add(x: u8, y: u8) -> u8 { return x + y }
+
+interrupt fn irq() {
+    c64.vic.irq_status = 1
+    b = add(b, 1)
+}
+
+fn main() {
+    c64.set_irq(addr(irq))
+    a = add(a, 2)
+}
+```
 
 The same for a library routine whose work bytes are `private`:
 

@@ -548,7 +548,8 @@ Results:
 
 A plain `match` tests its values in source order, so put the most common first. `indexed match`
 costs the same for every value (subtract the lowest value, then a table jump through `rts`). With
-values spread evenly, a plain `match` is faster up to about 8 values, `indexed match` from about 16.
+values spread evenly, `indexed match` is faster at 16 values (the first comparison below), and the
+plain `match` at 8 (the second); with fewer values the plain `match` wins by more.
 
 ```tern
 // chain.tern
@@ -631,6 +632,73 @@ Results:
   table.tern: acc = 208
 ```
 
+The same with 8 values:
+
+```tern
+// chain8.tern
+var ops: [u8; 64]
+var acc: u8
+
+fn run() {
+    for i in 0..64 {
+        match ops[i] {
+            0 => acc += 1
+            1 => acc += 2
+            2 => acc += 3
+            3 => acc += 4
+            4 => acc ^= 5
+            5 => acc ^= 6
+            6 => acc ^= 7
+            7 => acc ^= 8
+        }
+    }
+}
+
+fn main() {
+    for i in 0..64 { ops[i] = i & 7 }
+    run()
+}
+```
+
+```tern
+// table8.tern
+var ops: [u8; 64]
+var acc: u8
+
+fn run() {
+    for i in 0..64 {
+        indexed match ops[i] & 7 {
+            0 => acc += 1
+            1 => acc += 2
+            2 => acc += 3
+            3 => acc += 4
+            4 => acc ^= 5
+            5 => acc ^= 6
+            6 => acc ^= 7
+            7 => acc ^= 8
+        }
+    }
+}
+
+fn main() {
+    for i in 0..64 { ops[i] = i & 7 }
+    run()
+}
+```
+
+```console
+$ tern bench chain8.tern table8.tern --fn run --dump acc
+variant      program   run bytes   calls     cycles  per call    zp  other
+chain8.tern      161         111       1       2623      2623     1     64
+table8.tern      157         107       1       2951      2951     1     64
+Memory (zp: zero page bytes, other: the rest; the measured function's variables and the program's globals):
+  chain8.tern: acc $0002 u8, ops $0900 [u8; 64]
+  table8.tern: acc $0002 u8, ops $0900 [u8; 64]
+Results:
+  chain8.tern: acc = 80
+  table8.tern: acc = 80
+```
+
 `indexed match` does not check its value: list every value that can occur, or mask it into the span
 as here (`& 15` with patterns 0 to 15). `_` catches only values inside the span that no pattern lists.
 
@@ -639,7 +707,8 @@ as here (`& 15` with patterns 0 to 15). `_` catches only values inside the span 
 The optimizer already does these, so write the plain form:
 
 - A local copy of an element costs no code: `var v: u8 = a[i]`, then `if a[i + 1] < v`, compares
-  the element directly (`cmp a,x`). Below, both versions have the same bytes and cycles.
+  the element directly (`cmp a,x`). Below, both versions have the same bytes and cycles; the first
+  keeps a byte of zero page for `v` (`main.v`), which nothing reads.
 - `a[i + 1]` in a `for` loop whose bounds prove the sum does not wrap is `lda a+1,x`, with no add.
 - Loop counters, and a global used by one function in its loop, stay in free registers across it.
 - The variables used most go in zero page; arrays are placed so their indexed range does not cross

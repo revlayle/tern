@@ -129,13 +129,19 @@ fn main() {
 ```
 
 ```console
-$ tern run ring.tern --dump 'buf:2' --dump total
+$ tern run ring.tern --dump 'buf:2' --dump total --dump speeds
 Main returned: 3905 cycles (1160 in main)
 A=$1C X=$08 Y=$00 SP=$FF PC=$082D
 buf $0910 [u8; 256] (2 bytes):
   $0910  2A 00
 total $0003 u16 = 7168 ($1C00)
+speeds $0900 [u16; 8] (16 bytes):
+  $0900  00 00 00 00 00 00 00 00 00 01 02 03 04 05 06 07
 ```
+
+A dump of a `u16` array shows its memory: the 8 low bytes, then the 8 high bytes. Element `i` is
+low byte `i` plus 256 times high byte `i`: here `speeds[3]` is `$00` + 256 × `$03` = 768. An
+array of structs is dumped the same way, one table per field byte.
 
 ## 5. Structs
 

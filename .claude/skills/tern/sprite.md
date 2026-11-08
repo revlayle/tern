@@ -188,3 +188,79 @@ pointer, the position 160, 140 (`$A0`, `$8C`) and sprite 0 on.
 `move` is called once a frame, so it does not matter here. In a loop over many objects, apply
 `costs.md`: an array of structs for the objects, `inline fn` for a small helper, and `tern bench`
 for each change.
+
+To compare two versions of a module's function, put the other version in a folder of its own with
+a copy of the check program: `import` looks in the program's folder first. Here the second version
+tests right only when left is not pressed (a joystick cannot press both):
+
+```tern
+// alt/ship.tern
+const UP: u8 = 1
+const DOWN: u8 = 2
+const LEFT: u8 = 4
+const RIGHT: u8 = 8
+const FIRE: u8 = 16
+
+const MIN_X: u16 = 24
+const MAX_X: u16 = 320
+const MIN_Y: u8 = 50
+const MAX_Y: u8 = 229
+
+var x: u16 = 160
+var y: u8 = 140
+var shots: u8
+
+fn move(joy: u8) {
+    if joy & LEFT == 0 {
+        if x > MIN_X { x -= 1 }
+    } else if joy & RIGHT == 0 && x < MAX_X {
+        x += 1
+    }
+    if joy & UP == 0 {
+        if y > MIN_Y { y -= 1 }
+    } else if joy & DOWN == 0 && y < MAX_Y {
+        y += 1
+    }
+    if joy & FIRE == 0 { shots += 1 }
+}
+```
+
+```tern
+// alt/check.tern
+import ship
+
+const NONE: u8 = 0b1111_1111
+
+var after_right: u16
+var after_up_left: u8
+
+fn main() {
+    for _ in 0..200 { ship.move(NONE ^ ship.RIGHT) }
+    after_right = ship.x
+    for _ in 0..100 { ship.move(NONE ^ ship.UP ^ ship.LEFT) }
+    after_up_left = ship.y
+    ship.move(NONE)
+}
+```
+
+`--fn` takes the function's full name, with its module (`--fn move` is an error that suggests
+`ship.move`). Two variants with the same file name are shown by their paths:
+
+```console
+$ tern bench check.tern --fn move
+variant     program  move bytes   calls     cycles  per call    zp  other
+check.tern  error: There is no function 'move' in the program. Use 'ship.move': a module's function is named with its module
+Memory (zp: zero page bytes, other: the rest; the measured function's variables and the program's globals):
+$ tern bench check.tern alt/check.tern --fn ship.move --dump after_right --dump after_up_left --dump ship.x
+variant         program  ship.move bytes   calls     cycles  per call    zp  other
+check.tern          174          83     301      20634        68     4      0
+alt/check.tern      180          89     301      19604        65     4      0
+Memory (zp: zero page bytes, other: the rest; the measured function's variables and the program's globals):
+  check.tern: after_right $0006 u16, after_up_left $0008 u8, ship.move.joy $000B u8
+  alt/check.tern: after_right $0006 u16, after_up_left $0008 u8, ship.move.joy $000B u8
+Results:
+  check.tern: after_right = 320, after_up_left = 50, ship.x = 220
+  alt/check.tern: after_right = 320, after_up_left = 50, ship.x = 220
+```
+
+The results agree, and the second version is a little faster and a little larger.

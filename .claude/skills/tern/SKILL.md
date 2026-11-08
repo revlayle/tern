@@ -34,7 +34,7 @@ the compiler is. The standard library is in `lib/` next to it.
 | `tern game.tern` | compile: writes `game.prg`, `game.lst` (listing: every source line with its addresses, bytes and cycles), `game.vs` (VICE labels), `game.lines` (bytes and cycles per source line) and prints the memory report |
 | `tern --json game.tern` | the same, with the result and any error as JSON: `file`, `line`, `column`, `message`, `suggestion` |
 | `tern run game.tern` | compile and run in the built-in emulator until `main` returns; `--dump name` shows a variable, `--screen` the screen as text, `--profile` the cycles of each function and source line |
-| `tern bench a.tern b.tern` | run each version and compare bytes and cycles; `--fn f` measures one function; `--code '...'` measures statements as the body of `main`, after `--decl '...'` lines |
+| `tern bench a.tern b.tern` | run each version and compare bytes and cycles; `--fn f` measures one function (a module's function with its module: `--fn ship.move`); `--code '...'` measures statements as the body of `main`, after `--decl '...'` lines |
 
 Work in this loop: write a small piece, compile, `tern run` it with `--dump` to check the values,
 and `tern bench` two versions when speed matters. Quote `--code`, `--decl` and `--dump` arguments
