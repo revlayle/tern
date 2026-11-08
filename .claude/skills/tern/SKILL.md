@@ -10,8 +10,8 @@ target is the Commodore 64. You have not seen Tern code before: it looks a littl
 but do not guess from them. Write what the examples here show, compile often, and read the errors,
 which say how to fix the problem.
 
-Every example in this skill compiles, and every tool output shown is what the tools print, checked
-by the compiler's test suite (`SkillTests`).
+Every example in this skill compiles (or, where marked, gives the error shown), and every tool
+output shown is what the tools print, checked by the compiler's test suite (`SkillTests`).
 
 ## Files of this skill
 
