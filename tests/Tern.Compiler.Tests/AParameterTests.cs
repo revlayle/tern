@@ -120,4 +120,99 @@ public class AParameterTests
             for (int v = 0; v < 256; v++) Assert.Equal((sbyte)v > t ? 1 : 0, r.U8("out", v));
         }
     }
+
+    // Review M18 part 2, finding 1: a using AX parameter (high bytes with cpx, then low bytes with cmp).
+
+    private static readonly int[] Words = [0, 1, 255, 256, 257, 0x7FFF, 0x8000, 0xFFFE, 0xFFFF];
+
+    [Theory]
+    [InlineData("<")]
+    [InlineData("<=")]
+    [InlineData(">")]
+    [InlineData(">=")]
+    [InlineData("==")]
+    [InlineData("!=")]
+    public void A_using_ax_parameter_is_compared_in_a_and_x(string op)
+    {
+        bool Holds(int v, int t) => op switch
+        {
+            "<" => v < t, "<=" => v <= t, ">" => v > t, ">=" => v >= t, "==" => v == t, _ => v != t,
+        };
+        int n = Words.Length;
+        var r = Run.Program($$"""
+            var words: [u16; {{n}}] = [{{string.Join(", ", Words)}}]
+            var yes: [u8; {{n * n}}]
+            var no: [u8; {{n * n}}]
+            var k: u8
+            fn then(v: u16 using AX, t: u16) -> u8 {
+                if v {{op}} t { return 1 }
+                return 0
+            }
+            fn otherwise(v: u16 using AX, t: u16) -> u8 {
+                if !(v {{op}} t) { return 0 }
+                return 1
+            }
+            fn main() {
+                for i in 0..{{n}} {
+                    for j in 0..{{n}} {
+                        yes[k] = then(words[i], words[j])
+                        no[k] = otherwise(words[i], words[j])
+                        k += 1
+                    }
+                }
+            }
+            """);
+        for (int i = 0; i < n; i++)
+            for (int j = 0; j < n; j++)
+            {
+                int expected = Holds(Words[i], Words[j]) ? 1 : 0;
+                Assert.Equal(expected, r.U8("yes", i * n + j));
+                Assert.Equal(expected, r.U8("no", i * n + j));
+            }
+        Assert.DoesNotContain("then.v", r.Result.Listing.Replace("then.v:", ""));
+        // Ordering compares the high bytes first; equality the low bytes first.
+        Assert.StartsWith(op is "==" or "!=" ? "cmp then.t|" : "cpx then.t+1|", Code(r, "then"));
+    }
+
+    [Fact]
+    public void A_using_ax_parameter_returned_unchanged_needs_no_memory()
+    {
+        var r = Run.Program("""
+            var out: [u16; 4]
+            var top: u16 = 1000
+            fn clamp(v: u16 using AX) -> u16 {
+                if v > top { return top }
+                return v
+            }
+            fn main() {
+                out[0] = clamp(999)
+                out[1] = clamp(1000)
+                out[2] = clamp(1001)
+                out[3] = clamp(65535)
+            }
+            """);
+        Assert.Equal([999, 1000, 1000, 1000], Enumerable.Range(0, 4).Select(k => (int)r.U16At("out", k, 4)));
+        Assert.Equal("cpx top+1|bcc clamp.endif0|bne clamp.cmp1|cmp top|bcc clamp.endif0|beq clamp.endif0|ldx top+1|lda top|rts|rts", Code(r, "clamp"));
+    }
+
+    [Fact]
+    public void After_a_call_a_using_ax_parameter_is_read_from_memory()
+    {
+        var r = Run.Program("""
+            var out: [u8; 2]
+            var calls: u8
+            fn g() { calls += 1 }
+            fn f(v: u16 using AX, t: u16) -> u8 {
+                g()
+                if v > t { return 1 }
+                return 0
+            }
+            fn main() {
+                out[0] = f(300, 299)
+                out[1] = f(299, 300)
+            }
+            """);
+        Assert.Equal([1, 0], new[] { (int)r.U8("out"), r.U8("out", 1) });
+        Assert.Contains("stx f.v+1", r.Result.Listing);
+    }
 }
