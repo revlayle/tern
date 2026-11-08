@@ -24,6 +24,7 @@ const string Usage = """
     tern run <file.tern> compiles the program and runs it in the built-in emulator until
     main returns, then prints the cycles taken and the registers. Memory is plain RAM (no
     VIC-II, SID or CIA); CHROUT, GETIN and PLOT have stand-ins, other ROM calls stop the run.
+    Only the program file is loaded: overlays are not, so a call into one stops at a brk.
       --cycles <n>     stop after n cycles (default 20000000)
       --irq <n>        raise an IRQ every n cycles, through the vector at $FFFE
       --dump <what>    show memory after the run: a variable (score, main.count), a

@@ -29,7 +29,8 @@ public sealed record RunResult(
 /// emulated, so their registers read back what was written. The screen starts cleared (spaces). A few
 /// KERNAL routines have stand-ins that take no cycles: CHROUT ($FFD2) prints to the screen and to
 /// <see cref="RunResult.Output"/>, GETIN ($FFE4) returns 0 (no key), PLOT ($FFF0) sets or reads the
-/// cursor. Reaching any other ROM address stops the run.
+/// cursor. Reaching any other ROM address stops the run. Only the program file is loaded, not its
+/// overlays (the KERNAL LOAD that loads them has no stand-in), so a call into an overlay stops at a brk.
 /// </summary>
 public static class Runner
 {
