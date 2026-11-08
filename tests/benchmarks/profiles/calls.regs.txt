@@ -18,71 +18,70 @@
                      main.for2:
                                                      ;   20: var s: u8 = add3(i, i >> 1, 3)
     200 x      400  $0820  4A        lsr a                 ; 2
-    200 x      600  $0821  85 07     sta main._t0          ; 3
-    200 x      400  $0823  AA        tax                   ; 2
-    200 x      400  $0824  A0 03     ldy #$03              ; 2
-    200 x      600  $0826  A5 05     lda main.i            ; 3
-    200 x     1200  $0828  20 6B 08  jsr add3              ; 6
-    200 x      600  $082B  85 06     sta main.s            ; 3
+    200 x      400  $0821  AA        tax                   ; 2
+    200 x      400  $0822  A0 03     ldy #$03              ; 2
+    200 x      600  $0824  A5 05     lda main.i            ; 3
+    200 x     1200  $0826  20 69 08  jsr add3              ; 6
+    200 x      600  $0829  85 06     sta main.s            ; 3
                                                      ;   21: total += s as u16
-    200 x      400  $082D  18        clc                   ; 2
-    200 x      600  $082E  65 02     adc total             ; 3
-    200 x      600  $0830  85 02     sta total             ; 3
-    200 x      512  $0832  90 02     bcc main.c3           ; 2+
-     88 x      440  $0834  E6 03     inc total+1           ; 5
+    200 x      400  $082B  18        clc                   ; 2
+    200 x      600  $082C  65 02     adc total             ; 3
+    200 x      600  $082E  85 02     sta total             ; 3
+    200 x      512  $0830  90 02     bcc main.c3           ; 2+
+     88 x      440  $0832  E6 03     inc total+1           ; 5
                      main.c3:
                                                      ;   22: clamped = clamp(s, 150)
-    200 x      400  $0836  A2 96     ldx #$96              ; 2
-    200 x      600  $0838  A5 06     lda main.s            ; 3
-    200 x     1200  $083A  20 62 08  jsr clamp             ; 6
-    200 x      600  $083D  85 04     sta clamped           ; 3
+    200 x      400  $0834  A2 96     ldx #$96              ; 2
+    200 x      600  $0836  A5 06     lda main.s            ; 3
+    200 x     1200  $0838  20 60 08  jsr clamp             ; 6
+    200 x      600  $083B  85 04     sta clamped           ; 3
                                                      ;   23: if bigger(s, 100) { total += 1 }
-    200 x      400  $083F  A2 64     ldx #$64              ; 2
-    200 x      600  $0841  A5 06     lda main.s            ; 3
-    200 x     1200  $0843  20 57 08  jsr bigger            ; 6
-    200 x      497  $0846  90 06     bcc main.endif4       ; 2+
-    103 x      515  $0848  E6 02     inc total             ; 5
-    103 x      309  $084A  D0 02     bne main.inc5         ; 2+
-                     $084C  E6 03     inc total+1           ; 5
+    200 x      400  $083D  A2 64     ldx #$64              ; 2
+    200 x      600  $083F  A5 06     lda main.s            ; 3
+    200 x     1200  $0841  20 55 08  jsr bigger            ; 6
+    200 x      497  $0844  90 06     bcc main.endif4       ; 2+
+    103 x      515  $0846  E6 02     inc total             ; 5
+    103 x      309  $0848  D0 02     bne main.inc5         ; 2+
+                     $084A  E6 03     inc total+1           ; 5
                      main.inc5:
                      main.endif4:
                      main.fnext1:
-    200 x     1000  $084E  E6 05     inc main.i            ; 5
-    200 x      600  $0850  A5 05     lda main.i            ; 3
-    200 x      400  $0852  C9 C8     cmp #$C8              ; 2
-    200 x      599  $0854  D0 CA     bne main.for2         ; 2+
+    200 x     1000  $084C  E6 05     inc main.i            ; 5
+    200 x      600  $084E  A5 05     lda main.i            ; 3
+    200 x      400  $0850  C9 C8     cmp #$C8              ; 2
+    200 x      599  $0852  D0 CC     bne main.for2         ; 2+
                      main.fend0:
-      1 x        6  $0856  60        rts                   ; 6
+      1 x        6  $0854  60        rts                   ; 6
                                                      ;   14: fn bigger(a: u8 using A, b: u8 using X) -> bool {
                      bigger:
-    200 x      600  $0857  85 08     sta bigger.a          ; 3
+    200 x      600  $0855  85 08     sta bigger.a          ; 3
                                                      ;   15: return a > b
-    200 x      400  $0859  8A        txa                   ; 2
-    200 x      600  $085A  85 09     sta bigger._t1        ; 3
-    200 x      600  $085C  A5 08     lda bigger.a          ; 3
-    200 x      400  $085E  18        clc                   ; 2
-    200 x      600  $085F  E5 09     sbc bigger._t1        ; 3
-    200 x     1200  $0861  60        rts                   ; 6
+    200 x      400  $0857  8A        txa                   ; 2
+    200 x      600  $0858  85 09     sta bigger._t1        ; 3
+    200 x      600  $085A  A5 08     lda bigger.a          ; 3
+    200 x      400  $085C  18        clc                   ; 2
+    200 x      600  $085D  E5 09     sbc bigger._t1        ; 3
+    200 x     1200  $085F  60        rts                   ; 6
                                                      ;    9: fn clamp(v: u8 using A, top: u8 using X) -> u8 {
                      clamp:
-    200 x      600  $0862  85 08     sta clamp.v           ; 3
+    200 x      600  $0860  85 08     sta clamp.v           ; 3
                                                      ;   10: if v > top { return top }
-    200 x      600  $0864  E4 08     cpx clamp.v           ; 3
-    200 x      530  $0866  B0 02     bcs clamp.endif6      ; 2+
-     70 x      140  $0868  8A        txa                   ; 2
-     70 x      420  $0869  60        rts                   ; 6
+    200 x      600  $0862  E4 08     cpx clamp.v           ; 3
+    200 x      530  $0864  B0 02     bcs clamp.endif6      ; 2+
+     70 x      140  $0866  8A        txa                   ; 2
+     70 x      420  $0867  60        rts                   ; 6
                      clamp.endif6:
                                                      ;   11: return v
-    130 x      780  $086A  60        rts                   ; 6
+    130 x      780  $0868  60        rts                   ; 6
                                                      ;    5: fn add3(a: u8 using A, b: u8 using X, c: u8 using Y) -> u8 {
                      add3:
-    200 x      600  $086B  85 08     sta add3.a            ; 3
-    200 x      600  $086D  84 09     sty add3.c            ; 3
+    200 x      600  $0869  85 08     sta add3.a            ; 3
+    200 x      600  $086B  84 09     sty add3.c            ; 3
                                                      ;    6: return a + b + c
-    200 x      400  $086F  8A        txa                   ; 2
-    200 x      400  $0870  18        clc                   ; 2
-    200 x      600  $0871  65 08     adc add3.a            ; 3
-    200 x      400  $0873  18        clc                   ; 2
-    200 x      600  $0874  65 09     adc add3.c            ; 3
-    200 x     1200  $0876  60        rts                   ; 6
+    200 x      400  $086D  8A        txa                   ; 2
+    200 x      400  $086E  18        clc                   ; 2
+    200 x      600  $086F  65 08     adc add3.a            ; 3
+    200 x      400  $0871  18        clc                   ; 2
+    200 x      600  $0872  65 09     adc add3.c            ; 3
+    200 x     1200  $0874  60        rts                   ; 6
                      

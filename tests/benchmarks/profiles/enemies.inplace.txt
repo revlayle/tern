@@ -9,7 +9,7 @@
                      $0814  A9 00     lda #$00              ; 2
                      $0816  A2 50     ldx #$50              ; 2
                      clear:
-                     $0818  9D AE 08  sta bss-1,x           ; 5
+                     $0818  9D A2 08  sta bss-1,x           ; 5
                      $081B  CA        dex                   ; 2
                      $081C  D0 FA     bne clear             ; 2+
                      $081E  20 24 08  jsr main              ; 6
@@ -28,7 +28,7 @@
      16 x       32  $082B  0A        asl a                 ; 2
      16 x       48  $082C  65 05     adc main._t0          ; 3
      16 x       32  $082E  69 0A     adc #$0A              ; 2
-     16 x       80  $0830  9D AF 08  sta enemies,x         ; 5
+     16 x       80  $0830  9D A3 08  sta enemies,x         ; 5
                                                      ;    9: enemies[i].y = (i << 2) + i + 20
      16 x       32  $0833  8A        txa                   ; 2
      16 x       48  $0834  85 05     sta main._t0          ; 3
@@ -36,13 +36,13 @@
      16 x       32  $0837  0A        asl a                 ; 2
      16 x       48  $0838  65 05     adc main._t0          ; 3
      16 x       32  $083A  69 14     adc #$14              ; 2
-     16 x       80  $083C  9D BF 08  sta enemies+16,x      ; 5
+     16 x       80  $083C  9D B3 08  sta enemies+16,x      ; 5
                                                      ;   10: enemies[i].dx = 1
      16 x       32  $083F  A9 01     lda #$01              ; 2
-     16 x       80  $0841  9D CF 08  sta enemies+32,x      ; 5
+     16 x       80  $0841  9D C3 08  sta enemies+32,x      ; 5
                                                      ;   11: enemies[i].dy = -2
      16 x       32  $0844  A9 FE     lda #$FE              ; 2
-     16 x       80  $0846  9D DF 08  sta enemies+48,x      ; 5
+     16 x       80  $0846  9D D3 08  sta enemies+48,x      ; 5
                      main.fnext1:
      16 x       32  $0849  E8        inx                   ; 2
      16 x       32  $084A  E0 10     cpx #$10              ; 2
@@ -57,63 +57,59 @@
      50 x      100  $0852  A2 00     ldx #$00              ; 2
                      main.for8:
                                                      ;   15: enemies[i].x += enemies[i].dx as u8
-    800 x     3200  $0854  BD AF 08  lda enemies,x         ; 4+
+    800 x     3200  $0854  BD A3 08  lda enemies,x         ; 4+
     800 x     1600  $0857  18        clc                   ; 2
-    800 x     3200  $0858  7D CF 08  adc enemies+32,x      ; 4+
-    800 x     4000  $085B  9D AF 08  sta enemies,x         ; 5
+    800 x     3200  $0858  7D C3 08  adc enemies+32,x      ; 4+
+    800 x     4000  $085B  9D A3 08  sta enemies,x         ; 5
                                                      ;   16: if enemies[i].x < 8 || enemies[i].x > 200 {
-    800 x     3200  $085E  BD AF 08  lda enemies,x         ; 4+
-    800 x     1600  $0861  C9 08     cmp #$08              ; 2
-    800 x     1600  $0863  90 07     bcc main.or10         ; 2+
-    800 x     3200  $0865  BD AF 08  lda enemies,x         ; 4+
-    800 x     1600  $0868  C9 C9     cmp #$C9              ; 2
-    800 x     2400  $086A  90 12     bcc main.endif9       ; 2+
+    800 x     1600  $085E  C9 08     cmp #$08              ; 2
+    800 x     1600  $0860  90 04     bcc main.or10         ; 2+
+    800 x     1600  $0862  C9 C9     cmp #$C9              ; 2
+    800 x     2400  $0864  90 12     bcc main.endif9       ; 2+
                      main.or10:
                                                      ;   17: enemies[i].dx = -enemies[i].dx
-                     $086C  A9 00     lda #$00              ; 2
-                     $086E  38        sec                   ; 2
-                     $086F  FD CF 08  sbc enemies+32,x      ; 4+
-                     $0872  9D CF 08  sta enemies+32,x      ; 5
+                     $0866  A9 00     lda #$00              ; 2
+                     $0868  38        sec                   ; 2
+                     $0869  FD C3 08  sbc enemies+32,x      ; 4+
+                     $086C  9D C3 08  sta enemies+32,x      ; 5
                                                      ;   18: enemies[i].hits += 1
-                     $0875  FE EF 08  inc enemies+64,x      ; 7
+                     $086F  FE E3 08  inc enemies+64,x      ; 7
                                                      ;   19: bounces += 1
-                     $0878  E6 02     inc bounces           ; 5
-                     $087A  D0 02     bne main.inc11        ; 2+
-                     $087C  E6 03     inc bounces+1         ; 5
+                     $0872  E6 02     inc bounces           ; 5
+                     $0874  D0 02     bne main.inc11        ; 2+
+                     $0876  E6 03     inc bounces+1         ; 5
                      main.inc11:
                      main.endif9:
                                                      ;   21: enemies[i].y += enemies[i].dy as u8
-    800 x     3200  $087E  BD BF 08  lda enemies+16,x      ; 4+
-    800 x     1600  $0881  18        clc                   ; 2
-    800 x     3200  $0882  7D DF 08  adc enemies+48,x      ; 4+
-    800 x     4000  $0885  9D BF 08  sta enemies+16,x      ; 5
+    800 x     3200  $0878  BD B3 08  lda enemies+16,x      ; 4+
+    800 x     1600  $087B  18        clc                   ; 2
+    800 x     3200  $087C  7D D3 08  adc enemies+48,x      ; 4+
+    800 x     4000  $087F  9D B3 08  sta enemies+16,x      ; 5
                                                      ;   22: if enemies[i].y < 16 || enemies[i].y > 180 {
-    800 x     3200  $0888  BD BF 08  lda enemies+16,x      ; 4+
-    800 x     1600  $088B  C9 10     cmp #$10              ; 2
-    800 x     1616  $088D  90 07     bcc main.or13         ; 2+
-    784 x     3136  $088F  BD BF 08  lda enemies+16,x      ; 4+
-    784 x     1568  $0892  C9 B5     cmp #$B5              ; 2
-    784 x     2352  $0894  90 0F     bcc main.endif12      ; 2+
+    800 x     1600  $0882  C9 10     cmp #$10              ; 2
+    800 x     1616  $0884  90 04     bcc main.or13         ; 2+
+    784 x     1568  $0886  C9 B5     cmp #$B5              ; 2
+    784 x     2352  $0888  90 0F     bcc main.endif12      ; 2+
                      main.or13:
                                                      ;   23: enemies[i].dy = -enemies[i].dy
-     16 x       32  $0896  A9 00     lda #$00              ; 2
-     16 x       32  $0898  38        sec                   ; 2
-     16 x       64  $0899  FD DF 08  sbc enemies+48,x      ; 4+
-     16 x       80  $089C  9D DF 08  sta enemies+48,x      ; 5
+     16 x       32  $088A  A9 00     lda #$00              ; 2
+     16 x       32  $088C  38        sec                   ; 2
+     16 x       64  $088D  FD D3 08  sbc enemies+48,x      ; 4+
+     16 x       80  $0890  9D D3 08  sta enemies+48,x      ; 5
                                                      ;   24: bounces += 1
-     16 x       80  $089F  E6 02     inc bounces           ; 5
-     16 x       48  $08A1  D0 02     bne main.inc14        ; 2+
-                     $08A3  E6 03     inc bounces+1         ; 5
+     16 x       80  $0893  E6 02     inc bounces           ; 5
+     16 x       48  $0895  D0 02     bne main.inc14        ; 2+
+                     $0897  E6 03     inc bounces+1         ; 5
                      main.inc14:
                      main.endif12:
                      main.fnext7:
-    800 x     1600  $08A5  E8        inx                   ; 2
-    800 x     1600  $08A6  E0 10     cpx #$10              ; 2
-    800 x     2350  $08A8  D0 AA     bne main.for8         ; 2+
+    800 x     1600  $0899  E8        inx                   ; 2
+    800 x     1600  $089A  E0 10     cpx #$10              ; 2
+    800 x     2350  $089C  D0 B6     bne main.for8         ; 2+
                      main.fend6:
                      main.fnext4:
-     50 x      250  $08AA  C6 04     dec main._loop0       ; 5
-     50 x      149  $08AC  D0 A4     bne main.for5         ; 2+
+     50 x      250  $089E  C6 04     dec main._loop0       ; 5
+     50 x      149  $08A0  D0 B0     bne main.for5         ; 2+
                      main.fend3:
-      1 x        6  $08AE  60        rts                   ; 6
+      1 x        6  $08A2  60        rts                   ; 6
                      

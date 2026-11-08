@@ -180,10 +180,28 @@ public sealed class CodeGen
             return;
         }
         if (kept is { } k) _reserved.Add(k);
+        var inA = f.Parameters.FirstOrDefault(p => p.InMemory && p.PassedIn is Register.A or Register.AX);
+        _aParameter = inA is null ? null : (inA, _out.Count);
         GenBlock(f.Declaration!.Body);
+        _aParameter = null;
         if (kept is { } r) _reserved.Remove(r);
         if (!EndsWithJump()) Emit(Rts);
     }
+
+    /// <summary>The <c>using A</c> or <c>using AX</c> parameter of the function being generated, and where its body's code starts.</summary>
+    private (VariableSymbol Parameter, int From)? _aParameter;
+
+    /// <summary>
+    /// True if its registers (A, or A and X) hold <paramref name="e"/> here: it is the <c>using A</c>
+    /// or <c>using AX</c> parameter, and the body's code so far is straight-line code (no label) that
+    /// changes neither those registers nor the parameter.
+    /// </summary>
+    private bool AHolds(Expr e) =>
+        _aParameter is var (p, from) && e is NameExpr { Symbol: VariableSymbol v } && v == p
+        && _out.Skip(from).All(item => item is Comment or SourceLine
+            || (item is Instr { AsmPos: null } i && i.Mnemonic is not (Jsr or Brk)
+                && (AsmEffects.Of(i.Mnemonic, i.Mode).Writes & (p.PassedIn == Register.AX ? CpuState.A | CpuState.X : CpuState.A)) == 0
+                && !(i.Operand is VarOperand { Variable: var w } && w.Storage == p && AsmEffects.WritesMemory(i.Mnemonic, i.Mode))));
 
     /// <summary>Functions already decided by <see cref="KeptRegister"/>, with the register kept (or null).</summary>
     private readonly Dictionary<FunctionSymbol, Register?> _keptRegisters = new();
@@ -1710,6 +1728,33 @@ public sealed class CodeGen
             op = op == TokenKind.Greater ? TokenKind.GreaterEq : TokenKind.Less;
         }
 
+        // The left side already in A (a using A parameter, F16): compare in place with two branches
+        // instead of loading the right side, so the parameter need not be read from memory.
+        // A using AX parameter (F16): the high bytes with cpx, then the low bytes with cmp, so A and X
+        // keep the parameter.
+        if (type.Size == 2 && !signed && left.Type.Size == 2 && AHolds(left) && Simple2(right) is var (lo, hi))
+        {
+            CompareInAX(op, lo, hi, target);
+            return;
+        }
+        if (type.Size == 1 && !signed && op is TokenKind.Greater or TokenKind.LessEq && AHolds(left) && Simple1(right) is { } r)
+        {
+            Op(Cmp, r);
+            if (op == TokenKind.LessEq)
+            {
+                Branch(Bcc, target);
+                Branch(Beq, target);
+            }
+            else
+            {
+                var equal = NewLabel("eq");
+                Branch(Beq, equal);
+                Branch(Bcs, target);
+                Place(equal);
+            }
+            return;
+        }
+
         // Only ==, !=, < and >= remain: a > b is b < a, and a <= b is b >= a.
         if (op is TokenKind.Greater or TokenKind.LessEq)
         {
@@ -1719,6 +1764,38 @@ public sealed class CodeGen
 
         if (type.Size == 1) Compare8(left, right, op, signed, target);
         else Compare16(left, right, op, signed, target);
+    }
+
+    /// <summary>
+    /// Jumps to <paramref name="target"/> when the unsigned value in A (low) and X (high) relates to
+    /// (<paramref name="lo"/>, <paramref name="hi"/>) by <paramref name="op"/>, without changing A or X.
+    /// </summary>
+    private void CompareInAX(TokenKind op, Operand lo, Operand hi, Label target)
+    {
+        var skip = NewLabel("cmp");
+        if (op is TokenKind.EqEq or TokenKind.NotEq)
+        {
+            Op(Cmp, lo);
+            Branch(Bne, op == TokenKind.EqEq ? skip : target);
+            Op(Cpx, hi);
+            Branch(op == TokenKind.EqEq ? Beq : Bne, target);
+            Place(skip);
+            return;
+        }
+        bool less = op is TokenKind.Less or TokenKind.LessEq;
+        // The high bytes decide unless they are equal.
+        Op(Cpx, hi);
+        Branch(Bcc, less ? target : skip);
+        Branch(Bne, less ? skip : target);
+        Op(Cmp, lo);
+        switch (op)
+        {
+            case TokenKind.Less: Branch(Bcc, target); break;
+            case TokenKind.GreaterEq: Branch(Bcs, target); break;
+            case TokenKind.Greater: Branch(Beq, skip); Branch(Bcs, target); break;
+            default: Branch(Bcc, target); Branch(Beq, target); break;
+        }
+        Place(skip);
     }
 
     private void Compare8(Expr left, Expr right, TokenKind op, bool signed, Label target)

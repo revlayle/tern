@@ -182,7 +182,7 @@ public class SmallShapeTests
             Assert.Equal((byte)-values[i], r.U8("n", i));
             Assert.Equal((sbyte)-(sbyte)values[i], r.I8("s", i));
         }
-        Assert.Contains("lda #$00|sec|sbc main.m", Code(r));
+        Assert.Contains("lda #$00|sec|sbc a,x", Code(r));   // m read from a[i] (F18)
         Assert.DoesNotContain("eor #$FF", Code(r));
     }
 
