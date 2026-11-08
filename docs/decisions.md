@@ -432,3 +432,4 @@ Decided:
 - Rejected: omitting `_` to mean "no other value occurs" (it already means "other values skip the match", rule 3); `_ => unreachable` (a promise rather than code, and a second way to say what `indexed match` says); F14 as an optimizer proof (above); a new keyword such as `dispatch` (`indexed` already names the idea).
 - **Breaking change**: programs whose long `match` got a table now get a chain until they say `indexed match` (`interp`, the raster example). One word per `match`; the M20 coding session updates them.
 - **F20 is rejected** (deferred 2026-11-07): moving a statement past another is the riskiest kind of optimizer change, for 50 cycles over the benchmarks.
+- **`indexed match` is built in M19 part 1, not M20** (same day). Reason: the skill teaches `match`, so the language it describes should be final before part 2; the emulator's report of a value outside the span stays in M20 with the index check.
