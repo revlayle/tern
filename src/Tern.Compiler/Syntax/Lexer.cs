@@ -51,6 +51,8 @@ public static class Lexer
 
     public static bool IsRawByte(char c) => c >= RawByteBase && c <= RawByteBase + 0xFF;
 
+    public static bool IsKeyword(TokenKind kind) => kind >= TokenKind.Const && kind <= TokenKind.Export;
+
     private static readonly Dictionary<string, TokenKind> Keywords = new()
     {
         ["const"] = TokenKind.Const, ["var"] = TokenKind.Var, ["data"] = TokenKind.Data,
@@ -200,6 +202,15 @@ public static class Lexer
                 continue;
             }
 
+            // C's n++ / n-- at the end of a statement or before a closing bracket (spec 13). Elsewhere
+            // they stay two operators: a++b is a + (+b).
+            if (c is '+' or '-' && Peek(source, i + 1) == c && EndsAfter(source, i + 2))
+            {
+                string name = tokens.Count > 0 && tokens[^1].Kind == TokenKind.Identifier ? tokens[^1].Text : "x";
+                string op = c == '+' ? "+=" : "-=";
+                throw new CompileError(Pos(i), $"Tern has no '{c}{c}'. Write '{name} {op} 1'");
+            }
+
             bool matched = false;
             foreach (var (text, kind) in Operators)
             {
@@ -254,6 +265,13 @@ public static class Lexer
                     throw new CompileError(escapePos, $"Unknown escape '\\{e}'. Use \\0, \\n, \\\\, \\\", \\' or \\$NN for a byte");
             }
         }
+    }
+
+    /// <summary>True if only spaces stand between <paramref name="i"/> and the end of the line, a comment, a closing bracket or ';'.</summary>
+    private static bool EndsAfter(string s, int i)
+    {
+        while (i < s.Length && s[i] is ' ' or '\t' or '\r') i++;
+        return i >= s.Length || s[i] is '\n' or ';' or ')' or ']' or '}' || (s[i] == '/' && Peek(s, i + 1) is '/' or '*');
     }
 
     private static char Peek(string s, int i) => i < s.Length ? s[i] : '\0';

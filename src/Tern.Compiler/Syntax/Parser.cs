@@ -32,7 +32,11 @@ public sealed class Parser
     private Token Expect(TokenKind kind, string what)
     {
         if (!At(kind))
+        {
+            if (kind == TokenKind.Identifier && Lexer.IsKeyword(Current.Kind))
+                throw new CompileError(Current.Pos, $"Expected {what}, found '{Current.Text}', which is a keyword. Use another name");
             throw new CompileError(Current.Pos, $"Expected {what}, found {Describe(Current)}");
+        }
         return Advance();
     }
 
@@ -420,7 +424,7 @@ public sealed class Parser
             do
             {
                 // A fixed input: a constant in place of the name, e.g. "true using carry".
-                if (!(At(TokenKind.Identifier) && PeekAt(1).Kind == TokenKind.Colon))
+                if (!((At(TokenKind.Identifier) || Lexer.IsKeyword(Current.Kind)) && PeekAt(1).Kind == TokenKind.Colon))
                 {
                     var value = ParseExpr();
                     if (!At(TokenKind.Using))
@@ -957,6 +961,14 @@ public sealed class Parser
                 Expect(TokenKind.RParen, "')'");
                 return new CallExpr(t.Pos, name, args);
             }
+            // Habits from C, with the Tern spelling (spec 13).
+            case TokenKind.Star:
+            {
+                string p = PeekAt(1).Kind == TokenKind.Identifier ? PeekAt(1).Text : "p";
+                throw new CompileError(t.Pos, $"Tern has no '*' to read through a pointer. Write '{p}[0]' for the value {p} points to");
+            }
+            case TokenKind.Percent when PeekAt(1).Kind == TokenKind.Number && PeekAt(1).Pos.Column == t.Pos.Column + 1:
+                throw new CompileError(t.Pos, $"'%' does not start a binary number. Write binary numbers as 0b{PeekAt(1).Text}");
             default:
                 throw new CompileError(t.Pos, $"Expected an expression, found {Describe(t)}");
         }

@@ -97,10 +97,10 @@ fn main() {
 ```
 
 ```text
-example.tern:1:16: error: Expected an expression, found '%'
+example.tern:1:16: error: '%' does not start a binary number. Write binary numbers as 0b0000_1111
 ```
 
-Fix: `0b0000_1111`. Hex is `$0F`.
+Hex is `$0F`.
 
 A number is not a `bool`:
 
@@ -131,10 +131,10 @@ fn main() {
 ```
 
 ```text
-example.tern:5:1: error: Expected an expression, found '}'
+example.tern:4:6: error: Tern has no '++'. Write 'n += 1'
 ```
 
-The error is at the token after `++`, and does not mention it. Fix: `n += 1` (one `inc` on memory).
+`n += 1` is one `inc` on memory. `a++b` is not this error: between two operands it is `a + (+b)`.
 
 ## Variables and names
 
@@ -163,7 +163,7 @@ fn main() {
 ```
 
 ```text
-example.tern:1:4: error: Expected function name, found 'step'
+example.tern:1:4: error: Expected function name, found 'step', which is a keyword. Use another name
 ```
 
 A name from a module without the module name, or without the import:
@@ -227,10 +227,10 @@ fn main() {
 ```
 
 ```text
-example.tern:4:5: error: Expected an expression, found '*'
+example.tern:4:5: error: Tern has no '*' to read through a pointer. Write 'p[0]' for the value p points to
 ```
 
-There is no dereference operator. Fix: `p[0] = 1`.
+There is no dereference operator: `p[0]` is the byte `p` points to, `p[1]` the next one.
 
 Structs are not copied:
 
