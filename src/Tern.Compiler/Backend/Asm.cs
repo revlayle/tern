@@ -95,4 +95,5 @@ public sealed record SectionStart(string Name, int? FixedAddress = null, string?
 /// written to the program file. Must be the last item.
 /// </summary>
 /// <param name="VectorOffsets">Offsets of <c>jmp (...)</c> vectors in the block; none may start at an address ending in $FF.</param>
-public sealed record Reserve(Label Label, int Size, IReadOnlyList<int> VectorOffsets) : AsmItem;
+/// <param name="PageOffset">Start the block at an address with this low byte: its indexed arrays are placed for that (M18 F12).</param>
+public sealed record Reserve(Label Label, int Size, IReadOnlyList<int> VectorOffsets, int? PageOffset = null) : AsmItem;
