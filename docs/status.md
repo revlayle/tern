@@ -4,11 +4,22 @@ Owned by the coding session. Updated at the end of every coding session.
 
 ## Current
 
-- **Milestone:** M19, tools and skills for coding agents (roadmap). Part 1 is reviewed and merged into `main`; the spec session wrote the "writing fast Tern" advice (guide section 7). Part 2 (the Tern skill) is done and waits for its review.
-- **Branch:** `m19-skill`, from `main` at `7aadc4f` (the guide advice). 1871 compiler tests pass plus 36 CPU tests. No benchmark changed (1254 / 350780).
-- **Next step:** review of part 2 (`/review`; `docs/reviews/m19.md`, a part 2 section). The roadmap's "done when" asks that an agent with only the skill and tools can write, check and measure a small program: `sprite.md` is that program written by this session, but no fresh agent has tried it yet; the review is the natural place (give an agent only `.claude/skills/tern/` and `tern`, and the task "a sprite moved by the joystick").
+- **Milestone:** M19, tools and skills for coding agents (roadmap). Part 1 is reviewed and merged into `main`. Part 2 (the Tern skill) was reviewed (`docs/reviews/m19.md`, part 2 section: not ready, two must-fix findings); both findings and suggestions 3-6, 8 and 9 are fixed, and it waits for the re-review.
+- **Branch:** `m19-skill`, from `main` at `7aadc4f`, with `main` merged in for the review (`9e6b236`). 1874 compiler tests pass plus 36 CPU tests. No benchmark changed (1254 / 350780).
+- **Next step:** re-review of part 2 (`/review`; `docs/reviews/m19.md`, part 2 section). The review's agent trial covered the "done when" item.
 
 ## Done
+
+- **M19 part 2, review fixes** (2026-11-08, `docs/reviews/m19.md`, part 2 section).
+  - Finding 1 (must fix, `da8c1b9`): `errors.md` no longer gives register parameters as a fix for a function shared by main and a handler; the register version is a checked `tern error` example ("the parameter 'x', which it keeps in memory"), and the `inline fn` fix a checked program.
+  - Finding 2 (must fix, `397c2cd`): `tern bench --fn` with a name no function has gives "There is no function 'x' in the program.", and "Use 'ball.update': a module's function is named with its module" when a module declares it; an inline or uncalled function keeps the old reason ("has no code of its own"). `CompileResult.DeclaredFunctions` lists every declared function, compiled or not. `BenchToolTests` (they fail on the old message).
+  - Suggestion 3 (`da8c1b9`): `costs.md` section 9 measures 8 values too (chain 2623, table 2951 cycles; at 16 the table wins), and the prose says what the two measurements show.
+  - Suggestion 4 (`da8c1b9`): `SKILL.md` says `--fn` takes a module's function with its module; `sprite.md` section 4 compares two versions of `ship.move` from a subfolder copy (`alt/ship.tern`, `alt/check.tern`), with the `--fn move` error.
+  - Suggestion 5 (`397c2cd`): `tern bench` shows a variant by its path as given when two have the same file name (`Cli.BenchCommand`). `BenchToolTests`.
+  - Suggestion 6 (`5abb273`): `SkillTests` fails on a module block (no `main`, no `export`) that no program compiled after it imports, directly or through other modules (checked by hand with an orphan block). Block names may have a folder.
+  - Suggestion 8 (`da8c1b9`): `language.md` section 4 dumps a `u16` array and explains its low and high tables.
+  - Suggestion 9 (`da8c1b9`): `costs.md` section 10 says the local copy keeps a zero-page byte.
+  - Suggestion 7 is question 75.
 
 - **M19 part 2, the Tern skill** (2026-11-08). One commit per step.
   - *CLI in the compiler* (`c08f841`, `Tools/Cli.cs`): the argument parsing and printing of `tern`, `tern run` and `tern bench` moved from `Tern.Cli/Program.cs` (now one line) into `Cli.Run(args, output, error)`, so tests run the exact commands the skill shows. No change in behavior.
@@ -354,7 +365,7 @@ Including `jsr` and `rts`; from the tests.
 
 ## Known limitations and technical debt
 
-- Error messages an agent will hit that do not say what is wrong (the skill explains each; a parser change would fix them): `n++` gives "Expected an expression, found '}'" at the next token; `*p = 1` gives "Expected an expression, found '*'"; `%0000_1111` gives "Expected an expression, found '%'"; `fn step()` gives "Expected function name, found 'step'" (it is a keyword). `using X` with a call in the loop suggests removing `using X` but not why an `inline fn` does not help.
+- Error messages an agent will hit that do not say what is wrong (the skill explains each; a parser change would fix them): `n++` gives "Expected an expression, found '}'" at the next token; `*p = 1` gives "Expected an expression, found '*'"; `%0000_1111` gives "Expected an expression, found '%'"; `fn step()` gives "Expected function name, found 'step'" (it is a keyword). Question 75. `using X` with a call in the loop suggests removing `using X` but not why an `inline fn` does not help.
 - `tern run` cannot set an input before the run (the joystick at `$DC00` reads 0, every direction pressed). `sprite.md` works around it with logic that takes the joystick as a parameter; a `--set $DC00=$FF` option would let a whole game loop be checked.
 - The skill's outputs include addresses and cycles, so a code generator or library change that moves code fails `SkillTests` until `TERN_UPDATE_SKILL=1 dotnet test --filter SkillTests` rewrites them (read the diff: a prose claim next to an output may need changing too). Listing excerpts (```` ```lst ````) are updated by hand. Question 74 asks for this as a CLAUDE.md convention.
 - `tern run` / `tern bench` (M19): memory is plain RAM, so the VIC-II, SID and CIAs are not emulated (a raster wait never ends; the cycle limit stops it). The KERNAL stand-ins (CHROUT, GETIN, PLOT) take no cycles; any other ROM call stops the run, so overlays (loaded with KERNAL LOAD) cannot be run. A dumped local may not hold its last value: the compiler may keep it in a register or remove stores nobody reads.
@@ -406,6 +417,8 @@ Not bugs; things to improve, mostly in M7 (optimizer).
 73. **Operator precedence** is not in the spec or the guide (only "`as` binds tighter than every operator", spec 3.5). As built (`Parser.ParseExpr`), tightest first: `as`; unary `- + ~ !`; `* / %`; `+ -`; `<< >>`; `&`; `^`; `|`; the compares (not chained: an error); `&&`; `||`. Unlike C, `flags & 4 != 0` is `(flags & 4) != 0`. The skill (`language.md` section 2) states this. Should the spec?
 
 74. **A convention for the skill tests.** Like `BenchmarkTests`, `SkillTests` fails on any change in the skill's shown output. Proposed for CLAUDE.md's conventions: "`SkillTests` fails when the skill's examples or tool outputs change; rewrite them with `TERN_UPDATE_SKILL=1 dotnet test --filter SkillTests` in the same commit, read the diff, and fix any prose that no longer matches. Listing excerpts are updated by hand."
+
+75. **Parse errors for C habits** (review M19 part 2, suggestion 7). `n++`, `*p = 1` and `%0000_1111` give generic parse errors ("Expected an expression, found '}'", at the token after `++`). Dedicated messages with a fix ("Write 'n += 1'", "Write 'p[0]'", "Write binary numbers as 0b..."), and for `fn step()` one that says `step` is a keyword, would help agents most. Provisional: unchanged; `errors.md` shows the messages as they are. Should the parser recognise these?
 
 Questions 1-63 and 65-71 are settled (decisions.md; 44, 45 and 59-63 on 2026-11-07, 65-71 on 2026-11-08). Question 64 was withdrawn.
 
