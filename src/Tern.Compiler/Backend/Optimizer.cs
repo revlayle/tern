@@ -233,8 +233,11 @@ public static class Optimizer
         return before.Select(b => b == true).ToArray();
     }
 
-    /// <summary>True if item <paramref name="k"/> can run again without passing <paramref name="avoid"/> (it is in a loop that does not contain it).</summary>
-    private static bool RepeatsWithout(List<AsmItem> code, Dictionary<Label, int> positions, int k, int avoid)
+    /// <summary>
+    /// True if a path from item <paramref name="from"/> (through jumps, branches and fall-through)
+    /// reaches an item in <paramref name="targets"/> without passing <paramref name="stop"/>.
+    /// </summary>
+    private static bool Reaches(List<AsmItem> code, Dictionary<Label, int> positions, int from, Func<int, bool> targets, int stop)
     {
         var seen = new HashSet<int>();
         var work = new Stack<int>();
@@ -243,12 +246,12 @@ public static class Optimizer
             if (code[j] is Instr i && Target(i) is { } t && positions.TryGetValue(t, out int tp)) work.Push(tp);
             if (FallsThrough(code[j]) && j + 1 < code.Count) work.Push(j + 1);
         }
-        Next(k);
+        Next(from);
         while (work.Count > 0)
         {
             int j = work.Pop();
-            if (j == k) return true;
-            if (j == avoid || !seen.Add(j)) continue;
+            if (targets(j)) return true;
+            if (j == stop || !seen.Add(j)) continue;
             Next(j);
         }
         return false;
@@ -316,7 +319,8 @@ public static class Optimizer
                 else if (i.Mnemonic == Lda) fromRegister.Add(r);
                 else { usable = false; break; }
             }
-            if (!usable || fromSource.Any(r => RepeatsWithout(code, positions, r, s))) continue;
+            // A read moved to the source must not run more often than the store: in a loop without it.
+            if (!usable || fromSource.Any(r => Reaches(code, positions, r, j => j == r, s))) continue;
 
             // A store into the source memory that ends the copy while it is still needed: load the
             // value into a free register just before it.
@@ -325,24 +329,10 @@ public static class Optimizer
             if (fromRegister.Count > 0)
             {
                 var needed = fromRegister.ToHashSet();
-                bool StillNeeded(int k)
-                {
-                    var seen = new HashSet<int>();
-                    var work = new Stack<int>();
-                    work.Push(k + 1);
-                    while (work.Count > 0)
-                    {
-                        int j = work.Pop();
-                        if (j >= code.Count || j == s || !seen.Add(j)) continue;
-                        if (needed.Contains(j)) return true;
-                        if (code[j] is Instr ji && Target(ji) is { } t && positions.TryGetValue(t, out int tp)) work.Push(tp);
-                        if (FallsThrough(code[j])) work.Push(j + 1);
-                    }
-                    return false;
-                }
                 for (int k = 0; k < code.Count && usable; k++)
                 {
-                    if (k == s || !same[k] || !Ends(k) || !StillNeeded(k)) continue;
+                    // Still needed: a read from the register can follow before the next store of v.
+                    if (k == s || !same[k] || !Ends(k) || !Reaches(code, positions, k, needed.Contains, s)) continue;
                     // Only a store into the source memory, not a call or a change of the index.
                     usable = code[k] is Instr { AsmPos: null } i && (Stored(i.Mnemonic) is not null || AsmEffects.WritesMemory(i.Mnemonic, i.Mode))
                         && i.Operand is VarOperand { Variable: var w } && w.Storage == source && i.Mode is not (IndirectIndexed or IndexedIndirect or Indirect)
