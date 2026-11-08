@@ -7,7 +7,7 @@ driver and the routine, from `main` on; cycles are `main` to its return.
 | routine | asm bytes | asm cycles | plain bytes | plain cycles |
 |---|--:|--:|--:|--:|
 | mul8 | 62 | 53,773 | 94 | 105,485 |
-| div8 | 75 | 61,426 | 144 | 234,681 |
+| div8 | 73 | 60,658 | 142 | 233,913 |
 | mul16 | 126 | 45,486 | 133 | 47,184 |
 | abs16 | 65 | 20,506 | 94 | 27,420 |
 | add32 | 59 | 13,728 | 179 | 26,856 |

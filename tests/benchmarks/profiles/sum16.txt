@@ -11,12 +11,12 @@
                      $0818  A9 00     lda #$00              ; 2
                      $081A  A2 00     ldx #$00              ; 2
                      clear0:
-                     $081C  9D 97 08  sta bss,x             ; 5
+                     $081C  9D 38 09  sta bss,x             ; 5
                      $081F  E8        inx                   ; 2
                      $0820  D0 FA     bne clear0            ; 2+
                      $0822  A2 90     ldx #$90              ; 2
                      clear:
-                     $0824  9D 96 09  sta bss+255,x         ; 5
+                     $0824  9D 37 0A  sta bss+255,x         ; 5
                      $0827  CA        dex                   ; 2
                      $0828  D0 FA     bne clear             ; 2+
                      $082A  20 30 08  jsr main              ; 6
@@ -55,9 +55,9 @@
      61 x      305  $085B  E6 07     inc main.v+1          ; 5
                      main.c3:
                                                      ;   11: values[i] = v
-    200 x     1000  $085D  9D 97 08  sta values,x          ; 5
+    200 x     1000  $085D  9D 38 09  sta values,x          ; 5
     200 x      600  $0860  A5 07     lda main.v+1          ; 3
-    200 x     1000  $0862  9D 5F 09  sta values+200,x      ; 5
+    200 x     1000  $0862  9D 00 0A  sta values+200,x      ; 5
                      main.fnext1:
     200 x      400  $0865  E8        inx                   ; 2
     200 x      400  $0866  E0 C8     cpx #$C8              ; 2
@@ -69,20 +69,20 @@
                                                      ;   14: total += values[i]
     200 x      400  $086C  18        clc                   ; 2
     200 x      600  $086D  A5 02     lda total             ; 3
-    200 x      895  $086F  7D 97 08  adc values,x          ; 4+
+    200 x      800  $086F  7D 38 09  adc values,x          ; 4+
     200 x      600  $0872  85 02     sta total             ; 3
     200 x      600  $0874  A5 03     lda total+1           ; 3
-    200 x      839  $0876  7D 5F 09  adc values+200,x      ; 4+
+    200 x      800  $0876  7D 00 0A  adc values+200,x      ; 4+
     200 x      600  $0879  85 03     sta total+1           ; 3
                                                      ;   15: if values[i] > largest { largest = values[i] }
     200 x      600  $087B  A5 04     lda largest           ; 3
-    200 x      895  $087D  DD 97 08  cmp values,x          ; 4+
+    200 x      800  $087D  DD 38 09  cmp values,x          ; 4+
     200 x      600  $0880  A5 05     lda largest+1         ; 3
-    200 x      839  $0882  FD 5F 09  sbc values+200,x      ; 4+
+    200 x      800  $0882  FD 00 0A  sbc values+200,x      ; 4+
     200 x      568  $0885  B0 0A     bcs main.endif7       ; 2+
-     32 x      128  $0887  BD 97 08  lda values,x          ; 4+
+     32 x      128  $0887  BD 38 09  lda values,x          ; 4+
      32 x       96  $088A  85 04     sta largest           ; 3
-     32 x      128  $088C  BD 5F 09  lda values+200,x      ; 4+
+     32 x      128  $088C  BD 00 0A  lda values+200,x      ; 4+
      32 x       96  $088F  85 05     sta largest+1         ; 3
                      main.endif7:
                      main.fnext5:
@@ -91,4 +91,5 @@
     200 x      599  $0894  D0 D6     bne main.for6         ; 2+
                      main.fend4:
       1 x        6  $0896  60        rts                   ; 6
+                     ; $0897: 161 byte(s) left free so that indexed reads of the variables do not cross a page (not in the file)
                      
