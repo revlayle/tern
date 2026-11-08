@@ -47,6 +47,31 @@ any other KERNAL call stops the run. Keep game logic in functions that take thei
 parameters, so that it can be run and measured (`sprite.md` shows how). Check the finished program
 in VICE: `x64sc -autostart game.prg`.
 
+The program never checks an array index, but `tern run` does: an index outside its array, and an
+`indexed match` value outside its patterns (which also stops the run), are printed with the source
+line, and the exit code is 3. Pointer accesses and `asm` are not checked.
+
+```tern
+// bad.tern
+var hits: [u8; 8]
+var last: u8 = 9
+
+fn main() {
+    for i in 0..last {
+        hits[i] = 1
+    }
+}
+```
+
+```console
+$ tern run bad.tern
+Main returned: 249 cycles (153 in main)
+...
+Index check (the program has no check; the emulator found these):
+  bad.tern:7: Index 8 is outside 'hits', which has 8 elements
+      hits[i] = 1
+```
+
 ## 2. A first program
 
 ```tern
@@ -155,7 +180,8 @@ Functions (cycles include the functions they call):
   parameters cannot be read from outside it.
 - **Arrays have at most 256 elements and `u8` indexes**, compiled to `lda a,x`. Longer byte buffers
   exist but are reached through a pointer. An array of `u16` is stored as two tables (low and high
-  bytes); an array of structs as one table per field. Indexes are not checked.
+  bytes); an array of structs as one table per field. The program never checks an index; `tern run`
+  reports one outside its array.
 - **All arithmetic wraps, with no promotion:** `u8 + u8` is a `u8`. `u8` with `u16` widens. Narrowing
   is `as` (`big as u8` keeps the low byte). Mixing signed and unsigned is an error: cast one side.
 - **No `*p`:** read through a pointer with `p[0]` or `p[i]` (compiled to `lda (p),y`); a pointer to a

@@ -20,7 +20,14 @@ public sealed record PlacedArea(AddressRange Free, int UsedEnd, List<string> Nam
 /// <see cref="File"/> is null for the main file, else the module's file name. <see cref="Cycles"/> is
 /// the base count; <see cref="MoreCycles"/> is set for a branch or a read that can cross a page.
 /// </summary>
-public sealed record PlacedInstruction(int Address, int Size, string Text, int Cycles, bool MoreCycles, string? File, int? Line, string? Source, string Section);
+public sealed record PlacedInstruction(int Address, int Size, string Text, int Cycles, bool MoreCycles, string? File, int? Line, string? Source, string Section,
+    CheckedIndex? Index = null);
+
+/// <summary>
+/// An array index or <c>indexed match</c> table read that the emulator checks (M20): the address
+/// <see cref="Base"/> plus X (or Y, <see cref="UsesY"/>) must lie in <see cref="First"/> to First + Length - 1.
+/// </summary>
+public sealed record CheckedIndex(int Base, bool UsesY, bool ZeroPage, int First, IndexCheck Check);
 
 public sealed class AssembledCode(
     List<(int Address, byte[] Bytes)> segments, string listing, List<PlacedSection> sections, List<PlacedArea> areas, AddressRange? variables,
@@ -331,7 +338,8 @@ public static class Assembler
                     else
                         Encoder.Encode(i.Mnemonic, s.Mode, OperandValue(i, s.Mode), s.Address, bytes);
                     var (text, cycles, more) = ListInstruction(listing, s, i, bytes.Skip(begin).ToArray());
-                    instructions.Add(new PlacedInstruction(s.Address, bytes.Count - begin, text, cycles, more, source?.File, source?.Line, source?.Text.Trim(), sectionName));
+                    instructions.Add(new PlacedInstruction(s.Address, bytes.Count - begin, text, cycles, more, source?.File, source?.Line, source?.Text.Trim(), sectionName,
+                        Checked(i, s.Mode)));
                     break;
                 }
                 case DataBytes d:
@@ -468,6 +476,17 @@ public static class Assembler
         LabelOperand l => Resolve(l.Label) + l.Offset,
         _ => throw new InvalidOperationException(),
     };
+
+    /// <summary>The index check of a compiler-generated indexed instruction (never one from an asm block), or null.</summary>
+    private static CheckedIndex? Checked(Instr i, AddressingMode mode)
+    {
+        var check = i.Operand switch { VarOperand v => v.Check, LabelOperand l => l.Check, _ => null };
+        if (check is null || i.AsmPos is not null
+            || mode is not (AddressingMode.AbsoluteX or AddressingMode.AbsoluteY or AddressingMode.ZeroPageX or AddressingMode.ZeroPageY)) return null;
+        int at = OperandValue(i, mode);
+        return new CheckedIndex(at, mode is AddressingMode.AbsoluteY or AddressingMode.ZeroPageY,
+            mode is AddressingMode.ZeroPageX or AddressingMode.ZeroPageY, (at - check.Shift) & 0xFFFF, check);
+    }
 
     private static int Byte(int address, bool high) => high ? (address >> 8) & 0xFF : address & 0xFF;
 

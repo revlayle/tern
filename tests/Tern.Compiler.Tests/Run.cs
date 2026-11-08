@@ -13,14 +13,19 @@ public sealed class Run
     /// <summary>The number of IRQs the CPU took.</summary>
     public int Interrupts { get; }
 
+    /// <summary>Array indexes and indexed match values outside their tables (M20). A run with any fails, unless checkIndexes is false.</summary>
+    public IReadOnlyList<Tools.IndexError> IndexErrors { get; }
+
     private Run(string source, long maxCycles, string? sourcePath, Action<Ram>? setup, string? libraryDirectory, long irqEvery,
-        IReadOnlyDictionary<int, Action<Run>>? traps)
+        IReadOnlyDictionary<int, Action<Run>>? traps, bool checkIndexes)
     {
         Result = TernCompiler.Compile(source, sourcePath: sourcePath, libraryDirectory: libraryDirectory);
         Ram.Load((ushort)Result.LoadAddress, Result.Image);
         setup?.Invoke(Ram);
         Cpu = new Cpu6502(Ram) { PC = (ushort)Result.Entry, SP = 0xFF, I = true }; // as after reset: no IRQ until the program enables it
         long nextIrq = irqEvery;
+        var checker = new Tools.IndexChecker(Result, sourcePath is null ? "program.tern" : Path.GetFileName(sourcePath));
+        IndexErrors = checker.Errors;
         while (Cpu.PC != Result.HaltAddress)
         {
             if (irqEvery > 0 && Cpu.Cycles >= nextIrq)
@@ -41,18 +46,21 @@ public sealed class Run
                 Cpu.PC = (ushort)((high << 8 | low) + 1);
                 continue;
             }
+            if (checker.Before(Cpu)) break;   // an indexed match value outside its span: the jump goes nowhere chosen
             Cpu.Step();
             if (Cpu.Cycles > maxCycles)
                 throw new Xunit.Sdk.XunitException($"Program did not finish within {maxCycles} cycles (PC=${Cpu.PC:X4})\n{Result.Listing}");
         }
+        if (checkIndexes && checker.Errors.Count > 0)
+            throw new Xunit.Sdk.XunitException("The emulator's index check reported:\n" + string.Join("\n", checker.Errors));
     }
 
     /// <param name="setup">Prepares memory after loading the program, e.g. with stand-ins for ROM routines.</param>
     /// <param name="irqEvery">If set, raises an IRQ this many cycles after the last one was taken (taken once interrupts are enabled).</param>
     /// <param name="traps">Stand-ins for ROM routines: when the CPU reaches the address, the action runs and the routine returns without executing.</param>
     public static Run Program(string source, long maxCycles = 5_000_000, string? sourcePath = null, Action<Ram>? setup = null,
-        string? libraryDirectory = null, long irqEvery = 0, IReadOnlyDictionary<int, Action<Run>>? traps = null) =>
-        new(source, maxCycles, sourcePath, setup, libraryDirectory, irqEvery, traps);
+        string? libraryDirectory = null, long irqEvery = 0, IReadOnlyDictionary<int, Action<Run>>? traps = null, bool checkIndexes = true) =>
+        new(source, maxCycles, sourcePath, setup, libraryDirectory, irqEvery, traps, checkIndexes);
 
     public int Address(string name) =>
         Result.Symbols.TryGetValue(name, out var a) ? a : throw new KeyNotFoundException($"No symbol '{name}'");

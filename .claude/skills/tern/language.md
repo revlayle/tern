@@ -106,7 +106,8 @@ fn main() {
 ## 4. Arrays
 
 - `a[i]` with `i: u8` is `lda a,x` or `lda a,y`. A constant index is a fixed address (`lda a+3`).
-- An index is not checked, and wraps: with `head = 255`, `buf[head + 1]` is `buf[0]`.
+- An index wraps: with `head = 255`, `buf[head + 1]` is `buf[0]`. The program never checks it;
+  `tern run` reports an index outside its array (section 1 of `SKILL.md`).
 - Arrays of `u16` (and pointers) are stored as two tables, low bytes and high bytes, so `a[i]` is
   `lda a,x` / `lda a+n,x`. `linear var pts: [u16; 32]` stores them interleaved, for hardware or
   assembly that needs it, and costs an `asl` per index.
@@ -287,6 +288,7 @@ log $08BE [u8; 16] (10 bytes):
   pattern lists skips the match.
 - `indexed match` is a jump table over the span from the lowest to the highest pattern. A value
   outside the span is not checked and jumps to garbage: list every value that can occur, or mask it.
+  `tern run` reports such a value and stops there.
 
 ```tern
 // dispatch.tern

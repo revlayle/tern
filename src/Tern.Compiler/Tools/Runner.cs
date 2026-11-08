@@ -10,6 +10,8 @@ public sealed record RunOptions
     public long MaxCycles { get; init; } = 20_000_000;
     /// <summary>If above 0, an IRQ is raised this many cycles after the last one was taken (through the vector at $FFFE, once the program enables interrupts).</summary>
     public long IrqEvery { get; init; }
+    /// <summary>The main file's name, for the source lines of index check errors.</summary>
+    public string MainFile { get; init; } = "program.tern";
 }
 
 /// <summary>Cycles spent inside one function, callees included, over a run.</summary>
@@ -17,11 +19,12 @@ public sealed record FunctionTime(string Name, long Calls, long Cycles);
 
 /// <summary>
 /// The result of a run. <see cref="Cycles"/> counts from the program's first instruction; <see cref="MainCycles"/>
-/// from main's first instruction to its return (null if main never started).
+/// from main's first instruction to its return (null if main never started). <see cref="IndexErrors"/>
+/// are the array indexes and <c>indexed match</c> values the emulator found outside their tables (M20).
 /// </summary>
 public sealed record RunResult(
     bool Returned, string Stop, long Cycles, long? MainCycles, int Interrupts, Ram Ram, Cpu6502 Cpu,
-    string Output, Profile Profile, IReadOnlyList<FunctionTime> Functions);
+    string Output, Profile Profile, IReadOnlyList<FunctionTime> Functions, IReadOnlyList<IndexError> IndexErrors);
 
 /// <summary>
 /// Runs a compiled C64 program in the built-in emulator, from its start until main returns or a cycle
@@ -31,6 +34,8 @@ public sealed record RunResult(
 /// <see cref="RunResult.Output"/>, GETIN ($FFE4) returns 0 (no key), PLOT ($FFF0) sets or reads the
 /// cursor. Reaching any other ROM address stops the run. Only the program file is loaded, not its
 /// overlays (the KERNAL LOAD that loads them has no stand-in), so a call into an overlay stops at a brk.
+/// Array indexes and <c>indexed match</c> values are checked (<see cref="IndexChecker"/>); a match
+/// value outside its span stops the run, since its jump goes to an address no one chose.
 /// </summary>
 public static class Runner
 {
@@ -66,6 +71,7 @@ public static class Runner
         int interrupts = 0;
         string stop;
         bool returned = false;
+        var checker = new IndexChecker(program, options.MainFile);
 
         while (true)
         {
@@ -96,6 +102,7 @@ public static class Runner
             byte opcode = ram.Bytes[pc];
             if (opcode == 0x00) { stop = $"brk at ${pc:X4} (often a jump into empty memory)"; break; }
             if (pc == main && mainStart is null) mainStart = cpu.Cycles;
+            if (checker.Before(cpu)) { stop = "stopped at an 'indexed match' value outside its span (see the index check)"; break; }
             long before = cpu.Cycles;
             try { cpu.Step(); }
             catch (IllegalOpcodeException e) { stop = $"illegal opcode ${e.Opcode:X2} at ${e.Address:X4}"; break; }
@@ -108,7 +115,7 @@ public static class Runner
         // Up to halt: main's rts included, the jmp halt after it not run.
         long? mainCycles = cpu.Cycles - mainStart;
         var times = calls.Select(c => new FunctionTime(c.Key, c.Value.Calls, c.Value.Cycles)).OrderByDescending(t => t.Cycles).ToList();
-        return new RunResult(returned, stop, cpu.Cycles, mainCycles, interrupts, ram, cpu, output.ToString(), profile, times);
+        return new RunResult(returned, stop, cpu.Cycles, mainCycles, interrupts, ram, cpu, output.ToString(), profile, times, checker.Errors);
 
         void Entered(int at)
         {
