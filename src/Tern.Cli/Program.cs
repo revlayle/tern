@@ -1,10 +1,11 @@
 ﻿using Tern.Compiler;
 using Tern.Compiler.Syntax;
+using Tern.Compiler.Tools;
 
 if (args.Length < 1 || args[0] is "-h" or "--help")
 {
     Console.WriteLine("""
-        Usage: tern <file.tern> [-o <output.prg>]
+        Usage: tern [--json] <file.tern> [-o <output.prg>]
 
         Compiles a Tern program for the Commodore 64. Writes:
           <output>.prg   the program
@@ -13,20 +14,40 @@ if (args.Length < 1 || args[0] is "-h" or "--help")
 
         A program with 'export' lines and no main is a binary for another program to call;
         it also writes <name>_api.tern, the module a Tern program imports to call it.
+
+          --json         print the result as JSON: ok, the files written, the report's
+                         lines, and diagnostics (file, line, column, severity, message,
+                         suggestion)
         """);
     return args.Length < 1 ? 1 : 0;
 }
 
-string input = args[0];
-string output = Path.ChangeExtension(input, ".prg");
-for (int i = 1; i < args.Length; i++)
+bool json = false;
+string? input = null;
+string? output = null;
+for (int i = 0; i < args.Length; i++)
 {
-    if (args[i] == "-o" && i + 1 < args.Length) output = args[++i];
+    if (args[i] == "--json") json = true;
+    else if (args[i] == "-o" && i + 1 < args.Length) output = args[++i];
+    else if (input is null && !args[i].StartsWith('-')) input = args[i];
     else
     {
         Console.Error.WriteLine($"Unknown argument: {args[i]}");
         return 1;
     }
+}
+if (input is null)
+{
+    Console.Error.WriteLine("No source file given. Usage: tern [--json] <file.tern> [-o <output.prg>]");
+    return 1;
+}
+output ??= Path.ChangeExtension(input, ".prg");
+
+int Fail(Diagnostic d, string text)
+{
+    if (json) Console.WriteLine(Diagnostic.ToJson(false, [], null, [d]));
+    else Console.Error.WriteLine(d.Line == 0 ? text : $"{d.File}:{d.Line}:{d.Column}: error: {text}");
+    return 1;
 }
 
 string source;
@@ -36,34 +57,39 @@ try
 }
 catch (IOException e)
 {
-    Console.Error.WriteLine($"Cannot read {input}: {e.Message}");
-    return 1;
+    string text = $"Cannot read {input}: {e.Message}";
+    return Fail(new Diagnostic(input, 0, 0, "error", text, null), text);
 }
 
 try
 {
     var result = TernCompiler.Compile(source, sourcePath: input);
-    File.WriteAllBytes(output, result.Prg);
-    File.WriteAllText(Path.ChangeExtension(output, ".lst"), result.Listing);
-    File.WriteAllText(Path.ChangeExtension(output, ".vs"), result.ViceLabels);
+    var files = new List<string>();
+    void Write(string path, Action<string> write)
+    {
+        write(path);
+        files.Add(path);
+    }
+    Write(output, p => File.WriteAllBytes(p, result.Prg));
+    Write(Path.ChangeExtension(output, ".lst"), p => File.WriteAllText(p, result.Listing));
+    Write(Path.ChangeExtension(output, ".vs"), p => File.WriteAllText(p, result.ViceLabels));
+    string directory = Path.GetDirectoryName(Path.GetFullPath(output))!;
     foreach (var overlay in result.Overlays)
-    {
-        string file = Path.Combine(Path.GetDirectoryName(Path.GetFullPath(output))!, overlay.Name + ".prg");
-        File.WriteAllBytes(file, overlay.Prg);
-        Console.WriteLine($"Wrote {file}");
-    }
+        Write(Path.Combine(directory, overlay.Name + ".prg"), p => File.WriteAllBytes(p, overlay.Prg));
     if (result.ApiModule is not null)
+        Write(Path.Combine(directory, result.ApiModuleName + ".tern"), p => File.WriteAllText(p, result.ApiModule));
+
+    if (json)
     {
-        string api = Path.Combine(Path.GetDirectoryName(Path.GetFullPath(output))!, result.ApiModuleName + ".tern");
-        File.WriteAllText(api, result.ApiModule);
-        Console.WriteLine($"Wrote {api}");
+        Console.WriteLine(Diagnostic.ToJson(true, files, result.Report, []));
+        return 0;
     }
+    foreach (var f in files.Skip(3)) Console.WriteLine($"Wrote {f}");
     Console.WriteLine($"Wrote {output}");
     Console.Write(result.Report);
     return 0;
 }
 catch (CompileError e)
 {
-    Console.Error.WriteLine($"{e.Pos.File ?? input}:{e.Pos.Line}:{e.Pos.Column}: error: {e.Description}");
-    return 1;
+    return Fail(Diagnostic.From(e, input), e.Description);
 }
