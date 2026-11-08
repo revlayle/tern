@@ -46,6 +46,7 @@
       3 x       15  $0841  E6 04     inc main.p+1          ; 5
                      main.c3:
                      main.fnext1:
+                                                     ;   18: for k in 0..250 {
     250 x      500  $0843  E8        inx                   ; 2
     250 x      500  $0844  E0 FA     cpx #$FA              ; 2
     250 x      749  $0846  D0 DA     bne main.for2         ; 2+
@@ -90,6 +91,7 @@
                      $087E  85 02     sta same              ; 3
                      main.endif10:
                      main.fnext8:
+                                                     ;   30: for j in 0..=255 using Y {
     768 x     1536  $0880  C8        iny                   ; 2
     768 x     2301  $0881  D0 F3     bne main.for9         ; 2+
                      main.fend7:
@@ -98,6 +100,7 @@
                                                      ;   34: b += 256
       3 x       15  $0885  E6 08     inc main.b+1          ; 5
                      main.fnext5:
+                                                     ;   29: for _ in 0..3 {
       3 x        6  $0887  CA        dex                   ; 2
       3 x        8  $0888  D0 EA     bne main.for6         ; 2+
                      main.fend4:
@@ -111,10 +114,12 @@
                      $0891  85 02     sta same              ; 3
                      main.endif14:
                      main.fnext12:
+                                                     ;   36: for j in 0..232 using Y {
     232 x      464  $0893  C8        iny                   ; 2
     232 x      464  $0894  C0 E8     cpy #$E8              ; 2
     232 x      695  $0896  D0 F2     bne main.for13        ; 2+
                      main.fend11:
+                                                     ;   16: fn main() {
       1 x        6  $0898  60        rts                   ; 6
                                                      ;    6: fn copy(to: ptr u8, from: ptr u8, n: u16) {
                      copy:
@@ -138,6 +143,7 @@
                                                      ;   11: n -= 256
       3 x       15  $08AA  C6 0E     dec copy.n+1          ; 5
                      copy.test16:
+                                                     ;    7: while n.hi > 0 {
       3 x        8  $08AC  D0 EF     bne copy.while15      ; 2+
                      copy.wend17:
                                                      ;   13: for i in 0..n.lo using Y { to[i] = from[i] }
@@ -152,5 +158,6 @@
     232 x      696  $08B9  C4 0D     cpy copy.n            ; 3
     232 x      695  $08BB  D0 F7     bne copy.for23        ; 2+
                      copy.fend21:
+                                                     ;    6: fn copy(to: ptr u8, from: ptr u8, n: u16) {
       1 x        6  $08BD  60        rts                   ; 6
                      

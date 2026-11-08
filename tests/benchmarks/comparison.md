@@ -18,21 +18,21 @@ emulator and its results are checked against the same C# computation. Lower is b
 | | cycles | 55,156 | 45,789 | 99,050 | 446,793 | 84,449 |
 | fib16 | bytes | 133 | 141 | 271 | 366 | 105 |
 | | cycles | 1,379 | 1,397 | 3,891 | 6,601 | 1,297 |
-| interp | bytes | 203 | 186 | 385 | 545 | 253 |
-| | cycles | 5,388 | 4,713 | 7,777 | 11,022 | 6,891 |
+| interp | bytes | 198 | 186 | 385 | 545 | 253 |
+| | cycles | 5,038 | 4,713 | 7,777 | 11,022 | 6,891 |
 | sieve | bytes | 46 | 47 | 147 | 104 | 140 |
 | | cycles | 8,476 | 8,489 | 19,232 | 22,437 | 37,200 |
 | sum16 | bytes | 103 | 113 | 202 | 239 | 224 |
 | | cycles | 25,278 | 27,430 | 39,100 | 58,830 | 43,795 |
-| **total** | bytes | 968 | 947 | 2102 | 2822 | 1359 |
-| | cycles | 341,969 | 324,419 | 698,705 | 1,453,115 | 493,092 |
+| **total** | bytes | 963 | 947 | 2102 | 2822 | 1359 |
+| | cycles | 341,619 | 324,419 | 698,705 | 1,453,115 | 493,092 |
 
 Relative to the Tern version (total, Tern = 100%):
 
 | | assembly | Prog8 | cc65 | llvm-mos |
 |---|--:|--:|--:|--:|
-| bytes | 98% | 217% | 292% | 140% |
-| cycles | 95% | 204% | 425% | 144% |
+| bytes | 98% | 218% | 293% | 141% |
+| cycles | 95% | 205% | 425% | 144% |
 
 ## How the numbers are taken
 

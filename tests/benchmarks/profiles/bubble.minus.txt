@@ -31,6 +31,7 @@
                                                      ;    9: values[i] = x
     100 x      500  $082E  9D 01 09  sta values,x          ; 5
                      main.fnext1:
+                                                     ;    7: for i in 0..N {
     100 x      200  $0831  E8        inx                   ; 2
     100 x      200  $0832  E0 64     cpx #$64              ; 2
     100 x      299  $0834  D0 EE     bne main.for2         ; 2+
@@ -61,6 +62,7 @@
    2202 x    11010  $0851  9D 01 09  sta values,x          ; 5
                      main.endif10:
                      main.fnext7:
+                                                     ;   13: for i in 1..=last {
    4950 x    14850  $0854  E4 03     cpx main.last         ; 3
    4950 x     9999  $0856  F0 03     beq main.fend6        ; 2+
    4851 x     9702  $0858  E8        inx                   ; 2
@@ -69,8 +71,10 @@
                                                      ;   21: last -= 1
      99 x      495  $085B  C6 03     dec main.last         ; 5
                      main.test4:
+                                                     ;   12: while last > 0 {
      99 x      296  $085D  D0 DB     bne main.while3       ; 2+
                      main.wend5:
+                                                     ;    5: fn main() {
       1 x        6  $085F  60        rts                   ; 6
                      ; $0860: 161 byte(s) left free so that indexed reads of the variables do not cross a page (not in the file)
                      

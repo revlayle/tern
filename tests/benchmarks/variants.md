@@ -14,4 +14,4 @@ see `analysis.md`. Bytes and cycles are counted as in `comparison.md`.
 | enemies.first | 124 | 45,556 | 132 | 55,156 |
 | enemies.inplace | 124 | 45,556 | 132 | 55,156 |
 | fib16.const | 79 | 859 | 133 | 1,379 |
-| interp.return | 204 | 5,116 | 203 | 5,388 |
+| interp.return | 199 | 4,766 | 198 | 5,038 |

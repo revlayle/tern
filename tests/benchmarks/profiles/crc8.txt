@@ -34,13 +34,16 @@
                      main.else7:
                      main.endif6:
                      main.fnext4:
+                                                     ;    9: for _ in 0..8 {
    2048 x     4096  $082D  CA        dex                   ; 2
    2048 x     5888  $082E  D0 F8     bne main.for5         ; 2+
                      main.fend3:
                      main.fnext1:
+                                                     ;    6: for i in 0..=255 {
     256 x      768  $0830  85 02     sta crc               ; 3
     256 x      512  $0832  C8        iny                   ; 2
     256 x      767  $0833  D0 E8     bne main.for2         ; 2+
                      main.fend0:
+                                                     ;    4: fn main() {
       1 x        6  $0835  60        rts                   ; 6
                      

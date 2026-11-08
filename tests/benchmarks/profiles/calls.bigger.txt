@@ -54,11 +54,13 @@
                      main.inc6:
                      main.endif4:
                      main.fnext1:
+                                                     ;   19: for i in 0..200 {
     200 x     1000  $0853  E6 05     inc main.i            ; 5
     200 x      600  $0855  A5 05     lda main.i            ; 3
     200 x      400  $0857  C9 C8     cmp #$C8              ; 2
     200 x      599  $0859  D0 C5     bne main.for2         ; 2+
                      main.fend0:
+                                                     ;   18: fn main() {
       1 x        6  $085B  60        rts                   ; 6
                                                      ;    9: fn clamp(v: u8 using A, top: u8) -> u8 {
                      clamp:
