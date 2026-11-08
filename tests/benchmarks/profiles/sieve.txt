@@ -8,7 +8,7 @@
                      $0812  A9 00     lda #$00              ; 2
                      $0814  A2 00     ldx #$00              ; 2
                      clear0:
-                     $0816  9D 50 08  sta bss,x             ; 5
+                     $0816  9D 00 09  sta bss,x             ; 5
                      $0819  E8        inx                   ; 2
                      $081A  D0 FA     bne clear0            ; 2+
                      $081C  20 22 08  jsr main              ; 6
@@ -20,44 +20,46 @@
       1 x        2  $0822  A9 02     lda #$02              ; 2
       1 x        3  $0824  85 03     sta main.n            ; 3
                                                      ;    7: while n < 16 {
-      1 x        3  $0826  4C 3D 08  jmp main.test1        ; 3
                      main.while0:
                                                      ;    8: if composite[n] == 0 {
-     14 x       28  $0829  AA        tax                   ; 2
-     14 x       56  $082A  BD 50 08  lda composite,x       ; 4+
-     14 x       36  $082D  D0 0C     bne main.endif3       ; 2+
+     14 x       28  $0826  AA        tax                   ; 2
+     14 x       56  $0827  BD 00 09  lda composite,x       ; 4+
+     14 x       36  $082A  D0 0C     bne main.endif3       ; 2+
                                                      ;   10: for m in (n << 1)..=255 step n using Y {
-      6 x       12  $082F  8A        txa                   ; 2
-      6 x       12  $0830  0A        asl a                 ; 2
-      6 x       12  $0831  A8        tay                   ; 2
+      6 x       12  $082C  8A        txa                   ; 2
+      6 x       12  $082D  0A        asl a                 ; 2
+      6 x       12  $082E  A8        tay                   ; 2
                      main.for6:
                                                      ;   11: composite[m] = m
-    335 x     1675  $0832  99 50 08  sta composite,y       ; 5
+    335 x     1675  $082F  99 00 09  sta composite,y       ; 5
                      main.fnext5:
-    335 x      670  $0835  18        clc                   ; 2
-    335 x     1005  $0836  65 03     adc main.n            ; 3
-    335 x      670  $0838  A8        tay                   ; 2
-    335 x      999  $0839  90 F7     bcc main.for6         ; 2+
+    335 x      670  $0832  18        clc                   ; 2
+    335 x     1005  $0833  65 03     adc main.n            ; 3
+    335 x      670  $0835  A8        tay                   ; 2
+    335 x      999  $0836  90 F7     bcc main.for6         ; 2+
                      main.fend4:
                      main.endif3:
                                                      ;   14: n += 1
-     14 x       70  $083B  E6 03     inc main.n            ; 5
+     14 x       70  $0838  E6 03     inc main.n            ; 5
                      main.test1:
-     15 x       45  $083D  A5 03     lda main.n            ; 3
-     15 x       30  $083F  C9 10     cmp #$10              ; 2
-     15 x       44  $0841  90 E6     bcc main.while0       ; 2+
+     14 x       42  $083A  A5 03     lda main.n            ; 3
+     14 x       28  $083C  C9 10     cmp #$10              ; 2
+     14 x       41  $083E  90 E6     bcc main.while0       ; 2+
                      main.wend2:
                                                      ;   16: for i in 2..=255 {
-      1 x        2  $0843  A2 02     ldx #$02              ; 2
+      1 x        2  $0840  A2 02     ldx #$02              ; 2
+      1 x        3  $0842  A4 02     ldy count             ; 3
                      main.for9:
                                                      ;   17: if composite[i] == 0 { count += 1 }
-    254 x     1096  $0845  BD 50 08  lda composite,x       ; 4+
-    254 x      708  $0848  D0 02     bne main.endif10      ; 2+
-     54 x      270  $084A  E6 02     inc count             ; 5
+    254 x     1016  $0844  BD 00 09  lda composite,x       ; 4+
+    254 x      708  $0847  D0 01     bne main.endif10      ; 2+
+     54 x      108  $0849  C8        iny                   ; 2
                      main.endif10:
                      main.fnext8:
-    254 x      508  $084C  E8        inx                   ; 2
-    254 x      761  $084D  D0 F6     bne main.for9         ; 2+
+    254 x      508  $084A  E8        inx                   ; 2
+    254 x      761  $084B  D0 F7     bne main.for9         ; 2+
                      main.fend7:
+      1 x        3  $084D  84 02     sty count             ; 3
       1 x        6  $084F  60        rts                   ; 6
+                     ; $0850: 176 byte(s) left free so that indexed reads of the variables do not cross a page (not in the file)
                      

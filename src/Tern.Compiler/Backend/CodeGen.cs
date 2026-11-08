@@ -435,8 +435,19 @@ public sealed class CodeGen
 
     private void GenBlock(BlockStmt block)
     {
-        foreach (var s in block.Statements) GenStmt(s);
+        for (int k = 0; k < block.Statements.Count; k++)
+        {
+            _previous = (k > 0 ? block.Statements[k - 1] : null, block.Statements[k]);
+            GenStmt(block.Statements[k]);
+        }
+        _previous = default;
     }
+
+    /// <summary>The statement of a block being generated, and the one before it in the block (null for the first).</summary>
+    private (Stmt? Before, Stmt? Current) _previous;
+
+    /// <summary><c>for</c> loops whose range cannot be empty because of where they are (<see cref="GenWhile"/>).</summary>
+    private readonly HashSet<ForStmt> _nonEmpty = [];
 
     private void GenStmt(Stmt stmt)
     {
@@ -494,6 +505,9 @@ public sealed class CodeGen
         var top = NewLabel("while");
         var test = NewLabel("test");
         var end = NewLabel("wend");
+        var previous = _previous.Current == w ? _previous.Before : null;
+        // An endless loop never reaches the store after it.
+        var held = w.Condition.ConstValue == 1 ? null : HoldInRegister(w.Body, w.Condition, null);
         _loopDepth++;
         if (w.Condition.ConstValue == 1)
         {
@@ -505,17 +519,101 @@ public sealed class CodeGen
         }
         else
         {
-            // Test at the bottom: one branch per pass instead of a branch and a jump.
-            Jmp(test);
+            // Test at the bottom: one branch per pass instead of a branch and a jump. The first test
+            // goes when the statement before the loop makes it true (F9); a loop that ends by counting
+            // down to zero tests the Z flag of its decrement, after one test on entry.
+            var decremented = DecrementTest(w);
+            bool firstTrue = FirstTestTrue(w, previous);
+            if (firstTrue) { }
+            else if (decremented is not null) GenCond(w.Condition, end, false);
+            else Jmp(test);
+            if (w.Body.Statements.FirstOrDefault() is ForStmt first && NonEmptyInside(w.Condition, first)) _nonEmpty.Add(first);
             Place(top);
             _loops.Add((end, test));
             GenBlock(w.Body);
             _loops.RemoveAt(_loops.Count - 1);
+            // The decrement must be the body's last instruction: dec v, or dex / dey for a held v.
+            bool zFromDecrement = decremented is { } d && _out.Count > 0 && _out[^1] switch
+            {
+                Instr { Mnemonic: Dec, Operand: VarOperand o } => o == d,
+                Instr { Mnemonic: Dex } => d.Variable.Register == Register.X && d.Offset == 0,
+                Instr { Mnemonic: Dey } => d.Variable.Register == Register.Y && d.Offset == 0,
+                _ => false,
+            };
             Place(test);
-            GenCond(w.Condition, top, true);
+            if (zFromDecrement) Branch(Bne, top);
+            else GenCond(w.Condition, top, true);
         }
         _loopDepth--;
         Place(end);
+        ReleaseHeld(held, w.Body);
+    }
+
+    /// <summary>
+    /// For <c>while v &gt; 0</c> or <c>while v != 0</c> (v a one-byte variable, or the high byte of a
+    /// 16-bit one) whose body ends with <c>v -= 1</c> (<c>w -= 256</c>) and has no <c>continue</c>:
+    /// the byte the decrement leaves Z for. Null otherwise.
+    /// </summary>
+    private static VarOperand? DecrementTest(WhileStmt w)
+    {
+        if (w.Condition is not BinaryExpr { Op: TokenKind.Greater or TokenKind.NotEq, Right.ConstValue: 0 } c
+            || c.Left.Type is not { Size: 1, IsSigned: false } || ContinuesLoop(w.Body)) return null;
+        (VariableSymbol? v, int offset, long step) = c.Left switch
+        {
+            NameExpr { Symbol: { Type.Size: 1 } s } => (s, 0, 1L),
+            MemberExpr { Member: "hi", Target: NameExpr { Symbol: { Type.Size: 2 } s } } => (s, 1, 256L),
+            _ => (null, 0, 0L),
+        };
+        if (v is null || v.IsVolatile || v.AliasOf is not null) return null;
+        return w.Body.Statements.LastOrDefault() is AssignStmt { Op: TokenKind.MinusEq, Target: NameExpr { Symbol: var t } } a
+            && t == v && a.Value.ConstValue == step ? new VarOperand(v, offset) : null;
+    }
+
+    /// <summary>True if a <c>continue</c> in the code goes to this loop's test (not one inside a loop of its own).</summary>
+    private static bool ContinuesLoop(Node node) => node switch
+    {
+        ContinueStmt => true,
+        WhileStmt or ForStmt => false,
+        _ => Children(node).Any(ContinuesLoop),
+    };
+
+    /// <summary>
+    /// True if the statement before a <c>while</c> sets its variable to a constant that makes the
+    /// first test true: <c>var n: u8 = 2</c> before <c>while n &lt; 16</c>.
+    /// </summary>
+    private static bool FirstTestTrue(WhileStmt w, Stmt? previous)
+    {
+        if (w.Condition is not BinaryExpr { Left: NameExpr { Symbol: { Type: { Size: 1, IsSigned: false }, IsVolatile: false } v }, Right.ConstValue: long r } c) return false;
+        long? value = previous switch
+        {
+            VarDecl { Symbol: var s, Init.ConstValue: long i } when s == v => i,
+            AssignStmt { Op: TokenKind.Eq, Target: NameExpr { Symbol: var s }, Value.ConstValue: long i } when s == v => i,
+            _ => null,
+        };
+        if (value is not long l) return false;
+        l &= 0xFF;
+        return c.Op switch
+        {
+            TokenKind.Less => l < r, TokenKind.LessEq => l <= r, TokenKind.Greater => l > r, TokenKind.GreaterEq => l >= r,
+            TokenKind.EqEq => l == r, TokenKind.NotEq => l != r, _ => false,
+        };
+    }
+
+    /// <summary>
+    /// True if <c>for i in 0..v</c>, the first statement of a body entered only when the loop's
+    /// condition <c>v &gt; 0</c> (or <c>v != 0</c>) holds, cannot be empty.
+    /// </summary>
+    private static bool NonEmptyInside(Expr condition, ForStmt f) =>
+        condition is BinaryExpr { Op: TokenKind.Greater or TokenKind.NotEq, Left: NameExpr { Symbol: { Type: { Size: 1, IsSigned: false }, IsVolatile: false } v }, Right.ConstValue: 0 }
+        && f.From.ConstValue == 0 && !f.Inclusive && f.StepValue == 1 && !f.VariableStep && f.To is NameExpr { Symbol: var to } && to == v;
+
+    /// <summary>Ends <see cref="HoldInRegister"/>: stores the variable if the loop assigns it, and frees the register.</summary>
+    private void ReleaseHeld(VariableSymbol? held, Stmt body)
+    {
+        if (held?.Register is not { } reg) return;
+        _reserved.Remove(reg);
+        held.Register = null;
+        if (AssignsVar(body, held)) Op(reg == Register.X ? Stx : Sty, Var(held));
     }
 
     /// <summary>
@@ -755,6 +853,14 @@ public sealed class CodeGen
         var target = a.Target;
         bool byOne = a.Value.ConstValue == 1 && a.Op is TokenKind.PlusEq or TokenKind.MinusEq;
 
+        // x += 1 / x -= 1 on a variable held in a register for a loop: inx / dex / iny / dey.
+        if (byOne && target is NameExpr { Symbol.Register: Register.X or Register.Y } held)
+        {
+            bool x = held.Symbol!.Register == Register.X;
+            Emit(a.Op == TokenKind.PlusEq ? (x ? Inx : Iny) : (x ? Dex : Dey));
+            return;
+        }
+
         // x += 1 / x -= 1 on memory: inc / dec.
         if (byOne && target is NameExpr { Symbol: { InMemory: true } v })
         {
@@ -939,6 +1045,12 @@ public sealed class CodeGen
     {
         switch (target)
         {
+            case NameExpr { Symbol.Register: Register.X }:
+                Emit(Tax);
+                break;
+            case NameExpr { Symbol.Register: Register.Y }:
+                Emit(Tay);
+                break;
             case NameExpr { Symbol: { } v }:
                 Op(Sta, Var(v));
                 break;
@@ -1722,6 +1834,9 @@ public sealed class CodeGen
                 TokenKind.LessEq => TokenKind.GreaterEq, TokenKind.GreaterEq => TokenKind.LessEq, _ => op,
             };
         }
+        // Unsigned, x > 0 is x != 0 and x <= 0 is x == 0: the load sets Z, no cmp needed (F9).
+        if (type.Size == 1 && !signed && right.ConstValue == 0 && op is TokenKind.Greater or TokenKind.LessEq)
+            op = op == TokenKind.Greater ? TokenKind.NotEq : TokenKind.EqEq;
         if (type.Size == 1 && op is TokenKind.Greater or TokenKind.LessEq && right.ConstValue is long c && c < type.MaxValue)
         {
             right = new NumberExpr(right.Pos, c + 1) { Type = right.Type, ConstValue = c + 1 };
@@ -2290,6 +2405,7 @@ public sealed class CodeGen
         long? from = f.From.ConstValue, to = f.To.ConstValue;
         bool inclusive = f.Inclusive;
         if (c.Register is null) ChooseCounterRegister(f, c);
+        if (c.Register is null) ChooseOuterCounterRegister(f, c);
 
         var end = NewLabel("fend");
         var cont = NewLabel("fnext");
@@ -2363,11 +2479,12 @@ public sealed class CodeGen
 
         SetCounter(c, f.From);
         if (c.Register is { } held) _reserved.Add(held);
+        var inRegister = HoldInRegister(f.Body, null, c);
 
         // Skip the loop if the range is empty, unless the bounds prove it is not.
         long max = type.MaxValue;
         bool provablyNonEmpty = (from is not null && to is not null)
-            || (inclusive && up && to == max) || (inclusive && !up && to == 0);
+            || (inclusive && up && to == max) || (inclusive && !up && to == 0) || _nonEmpty.Contains(f);
         if (!provablyNonEmpty)
         {
             var emptyIf = (up, inclusive) switch
@@ -2394,6 +2511,7 @@ public sealed class CodeGen
             StepGeneral(c, up, stepOperand ?? Byte(d), inclusive, to, bound, top, end);
 
         Place(end);
+        ReleaseHeld(inRegister, f.Body);
         if (c.Register is { } r) _reserved.Remove(r);
         if (stepTemp is not null) Release(stepTemp);
         if (boundTemp is not null) Release(boundTemp);
@@ -2408,16 +2526,157 @@ public sealed class CodeGen
     /// </summary>
     private void ChooseCounterRegister(ForStmt f, VariableSymbol c)
     {
-        if (c.Type.Size != 1 || Math.Abs(f.StepValue) != 1 || c.AddressTaken || _reserved.Count > 0
+        if (c.Type.Size != 1 || Math.Abs(f.StepValue) != 1 || c.AddressTaken
             || Descendants(f.Body).Any(n => n is ForStmt or WhileStmt) || !KeepsIndexRegistersFree(f.Body)) return;
-        var (plain, other) = PointerIndexes(f.Body, c);
-        var reg = plain > 0 && other == 0 ? Register.Y : Register.X;
+        Register reg;
+        if (_reserved.Count == 0)
+        {
+            var (plain, other) = PointerIndexes(f.Body, c);
+            reg = plain > 0 && other == 0 ? Register.Y : Register.X;
+        }
+        else if (_reserved.Count == 1 && IndexesHeld(f.Body, c, null, null) && !Descendants(f.Body).Any(n => n is MatchStmt || (n is IndexExpr ix && IsPointerIndex(ix))))
+        {
+            // M18 F13: beside a register already held (an outer counter in Y), the other one, when
+            // every index in the body is this counter or already in a register.
+            reg = _reserved.Contains(Register.X) ? Register.Y : Register.X;
+        }
+        else return;
         if (_fn.ReturnRegister is { } ret && ret.Uses(reg) && Descendants(f.Body).Any(n => n is ReturnStmt { Value: not null })) return;
         c.Register = reg;
         _fn.FrameVariables.Remove(c);
     }
 
-    /// <summary><c>for _ in a..b</c> with constant bounds: count down to zero.</summary>
+    /// <summary>
+    /// True if every index in <paramref name="body"/> needs no index register of its own: a constant,
+    /// the counter <paramref name="c"/>, a variable already in a register, or <paramref name="outer"/>
+    /// (about to be held in <paramref name="outerReg"/>). A pointer access needs its index in Y.
+    /// </summary>
+    private bool IndexesHeld(Node body, VariableSymbol c, VariableSymbol? outer, Register? outerReg)
+    {
+        Register? RegisterOf(Expr e) => e is NameExpr { Symbol: { } s } ? s == outer ? outerReg : s.Register : null;
+        foreach (var ix in Descendants(body).OfType<IndexExpr>())
+        {
+            if (ix.Index.ConstValue is not null) continue;
+            if (IsPointerIndex(ix))
+            {
+                if (!PlainPointerIndex(ix) || RegisterOf(ix.Index) != Register.Y) return false;
+                continue;
+            }
+            var index = FoldIndexOffset(ix.Index, ArrayOf(ix)).Index;
+            if (!(index is NameExpr { Symbol: var s } && s == c) && RegisterOf(index) is null) return false;
+        }
+        return true;
+    }
+
+    /// <summary>
+    /// M18 F13: the counter of a loop with loops inside goes in a register too, when the body has
+    /// one level of <c>for</c> loops and no call, asm block, <c>return</c> or <c>while</c>, and every
+    /// use of the counter is one a register serves as well as memory. Y, leaving X to the inner
+    /// loops (they take it if every index in them is in a register, see
+    /// <see cref="ChooseCounterRegister"/>); X if a pointer access other than <c>p[counter]</c> needs
+    /// Y. An inner loop with <c>using</c> must use the other register, and every index in it must
+    /// already be in a register.
+    /// </summary>
+    private void ChooseOuterCounterRegister(ForStmt f, VariableSymbol c)
+    {
+        if (c.Type.Size != 1 || Math.Abs(f.StepValue) != 1 || c.AddressTaken || _reserved.Count > 0 || f.VariableStep) return;
+        var nodes = Descendants(f.Body).ToList();
+        var inner = nodes.OfType<ForStmt>().ToList();
+        if (inner.Count == 0 || nodes.Any(n => n is WhileStmt or ReturnStmt or AsmStmt or CallExpr { Function: not null })
+            || inner.Any(l => Descendants(l.Body).Any(n => n is ForStmt or WhileStmt))) return;
+        var parents = new Dictionary<Node, Node>();
+        foreach (var n in nodes) foreach (var child in Children(n)) parents[child] = n;
+        if (nodes.OfType<NameExpr>().Any(n => n.Symbol == c && !Served(n, parents.GetValueOrDefault(n)))) return;
+
+        bool pointersNeedY = nodes.OfType<IndexExpr>().Any(ix => IsPointerIndex(ix) && !(PlainPointerIndex(ix) && ix.Index is NameExpr { Symbol: var s } && s == c));
+        var reg = pointersNeedY || inner.Any(l => l.Symbol!.Register == Register.Y) ? Register.X : Register.Y;
+        foreach (var l in inner.Where(l => l.Symbol!.Register is not null))
+            if (l.Symbol!.Register == reg || !IndexesHeld(l.Body, l.Symbol, c, reg)) return;
+        c.Register = reg;
+        _fn.FrameVariables.Remove(c);
+    }
+
+    /// <summary>
+    /// M18 F7/F11: a one-byte variable of ordinary memory used in a loop is held in a free index
+    /// register for the loop (spec 4: its values may be kept in registers; spec 7: the compiler
+    /// chooses registers). It is loaded before the loop and, if the loop assigns it, stored after its
+    /// end, where a <c>break</c> goes too. Only for a loop with no call, asm block, <c>return</c> or
+    /// loop inside, so nothing else can read the memory or needs the register, and only when every
+    /// use is one a register serves at least as well as memory: an array index (also <c>a[v - c]</c>),
+    /// a plain read, the left operand of an operator or compare with a simple right one, an
+    /// assignment. At least one use must save more than a cycle: an index (no <c>ldx v</c>) or
+    /// <c>v += 1</c> / <c>v -= 1</c> (<c>inx</c> for <c>inc v</c>); a plain read only trades <c>lda</c>
+    /// for <c>txa</c>, which may lose to what the optimizer does with memory. The variable with the
+    /// most such uses, then the most uses; X unless every
+    /// pointer access is <c>p[v]</c> (then Y). Beside a counter held in a register, only when every
+    /// index in the body is the counter or the variable and nothing else needs an index register.
+    /// Returns the variable, now held, or null.
+    /// </summary>
+    private VariableSymbol? HoldInRegister(Node body, Expr? condition, VariableSymbol? counter)
+    {
+        var nodes = Descendants(body).Concat(condition is null ? [] : Descendants(condition)).ToList();
+        if (nodes.Skip(1).Any(n => n is ForStmt or WhileStmt or ReturnStmt or CallExpr { Function: not null } or AsmStmt)) return null;
+        var heldCounter = counter?.Register is not null ? counter : null;
+        if (heldCounter is null ? _reserved.Count > 0 : _reserved.Count != 1 || !_reserved.Contains(heldCounter.Register!.Value)) return null;
+        if (heldCounter is not null && nodes.Any(n => n is MatchStmt || (n is IndexExpr ix && IsPointerIndex(ix)))) return null;
+
+        var declared = nodes.OfType<VarDecl>().Select(d => d.Symbol).ToHashSet();
+        bool Ordinary(VariableSymbol v) =>
+            v.Type.Kind == TypeKind.U8 && v.AliasOf is null && v.InMemory && v != counter && !declared.Contains(v)
+            && !v.AddressTaken && !v.IsVolatile && v.FixedAddress is null && v.Region is null && !v.IsData && !v.ReadOnly
+            && !v.InOverlayArea && v.OverlayArea is null && v.Kind is VariableKind.Global or VariableKind.Local or VariableKind.Parameter;
+
+        // Each use of a candidate, with the node it is part of.
+        var parents = new Dictionary<Node, Node>();
+        foreach (var n in nodes) foreach (var c in Children(n)) parents[c] = n;
+        // Per candidate: uses where the register saves a load or an inc (an index, v += 1), and all uses.
+        var uses = new Dictionary<VariableSymbol, (int Strong, int All)>();
+        var bad = new HashSet<VariableSymbol>();
+        foreach (var n in nodes.OfType<NameExpr>())
+        {
+            if (n.Symbol is not { } v || !Ordinary(v) || bad.Contains(v)) continue;
+            var parent = parents.GetValueOrDefault(n);
+            if (!Served(n, parent)) { bad.Add(v); uses.Remove(v); continue; }
+            bool strong = parent is IndexExpr || (parent is AssignStmt { Op: TokenKind.PlusEq or TokenKind.MinusEq, Value.ConstValue: 1 } a && a.Target == n);
+            var (st, all) = uses.GetValueOrDefault(v);
+            uses[v] = (st + (strong ? 1 : 0), all + 1);
+        }
+        foreach (var v in uses.Where(u => u.Value.Strong == 0).Select(u => u.Key).ToList()) uses.Remove(v);
+        // Beside a held counter: every index must be the counter or the variable.
+        if (heldCounter is not null)
+            foreach (var v in uses.Keys.ToList())
+                if (!nodes.OfType<IndexExpr>().All(ix => ix.Index.ConstValue is not null
+                        || FoldIndexOffset(ix.Index, ArrayOf(ix)).Index is NameExpr { Symbol: var s } && (s == heldCounter || s == v)))
+                    uses.Remove(v);
+        if (uses.Count == 0) return null;
+        var held = uses.MaxBy(u => (u.Value.Strong, u.Value.All)).Key;
+
+        Register reg;
+        if (heldCounter is not null) reg = heldCounter.Register == Register.X ? Register.Y : Register.X;
+        else
+        {
+            var (plain, other) = PointerIndexes(body, held);
+            reg = plain > 0 && other == 0 ? Register.Y : Register.X;
+        }
+        Op(reg == Register.X ? Ldx : Ldy, Var(held));
+        held.Register = reg;
+        _reserved.Add(reg);
+        return held;
+    }
+
+    /// <summary>A use of a variable that a register serves at least as well as memory (<see cref="HoldInRegister"/>).</summary>
+    private bool Served(NameExpr use, Node? parent) => parent switch
+    {
+        IndexExpr ix => ix.Index == use && (!IsPointerIndex(ix) || PlainPointerIndex(ix)),
+        // txa (or tya) where memory needs lda; the operator's own instruction takes the right operand.
+        BinaryExpr b => b.Left == use && b.Type.Size == 1 && Simple1(b.Right) is not null
+            && b.Op is TokenKind.Plus or TokenKind.Minus or TokenKind.Amp or TokenKind.Pipe or TokenKind.Caret
+                or TokenKind.EqEq or TokenKind.NotEq or TokenKind.Less or TokenKind.LessEq or TokenKind.Greater or TokenKind.GreaterEq,
+        AssignStmt a => a.Target == use ? a.Op == TokenKind.Eq || Simple1(a.Value) is not null || a.Value.ConstValue is not null : a.Value == use,
+        VarDecl d => d.Init == use,
+        MatchStmt m => m.Subject == use,
+        _ => false,
+    };
     private void GenRepeat(ForStmt f, VariableSymbol c, long count, Label top, Label cont, Label end)
     {
         _out.Add(new Comment($"repeat {count} times"));

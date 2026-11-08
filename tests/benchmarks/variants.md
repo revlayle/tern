@@ -5,13 +5,13 @@ see `analysis.md`. Bytes and cycles are counted as in `comparison.md`.
 
 | variant | bytes | cycles | task bytes | task cycles |
 |---|--:|--:|--:|--:|
-| bubble.direct | 69 | 131,788 | 69 | 131,788 |
-| bubble.minus | 73 | 141,588 | 69 | 131,788 |
+| bubble.direct | 58 | 130,787 | 58 | 130,787 |
+| bubble.minus | 66 | 141,082 | 58 | 130,787 |
 | calls.bigger | 83 | 23,365 | 91 | 26,965 |
 | calls.inline | 71 | 17,613 | 91 | 26,965 |
 | calls.regs | 89 | 27,353 | 91 | 26,965 |
-| copy.pages | 173 | 51,900 | 178 | 62,154 |
-| enemies.first | 127 | 45,709 | 135 | 55,309 |
-| enemies.inplace | 127 | 45,709 | 135 | 55,309 |
-| fib16.const | 79 | 859 | 137 | 1,385 |
-| interp.return | 204 | 5,116 | 222 | 5,768 |
+| copy.pages | 166 | 51,867 | 172 | 61,380 |
+| enemies.first | 124 | 45,556 | 132 | 55,156 |
+| enemies.inplace | 124 | 45,556 | 132 | 55,156 |
+| fib16.const | 79 | 859 | 133 | 1,379 |
+| interp.return | 204 | 5,116 | 203 | 5,388 |

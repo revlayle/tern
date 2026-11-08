@@ -138,7 +138,89 @@ public class DeadStoreTests
                 new LabelDef(sub), new Instr(Lda, Absolute, new VarOperand(T), pos), new Instr(Sta, Absolute, new VarOperand(X), pos), new Instr(Mnemonic.Rts, Implied, null, pos)));
     }
 
+    // M18 part 3, F7: ordinary globals.
+
+    [Fact]
+    public void A_store_into_a_global_stored_again_before_any_read_goes()
+    {
+        var y = new VariableSymbol("y", default, TernType.U8, VariableKind.Global, null);
+        Assert.Equal("lda #$02|sta x|rts", Optimize(Imm(Lda, 1), Abs(Sta, X), Imm(Lda, 2), Abs(Sta, X), Rts));
+        // Another global in between changes nothing; on both paths of a branch.
+        var skip = new Label("skip");
+        Assert.Equal("ldx #$01|lda y|beq skip|ldx #$03|stx y|lda #$02|sta x|rts",
+            Optimize(Imm(Ldx, 1), Abs(Stx, X), Abs(Lda, y), new Instr(Beq, Relative, new LabelOperand(skip)), Imm(Ldx, 3), Abs(Stx, X),
+                new LabelDef(skip), Abs(Stx, y), Imm(Lda, 2), Abs(Sta, X), Rts));
+    }
+
+    [Fact]
+    public void A_global_is_read_by_a_call_a_return_a_jump_out_and_the_end_of_the_code()
+    {
+        var g = new Label("g");
+        Assert.Equal("lda #$01|sta x|jsr g|lda #$02|sta x|rts",
+            Optimize(Imm(Lda, 1), Abs(Sta, X), new Instr(Jsr, Absolute, new LabelOperand(g)), Imm(Lda, 2), Abs(Sta, X), Rts));
+        Assert.Equal("lda #$01|sta x|rts", Optimize(Imm(Lda, 1), Abs(Sta, X), Rts));
+        Assert.Equal("lda #$01|sta x|jmp g", Optimize(Imm(Lda, 1), Abs(Sta, X), new Instr(Mnemonic.Jmp, Absolute, new LabelOperand(g))));
+        Assert.Equal("lda #$01|sta x|beq g|lda #$02|sta x|rts",
+            Optimize(Imm(Lda, 1), Abs(Sta, X), new Instr(Beq, Relative, new LabelOperand(g)), Imm(Lda, 2), Abs(Sta, X), Rts));
+        Assert.Equal("lda #$01|sta x", Optimize(Imm(Lda, 1), Abs(Sta, X)));
+    }
+
+    [Fact]
+    public void A_global_may_be_read_through_a_pointer_or_at_a_number()
+    {
+        var p = new VariableSymbol("p", default, TernType.U16, VariableKind.Global, null);
+        Assert.Equal("lda #$01|sta x|ldy #$00|lda p|lda #$02|sta x|rts",
+            Optimize(Imm(Lda, 1), Abs(Sta, X), Imm(Ldy, 0), new Instr(Lda, IndirectIndexed, new VarOperand(p)), Imm(Lda, 2), Abs(Sta, X), Rts));
+        Assert.Equal("lda #$01|sta x|lda $0900|lda #$02|sta x|rts",
+            Optimize(Imm(Lda, 1), Abs(Sta, X), new Instr(Lda, Absolute, new AddrOperand(0x900)), Imm(Lda, 2), Abs(Sta, X), Rts));
+        // A write through a pointer reads nothing.
+        Assert.Equal("lda #$01|ldy #$00|sta p|lda #$02|sta x|rts",
+            Optimize(Imm(Lda, 1), Abs(Sta, X), Imm(Ldy, 0), new Instr(Sta, IndirectIndexed, new VarOperand(p)), Imm(Lda, 2), Abs(Sta, X), Rts));
+    }
+
+    [Fact]
+    public void Only_ordinary_globals()
+    {
+        var shaky = new VariableSymbol("v", default, TernType.U8, VariableKind.Global, null) { DeclaredVolatile = true };
+        var taken = new VariableSymbol("a", default, TernType.U8, VariableKind.Global, null) { AddressTaken = true };
+        var at = new VariableSymbol("h", default, TernType.U8, VariableKind.Global, null) { FixedAddress = 0xC000 };
+        var shared = new VariableSymbol("s", default, TernType.U8, VariableKind.Global, null) { UsedFromTwoRoots = true };
+        foreach (var v in new[] { shaky, taken, at, shared })
+            Assert.Equal($"lda #$01|sta {v.Name}|lda #$02|sta {v.Name}|rts", Optimize(Imm(Lda, 1), Abs(Sta, v), Imm(Lda, 2), Abs(Sta, v), Rts));
+    }
+
     // ---------- Programs ----------
+
+    [Fact]
+    public void Globals_overwritten_before_they_are_read_give_the_same_results()
+    {
+        byte[] input = [0, 1, 127, 128, 255, 254, 3, 0];
+        var r = Run.Program($$"""
+            var values: [u8; 8] = [{{string.Join(", ", input)}}]
+            var last: u8
+            var big: u8
+            var seen: u8
+            fn note() { seen += last }
+            fn main() {
+                for i in 0..8 {
+                    last = values[i]
+                    if last > 100 { big += 1 }
+                    last = last + 1
+                    note()
+                    last = 0
+                }
+                last = values[7] ^ 255
+            }
+            """);
+        int seen = 0, big = 0;
+        foreach (var v in input) { if (v > 100) big++; seen += (byte)(v + 1); }
+        Assert.Equal(input[7] ^ 255, r.U8("last"));
+        Assert.Equal(big, r.U8("big"));
+        Assert.Equal(seen & 0xFF, r.U8("seen"));
+        // last = values[i] is overwritten before the call reads it; last = 0 in the next pass or after the loop.
+        var main = r.Result.Listing.Split("\nmain:")[1].Split("\nnote:")[0];
+        Assert.Equal(2, main.Split("sta last").Length - 1);
+    }
 
     [Fact]
     public void A_local_used_only_from_a_is_not_stored()

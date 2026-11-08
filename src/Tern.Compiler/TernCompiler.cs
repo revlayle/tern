@@ -61,89 +61,112 @@ public static class TernCompiler
         var gen = new CodeGen(program);
         var functionCode = gen.GenerateFunctions();
         Checker.CheckSharedFunctions(program);
-        var plan = Allocator.Allocate(program, platform);
-        foreach (var v in program.Globals.Concat(program.Functions.SelectMany(f => f.FrameVariables)))
-            if (v.Address is >= 0 and < 0x100 && v.FixedAddress is null)
-                foreach (int o in v.JumpVectorOffsets)
-                    if (((v.Address + o) & 0xFF) == 0xFF)
-                        throw new CompileError(v.Pos, $"'{v.Name}' is used as jmp ({v.Name}{o:+0;-0;''}) and was placed so that the vector starts at $FF, where the 6502 reads it wrongly");
-
+        // Indexed arrays placed so that they do not cross a page, with the variables starting on one;
+        // if the program areas have no room for that, the variables are placed one after another (F12).
+        RamPlan plan = null!;
+        List<AsmItem> items = null!;
+        AssembledCode code = null!;
+        Dictionary<VariableSymbol, Label> imageLabels = null!;
         var layout = program.Layout;
         bool binary = program.IsBinary;
-        if (!binary && layout.Program[0].First != platform.LoadAddress)
-            throw new CompileError(program.Main.Pos,
-                $"A program with 'main' starts at ${platform.LoadAddress:X4}, where the {platform.Name.ToUpperInvariant()} BASIC line goes, but its first program area begins at ${layout.Program[0].First:X4}. " +
-                (layout.ProgramReplaced ? $"Start the first 'program' line of the memory block at ${platform.LoadAddress:X4}" : "Move the 'reserved' or 'region' range that covers it"));
-        CheckFixedData(program, plan);
-
         var start = new Label("start");
         var halt = new Label("halt");
         var bss = new Label("bss");
         var setup = new Label("setup");
-        List<AsmItem> items;
-        if (!binary)
+        // Indexed reads only: a store or a read-modify-write takes the same cycles across a page.
+        var indexed = new Dictionary<VariableSymbol, List<int>>();
+        foreach (var i in functionCode.OfType<Instr>())
+            if (i.Mode is Tern.Cpu.AddressingMode.AbsoluteX or Tern.Cpu.AddressingMode.AbsoluteY or Tern.Cpu.AddressingMode.ZeroPageX or Tern.Cpu.AddressingMode.ZeroPageY
+                && AsmEffects.ReadsMemory(i.Mnemonic, i.Mode) && !AsmEffects.WritesMemory(i.Mnemonic, i.Mode)
+                && i.Operand is VarOperand { Variable: var v } o)
+                (indexed.TryGetValue(v.Storage, out var list) ? list : indexed[v.Storage] = []).Add(v.AliasOffset + o.Offset);
+        for (bool byPage = true; ; byPage = false)
         {
-            items = [new SectionStart("startup"), new DataBytes(platform.Header), new LabelDef(start), new Comment("startup")];
-            items.AddRange(Startup(plan, bss, gen.LabelOf));
-            items.Add(new Instr(Jsr, Absolute, new LabelOperand(gen.LabelOf(program.Main))));
-            items.Add(new LabelDef(halt));
-            items.Add(new Instr(Jmp, Absolute, new LabelOperand(halt)));
-        }
-        else
-        {
-            // A binary starts with its jump table: setup, then the exports in the order they were listed (spec 12.3).
-            items = [new SectionStart("jump table"), new LabelDef(start), new Instr(Jmp, Absolute, new LabelOperand(setup))];
-            foreach (var export in program.Exports)
-                items.Add(new Instr(Jmp, Absolute, new LabelOperand(gen.LabelOf(export))));
-            items.Add(new SectionStart("setup"));
-            items.Add(new LabelDef(setup));
-            items.AddRange(Startup(plan, bss, gen.LabelOf));
-            items.Add(new Instr(Rts));
-        }
-        items.AddRange(functionCode);
+            plan = Allocator.Allocate(program, platform, byPage, indexed);
+            foreach (var v in program.Globals.Concat(program.Functions.SelectMany(f => f.FrameVariables)))
+                if (v.Address is >= 0 and < 0x100 && v.FixedAddress is null)
+                    foreach (int o in v.JumpVectorOffsets)
+                        if (((v.Address + o) & 0xFF) == 0xFF)
+                            throw new CompileError(v.Pos, $"'{v.Name}' is used as jmp ({v.Name}{o:+0;-0;''}) and was placed so that the vector starts at $FF, where the 6502 reads it wrongly");
 
-        var imageLabels = new Dictionary<VariableSymbol, Label>();
-        foreach (var g in plan.ImageGlobals)
-        {
-            var label = new Label(g.Name);
-            imageLabels[g] = label;
-            items.Add(new SectionStart(g.Name));
-            if (g.JumpVectorOffsets.Count > 0)
-                items.Add(new Padding(pc => Assembler.AvoidPageEnd(pc, g.JumpVectorOffsets), $"jmp ({g.Name}) must not read a vector at $xxFF"));
-            items.Add(new LabelDef(label));
-            items.AddRange(ImageBytes(g, gen.LabelOf));
-        }
-        foreach (var g in plan.FixedImageGlobals)
-        {
-            items.Add(new SectionStart(g.Name, g.Address, Overlay: g.OverlayArea is null ? null : g.Module!.Name));
-            items.AddRange(ImageBytes(g, gen.LabelOf));
-        }
-        // Overlay modules: their variables are bytes of the file, zeros where there is no initial value.
-        foreach (var g in plan.OverlayGlobals)
-        {
-            var label = new Label(g.Name);
-            imageLabels[g] = label;
-            items.Add(new SectionStart(g.Name, Overlay: g.Module!.Name));
-            if (g.JumpVectorOffsets.Count > 0)
-                items.Add(new Padding(pc => Assembler.AvoidPageEnd(pc, g.JumpVectorOffsets), $"jmp ({g.Name}) must not read a vector at $xxFF"));
-            items.Add(new LabelDef(label));
-            items.AddRange(ImageBytes(g, gen.LabelOf));
-        }
-        // Variables after the program start at bss. Move them all, if needed, so that no jmp (...)
-        // vector among them starts at an address ending in $FF.
-        var ramVectors = plan.ZeroedGlobals.Concat(plan.NoinitGlobals).Concat(plan.FrameVariables)
-            .SelectMany(e => e.Var.JumpVectorOffsets.Select(o => e.Offset + o)).ToList();
-        items.Add(new Reserve(bss, plan.TotalSize, ramVectors));
+            if (!binary && layout.Program[0].First != platform.LoadAddress)
+                throw new CompileError(program.Main.Pos,
+                    $"A program with 'main' starts at ${platform.LoadAddress:X4}, where the {platform.Name.ToUpperInvariant()} BASIC line goes, but its first program area begins at ${layout.Program[0].First:X4}. " +
+                    (layout.ProgramReplaced ? $"Start the first 'program' line of the memory block at ${platform.LoadAddress:X4}" : "Move the 'reserved' or 'region' range that covers it"));
+            CheckFixedData(program, plan);
 
-        var overlayAreas = program.Modules.Where(m => m.OverlayArea is not null)
-            .ToDictionary(m => m.Name, m => layout.Overlays[m.OverlayArea!]);
-        var code = Assembler.Assemble(items, layout.Program, () =>
-        {
-            foreach (var (g, label) in imageLabels) g.Address = label.Address;
-            foreach (var (v, offset) in plan.ZeroedGlobals.Concat(plan.NoinitGlobals)) v.Address = bss.Address + offset;
-            foreach (var (v, offset) in plan.FrameVariables) v.Address = bss.Address + offset;
-        }, overlayAreas, program.Modules.Where(m => m.ImportedBy is not null && m.OverlayArea is not null).ToDictionary(m => m.Name, m => m.ImportedBy!.Pos));
-        CheckFixedAddresses(program, platform, code, plan);
+            if (!binary)
+            {
+                items = [new SectionStart("startup"), new DataBytes(platform.Header), new LabelDef(start), new Comment("startup")];
+                items.AddRange(Startup(plan, bss, gen.LabelOf));
+                items.Add(new Instr(Jsr, Absolute, new LabelOperand(gen.LabelOf(program.Main))));
+                items.Add(new LabelDef(halt));
+                items.Add(new Instr(Jmp, Absolute, new LabelOperand(halt)));
+            }
+            else
+            {
+                // A binary starts with its jump table: setup, then the exports in the order they were listed (spec 12.3).
+                items = [new SectionStart("jump table"), new LabelDef(start), new Instr(Jmp, Absolute, new LabelOperand(setup))];
+                foreach (var export in program.Exports)
+                    items.Add(new Instr(Jmp, Absolute, new LabelOperand(gen.LabelOf(export))));
+                items.Add(new SectionStart("setup"));
+                items.Add(new LabelDef(setup));
+                items.AddRange(Startup(plan, bss, gen.LabelOf));
+                items.Add(new Instr(Rts));
+            }
+            items.AddRange(functionCode);
+
+            imageLabels = new Dictionary<VariableSymbol, Label>();
+            foreach (var g in plan.ImageGlobals)
+            {
+                var label = new Label(g.Name);
+                imageLabels[g] = label;
+                items.Add(new SectionStart(g.Name));
+                if (g.JumpVectorOffsets.Count > 0)
+                    items.Add(new Padding(pc => Assembler.AvoidPageEnd(pc, g.JumpVectorOffsets), $"jmp ({g.Name}) must not read a vector at $xxFF"));
+                items.Add(new LabelDef(label));
+                items.AddRange(ImageBytes(g, gen.LabelOf));
+            }
+            foreach (var g in plan.FixedImageGlobals)
+            {
+                items.Add(new SectionStart(g.Name, g.Address, Overlay: g.OverlayArea is null ? null : g.Module!.Name));
+                items.AddRange(ImageBytes(g, gen.LabelOf));
+            }
+            // Overlay modules: their variables are bytes of the file, zeros where there is no initial value.
+            foreach (var g in plan.OverlayGlobals)
+            {
+                var label = new Label(g.Name);
+                imageLabels[g] = label;
+                items.Add(new SectionStart(g.Name, Overlay: g.Module!.Name));
+                if (g.JumpVectorOffsets.Count > 0)
+                    items.Add(new Padding(pc => Assembler.AvoidPageEnd(pc, g.JumpVectorOffsets), $"jmp ({g.Name}) must not read a vector at $xxFF"));
+                items.Add(new LabelDef(label));
+                items.AddRange(ImageBytes(g, gen.LabelOf));
+            }
+            // Variables after the program start at bss. Move them all, if needed, so that no jmp (...)
+            // vector among them starts at an address ending in $FF.
+            var ramVectors = plan.ZeroedGlobals.Concat(plan.NoinitGlobals).Concat(plan.FrameVariables)
+                .SelectMany(e => e.Var.JumpVectorOffsets.Select(o => e.Offset + o)).ToList();
+            items.Add(new Reserve(bss, plan.TotalSize, ramVectors, plan.PageArrays.Count > 0 ? plan.PageOffset : null));
+
+            var overlayAreas = program.Modules.Where(m => m.OverlayArea is not null)
+                .ToDictionary(m => m.Name, m => layout.Overlays[m.OverlayArea!]);
+            // Placed by page, the variables may not fit, or may now overlap a fixed-address variable
+            // (review M18 part 3, finding 1): then place them one after another. That try reports
+            // any error as before.
+            try
+            {
+                code = Assembler.Assemble(items, layout.Program, () =>
+                {
+                    foreach (var (g, label) in imageLabels) g.Address = label.Address;
+                    foreach (var (v, offset) in plan.ZeroedGlobals.Concat(plan.NoinitGlobals)) v.Address = bss.Address + offset;
+                    foreach (var (v, offset) in plan.FrameVariables) v.Address = bss.Address + offset;
+                }, overlayAreas, program.Modules.Where(m => m.ImportedBy is not null && m.OverlayArea is not null).ToDictionary(m => m.Name, m => m.ImportedBy!.Pos));
+                CheckFixedAddresses(program, platform, code, plan);
+                break;
+            }
+            catch (Exception e) when (byPage && plan.PageArrays.Count > 0 && e is Assembler.NoPageStart or CompileError) { }
+        }
 
         // The file covers every byte from the lowest to the highest address used; gaps are zeros.
         int loadAddress = code.Segments.Min(s => s.Address);
@@ -228,6 +251,9 @@ public static class TernCompiler
         report.AppendLine($"Code and data: ${loadAddress:X4}-${fileEnd - 1:X4} ({image.Length} bytes)");
         report.AppendLine(code.Variables is { } vars
             ? $"Variables after the program: {plan.TotalSize} bytes, up to ${vars.Last:X4}"
+              + (plan.PageArrays.Count > 0
+                  ? $", from ${vars.First:X4}, placed so that indexed reads do not cross a page: {string.Join(", ", plan.PageArrays.Select(a => $"{a.QualifiedName} ${a.Address:X4}"))}"
+                  : "")
             : "Variables after the program: 0 bytes");
         foreach (var table in program.Globals.Where(g => g.IsOffsetTable))
             report.AppendLine($"Offset table {table.Name}: {table.Type.Size} bytes, in the program");

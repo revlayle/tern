@@ -72,14 +72,24 @@ public class WideningAddTests
         var r = Run.Program("""
             var w: u16 = 300
             var b: u8 = 200
+            var x: u16
+            fn up() { w += b as u16 }
+            fn down() { w -= b as u16 }
             fn main() {
+                up()
+                x = w
+                down()
                 w += b as u16
                 w -= b as u16
             }
             """);
         Assert.Equal(300, r.U16("w"));
-        // A still holds w after the inc w+1 (F17), so the subtraction does not load it.
-        Assert.Equal("lda b|clc|adc w|sta w|bcc main.c0|inc w+1|sec|sbc b|sta w|bcs main.c1|dec w+1|rts", Code(r));
+        Assert.Equal(500, r.U16("x"));
+        Assert.Matches(@"^lda b\|clc\|adc w\|sta w\|bcc up\.c\d+\|inc w\+1\|rts$", Code(r, "up"));
+        Assert.Matches(@"^lda w\|sec\|sbc b\|sta w\|bcs down\.c\d+\|dec w\+1\|rts$", Code(r, "down"));
+        // A still holds w after the inc w+1 (F17), so the subtraction does not load it; the first
+        // store of the low byte is overwritten before anything reads it (F3, F7).
+        Assert.Matches(@"lda b\|clc\|adc w\|bcc main\.c\d+\|inc w\+1\|sec\|sbc b\|sta w\|bcs main\.c\d+\|dec w\+1\|rts$", Code(r));
     }
 
     private static string Code(Run r, string function = "main")

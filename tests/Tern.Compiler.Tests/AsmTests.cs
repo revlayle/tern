@@ -621,21 +621,24 @@ public class AsmTests
     [Fact]
     public void Jump_vectors_never_start_at_the_end_of_a_page()
     {
+        // With arrays the variables start on a page (F12); structs keep them one after another,
+        // where the padding before them must be used for some size.
         bool padded = false;
+        foreach (bool arrays in new[] { true, false })
         foreach (string init in new[] { "", " = 0" })
         {
             for (int n = 1; n <= 256; n++)
             {
+                string types = arrays ? $"var pad: [u8; {n}]\nvar t: [u8; 3]"
+                    : $"struct Pad {{ b: [u8; {n}] }}\nstruct T {{ a: u8, b: u8, c: u8 }}\nvar pad: Pad\nvar t: T";
                 var r = Run.Program($$"""
                     var zp1: [u8; 142] @ zp
-                    var pad: [u8; {{n}}]
+                    {{types}}
                     var v: u16{{init}}
-                    var t: [u8; 3]
                     var hit: u8
                     asm fn target() { inc hit }
                     fn main() {
                         zp1[0] = 1
-                        pad[0] = 1
                         asm {
                             lda #target.lo
                             sta v
@@ -657,7 +660,7 @@ public class AsmTests
                 Assert.True((r.Address("v") & 0xFF) != 0xFF, $"v at ${r.Address("v"):X4} with pad {n}");
                 Assert.True(((r.Address("t") + 1) & 0xFF) != 0xFF, $"t+1 at ${r.Address("t") + 1:X4} with pad {n}");
                 Assert.Equal(2, r.U8("hit"));
-                padded |= r.Result.Listing.Contains("of padding");
+                padded |= !arrays && r.Result.Listing.Contains("of padding");
             }
         }
         Assert.True(padded);

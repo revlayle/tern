@@ -79,7 +79,7 @@ public class MemLibraryTests
             Mem.Set16("mem.copy.count", 1000);
             long copy = Mem.Call("mem.copy");
             // About 15 cycles per byte for fill and 17 for copy (13 and 16 inside whole pages).
-            Assert.Equal((14783, 16798), (fill, copy));
+            Assert.Equal((14762, 16777), (fill, copy));
         }
     }
 }
@@ -126,7 +126,7 @@ public class TextLibraryTests
         var cycles = new List<long>();
         lock (Text)
             for (int v = 0; v < 256; v++) cycles.Add(Digits("dec8", v, v.ToString(), returnsCount: true));
-        Assert.Equal((63, 324), Range(cycles));
+        Assert.Equal((63, 290), Range(cycles));
     }
 
     [Fact]
@@ -137,7 +137,7 @@ public class TextLibraryTests
         lock (Text)
             foreach (int v in values.Concat(Enumerable.Range(0, 1772).Select(i => i * 37)))
                 cycles.Add(Digits("dec16", v, v.ToString(), returnsCount: true));
-        Assert.Equal((293, 1637), Range(cycles));
+        Assert.Equal((285, 1521), Range(cycles));
     }
 
     [Fact]

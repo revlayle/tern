@@ -29,32 +29,53 @@ public static class Optimizer
     {
         while (RemoveRedundant(code, function) | FoldShiftTests(code, function) | UseOperandInA(code, function)
             | RemoveDeadLoads(code, function) | RemoveDeadStores(code, function) | ReadCopiesFromSource(code, function)
-            | GroupConstantStores(code)) { }
+            | SinkStoresFromLoops(code, function) | RemoveJumpsToNext(code) | GroupConstantStores(code)) { }
     }
 
     // ---------- Dead stores ----------
 
     /// <summary>
-    /// Bytes of the function's own memory variables that may be read before they are written again.
-    /// <see cref="All"/>: anything may be read (code the analysis cannot follow).
+    /// Bytes of tracked variables (<see cref="Tracked"/>) that may be read before they are written again.
+    /// <see cref="All"/>: anything may be read (code the analysis cannot follow). <see cref="Globals"/>:
+    /// every byte of an ordinary global may be read (a call, the return), except those in <see cref="Dead"/>,
+    /// which are stored again first.
     /// </summary>
     private sealed class Live
     {
-        public bool All;
+        public bool All, Globals;
         public readonly HashSet<(VariableSymbol, int)> Bytes = [];
         public readonly HashSet<VariableSymbol> Whole = [];   // read with an index
+        public readonly HashSet<(VariableSymbol, int)> Dead = [];
 
-        public bool Has(VariableSymbol v, int offset) => All || Whole.Contains(v) || Bytes.Contains((v, offset));
+        public bool Has(VariableSymbol v, int offset) => All || Whole.Contains(v) || Bytes.Contains((v, offset))
+            || (Globals && v.Kind == VariableKind.Global && !Dead.Contains((v, offset)));
+
+        public void Read((VariableSymbol, int) b) { Bytes.Add(b); Dead.Remove(b); }
+
+        public void Written((VariableSymbol V, int) b)
+        {
+            Bytes.Remove(b);
+            if (Globals && b.V.Kind == VariableKind.Global) Dead.Add(b);
+        }
+
+        public void ReadGlobals() { Globals = true; Dead.Clear(); }
 
         /// <summary>Adds what <paramref name="other"/> holds. Returns true if this changed.</summary>
         public bool Union(Live other)
         {
             if (All) return false;
             if (other.All) { All = true; return true; }
-            int before = Bytes.Count + Whole.Count;
+            var before = (Globals, Bytes.Count, Whole.Count, Dead.Count);
+            if (other.Globals)
+            {
+                if (Globals) Dead.IntersectWith(other.Dead);
+                else Dead.UnionWith(other.Dead.Where(b => !Bytes.Contains(b)));
+                Globals = true;
+            }
             Bytes.UnionWith(other.Bytes);
             Whole.UnionWith(other.Whole);
-            return Bytes.Count + Whole.Count != before;
+            Dead.ExceptWith(other.Bytes);
+            return (Globals, Bytes.Count, Whole.Count, Dead.Count) != before;
         }
     }
 
@@ -71,17 +92,34 @@ public static class Optimizer
     }
 
     /// <summary>
+    /// A global variable of ordinary memory (spec 4): not volatile (so used from one root, spec 8.1),
+    /// its address not taken, not at a fixed address, in a region or in an overlay, not data. Other
+    /// code may read it only after a call, a return or a jump out of the function's code.
+    /// </summary>
+    private static bool OrdinaryGlobal(VariableSymbol v)
+    {
+        var s = v.Storage;
+        return s.Kind == VariableKind.Global && !s.AddressTaken && !v.AddressTaken && !s.IsVolatile && s.FixedAddress is null
+            && s.Region is null && s.OverlayArea is null && !s.InOverlayArea && !s.IsData;
+    }
+
+    /// <summary>The variables whose stores <see cref="RemoveDeadStores"/> follows.</summary>
+    private static bool Tracked(VariableSymbol v, FunctionSymbol function) => OwnMemory(v, function) || OrdinaryGlobal(v);
+
+    /// <summary>
     /// Removes <c>sta</c>, <c>stx</c> and <c>sty</c> into a byte of the function's own memory
-    /// (<see cref="OwnMemory"/>) that no path reads before it is stored again or the function
-    /// returns: <c>var b = values[i + 1]</c> whose value is used only from A. A store changes no
-    /// register or flag, so nothing else changes. Stores from assembly stay. Returns true if any was removed.
+    /// (<see cref="OwnMemory"/>) or of an ordinary global (<see cref="OrdinaryGlobal"/>) that no path
+    /// reads before it is stored again or, for the function's own memory, the function returns:
+    /// <c>var b = values[i + 1]</c> whose value is used only from A. A store changes no register or
+    /// flag, so nothing else changes. Stores from assembly stay. Returns true if any was removed.
     /// </summary>
     /// <remarks>
-    /// A backward analysis over the code. A <c>jsr</c> reads none of these bytes (the callee cannot
-    /// name them). An <c>rts</c> or <c>jmp (v)</c> may go to a label named other than by a jump (the
-    /// jump table of a <c>match</c> dispatches with <c>rts</c>), so it reads what those labels may read.
-    /// The end of the code, and a jump to a label outside it, read nothing: what follows is the
-    /// function's exit (an interrupt handler's register restore) or another function.
+    /// A backward analysis over the code. A <c>jsr</c> reads none of the function's own bytes (the
+    /// callee cannot name them). An <c>rts</c> or <c>jmp (v)</c> may go to a label named other than by
+    /// a jump (the jump table of a <c>match</c> dispatches with <c>rts</c>), so it reads what those
+    /// labels may read. The end of the code, and a jump to a label outside it, read none of them:
+    /// what follows is the function's exit (an interrupt handler's register restore) or another
+    /// function. Globals are read by all of these, by a call, and by a read through a pointer or at a number.
     /// </remarks>
     private static bool RemoveDeadStores(List<AsmItem> code, FunctionSymbol function)
     {
@@ -98,18 +136,22 @@ public static class Optimizer
             into.Union(after);
             if (code[k] is not Instr i) return;
             if (i.Mnemonic == Brk) { into.All = true; return; }
-            if (i.Operand is ImmVarByte { Variable: var a } && OwnMemory(a, function)) into.Whole.Add(a.Storage);
-            if (i.Operand is not VarOperand o || !OwnMemory(o.Variable, function)) return;
+            // Other code may read the globals: a callee, the caller, or memory reached through a pointer or at a number.
+            if (i.Mnemonic is Jsr or Rts or Rti || (i.Mode is IndirectIndexed or IndexedIndirect or Indirect && i.Mnemonic != Sta)
+                || (i.Operand is AddrOperand && AsmEffects.ReadsMemory(i.Mnemonic, i.Mode)))
+                into.ReadGlobals();
+            if (i.Operand is ImmVarByte { Variable: var a } && Tracked(a, function)) into.Whole.Add(a.Storage);
+            if (i.Operand is not VarOperand o || !Tracked(o.Variable, function)) return;
             var b = Byte(o);
             switch (i.Mode)
             {
                 case Absolute or ZeroPage:
-                    if (Stored(i.Mnemonic) is not null) into.Bytes.Remove(b);
-                    else if (AsmEffects.ReadsMemory(i.Mnemonic, i.Mode)) into.Bytes.Add(b);
+                    if (Stored(i.Mnemonic) is not null) into.Written(b);
+                    else if (AsmEffects.ReadsMemory(i.Mnemonic, i.Mode)) into.Read(b);
                     break;
                 case IndirectIndexed or Indirect:
-                    into.Bytes.Add(b);
-                    into.Bytes.Add((b.Item1, b.Item2 + 1));
+                    into.Read(b);
+                    into.Read((b.Item1, b.Item2 + 1));
                     break;
                 default:
                     // Indexed: any byte of the variable. An indexed store overwrites no known byte.
@@ -131,9 +173,13 @@ public static class Optimizer
                 if (i.Mnemonic is Rts || (i.Mnemonic == Mnemonic.Jmp && i.Mode == Indirect))
                     foreach (int u in unknown) after.Union(liveIn[u]);
                 if (Target(i) is { } t && positions.TryGetValue(t, out int tp)) after.Union(liveIn[tp]);
+                // A jump out of the code leaves the function: its globals may be read there.
+                else if (IsBranch(i.Mnemonic) || i.Mnemonic == Mnemonic.Jmp) after.ReadGlobals();
             }
             // liveIn keeps the indexes from before any removal below; items before a removal do not move.
             if (FallsThrough(item) && k + 1 < liveIn.Length) after.Union(liveIn[k + 1]);
+            // The end of the code: the function's exit (an interrupt handler's register restore).
+            else if (FallsThrough(item)) after.ReadGlobals();
             return after;
         }
 
@@ -152,11 +198,138 @@ public static class Optimizer
         for (int k = code.Count - 1; k >= 0; k--)
         {
             if (code[k] is Instr { AsmPos: null, Mode: Absolute or ZeroPage, Operand: VarOperand o } i && Stored(i.Mnemonic) is not null
-                && OwnMemory(o.Variable, function))
+                && Tracked(o.Variable, function))
             {
                 var (v, offset) = Byte(o);
                 if (!After(k).Has(v, offset)) { code.RemoveAt(k); removed = true; }
             }
+        }
+        return removed;
+    }
+
+    /// <summary>
+    /// A loop that stores a variable (<see cref="Tracked"/>) but never reads its memory keeps it only in
+    /// the register: the stores in the loop go, and the variable is stored once at each exit, from a
+    /// register that holds it on every path there (<c>crc</c> in A for the eight steps of a CRC byte:
+    /// spec 4, ordinary memory may be kept in registers). Only when that takes no more stores than it
+    /// removes. Returns true if a loop was changed.
+    /// </summary>
+    /// <remarks>
+    /// A loop is the code from a label to a branch or jump back to it. Inside it no instruction reads
+    /// the variable, and nothing leaves it except by a jump, a branch or falling out at its end (no
+    /// call, return or jump table), so the memory is out of date only where nothing reads it. A
+    /// register the analysis shows equal to the memory before the change holds the right value after
+    /// it, since removing stores changes no register.
+    /// </remarks>
+    private static bool SinkStoresFromLoops(List<AsmItem> code, FunctionSymbol function)
+    {
+        var positions = Positions(code);
+        if (SelfModifying(code, function) || CallsOwnSubroutine(code, positions)) return false;
+        var unknown = UnknownEntries(code);
+        State?[]? before = null;
+        for (int b = 0; b < code.Count; b++)
+        {
+            if (code[b] is not Instr back || Target(back) is not { } head || !positions.TryGetValue(head, out int h) || h > b) continue;
+            bool InLoop(int k) => k >= h && k <= b;
+            bool JumpedFromOutside(Label l) =>
+                code.Where((item, k) => !InLoop(k) && item is Instr i && Target(i) == l).Any();
+
+            // Nothing leaves the loop except by a jump or branch to a label of this code, or at its end.
+            bool followed = true, readsAnywhere = false;
+            for (int k = h; k <= b && followed; k++)
+            {
+                switch (code[k])
+                {
+                    case LabelTable or DataBytes:
+                    case LabelDef d when unknown.Contains(d.Label):
+                        followed = false;
+                        break;
+                    case Instr i:
+                        followed = i.Mnemonic is not (Jsr or Brk or Rts or Rti)
+                            && !((IsBranch(i.Mnemonic) || i.Mnemonic == Mnemonic.Jmp) && (Target(i) is not { } t || !positions.ContainsKey(t)));
+                        readsAnywhere |= (i.Mode is IndirectIndexed or IndexedIndirect && i.Mnemonic != Sta)
+                            || (i.Operand is AddrOperand && AsmEffects.ReadsMemory(i.Mnemonic, i.Mode));
+                        break;
+                }
+            }
+            if (!followed) continue;
+
+            // Each variable byte the compiler stores in the loop, and the stores.
+            var stores = new Dictionary<VarOperand, List<int>>();
+            for (int k = h; k <= b; k++)
+                if (code[k] is Instr { AsmPos: null, Mode: Absolute or ZeroPage, Operand: VarOperand o } i && Stored(i.Mnemonic) is not null
+                    && Tracked(o.Variable, function) && !(readsAnywhere && OrdinaryGlobal(o.Variable)))
+                    (stores.TryGetValue(o, out var list) ? list : stores[o] = []).Add(k);
+
+            foreach (var (o, at) in stores)
+            {
+                var storage = o.Variable.Storage;
+                // No other instruction in the loop names the variable.
+                bool alone = true;
+                for (int k = h; k <= b && alone; k++)
+                    if (code[k] is Instr i && !at.Contains(k))
+                        alone = !(i.Operand is VarOperand w && w.Variable.Storage == storage) && !(i.Operand is ImmVarByte a && a.Variable.Storage == storage);
+                if (!alone) continue;
+
+                // The exits: falling out at the end, inserted after the labels that follow it if only
+                // the loop jumps to them (a break), and jumps to other labels outside, inserted just
+                // after the label (every path into it has a register holding the value).
+                before ??= Analyse(code, function);
+                var exits = new List<(int At, State? State)>();
+                int fall = -1;
+                if (FallsThrough(back))
+                {
+                    fall = b + 1;
+                    while (fall < code.Count && code[fall] is LabelDef or Comment or SourceLine
+                           && !(code[fall] is LabelDef d && (unknown.Contains(d.Label) || JumpedFromOutside(d.Label)))) fall++;
+                    State? s = null;
+                    if (fall > b + 1) s = before[fall - 1];
+                    else if (before[b] is { } last) { s = last.Copy(); Step(s, back, function, false); }
+                    exits.Add((fall, s));
+                }
+                for (int k = h; k <= b; k++)
+                    if (code[k] is Instr i && Target(i) is { } t && positions[t] is int tp && !InLoop(tp)
+                        && !(tp > b && tp < fall) && exits.All(e => e.At != tp + 1))
+                        exits.Add((tp + 1, before[tp]));
+                if (exits.Count > at.Count) continue;
+
+                var inserts = new List<(int At, Instr Store)>();
+                foreach (var (pos, s) in exits)
+                {
+                    if (s is null) break;
+                    Reg? held = new[] { Reg.A, Reg.X, Reg.Y }.Cast<Reg?>().FirstOrDefault(r => s.Regs[(int)r!].Contains(o));
+                    if (held is not Reg r) break;
+                    inserts.Add((pos, new Instr(r == Reg.A ? Sta : r == Reg.X ? Stx : Sty, Absolute, o)));
+                }
+                if (inserts.Count != exits.Count) continue;
+
+                // Positions after the loop first, then the stores in it, from the end, so indexes stay right.
+                var changes = inserts.Select(x => (x.At, (Instr?)x.Store)).Concat(at.Select(k => (At: k, (Instr?)null)))
+                    .OrderByDescending(x => x.At).ThenBy(x => x.Item2 is null ? 0 : 1);
+                foreach (var (pos, store) in changes)
+                {
+                    if (store is null) code.RemoveAt(pos);
+                    else code.Insert(pos, store);
+                }
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// Removes a <c>jmp</c> or branch to the label that follows it (only labels, comments and source
+    /// lines between): an <c>if</c> whose <c>else</c> became empty when its store moved out of a loop
+    /// (F15). Neither changes a register or flag. Returns true if any was removed.
+    /// </summary>
+    private static bool RemoveJumpsToNext(List<AsmItem> code)
+    {
+        bool removed = false;
+        for (int k = code.Count - 1; k >= 0; k--)
+        {
+            if (code[k] is not Instr i || FromAsm(i) || Target(i) is not { } t) continue;
+            for (int j = k + 1; j < code.Count && code[j] is LabelDef or Comment or SourceLine; j++)
+                if (code[j] is LabelDef d && d.Label == t) { code.RemoveAt(k); removed = true; break; }
         }
         return removed;
     }

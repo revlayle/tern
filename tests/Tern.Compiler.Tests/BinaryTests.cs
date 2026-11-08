@@ -195,9 +195,10 @@ public class BinaryTests
             export uses_x, calls_x, uses_y, nothing, value
             """);
         string api = b.Result.ApiModule!;
-        Assert.Contains("fn uses_x() @ $C003 keeps A, Y", api);        // 'inc n' does not touch A
-        Assert.Contains("fn calls_x() @ $C006 keeps A, Y", api);       // what it calls counts
-        Assert.Contains("fn uses_y() @ $C009 keeps A, X", api);
+        // n is held in the other index register for the loop (iny, inx), which does not touch A.
+        Assert.Matches(@"fn uses_x\(\) @ \$C003 keeps A\r?\n", api);
+        Assert.Matches(@"fn calls_x\(\) @ \$C006 keeps A\r?\n", api);   // what it calls counts
+        Assert.Matches(@"fn uses_y\(\) @ \$C009 keeps A\r?\n", api);
         Assert.Contains("fn nothing() @ $C00C keeps X, Y", api);       // it loads A
         Assert.Contains("fn value() -> u8 using A @ $C00F keeps X, Y", api);
     }

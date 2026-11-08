@@ -74,8 +74,8 @@ public class DeadLoadTests
     {
         var arr = new VariableSymbol("arr", default, TernType.ArrayOf(TernType.U8, 4), VariableKind.Global, null);
         // ldx #1 is read by lda arr,x before ldx #5.
-        Assert.Equal("ldx #$01|lda arr|ldx #$05|stx x|sta x|rts",
-            Optimize(null, Imm(Ldx, 1), new Instr(Lda, AbsoluteX, new VarOperand(arr)), Imm(Ldx, 5), Abs(Stx, X), Abs(Sta, X), new Instr(Rts)));
+        Assert.Equal("ldx #$01|lda arr|ldx #$05|stx x|sta arr|rts",
+            Optimize(null, Imm(Ldx, 1), new Instr(Lda, AbsoluteX, new VarOperand(arr)), Imm(Ldx, 5), Abs(Stx, X), Abs(Sta, arr), new Instr(Rts)));
     }
 
     [Fact]

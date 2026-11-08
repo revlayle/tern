@@ -11,7 +11,7 @@
                      $0818  A9 00     lda #$00              ; 2
                      $081A  A2 10     ldx #$10              ; 2
                      clear:
-                     $081C  9D 05 09  sta bss-1,x           ; 5
+                     $081C  9D 01 09  sta bss-1,x           ; 5
                      $081F  CA        dex                   ; 2
                      $0820  D0 FA     bne clear             ; 2+
                      $0822  20 28 08  jsr main              ; 6
@@ -26,129 +26,124 @@
       1 x        2  $082C  A9 01     lda #$01              ; 2
       1 x        3  $082E  85 07     sta main.running      ; 3
                                                      ;   23: while running {
-      1 x        3  $0830  4C EB 08  jmp main.test1        ; 3
+      1 x        3  $0830  A6 02     ldx sp                ; 3
+      1 x        3  $0832  4C D6 08  jmp main.test1        ; 3
                      main.while0:
                                                      ;   24: var op: u8 = code[pc]
-     74 x      222  $0833  A6 06     ldx main.pc           ; 3
-     74 x      328  $0835  BD F8 08  lda code,x            ; 4+
+     74 x      222  $0835  A4 06     ldy main.pc           ; 3
+     74 x      296  $0837  B9 E5 08  lda code,y            ; 4+
                                                      ;   25: pc += 1
-     74 x      370  $0838  E6 06     inc main.pc           ; 5
+     74 x      370  $083A  E6 06     inc main.pc           ; 5
                                                      ;   26: steps += 1
-     74 x      370  $083A  E6 04     inc steps             ; 5
-     74 x      222  $083C  D0 02     bne main.inc3         ; 2+
-                     $083E  E6 05     inc steps+1           ; 5
+     74 x      370  $083C  E6 04     inc steps             ; 5
+     74 x      222  $083E  D0 02     bne main.inc3         ; 2+
+                     $0840  E6 05     inc steps+1           ; 5
                      main.inc3:
                                                      ;   27: match op {
-     74 x      148  $0840  C9 09     cmp #$09              ; 2
-     74 x      224  $0842  90 03 4C  bcc *+5 / jmp main.default14; 2+3
-     73 x      146  $0847  AA        tax                   ; 2
-     73 x      292  $0848  BD 51 08  lda main.jumphi15,x   ; 4+
-     73 x      219  $084B  48        pha                   ; 3
-     73 x      292  $084C  BD 5A 08  lda main.jumplo16,x   ; 4+
-     73 x      219  $084F  48        pha                   ; 3
-     73 x      438  $0850  60        rts                   ; 6
+     74 x      148  $0842  C9 09     cmp #$09              ; 2
+     74 x      224  $0844  90 03 4C  bcc *+5 / jmp main.default14; 2+3
+     73 x      146  $0849  A8        tay                   ; 2
+     73 x      292  $084A  B9 53 08  lda main.jumphi15,y   ; 4+
+     73 x      219  $084D  48        pha                   ; 3
+     73 x      292  $084E  B9 5C 08  lda main.jumplo16,y   ; 4+
+     73 x      219  $0851  48        pha                   ; 3
+     73 x      438  $0852  60        rts                   ; 6
                      main.jumphi15:
-                     $0851  08 08 08 08 08 08 08 08  ; hi: (main.case5-1), (main.case6-1), (main.case7-1), (main.case8-1), (main.case9-1), (main.case10-1), (main.case11-1), (main.case12-1)
-                     $0859  08  ; hi: (main.case13-1)
+                     $0853  08 08 08 08 08 08 08 08  ; hi: (main.case5-1), (main.case6-1), (main.case7-1), (main.case8-1), (main.case9-1), (main.case10-1), (main.case11-1), (main.case12-1)
+                     $085B  08  ; hi: (main.case13-1)
                      main.jumplo16:
-                     $085A  62 73 84 95 A2 B4 B9 D1  ; lo: (main.case5-1), (main.case6-1), (main.case7-1), (main.case8-1), (main.case9-1), (main.case10-1), (main.case11-1), (main.case12-1)
-                     $0862  D9  ; lo: (main.case13-1)
+                     $085C  64 72 80 8E 98 A8 AC C1  ; lo: (main.case5-1), (main.case6-1), (main.case7-1), (main.case8-1), (main.case9-1), (main.case10-1), (main.case11-1), (main.case12-1)
+                     $0864  C7  ; lo: (main.case13-1)
                      main.case5:
                                                      ;   29: stack[sp] = code[pc]
-      2 x        6  $0863  A6 06     ldx main.pc           ; 3
-      2 x        8  $0865  BD F8 08  lda code,x            ; 4+
-      2 x        6  $0868  A6 02     ldx sp                ; 3
-      2 x       10  $086A  9D 06 09  sta stack,x           ; 5
+      2 x        6  $0865  A4 06     ldy main.pc           ; 3
+      2 x        8  $0867  B9 E5 08  lda code,y            ; 4+
+      2 x       10  $086A  9D 02 09  sta stack,x           ; 5
                                                      ;   30: sp += 1
-      2 x       10  $086D  E6 02     inc sp                ; 5
+      2 x        4  $086D  E8        inx                   ; 2
                                                      ;   31: pc += 1
-      2 x       10  $086F  E6 06     inc main.pc           ; 5
-      2 x        6  $0871  4C EB 08  jmp main.mend4        ; 3
+      2 x       10  $086E  E6 06     inc main.pc           ; 5
+      2 x        6  $0870  4C D6 08  jmp main.mend4        ; 3
                      main.case6:
                                                      ;   34: sp -= 1
-     10 x       50  $0874  C6 02     dec sp                ; 5
+     10 x       20  $0873  CA        dex                   ; 2
                                                      ;   35: stack[sp - 1] = stack[sp - 1] + stack[sp]
-     10 x       30  $0876  A6 02     ldx sp                ; 3
-     10 x       40  $0878  BD 05 09  lda stack-1,x         ; 4+
-     10 x       20  $087B  18        clc                   ; 2
-     10 x       40  $087C  7D 06 09  adc stack,x           ; 4+
-     10 x       50  $087F  9D 05 09  sta stack-1,x         ; 5
-     10 x       30  $0882  4C EB 08  jmp main.mend4        ; 3
+     10 x       40  $0874  BD 01 09  lda stack-1,x         ; 4+
+     10 x       20  $0877  18        clc                   ; 2
+     10 x       40  $0878  7D 02 09  adc stack,x           ; 4+
+     10 x       50  $087B  9D 01 09  sta stack-1,x         ; 5
+     10 x       30  $087E  4C D6 08  jmp main.mend4        ; 3
                      main.case7:
                                                      ;   38: sp -= 1
-                     $0885  C6 02     dec sp                ; 5
+                     $0881  CA        dex                   ; 2
                                                      ;   39: stack[sp - 1] = stack[sp - 1] - stack[sp]
-                     $0887  A6 02     ldx sp                ; 3
-                     $0889  BD 05 09  lda stack-1,x         ; 4+
-                     $088C  38        sec                   ; 2
-                     $088D  FD 06 09  sbc stack,x           ; 4+
-                     $0890  9D 05 09  sta stack-1,x         ; 5
-                     $0893  4C EB 08  jmp main.mend4        ; 3
+                     $0882  BD 01 09  lda stack-1,x         ; 4+
+                     $0885  38        sec                   ; 2
+                     $0886  FD 02 09  sbc stack,x           ; 4+
+                     $0889  9D 01 09  sta stack-1,x         ; 5
+                     $088C  4C D6 08  jmp main.mend4        ; 3
                      main.case8:
                                                      ;   42: stack[sp] = stack[sp - 1]
-     10 x       30  $0896  A6 02     ldx sp                ; 3
-     10 x       40  $0898  BD 05 09  lda stack-1,x         ; 4+
-     10 x       50  $089B  9D 06 09  sta stack,x           ; 5
+     10 x       40  $088F  BD 01 09  lda stack-1,x         ; 4+
+     10 x       50  $0892  9D 02 09  sta stack,x           ; 5
                                                      ;   43: sp += 1
-     10 x       50  $089E  E6 02     inc sp                ; 5
-     10 x       30  $08A0  4C EB 08  jmp main.mend4        ; 3
+     10 x       20  $0895  E8        inx                   ; 2
+     10 x       30  $0896  4C D6 08  jmp main.mend4        ; 3
                      main.case9:
                                                      ;   46: var t: u8 = stack[sp - 1]
-     20 x       60  $08A3  A6 02     ldx sp                ; 3
                                                      ;   47: stack[sp - 1] = stack[sp - 2]
-     20 x       80  $08A5  BD 04 09  lda stack-2,x         ; 4+
-     20 x       80  $08A8  BC 05 09  ldy stack-1,x         ; 4+
-     20 x      100  $08AB  9D 05 09  sta stack-1,x         ; 5
+     20 x       80  $0899  BD 00 09  lda stack-2,x         ; 4+
+     20 x       80  $089C  BC 01 09  ldy stack-1,x         ; 4+
+     20 x      100  $089F  9D 01 09  sta stack-1,x         ; 5
                                                      ;   48: stack[sp - 2] = t
-     20 x       40  $08AE  98        tya                   ; 2
-     20 x      100  $08AF  9D 04 09  sta stack-2,x         ; 5
-     20 x       60  $08B2  4C EB 08  jmp main.mend4        ; 3
+     20 x       40  $08A2  98        tya                   ; 2
+     20 x      100  $08A3  9D 00 09  sta stack-2,x         ; 5
+     20 x       60  $08A6  4C D6 08  jmp main.mend4        ; 3
                      main.case10:
                                                      ;   50: DROP => sp -= 1
-      1 x        5  $08B5  C6 02     dec sp                ; 5
-      1 x        3  $08B7  4C EB 08  jmp main.mend4        ; 3
+      1 x        2  $08A9  CA        dex                   ; 2
+      1 x        3  $08AA  4C D6 08  jmp main.mend4        ; 3
                      main.case11:
                                                      ;   52: sp -= 1
-     10 x       50  $08BA  C6 02     dec sp                ; 5
+     10 x       20  $08AD  CA        dex                   ; 2
                                                      ;   53: if stack[sp] != 0 { pc = code[pc] } else { pc += 1 }
-     10 x       30  $08BC  A6 02     ldx sp                ; 3
-     10 x       40  $08BE  BD 06 09  lda stack,x           ; 4+
-     10 x       21  $08C1  F0 0A     beq main.else18       ; 2+
-      9 x       27  $08C3  A6 06     ldx main.pc           ; 3
-      9 x       45  $08C5  BD F8 08  lda code,x            ; 4+
-      9 x       27  $08C8  85 06     sta main.pc           ; 3
-      9 x       27  $08CA  4C EB 08  jmp main.mend4        ; 3
+     10 x       40  $08AE  BD 02 09  lda stack,x           ; 4+
+     10 x       21  $08B1  F0 0A     beq main.else18       ; 2+
+      9 x       27  $08B3  A4 06     ldy main.pc           ; 3
+      9 x       36  $08B5  B9 E5 08  lda code,y            ; 4+
+      9 x       27  $08B8  85 06     sta main.pc           ; 3
+      9 x       27  $08BA  4C D6 08  jmp main.mend4        ; 3
                      main.else18:
-      1 x        5  $08CD  E6 06     inc main.pc           ; 5
+      1 x        5  $08BD  E6 06     inc main.pc           ; 5
                      main.endif17:
-      1 x        3  $08CF  4C EB 08  jmp main.mend4        ; 3
+      1 x        3  $08BF  4C D6 08  jmp main.mend4        ; 3
                      main.case12:
                                                      ;   55: DEC => stack[sp - 1] -= 1
-     10 x       30  $08D2  A6 02     ldx sp                ; 3
-     10 x       70  $08D4  DE 05 09  dec stack-1,x         ; 7
-     10 x       30  $08D7  4C EB 08  jmp main.mend4        ; 3
+     10 x       70  $08C2  DE 01 09  dec stack-1,x         ; 7
+     10 x       30  $08C5  4C D6 08  jmp main.mend4        ; 3
                      main.case13:
                                                      ;   57: stack[sp] = stack[sp - 2]
-     10 x       30  $08DA  A6 02     ldx sp                ; 3
-     10 x       40  $08DC  BD 04 09  lda stack-2,x         ; 4+
-     10 x       50  $08DF  9D 06 09  sta stack,x           ; 5
+     10 x       40  $08C8  BD 00 09  lda stack-2,x         ; 4+
+     10 x       50  $08CB  9D 02 09  sta stack,x           ; 5
                                                      ;   58: sp += 1
-     10 x       50  $08E2  E6 02     inc sp                ; 5
-     10 x       30  $08E4  4C EB 08  jmp main.mend4        ; 3
+     10 x       20  $08CE  E8        inx                   ; 2
+     10 x       30  $08CF  4C D6 08  jmp main.mend4        ; 3
                      main.default14:
                                                      ;   60: _ => running = false
-      1 x        2  $08E7  A9 00     lda #$00              ; 2
-      1 x        3  $08E9  85 07     sta main.running      ; 3
+      1 x        2  $08D2  A9 00     lda #$00              ; 2
+      1 x        3  $08D4  85 07     sta main.running      ; 3
                      main.mend4:
                      main.test1:
-     75 x      225  $08EB  A5 07     lda main.running      ; 3
-     75 x      373  $08ED  F0 03 4C  beq *+5 / jmp main.while0; 2+3
+     75 x      225  $08D6  A5 07     lda main.running      ; 3
+     75 x      373  $08D8  F0 03 4C  beq *+5 / jmp main.while0; 2+3
                      main.wend2:
+      1 x        3  $08DD  86 02     stx sp                ; 3
                                                      ;   63: result = stack[0]
-      1 x        4  $08F2  AD 06 09  lda stack             ; 4
-      1 x        3  $08F5  85 03     sta result            ; 3
-      1 x        6  $08F7  60        rts                   ; 6
+      1 x        4  $08DF  AD 02 09  lda stack             ; 4
+      1 x        3  $08E2  85 03     sta result            ; 3
+      1 x        6  $08E4  60        rts                   ; 6
                      code:
-                     $08F8  00 00 00 0A 04 08 01 04
-                     $0900  07 03 06 04 05 09
+                     $08E5  00 00 00 0A 04 08 01 04
+                     $08ED  07 03 06 04 05 09
+                     ; $08F3: 15 byte(s) left free so that indexed reads of the variables do not cross a page (not in the file)
                      
