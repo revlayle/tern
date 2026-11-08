@@ -318,15 +318,46 @@ Done when: the three parts are merged, `comparison.md` has the new totals, and t
 
 ## M19: Tools and skills for coding agents
 
-Decision 2026-11-05; after M18 (decision 2026-11-07), so the skill does not teach workarounds the optimizer has since removed. Tern is new, so a model has seen no Tern code; what it needs must come from a skill and from tools that answer quickly and exactly. Scope to confirm when scheduled.
+Decisions 2026-11-05, 2026-11-07 and 2026-11-08; after M18, so the skill does not teach workarounds the optimizer has since removed. Tern is new, so a model has seen no Tern code; what it needs must come from a skill and from tools that answer quickly and exactly. Two parts, each reviewed before the next starts.
 
-- **A Tern skill** (a Claude Code skill in this repository, usable as a plugin elsewhere): the language in brief, with the restrictions an agent would not guess (no recursion, arrays of at most 256, one-byte indexes, `using` registers, roots and private variables, flags as values); the cost of each construct; the "how the Tern is written" advice from M17; common errors and their fixes; when to use an `asm` block.
+**Before part 2 (spec session):** the "writing fast Tern" advice in `docs/guide.md`, from what is still true after M18 (`tests/benchmarks/analysis.md` section 8: `copy`'s records of 4, `enemies`' element stored before its tests, `interp`'s `running` flag). The skill takes its advice from there.
+
+**Part 1: compiler, tools and two small features**
+
+- **`-> bool using overflow`** (spec 6.1, decision 2026-11-07): the V flag as a return of `inline asm fn`, `asm fn` and routines at a fixed address. Tests: `if f()`, `!f()`, `while f()` and `v = f()` on a flag set by `bit` (bit 6) and by a signed `adc` overflow; the empty-body form after an `asm` block; the error on a plain `fn` and as a fixed input.
+- **`cpu` library module** (spec 10.1, decision 2026-11-07): `carry()`, `zero()`, `negative()`, `overflow()` as empty-body `inline asm fn`s. Tests: each function, plain and with `!`, in `if` and `while` after an `asm` block, against the flag the block set; the listing shows only the branch.
+- **From questions 65-67** (decision 2026-11-08): the two-roots error for a loop counter names the loop and suggests `using X` or `using Y` (spec 8.1), with a test; the `MatchTests` program that expects a read of `var reg: u8 @ $C000` to stay declares it `volatile` (spec 4).
 - **Agent-friendly compiler output**: diagnostics as JSON (`tern --json`: file, line, column, message, suggestion); a listing that links each source line to its instructions, bytes and cycles.
 - **A measuring tool**: compile a snippet or a function, run it in the built-in emulator, and report bytes, cycles and chosen memory, so an agent can compare two ways of writing the same code. It should be a `tern` subcommand, such as `tern bench`, not a separate script.
 - **A run tool**: run a program in the emulator for n cycles or until `main` returns, and dump memory ranges or the screen as text, so an agent can check behavior without VICE.
-- Tests: each tool's output format; the skill's examples compile and give the stated costs (checked by a test, so the skill cannot drift from the compiler).
+- Tests: each tool's output format.
+
+**Part 2: the Tern skill** (a Claude Code skill in this repository, usable as a plugin elsewhere)
+
+- The language in brief, with the restrictions an agent would not guess (no recursion, arrays of at most 256, one-byte indexes, `using` registers, roots and private variables, flags as values and `cpu`); the cost of each construct; the "writing fast Tern" advice from the guide; common errors and their fixes; when to use an `asm` block; how to use the part 1 tools.
+- Tests: the skill's examples compile and give the stated costs, so the skill cannot drift from the compiler.
 
 Done when an agent with only the skill and tools can write, check and measure a small program (e.g. a sprite moving under joystick control), and the skill's examples are checked by the test suite.
+
+## Developer guide (spec session, from M19 on)
+
+Decision 2026-11-07, scheduled 2026-11-08. User documentation that explains how the language behaves on the machine, with examples; it informs and does not forbid. It grows out of the quick guide in `docs/guide.md`, whose section 6 lists these behaviors briefly. Written by the spec session after M19 (which with M17 gives most of its content), extended as each later milestone lands, and complete before the first release (below), with wrapping arithmetic and unchecked indexes covered in detail. It must cover each behavior below; the spec session adds to this list whenever a decision leaves a behavior that the programmer may rely on, or that may surprise them:
+
+- all arithmetic wraps, including index expressions: `buf[head + 1]` with `head = 255` is `buf[0]` (3.1, 3.2); when the optimizer folds a constant offset into the address
+- an index outside the array is not checked, as in C, and the optimizer assumes it does not happen; reaching other memory on purpose uses a pointer; the emulator reports a bad index in test runs (3.2, 14.4)
+- flags after an `asm` block: `if f()`, `while f()` (first test, and each later test when the body ends with an `asm` block) and `v = f()` with an empty-body flag function; after compiled Tern code the flags are unspecified (7)
+- a variable `for` step of 0 never ends the loop; stepped loops stop when the step carries past the end of the type (5.1)
+- signed `>>` rounds down, not toward zero (3.1)
+- `keeps` on a fixed routine is a promise the compiler does not check (6.6); a function reached only through `addr()` has no known root (6.5, 8.1)
+- a handler that leaves through an asm `jmp` gets `cld` only if its own code has `adc`, `sbc` or `jsr`; code it jumps to runs in decimal mode if main was in it, unless the asm block clears it (6.3)
+- a call into an overlay that is not loaded runs whatever is in the area (8.5)
+- an interrupt handler installed from an overlay must be removed before that overlay is replaced (8.5)
+- an overlay's zero-page bytes at a fixed address hold whatever was there before it loaded; the overlay sets them (8.5)
+- a `volatile` fixed-address variable over an overlay reads whatever overlay is loaded; addresses inside an overlay's file move when the overlay changes (8.5)
+- a binary's entries are one root: the host must not call one from an interrupt while another runs (12.3)
+- evaluation order: in `a[i] = v` the index is evaluated first; with a call in the index, and inside expressions, the order is unspecified (5)
+- a fixed address outside the platform's volatile areas is ordinary memory: unlisted hardware needs `volatile` (4)
+- a function shared by main and a handler may have loop counters only in registers; only `using X` / `using Y` guarantees one (8.1)
 
 ## M20: Index checks in the emulator, and signed loop variables
 
@@ -357,20 +388,26 @@ Done when: (part 1) a sine table and a screen-row address table are built by `co
 - `///` doc comments before declarations, kept by the compiler.
 - A Tern language server (LSP): errors as you type (in the M19 JSON format), hover with the doc comment, type and cost (bytes, cycles where fixed), go to definition, e.g. showing that `set_irq` needs an `interrupt fn`.
 
+## M24: Floats as a library
+
+Decision 2026-11-08. A portable library module with a 4-byte format, built on `wide`; no language change. After M22, so `const fn` with `real` can build float constants and tables. Scope settled by a spec session before coding: the format (IEEE 754 single, or a layout closer to the 6502's needs, e.g. exponent byte plus 24-bit mantissa), the value type (a 4-byte struct), the operations (add, subtract, multiply, divide, compare, conversion to and from integers, to text), and how a `const fn` turns a `real` into the format's bytes.
+
+Done when: the operations match C# over edge values (0, ±1, smallest and largest, rounding), their bytes and cycles are in the spec 10.1 table, and an example prints computed values on the C64.
+
 ## New platforms
 
-In this order (decision 2026-11-07). Each starts with a spec session for the platform's memory map, output format, encoding and library; the scope below is a first outline.
+In this order (decision 2026-11-07; renumbered 2026-11-08). Each starts with a spec session for the platform's memory map, output format, encoding and library; the scope below is a first outline.
 
-### M24: Atari 8-bit
+### M25: Atari 8-bit
 
 - Platform description: memory map, free zero page, volatile areas (hardware registers, OS variables), ATASCII and screen-code encodings
 - `.xex` output (load segments, run address); the `memory` block's areas map to segments
 - `lib/atari`: OS routines (CIO) as routines at a fixed address; register structs for ANTIC, GTIA, POKEY, PIA; display lists; VBI and DLI handlers through the OS vectors
-- Library modules that are not C64-only (`math`, `mem`, `text`, `wide`, `bcd`, `random`) work unchanged
+- Library modules that are not C64-only (`math`, `mem`, `text`, `wide`, `bcd`, `random`, `cpu`, the M24 floats) work unchanged
 
 Done when: an example with a display list and a DLI color change runs in an Atari emulator (Altirra), and the benchmarks compile for the Atari.
 
-### M25: Apple II
+### M26: Apple II
 
 - Platform description and memory map (no interrupt source by default, text and hi-res pages, soft switches as volatile areas), high-bit ASCII
 - Output: a DOS 3.3 binary and/or ProDOS system file (spec session decides), with disk image creation for testing
@@ -378,39 +415,31 @@ Done when: an example with a display list and a DLI color change runs in an Atar
 
 Done when: an example draws text and hi-res graphics in an Apple II emulator (AppleWin or MAME).
 
-### M26: NES
+### M27: NES
 
 - Bank switching settled first (spec 14.1): `@ bank(n)`, calls between banks through generated stubs, a first mapper (likely NROM, then UxROM or MMC1)
 - iNES output; 2 KB of RAM, so frame sharing and zero page matter most; PPU and APU register structs; NMI-driven frame loop; user-defined encodings for tiles (14.5)
 
 Done when: an example scrolls a background and moves sprites in a NES emulator (Mesen), with code in more than one bank.
 
-### M27: 65C02 and Commander X16
+### M28: 65C02 and Commander X16
 
 - The 65C02 CPU variant (spec 12.1): new instructions in the CPU table, emulator and code generator (`stz`, `bra`, `phx`/`phy`, `inc a`, `(zp)` addressing); code shapes per variant
 - X16 platform: memory map, banked RAM, VERA register structs, KERNAL routines
 
 Done when: the benchmarks compile for the 65C02 and use the new instructions where shorter (listing tests), and an X16 example runs in its emulator.
 
-## Later (not yet ordered)
+## First release (after M28)
 
-- Floats as a library with a 4-byte format, built on `wide` (not a priority)
-- `-> bool using overflow` (spec 6.1, decision 2026-11-07): the V flag as a return of `inline asm fn`, `asm fn` and routines at a fixed address. Small; fits into any milestone. Tests: `if f()`, `!f()`, `while f()` and `v = f()` on a flag set by `bit` (bit 6) and by a signed `adc` overflow; the empty-body form after an `asm` block; the error on a plain `fn` and as a fixed input
-- `cpu` library module (spec 10.1, decision 2026-11-07): `carry()`, `zero()`, `negative()` as empty-body `inline asm fn`s, and `overflow()` once `using overflow` is built. Can come before it. Tests: each function, plain and with `!`, in `if` and `while` after an `asm` block, against the flag the block set; the listing shows only the branch
-- **Developer guide** (spec session work, after M19, which with M17 gives most of its content): user documentation that explains how the language behaves on the machine, with examples; it informs and does not forbid. It grows out of the quick guide in `docs/guide.md`, whose section 6 lists these behaviors briefly. It must cover each behavior below, and must exist before the first release, with wrapping arithmetic and unchecked indexes covered in detail (decision 2026-11-07). The spec session adds to this list whenever a decision leaves a behavior that the programmer may rely on, or that may surprise them:
-  - all arithmetic wraps, including index expressions: `buf[head + 1]` with `head = 255` is `buf[0]` (3.1, 3.2); when the optimizer folds a constant offset into the address
-  - an index outside the array is not checked, as in C, and the optimizer assumes it does not happen; reaching other memory on purpose uses a pointer; the emulator reports a bad index in test runs (3.2, 14.4)
-  - flags after an `asm` block: `if f()`, `while f()` (first test, and each later test when the body ends with an `asm` block) and `v = f()` with an empty-body flag function; after compiled Tern code the flags are unspecified (7)
-  - a variable `for` step of 0 never ends the loop; stepped loops stop when the step carries past the end of the type (5.1)
-  - signed `>>` rounds down, not toward zero (3.1)
-  - `keeps` on a fixed routine is a promise the compiler does not check (6.6); a function reached only through `addr()` has no known root (6.5, 8.1)
-  - a handler that leaves through an asm `jmp` gets `cld` only if its own code has `adc`, `sbc` or `jsr`; code it jumps to runs in decimal mode if main was in it, unless the asm block clears it (6.3)
-  - a call into an overlay that is not loaded runs whatever is in the area (8.5)
-  - an interrupt handler installed from an overlay must be removed before that overlay is replaced (8.5)
-  - an overlay's zero-page bytes at a fixed address hold whatever was there before it loaded; the overlay sets them (8.5)
-  - a `volatile` fixed-address variable over an overlay reads whatever overlay is loaded; addresses inside an overlay's file move when the overlay changes (8.5)
-  - a binary's entries are one root: the host must not call one from an interrupt while another runs (12.3)
-  - evaluation order: in `a[i] = v` the index is evaluated first; with a call in the index, and inside expressions, the order is unspecified (5)
+Decision 2026-11-08: the first release comes once all five platforms work. Done when: M28 is merged, the developer guide covers every behavior in its list, `docs/guide.md` and spec 10.1 describe the compiler and library as built, and every example builds for its platforms.
+
+## Not scheduled
+
+Each has a reason to wait; the spec session schedules one when that reason changes.
+
+- **F20, F14 and question 63 (b)** (deferred 2026-11-07): moving an independent shift before a bit test (50 cycles over the benchmarks; statement reordering is the riskiest kind of optimizer change); no `match` range check when the value's range is known (350 cycles; needs a value-range analysis, worth building once more optimizations can use it); folding `a[i + c]` proved from another access (no benchmark needs it, and it makes one line's cost depend on another, rule 4). Reconsider when a real program needs one.
+- **Second copies of functions called from two roots** (spec 14.2) and **arrays of structs as struct fields** (14.11): discussed after the first release.
+- **The `nmos6502+undoc` CPU variant** (spec 12.1, opt-in undocumented opcodes).
 
 After the compiler is complete (far off, not planned):
 

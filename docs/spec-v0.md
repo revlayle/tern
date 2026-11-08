@@ -259,9 +259,9 @@ data msg = "GAME OVER"
   - the variable is used by functions reachable from main and from an interrupt handler, or from two handlers (8.1). The compiler finds this from the call graph,
   - it is read or written through a pointer, since the compiler cannot know where a pointer points.
 
-  All other memory is ordinary: its values may be kept in registers, and redundant reads and writes removed. An asm block, and a call to a routine at a fixed address, make the optimizer forget the values it holds for ordinary memory. There is no way to mark memory inside a volatile area as ordinary; a memory layout declaration may add one later (14.12).
+  All other memory is ordinary: its values may be kept in registers, and redundant reads and writes removed. That includes a fixed address outside the volatile areas: `var reg: u8 @ $C000` is ordinary memory, and the optimizer may remove a read of it whose value is not used, or a repeated read, though it need not. Hardware that the platform's table does not list, such as a cartridge register, is marked `volatile`. An asm block, and a call to a routine at a fixed address, make the optimizer forget the values it holds for ordinary memory. There is no way to mark memory inside a volatile area as ordinary; a memory layout declaration may add one later (14.12).
 - **A fixed-address variable must not overlap the program**, its data, or the variables the compiler places. That is a compile error that names the variable and both address ranges. Fixed-address variables are often graphics data that the VIC must find in a given 16 KB bank; move the data or make the program smaller. Fixed-address variables may overlap each other. The one exception is the memory an overlay loads (8.5): a fixed-address variable marked `volatile` may overlap an overlay's file.
-- Global variables without an initializer are zeroed at startup. A global variable can be marked `noinit` to skip that. It is a prefix like `linear`: `noinit var buf: [u8; 256]`. It is an error with an initial value, at a fixed address (never zeroed anyway), on `data` and on locals.
+- Global variables without an initializer are zeroed at startup. Storing 0 into such a variable at the start of `main`, before any label, branch, call or asm block and before `main` has written it, therefore generates no code. A global variable can be marked `noinit` to skip that. It is a prefix like `linear`: `noinit var buf: [u8; 256]`. It is an error with an initial value, at a fixed address (never zeroed anyway), on `data` and on locals.
 - Local variables (other than arrays) must have an initial value. Their memory is shared with other functions (8.1), so it holds no useful value on entry.
 
 ### 4.1 Compile-time evaluation
@@ -529,6 +529,7 @@ if collides(n) { ... }             // jsr collides / bcc skip
 - **Two frames may share memory if the functions can never be active at the same time**, that is, neither is reachable from the other in the call graph. This is computed from the call graph, so total RAM use is the deepest call path, similar to a stack, but with absolute addressing.
 - Interrupt handlers are separate roots. Their frames never overlap with frames reachable from the main program.
 - **A function reachable from two roots** (main and a handler, or two handlers) is a compile error, unless it has no memory of its own: no memory parameters, no locals and no compiler temporaries, and it calls only such functions. Its only state is registers, which the handler saves. When the reason is a hidden temporary (e.g. for a 16-bit addition), the error says so. Routines at a fixed address may be called from any root.
+  - A loop counter is memory unless it is in a register. Only a counter declared with `using X` or `using Y` (5.1) is sure to be in one. The compiler may put other counters in a register (innermost loops, for example), and the function is then accepted, but that choice depends on the loop's body: adding a call or an inner loop can turn the function into an error. The error names the loop and suggests `using X` or `using Y`.
 - **A module's `private` variable used from two roots** is a compile error, e.g. the library's work bytes (`math.w0`-`w2`): the two sides would overwrite each other's values. Public variables and `data` may be shared.
   - Exception: when one of the two roots is an `interrupt fn` declared in the variable's own module, sharing is allowed. A function of that module called only from the module's own `interrupt fn`s (directly or through other such functions) counts as that side too, so a handler's helpers need not be `interrupt fn`s themselves. The module's author wrote both sides, so the sharing is by design, e.g. a `timer` module whose handler counts `private var ticks` and whose `now()` reads it. The variable is volatile, as below.
 - A global variable used from two roots is volatile (4), so a main loop that waits for a flag set by a handler reads it on every pass.
@@ -861,7 +862,7 @@ These are the intended translations. The optimizer may produce something shorter
 
 | Source | Generated code |
 |---|---|
-| `x = 0` | `lda #0` / `sta x` |
+| `x = 0` | `lda #0` / `sta x` (no code at the start of `main` when x is a global zeroed at startup, 4) |
 | `x += 1` (x in memory) | `inc x` |
 | `w += 1` (u16) | `inc w` / `bne +` / `inc w+1` |
 | `w += b as u16` (b: u8) | `lda b` / `clc` / `adc w` / `sta w` / `bcc +` / `inc w+1` |
@@ -887,7 +888,7 @@ These are the intended translations. The optimizer may produce something shorter
 | `chrout(x)` with `fn chrout(...) @ $FFD2` | `lda x` / `jsr $FFD2` |
 | `get_cursor()` with `fn get_cursor(true using carry) ... @ $FFF0` | `sec` / `jsr $FFF0` |
 | `return true` with `-> bool using carry` | `sec` / `rts` |
-| `-x` (u8) | `lda x` / `eor #$FF` / `clc` / `adc #1` |
+| `-x` (u8) | `lda #0` / `sec` / `sbc x` |
 | `x << 2` | `asl` / `asl` (on A or directly on memory) |
 | `(w << 5) + (w << 3)` (w: u16, i.e. w × 40) | shifts and one 16-bit add, inline |
 | `math.mul8(a, b)` | `ldx b` / `lda a` / `jsr math.mul8` (A is loaded last; result in A/X) |
