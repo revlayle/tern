@@ -11,6 +11,7 @@ if (args.Length < 1 || args[0] is "-h" or "--help")
           <output>.prg   the program
           <output>.lst   listing with addresses, bytes and cycles
           <output>.vs    VICE label file (load in the monitor with: ll "<output>.vs")
+          <output>.lines bytes, cycles and addresses of each source line
 
         A program with 'export' lines and no main is a binary for another program to call;
         it also writes <name>_api.tern, the module a Tern program imports to call it.
@@ -73,6 +74,7 @@ try
     Write(output, p => File.WriteAllBytes(p, result.Prg));
     Write(Path.ChangeExtension(output, ".lst"), p => File.WriteAllText(p, result.Listing));
     Write(Path.ChangeExtension(output, ".vs"), p => File.WriteAllText(p, result.ViceLabels));
+    Write(Path.ChangeExtension(output, ".lines"), p => File.WriteAllText(p, LineTable.Format(LineTable.Rows(result, Path.GetFileName(input)))));
     string directory = Path.GetDirectoryName(Path.GetFullPath(output))!;
     foreach (var overlay in result.Overlays)
         Write(Path.Combine(directory, overlay.Name + ".prg"), p => File.WriteAllBytes(p, overlay.Prg));
@@ -84,7 +86,7 @@ try
         Console.WriteLine(Diagnostic.ToJson(true, files, result.Report, []));
         return 0;
     }
-    foreach (var f in files.Skip(3)) Console.WriteLine($"Wrote {f}");
+    foreach (var f in files.Skip(4)) Console.WriteLine($"Wrote {f}");
     Console.WriteLine($"Wrote {output}");
     Console.Write(result.Report);
     return 0;

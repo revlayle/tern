@@ -42,6 +42,8 @@ public sealed class CompileResult
     public string? ApiModule { get; init; }
     /// <summary>The module's name, such as <c>player_api</c>; the file is <c>player_api.tern</c>.</summary>
     public string? ApiModuleName { get; init; }
+    /// <summary>Every instruction with the source line it belongs to (the source map; <see cref="Tools.LineTable"/>).</summary>
+    public IReadOnlyList<PlacedInstruction> Instructions { get; init; } = [];
 }
 
 public static class TernCompiler
@@ -302,6 +304,7 @@ public static class TernCompiler
             Overlays = overlayFiles,
             ApiModule = apiModule,
             ApiModuleName = apiName,
+            Instructions = code.Instructions,
         };
     }
 

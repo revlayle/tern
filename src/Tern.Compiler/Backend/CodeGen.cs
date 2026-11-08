@@ -185,7 +185,11 @@ public sealed class CodeGen
         GenBlock(f.Declaration!.Body);
         _aParameter = null;
         if (kept is { } r) _reserved.Remove(r);
-        if (!EndsWithJump()) Emit(Rts);
+        if (!EndsWithJump())
+        {
+            Source(f.Declaration!); // the closing rts belongs to the function's line (source map)
+            Emit(Rts);
+        }
     }
 
     /// <summary>The <c>using A</c> or <c>using AX</c> parameter of the function being generated, and where its body's code starts.</summary>
@@ -515,6 +519,7 @@ public sealed class CodeGen
             _loops.Add((end, top));
             GenBlock(w.Body);
             _loops.RemoveAt(_loops.Count - 1);
+            Source(w);
             Jmp(top);
         }
         else
@@ -541,6 +546,7 @@ public sealed class CodeGen
                 _ => false,
             };
             Place(test);
+            Source(w);
             if (zFromDecrement) Branch(Bne, top);
             else GenCond(w.Condition, top, true);
         }
@@ -2506,6 +2512,7 @@ public sealed class CodeGen
         _loopDepth--;
         _loops.RemoveAt(_loops.Count - 1);
         Place(cont);
+        Source(f); // the step and the test belong to the loop's line (source map)
 
         if (type.Size == 1 && d == 1 && !f.VariableStep)
             StepByOne(c, up, inclusive, from, to, bound, top, end);
@@ -2693,6 +2700,7 @@ public sealed class CodeGen
             _loopDepth--;
             _loops.RemoveAt(_loops.Count - 1);
             Place(cont);
+            Source(f);
             DecCounter(c);
             Branch(Bne, top);
             if (c.Register is { } r) _reserved.Remove(r);
@@ -2708,6 +2716,7 @@ public sealed class CodeGen
             _loopDepth--;
             _loops.RemoveAt(_loops.Count - 1);
             Place(cont);
+            Source(f);
             var noBorrow = NewLabel("nb");
             Op(Lda, Var(c)); Branch(Bne, noBorrow); Op(Dec, Var(c, 1));
             Place(noBorrow);

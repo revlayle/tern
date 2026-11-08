@@ -14,10 +14,20 @@ public sealed record PlacedSection(string Name, int Address, int Size, bool IsFi
 /// <param name="UsedEnd">The address after the last byte placed in <paramref name="Free"/>.</param>
 public sealed record PlacedArea(AddressRange Free, int UsedEnd, List<string> Names);
 
+/// <summary>
+/// One instruction of the program and the source line it was generated for: the last source line
+/// before it in the listing (null <see cref="Line"/> for code with none, such as the startup code).
+/// <see cref="File"/> is null for the main file, else the module's file name. <see cref="Cycles"/> is
+/// the base count; <see cref="MoreCycles"/> is set for a branch or a read that can cross a page.
+/// </summary>
+public sealed record PlacedInstruction(int Address, int Size, string Text, int Cycles, bool MoreCycles, string? File, int? Line, string? Source, string Section);
+
 public sealed class AssembledCode(
     List<(int Address, byte[] Bytes)> segments, string listing, List<PlacedSection> sections, List<PlacedArea> areas, AddressRange? variables,
-    Dictionary<string, List<(int Address, byte[] Bytes)>> overlays)
+    Dictionary<string, List<(int Address, byte[] Bytes)>> overlays, List<PlacedInstruction> instructions)
 {
+    /// <summary>Every instruction, in address order within each section, with its source line.</summary>
+    public List<PlacedInstruction> Instructions { get; } = instructions;
     /// <summary>The bytes of each overlay module's file, by module name.</summary>
     public Dictionary<string, List<(int Address, byte[] Bytes)>> Overlays { get; } = overlays;
     /// <summary>The bytes of the program file, in address order. Each segment is a run of adjacent sections.</summary>
@@ -295,6 +305,9 @@ public static class Assembler
             bytes.Clear();
         }
         var listing = new StringBuilder();
+        var instructions = new List<PlacedInstruction>();
+        SourceLine? source = null;
+        string sectionName = "";
         foreach (var s in slots)
         {
             switch (s.Item)
@@ -303,6 +316,8 @@ public static class Assembler
                     Flush();
                     segmentStart = s.Address;
                     overlay = begin.Overlay;
+                    source = null;
+                    sectionName = begin.Name;
                     break;
                 case Instr i:
                 {
@@ -315,7 +330,8 @@ public static class Assembler
                     }
                     else
                         Encoder.Encode(i.Mnemonic, s.Mode, OperandValue(i, s.Mode), s.Address, bytes);
-                    ListInstruction(listing, s, i, bytes.Skip(begin).ToArray());
+                    var (text, cycles, more) = ListInstruction(listing, s, i, bytes.Skip(begin).ToArray());
+                    instructions.Add(new PlacedInstruction(s.Address, bytes.Count - begin, text, cycles, more, source?.File, source?.Line, source?.Text.Trim(), sectionName));
                     break;
                 }
                 case DataBytes d:
@@ -346,6 +362,7 @@ public static class Assembler
                     listing.AppendLine($"{l.Label.Name}:");
                     break;
                 case SourceLine src:
+                    source = src;
                     listing.AppendLine(src.File is null
                         ? $"                                ; {src.Line,4}: {src.Text.Trim()}"
                         : $"                                ; {src.File}:{src.Line}: {src.Text.Trim()}");
@@ -375,7 +392,7 @@ public static class Assembler
             return merged;
         }
         return new AssembledCode(Merge(segments), listing.ToString(), placed, placedAreas, variables,
-            overlaySegments.ToDictionary(p => p.Key, p => Merge(p.Value)));
+            overlaySegments.ToDictionary(p => p.Key, p => Merge(p.Value)), instructions);
     }
 
     /// <summary>
@@ -463,7 +480,8 @@ public static class Assembler
         _ => throw new InvalidOperationException($"{branch} is not a branch"),
     };
 
-    private static void ListInstruction(StringBuilder listing, Slot s, Instr i, byte[] encoded)
+    /// <summary>Lists one instruction; returns its text and its cycles (base, and whether it can take more).</summary>
+    private static (string Text, int Cycles, bool More) ListInstruction(StringBuilder listing, Slot s, Instr i, byte[] encoded)
     {
         string hex = string.Join(" ", encoded.Take(3).Select(b => b.ToString("X2")));
         string text = s.LongBranch
@@ -472,6 +490,7 @@ public static class Assembler
         InstructionSet.TryGet(i.Mnemonic, s.Mode, out var info);
         string cycles = s.LongBranch ? "2+3" : info.Mode == AddressingMode.Relative ? "2+" : info.PageCrossPenalty ? $"{info.Cycles}+" : $"{info.Cycles}";
         listing.AppendLine($"${s.Address:X4}  {hex,-9} {text,-22}; {cycles}");
+        return (text, s.LongBranch ? 2 : info.Cycles, s.LongBranch || info.Mode == AddressingMode.Relative || info.PageCrossPenalty);
     }
 
     private static string FormatOperand(Operand? op, AddressingMode mode)
