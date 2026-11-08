@@ -109,8 +109,62 @@ public class BenchToolTests
     public void A_function_with_no_code_of_its_own_is_an_error()
     {
         var r = Bench.Measure(BenchVariant.Snippet("code 1", ["var n: u8", "inline fn bump() { n += 1 }"], "bump()"), "bump", []);
-        Assert.Contains("There is no function 'bump' with code of its own", r.Error!.Message);
+        Assert.Contains("The function 'bump' has no code of its own", r.Error!.Message);
         Assert.Equal("Measure a function that calls it", r.Error.Suggestion);
+
+        var uncalled = Bench.Measure(BenchVariant.Snippet("code 1", ["var n: u8", "fn bump() { n += 1 }"], "n = 1"), "bump", []);
+        Assert.Contains("The function 'bump' has no code of its own", uncalled.Error!.Message);
+    }
+
+    [Fact]
+    public void Two_variants_with_the_same_file_name_are_named_by_their_paths()
+    {
+        // Review M19 part 2, suggestion 5.
+        string dir = Path.Combine(Path.GetTempPath(), "tern-bench-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            foreach (var sub in new[] { "a", "b" })
+            {
+                Directory.CreateDirectory(Path.Combine(dir, sub));
+                File.WriteAllText(Path.Combine(dir, sub, "check.tern"), "var n: u8\nfn main() { n = 1 }\n");
+            }
+            File.WriteAllText(Path.Combine(dir, "other.tern"), "var n: u8\nfn main() { n = 2 }\n");
+            string a = Path.Combine(dir, "a", "check.tern"), b = Path.Combine(dir, "b", "check.tern"), other = Path.Combine(dir, "other.tern");
+            var output = new StringWriter();
+            Assert.Equal(0, Cli.Run(["bench", a, b, other], output, output));
+            var rows = output.ToString().Split('\n').Skip(1).Take(3).Select(l => l.Split("  ")[0].Trim()).ToList();
+            Assert.Equal([a, b, "other.tern"], rows);
+        }
+        finally { Directory.Delete(dir, recursive: true); }
+    }
+
+    [Fact]
+    public void An_unknown_function_is_not_called_inline_or_uncalled()
+    {
+        // Review M19 part 2, finding 2.
+        var r = Bench.Measure(BenchVariant.Snippet("code 1", ["var n: u8"], "n = 1"), "nosuch", []);
+        Assert.Equal("There is no function 'nosuch' in the program.", r.Error!.Message);
+        Assert.Null(r.Error.Suggestion);
+    }
+
+    [Fact]
+    public void A_module_function_without_its_module_name_suggests_the_full_name()
+    {
+        // Review M19 part 2, finding 2: the agent wrote --fn update for ball.update.
+        string dir = Path.Combine(Path.GetTempPath(), "tern-bench-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        try
+        {
+            File.WriteAllText(Path.Combine(dir, "ball.tern"), "var x: u8\nfn update() { x += 1 }\n");
+            string main = Path.Combine(dir, "check.tern");
+            string source = "import ball\nfn main() { ball.update() }\n";
+            File.WriteAllText(main, source);
+            var r = Bench.Measure(new BenchVariant("check.tern", source, main), "update", []);
+            Assert.Equal("There is no function 'update' in the program.", r.Error!.Message);
+            Assert.Equal("Use 'ball.update': a module's function is named with its module", r.Error.Suggestion);
+            Assert.Null(Bench.Measure(new BenchVariant("check.tern", source, main), "ball.update", []).Error);
+        }
+        finally { Directory.Delete(dir, recursive: true); }
     }
 
     [Fact]

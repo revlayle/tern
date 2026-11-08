@@ -179,13 +179,17 @@ public static class Cli
 
             var results = new List<BenchResult>();
             int snippets = 0;
+            // A variant is named by its file name, or by its path as given when two have the same name.
+            var duplicateNames = variants.Where(v => v.Path is not null).GroupBy(v => Path.GetFileName(v.Path!))
+                .Where(g => g.Count() > 1).Select(g => g.Key).ToHashSet();
             foreach (var (path, code) in variants)
             {
                 BenchVariant variant;
                 if (code is not null) variant = BenchVariant.Snippet($"code {++snippets}", declarations, code);
                 else
                 {
-                    try { variant = new BenchVariant(Path.GetFileName(path!), File.ReadAllText(path!), path); }
+                    string name = duplicateNames.Contains(Path.GetFileName(path!)) ? path! : Path.GetFileName(path!);
+                    try { variant = new BenchVariant(name, File.ReadAllText(path!), path); }
                     catch (IOException e) { return Fail(json, new Diagnostic(path!, 0, 0, "error", $"Cannot read {path}: {e.Message}", null), $"Cannot read {path}: {e.Message}"); }
                 }
                 results.Add(Bench.Measure(variant, function, dumps, new RunOptions { MaxCycles = cycles, IrqEvery = irq }));

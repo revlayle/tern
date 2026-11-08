@@ -74,10 +74,18 @@ public static class Bench
             return Failed(d);
         }
         var section = program.Sections.FirstOrDefault(s => s.Name == measured);
-        if (section is null)
+        if (section is null && program.DeclaredFunctions.Contains(measured))
             return Failed(new Diagnostic(variant.Name, 0, 0, "error",
-                $"There is no function '{measured}' with code of its own (an inline function is copied into each caller, and a function nothing calls is left out).",
+                $"The function '{measured}' has no code of its own (an inline function is copied into each caller, and a function nothing calls is left out).",
                 "Measure a function that calls it"));
+        if (section is null)
+        {
+            // A module's function is named with its module: ship.move.
+            var inModule = program.DeclaredFunctions.Where(f => f.EndsWith("." + measured)).Order(StringComparer.Ordinal).ToList();
+            return Failed(new Diagnostic(variant.Name, 0, 0, "error",
+                $"There is no function '{measured}' in the program.",
+                inModule.Count == 0 ? null : "Use " + string.Join(" or ", inModule.Select(f => $"'{f}'")) + ": a module's function is named with its module"));
+        }
 
         var run = Runner.Run(program, options);
         var time = run.Functions.FirstOrDefault(f => f.Name == measured);
