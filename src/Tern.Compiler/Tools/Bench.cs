@@ -6,15 +6,34 @@ using Tern.Compiler.Syntax;
 namespace Tern.Compiler.Tools;
 
 /// <summary>One way of writing the code: a source file, or a snippet put into <c>main</c> after shared declarations.</summary>
-/// <param name="FirstSnippetLine">For a snippet, the line of the generated source where the snippet starts; errors are given relative to it.</param>
-public sealed record BenchVariant(string Name, string Source, string? Path, int FirstSnippetLine = 0)
+/// <param name="DeclarationLines">For a snippet, the number of lines of each <c>--decl</c>, in order; null for a file.</param>
+/// <param name="SnippetLines">For a snippet, its number of lines.</param>
+public sealed record BenchVariant(string Name, string Source, string? Path, IReadOnlyList<int>? DeclarationLines = null, int SnippetLines = 0)
 {
     /// <summary><c>--decl</c> lines, then <c>fn main() {</c>, the snippet and <c>}</c>.</summary>
     public static BenchVariant Snippet(string name, IReadOnlyList<string> declarations, string code)
     {
-        var head = string.Join("\n", declarations);
-        int before = declarations.Sum(d => d.Split('\n').Length);
-        return new BenchVariant(name, $"{head}\nfn main() {{\n{code}\n}}\n", null, before + 2);
+        var source = new StringBuilder();
+        foreach (var d in declarations) source.Append(d).Append('\n');
+        source.Append("fn main() {\n").Append(code).Append("\n}\n");
+        return new BenchVariant(name, source.ToString(), null, declarations.Select(d => d.Split('\n').Length).ToList(), code.Split('\n').Length);
+    }
+
+    /// <summary>
+    /// Where a line of a snippet's generated source came from: <c>decl N</c> and the line in that
+    /// declaration, or the variant's name and the line in the snippet.
+    /// </summary>
+    public (string File, int Line) Place(int line)
+    {
+        if (DeclarationLines is null) return (Name, line);
+        int first = 1;
+        for (int i = 0; i < DeclarationLines.Count; i++)
+        {
+            if (line < first + DeclarationLines[i]) return ($"decl {i + 1}", line - first + 1);
+            first += DeclarationLines[i];
+        }
+        // The line after the declarations is fn main() {, then the snippet, then the closing brace.
+        return (Name, Math.Clamp(line - first, 1, Math.Max(1, SnippetLines)));
     }
 }
 
@@ -48,7 +67,10 @@ public static class Bench
         {
             var d = Diagnostic.From(e, variant.Name);
             if (variant.Path is null && e.Pos.File is null)
-                d = d with { Line = e.Pos.Line - variant.FirstSnippetLine + 1, File = variant.Name };
+            {
+                var (file, line) = variant.Place(e.Pos.Line);
+                d = d with { File = file, Line = line };
+            }
             return Failed(d);
         }
         var section = program.Sections.FirstOrDefault(s => s.Name == measured);
@@ -90,7 +112,8 @@ public static class Bench
         {
             if (r.Error is { } e)
             {
-                sb.AppendLine($"{r.Variant.PadRight(width)}  error: {(e.Line > 0 ? $"line {e.Line}:{e.Column}: " : "")}{e.Message}{(e.Suggestion is null ? "" : " " + e.Suggestion)}");
+                string where = e.Line <= 0 ? "" : e.File == r.Variant ? $"line {e.Line}:{e.Column}: " : $"{e.File}, line {e.Line}:{e.Column}: ";
+                sb.AppendLine($"{r.Variant.PadRight(width)}  error: {where}{e.Message}{(e.Suggestion is null ? "" : " " + e.Suggestion)}");
                 continue;
             }
             sb.AppendLine($"{r.Variant.PadRight(width)}  {r.ProgramBytes,7}  {r.FunctionBytes,10}  {r.Calls,6}  {r.Cycles,9}  {r.CyclesPerCall,8}  {r.ZeroPageBytes,4}  {r.OtherBytes,5}"

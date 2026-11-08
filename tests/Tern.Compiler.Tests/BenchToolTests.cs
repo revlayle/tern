@@ -13,7 +13,43 @@ public class BenchToolTests
     {
         var v = BenchVariant.Snippet("code 1", ["var a: u8", "var b: u8"], "a = 1; b = 2");
         Assert.Equal("var a: u8\nvar b: u8\nfn main() {\na = 1; b = 2\n}\n", v.Source);
-        Assert.Equal(4, v.FirstSnippetLine);
+        Assert.Equal(("decl 2", 1), v.Place(2));
+        Assert.Equal(("code 1", 1), v.Place(4));
+        Assert.Equal("fn main() {\nx = 1\n}\n", BenchVariant.Snippet("code 1", [], "x = 1").Source);
+    }
+
+    [Fact]
+    public void An_error_in_a_snippet_with_no_declarations_is_on_its_line()
+    {
+        // Review M19, finding 2.
+        var r = Bench.Measure(BenchVariant.Snippet("code 1", [], "var x: u8 = 1; x = nope"), null, []);
+        Assert.Equal("code 1", r.Error!.File);
+        Assert.Equal(1, r.Error.Line);
+        Assert.Equal(20, r.Error.Column);
+        Assert.StartsWith("code 1    error: line 1:20: 'nope' is not declared", Bench.Text([r]).Split('\n')[1]);
+    }
+
+    [Theory]
+    [InlineData(new[] { "var g: u9" }, "decl 1", 1)]
+    [InlineData(new[] { "var a: u8", "var b: u8\nvar g: u9" }, "decl 2", 2)]
+    public void An_error_in_a_declaration_names_the_declaration(string[] declarations, string file, int line)
+    {
+        var r = Bench.Measure(BenchVariant.Snippet("code 1", declarations, "a = 1"), null, []);
+        Assert.Equal(file, r.Error!.File);
+        Assert.Equal(line, r.Error.Line);
+        Assert.Contains($"error: {file}, line {line}:", Bench.Text([r]));
+    }
+
+    [Fact]
+    public void The_generated_lines_around_the_snippet_map_to_its_first_and_last_lines()
+    {
+        var v = BenchVariant.Snippet("code 1", ["var a: u8"], "a = 1\na += 1");
+        Assert.Equal(("code 1", 1), v.Place(2)); // fn main() {
+        Assert.Equal(("code 1", 2), v.Place(4));
+        Assert.Equal(("code 1", 2), v.Place(5)); // }
+        var r = Bench.Measure(BenchVariant.Snippet("code 1", ["var a: u8"], "a = 1\nif a == 1 {"), null, []);
+        Assert.Equal("code 1", r.Error!.File);
+        Assert.Contains("is not closed", r.Error.Message);
     }
 
     [Fact]
