@@ -35,26 +35,47 @@ public static class Optimizer
     // ---------- Dead stores ----------
 
     /// <summary>
-    /// Bytes of the function's own memory variables that may be read before they are written again.
-    /// <see cref="All"/>: anything may be read (code the analysis cannot follow).
+    /// Bytes of tracked variables (<see cref="Tracked"/>) that may be read before they are written again.
+    /// <see cref="All"/>: anything may be read (code the analysis cannot follow). <see cref="Globals"/>:
+    /// every byte of an ordinary global may be read (a call, the return), except those in <see cref="Dead"/>,
+    /// which are stored again first.
     /// </summary>
     private sealed class Live
     {
-        public bool All;
+        public bool All, Globals;
         public readonly HashSet<(VariableSymbol, int)> Bytes = [];
         public readonly HashSet<VariableSymbol> Whole = [];   // read with an index
+        public readonly HashSet<(VariableSymbol, int)> Dead = [];
 
-        public bool Has(VariableSymbol v, int offset) => All || Whole.Contains(v) || Bytes.Contains((v, offset));
+        public bool Has(VariableSymbol v, int offset) => All || Whole.Contains(v) || Bytes.Contains((v, offset))
+            || (Globals && v.Kind == VariableKind.Global && !Dead.Contains((v, offset)));
+
+        public void Read((VariableSymbol, int) b) { Bytes.Add(b); Dead.Remove(b); }
+
+        public void Written((VariableSymbol V, int) b)
+        {
+            Bytes.Remove(b);
+            if (Globals && b.V.Kind == VariableKind.Global) Dead.Add(b);
+        }
+
+        public void ReadGlobals() { Globals = true; Dead.Clear(); }
 
         /// <summary>Adds what <paramref name="other"/> holds. Returns true if this changed.</summary>
         public bool Union(Live other)
         {
             if (All) return false;
             if (other.All) { All = true; return true; }
-            int before = Bytes.Count + Whole.Count;
+            var before = (Globals, Bytes.Count, Whole.Count, Dead.Count);
+            if (other.Globals)
+            {
+                if (Globals) Dead.IntersectWith(other.Dead);
+                else Dead.UnionWith(other.Dead.Where(b => !Bytes.Contains(b)));
+                Globals = true;
+            }
             Bytes.UnionWith(other.Bytes);
             Whole.UnionWith(other.Whole);
-            return Bytes.Count + Whole.Count != before;
+            Dead.ExceptWith(other.Bytes);
+            return (Globals, Bytes.Count, Whole.Count, Dead.Count) != before;
         }
     }
 
@@ -71,17 +92,34 @@ public static class Optimizer
     }
 
     /// <summary>
+    /// A global variable of ordinary memory (spec 4): not volatile (so used from one root, spec 8.1),
+    /// its address not taken, not at a fixed address, in a region or in an overlay, not data. Other
+    /// code may read it only after a call, a return or a jump out of the function's code.
+    /// </summary>
+    private static bool OrdinaryGlobal(VariableSymbol v)
+    {
+        var s = v.Storage;
+        return s.Kind == VariableKind.Global && !s.AddressTaken && !v.AddressTaken && !s.IsVolatile && s.FixedAddress is null
+            && s.Region is null && s.OverlayArea is null && !s.InOverlayArea && !s.IsData;
+    }
+
+    /// <summary>The variables whose stores <see cref="RemoveDeadStores"/> follows.</summary>
+    private static bool Tracked(VariableSymbol v, FunctionSymbol function) => OwnMemory(v, function) || OrdinaryGlobal(v);
+
+    /// <summary>
     /// Removes <c>sta</c>, <c>stx</c> and <c>sty</c> into a byte of the function's own memory
-    /// (<see cref="OwnMemory"/>) that no path reads before it is stored again or the function
-    /// returns: <c>var b = values[i + 1]</c> whose value is used only from A. A store changes no
-    /// register or flag, so nothing else changes. Stores from assembly stay. Returns true if any was removed.
+    /// (<see cref="OwnMemory"/>) or of an ordinary global (<see cref="OrdinaryGlobal"/>) that no path
+    /// reads before it is stored again or, for the function's own memory, the function returns:
+    /// <c>var b = values[i + 1]</c> whose value is used only from A. A store changes no register or
+    /// flag, so nothing else changes. Stores from assembly stay. Returns true if any was removed.
     /// </summary>
     /// <remarks>
-    /// A backward analysis over the code. A <c>jsr</c> reads none of these bytes (the callee cannot
-    /// name them). An <c>rts</c> or <c>jmp (v)</c> may go to a label named other than by a jump (the
-    /// jump table of a <c>match</c> dispatches with <c>rts</c>), so it reads what those labels may read.
-    /// The end of the code, and a jump to a label outside it, read nothing: what follows is the
-    /// function's exit (an interrupt handler's register restore) or another function.
+    /// A backward analysis over the code. A <c>jsr</c> reads none of the function's own bytes (the
+    /// callee cannot name them). An <c>rts</c> or <c>jmp (v)</c> may go to a label named other than by
+    /// a jump (the jump table of a <c>match</c> dispatches with <c>rts</c>), so it reads what those
+    /// labels may read. The end of the code, and a jump to a label outside it, read none of them:
+    /// what follows is the function's exit (an interrupt handler's register restore) or another
+    /// function. Globals are read by all of these, by a call, and by a read through a pointer or at a number.
     /// </remarks>
     private static bool RemoveDeadStores(List<AsmItem> code, FunctionSymbol function)
     {
@@ -98,18 +136,22 @@ public static class Optimizer
             into.Union(after);
             if (code[k] is not Instr i) return;
             if (i.Mnemonic == Brk) { into.All = true; return; }
-            if (i.Operand is ImmVarByte { Variable: var a } && OwnMemory(a, function)) into.Whole.Add(a.Storage);
-            if (i.Operand is not VarOperand o || !OwnMemory(o.Variable, function)) return;
+            // Other code may read the globals: a callee, the caller, or memory reached through a pointer or at a number.
+            if (i.Mnemonic is Jsr or Rts or Rti || (i.Mode is IndirectIndexed or IndexedIndirect or Indirect && i.Mnemonic != Sta)
+                || (i.Operand is AddrOperand && AsmEffects.ReadsMemory(i.Mnemonic, i.Mode)))
+                into.ReadGlobals();
+            if (i.Operand is ImmVarByte { Variable: var a } && Tracked(a, function)) into.Whole.Add(a.Storage);
+            if (i.Operand is not VarOperand o || !Tracked(o.Variable, function)) return;
             var b = Byte(o);
             switch (i.Mode)
             {
                 case Absolute or ZeroPage:
-                    if (Stored(i.Mnemonic) is not null) into.Bytes.Remove(b);
-                    else if (AsmEffects.ReadsMemory(i.Mnemonic, i.Mode)) into.Bytes.Add(b);
+                    if (Stored(i.Mnemonic) is not null) into.Written(b);
+                    else if (AsmEffects.ReadsMemory(i.Mnemonic, i.Mode)) into.Read(b);
                     break;
                 case IndirectIndexed or Indirect:
-                    into.Bytes.Add(b);
-                    into.Bytes.Add((b.Item1, b.Item2 + 1));
+                    into.Read(b);
+                    into.Read((b.Item1, b.Item2 + 1));
                     break;
                 default:
                     // Indexed: any byte of the variable. An indexed store overwrites no known byte.
@@ -131,9 +173,13 @@ public static class Optimizer
                 if (i.Mnemonic is Rts || (i.Mnemonic == Mnemonic.Jmp && i.Mode == Indirect))
                     foreach (int u in unknown) after.Union(liveIn[u]);
                 if (Target(i) is { } t && positions.TryGetValue(t, out int tp)) after.Union(liveIn[tp]);
+                // A jump out of the code leaves the function: its globals may be read there.
+                else if (IsBranch(i.Mnemonic) || i.Mnemonic == Mnemonic.Jmp) after.ReadGlobals();
             }
             // liveIn keeps the indexes from before any removal below; items before a removal do not move.
             if (FallsThrough(item) && k + 1 < liveIn.Length) after.Union(liveIn[k + 1]);
+            // The end of the code: the function's exit (an interrupt handler's register restore).
+            else if (FallsThrough(item)) after.ReadGlobals();
             return after;
         }
 
@@ -152,7 +198,7 @@ public static class Optimizer
         for (int k = code.Count - 1; k >= 0; k--)
         {
             if (code[k] is Instr { AsmPos: null, Mode: Absolute or ZeroPage, Operand: VarOperand o } i && Stored(i.Mnemonic) is not null
-                && OwnMemory(o.Variable, function))
+                && Tracked(o.Variable, function))
             {
                 var (v, offset) = Byte(o);
                 if (!After(k).Has(v, offset)) { code.RemoveAt(k); removed = true; }

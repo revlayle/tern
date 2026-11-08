@@ -284,7 +284,7 @@ public class SmallShapeTests
                 a[0] = 0
                 a[1] = 1
                 b = 0
-                c = 5
+                c += 1
                 c = 0
                 d = 0
                 e = 0
@@ -303,7 +303,7 @@ public class SmallShapeTests
         Assert.DoesNotContain("sta a+4|", code);
         Assert.DoesNotContain("sta b|", code);   // also the second b = 0: main has not written b
         Assert.DoesNotContain("sta f|", code);
-        Assert.Contains("sta c|", code);          // c = 0 after c = 5
+        Assert.Contains("sta c|", code);          // c = 0 after c += 1
         Assert.Contains("sta d|", code);          // initialized: in the file, not cleared
         Assert.Contains("sta e|", code);          // noinit
     }
