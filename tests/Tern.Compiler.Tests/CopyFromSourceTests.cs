@@ -1,3 +1,10 @@
+using Tern.Compiler.Backend;
+using Tern.Compiler.Semantics;
+using Tern.Compiler.Syntax;
+using Tern.Cpu;
+using static Tern.Cpu.AddressingMode;
+using static Tern.Cpu.Mnemonic;
+
 namespace Tern.Compiler.Tests;
 
 /// <summary>
@@ -179,5 +186,85 @@ public class CopyFromSourceTests
             }
             """);
         Assert.Equal([10, 100, 30, 100], Enumerable.Range(0, 4).Select(k => (int)r.U8("out", k)));
+    }
+
+    // Review M18 part 2, suggestion 2: the register for the inserted load.
+
+    private const string Swap = """
+                    var a: u8 = values[i]
+                    var b: u8 = values[i + 1]
+                    if a > b {
+                        values[i] = b
+                        values[i + 1] = a
+                    }
+        """;
+
+    [Fact]
+    public void With_the_index_in_y_the_copy_goes_through_x()
+    {
+        byte[] input = [5, 0, 255, 3, 3, 128, 1, 254, 0, 255, 127, 129];
+        var r = Run.Program($$"""
+            var values: [u8; 12] = [{{Values(input)}}]
+            fn main() {
+                var last: u8 = 11
+                while last > 0 {
+                    for i in 0..last using Y {
+            {{Swap}}
+                    }
+                    last -= 1
+                }
+            }
+            """);
+        var sorted = input.Order().ToArray();
+        for (int k = 0; k < sorted.Length; k++) Assert.Equal(sorted[k], r.U8("values", k));
+        Assert.Contains("lda values+1,y|cmp values,y|bcs main.endif6|ldx values,y|sta values,y|txa|sta values+1,y", Code(r));
+    }
+
+    [Fact]
+    public void With_both_index_registers_in_use_the_copy_stays_in_memory()
+    {
+        byte[] input = [5, 0, 255, 3, 3, 128, 1, 254, 0, 255, 127, 129];
+        var r = Run.Program($$"""
+            var values: [u8; 12] = [{{Values(input)}}]
+            var passes: u8
+            fn main() {
+                for k in 0..11 using Y {
+                    for i in 0..11 using X {
+            {{Swap}}
+                    }
+                    passes += 1
+                }
+            }
+            """);
+        var sorted = input.Order().ToArray();
+        for (int k = 0; k < sorted.Length; k++) Assert.Equal(sorted[k], r.U8("values", k));
+        Assert.Equal(11, r.U8("passes"));
+        Assert.Contains("sta main.a", Code(r));
+        Assert.Contains("lda main.a|sta values+1,x", Code(r));
+    }
+
+    [Fact]
+    public void Flags_read_after_the_overwriting_store_keep_the_copy_in_memory()
+    {
+        var f = new FunctionSymbol("f", default);
+        var arr = new VariableSymbol("arr", default, TernType.ArrayOf(TernType.U8, 4), VariableKind.Global, null);
+        var t = new VariableSymbol("t", default, TernType.U8, VariableKind.Local, f);
+        var o = new VariableSymbol("out", default, TernType.U8, VariableKind.Global, null);
+        string Optimize(params AsmItem[] code)
+        {
+            var list = code.ToList();
+            Optimizer.Run(list, f);
+            return string.Join("|", list.OfType<Instr>().Select(i => $"{i.Mnemonic.ToString().ToLowerInvariant()} {i.Operand}".Trim()));
+        }
+        Instr Abs(Mnemonic m, VariableSymbol v) => new(m, Absolute, new VarOperand(v));
+        Instr X(Mnemonic m) => new(m, AbsoluteX, new VarOperand(arr));
+        var skip = new Label("skip");
+        // N and Z from lda #0 are read by beq after the store: no ldy can go in front of it.
+        Assert.Equal("ldx out|lda arr|sta f.t|lda #$00|sta arr|beq skip|lda f.t|sta out|rts",
+            Optimize(Abs(Ldx, o), X(Lda), Abs(Sta, t), new Instr(Lda, Immediate, new Imm(0)), X(Sta),
+                new Instr(Beq, Relative, new LabelOperand(skip)), Abs(Lda, t), Abs(Sta, o), new LabelDef(skip), new Instr(Rts)));
+        // Without the branch the copy is loaded into Y before the store.
+        Assert.Equal("ldx out|lda #$00|ldy arr|sta arr|tya|sta out|rts",
+            Optimize(Abs(Ldx, o), X(Lda), Abs(Sta, t), new Instr(Lda, Immediate, new Imm(0)), X(Sta), Abs(Lda, t), Abs(Sta, o), new Instr(Rts)));
     }
 }

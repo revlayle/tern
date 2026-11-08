@@ -242,4 +242,61 @@ public class DeadStoreTests
             """);
         Assert.Equal(42, r.U8("out"));
     }
+
+    // Review M18 part 2, suggestion 3.
+
+    [Fact]
+    public void The_end_of_the_code_and_a_jump_out_of_it_read_nothing()
+    {
+        var other = new Label("other");
+        Assert.Equal("lda #$01|jmp other", Optimize(Imm(Lda, 1), Abs(Sta, T), new Instr(Mnemonic.Jmp, Absolute, new LabelOperand(other))));
+        // An interrupt handler's body falls into the register restore, which is added after optimizing.
+        Assert.Equal("lda #$01", Optimize(Imm(Lda, 1), Abs(Sta, T)));
+    }
+
+    [Fact]
+    public void An_interrupt_handler_with_locals_runs_beside_main()
+    {
+        var r = Run.Program("""
+            var hn: u8
+            var hacc: u8
+            var last: u8
+            var sum: u16
+            interrupt fn h() {
+                var t: u8 = hn
+                hn += 1
+                hacc += t
+                var u: u8 = hacc ^ 85
+                last = u
+            }
+            fn main() {
+                asm {
+                    sei
+                    lda #h.lo
+                    sta $FFFE
+                    lda #h.hi
+                    sta $FFFF
+                    cli
+                }
+                for rep in 0..40 {
+                    for i in 0..=255 {
+                        var v: u8 = i ^ 170
+                        sum += v as u16
+                    }
+                }
+                asm { sei }
+            }
+            """, maxCycles: 4_000_000, irqEvery: 97);
+        int calls = r.Interrupts;
+        Assert.True(calls > 100);
+        int sum = 0;
+        for (int rep = 0; rep < 40; rep++) for (int i = 0; i < 256; i++) sum += i ^ 170;
+        Assert.Equal(sum & 0xFFFF, r.U16("sum"));
+        int acc = 0;
+        for (int n = 0; n < calls; n++) acc += n;
+        Assert.Equal(calls & 0xFF, r.U8("hn"));
+        Assert.Equal(acc & 0xFF, r.U8("hacc"));
+        Assert.Equal((acc & 0xFF) ^ 85, r.U8("last"));
+        Assert.DoesNotContain("sta h.u", r.Result.Listing);   // u is used only from A
+    }
 }
