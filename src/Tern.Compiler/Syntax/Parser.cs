@@ -476,12 +476,13 @@ public sealed class Parser
 
     private Register ParseRegister()
     {
-        var t = Expect(TokenKind.Identifier, "a register or flag (A, X, Y, AX, AY, XY, carry, zero, negative)");
+        var t = Expect(TokenKind.Identifier, "a register or flag (A, X, Y, AX, AY, XY, carry, zero, negative, overflow)");
         return t.Text switch
         {
             "A" => Register.A, "X" => Register.X, "Y" => Register.Y,
             "AX" => Register.AX, "AY" => Register.AY, "XY" => Register.XY,
             "carry" => Register.Carry, "zero" => Register.Zero, "negative" => Register.Negative,
+            "overflow" => Register.Overflow,
             _ => throw new CompileError(t.Pos, $"Unknown register or flag '{t.Text}'"),
         };
     }

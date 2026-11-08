@@ -82,7 +82,7 @@ public sealed class TernType
 }
 
 /// <summary>A CPU register, register pair or flag named by <c>using</c>.</summary>
-public enum Register { A, X, Y, AX, AY, XY, Carry, Zero, Negative }
+public enum Register { A, X, Y, AX, AY, XY, Carry, Zero, Negative, Overflow }
 
 public static class RegisterExtensions
 {

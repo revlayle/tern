@@ -1304,11 +1304,11 @@ public sealed class CodeGen
                     case Register.X: Emit(Txa); break;
                     case Register.Y: Emit(Tya); break;
                     case Register.Carry: Op(Lda, Byte(0)); Emit(Rol, Accumulator); break;
-                    case Register.Zero or Register.Negative:
+                    case Register.Zero or Register.Negative or Register.Overflow:
                     {
                         var isFalse = NewLabel("f");
                         var done = NewLabel("b");
-                        Branch(call.Function.ReturnRegister == Register.Zero ? Bne : Bpl, isFalse);
+                        Branch(call.Function.ReturnRegister switch { Register.Zero => Bne, Register.Negative => Bpl, _ => Bvc }, isFalse);
                         Op(Lda, Byte(1));
                         Branch(Bne, done);
                         Place(isFalse);
@@ -1794,6 +1794,7 @@ public sealed class CodeGen
                     case Register.Carry: Branch(jumpIf ? Bcs : Bcc, target); return;
                     case Register.Zero: Branch(jumpIf ? Beq : Bne, target); return;
                     case Register.Negative: Branch(jumpIf ? Bmi : Bpl, target); return;
+                    case Register.Overflow: Branch(jumpIf ? Bvs : Bvc, target); return;
                     case Register.X: Op(Cpx, Byte(0)); break;
                     case Register.Y: Op(Cpy, Byte(0)); break;
                     default: Op(Cmp, Byte(0)); break;

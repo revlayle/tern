@@ -483,6 +483,9 @@ public sealed partial class Checker
                 _ => Register.A,
             };
             CheckRegisterFits(fn.ReturnRegister.Value, fn.ReturnType, decl.ReturnType.Pos, allowFlags: true);
+            if (fn.ReturnRegister == Register.Overflow && !decl.IsAsm && decl.Address is null)
+                throw new CompileError(decl.ReturnType.Pos,
+                    "Only an asm fn, an inline asm fn or a routine at a fixed address can return a bool using overflow: no instruction sets the V flag, so a fn cannot 'return true' in it. Return it using carry, zero or negative");
         }
         else if (decl.ReturnUsing is not null)
             throw new CompileError(decl.Pos, "'using' needs a return type");
