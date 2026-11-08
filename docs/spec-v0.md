@@ -893,6 +893,7 @@ These are the intended translations. The optimizer may produce something shorter
 |---|---|
 | `x = 0` | `lda #0` / `sta x` (no code at the start of `main` when x is a global zeroed at startup, 4) |
 | `x += 1` (x in memory) | `inc x` |
+| `x += 2`, `x -= 2` (u8 in memory, not `volatile`) | `inc x` / `inc x`, `dec x` / `dec x` (4 bytes against 7, the same cycles, A unchanged; a `volatile` variable gets the add, since two `inc`s write the value in between) |
 | `w += 1` (u16) | `inc w` / `bne +` / `inc w+1` |
 | `w += b as u16` (b: u8) | `lda b` / `clc` / `adc w` / `sta w` / `bcc +` / `inc w+1` |
 | `p += 256`, `w -= 256` | `inc p+1`, `dec w+1` |
