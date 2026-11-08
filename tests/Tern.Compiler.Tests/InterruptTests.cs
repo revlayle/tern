@@ -400,8 +400,8 @@ public class InterruptTests
         "'f' is called from the interrupt handler 'h1' and from the interrupt handler 'h2'")]
     [InlineData("var v: u8\nfn f(n: u8) { v = n }\ninterrupt fn h() { f(1) }\nfn main() { f(2) }", "its memory: the parameter 'n' in memory")]
     [InlineData("var v: u8\nfn f(n: u8 using A) { v = n }\ninterrupt fn h() { f(1) }\nfn main() { f(2) }", "its memory: the parameter 'n', which it keeps in memory (it arrives in A)")]
-    // The inner counter goes in X; the outer one stays in memory.
-    [InlineData("var v: u8\nfn f() {\n for _ in 0..v {\n for _ in 0..v { v += 1 }\n }\n}\ninterrupt fn h() { f() }\nfn main() { f() }", "its memory: the counter of the loop at line 3")]
+    // The inner counter goes in X; the outer one stays in memory (its loop calls g).
+    [InlineData("var v: u8\nfn g() {}\nfn f() {\n for _ in 0..v {\n for _ in 0..v { v += 1 }\n g()\n }\n}\ninterrupt fn h() { f() }\nfn main() { f() }", "its memory: the counter of the loop at line 4")]
     [InlineData("var v: u16\nvar w: u16\nfn g() -> u8 { return 1 }\nfn f() {\n v = w + (g() as u16)\n}\ninterrupt fn h() { f() }\nfn main() { f() }",
         "its memory: a hidden temporary for the code at line 5")]
     [InlineData("var v: u8\nfn g() { var t = v\n v = t + 1 }\nfn f() { g() }\ninterrupt fn h() { f() }\nfn main() { f() }", "'g' is called from main and from the interrupt handler 'h'")]

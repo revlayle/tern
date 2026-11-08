@@ -2316,6 +2316,7 @@ public sealed class CodeGen
         long? from = f.From.ConstValue, to = f.To.ConstValue;
         bool inclusive = f.Inclusive;
         if (c.Register is null) ChooseCounterRegister(f, c);
+        if (c.Register is null) ChooseOuterCounterRegister(f, c);
 
         var end = NewLabel("fend");
         var cont = NewLabel("fnext");
@@ -2436,11 +2437,72 @@ public sealed class CodeGen
     /// </summary>
     private void ChooseCounterRegister(ForStmt f, VariableSymbol c)
     {
-        if (c.Type.Size != 1 || Math.Abs(f.StepValue) != 1 || c.AddressTaken || _reserved.Count > 0
+        if (c.Type.Size != 1 || Math.Abs(f.StepValue) != 1 || c.AddressTaken
             || Descendants(f.Body).Any(n => n is ForStmt or WhileStmt) || !KeepsIndexRegistersFree(f.Body)) return;
-        var (plain, other) = PointerIndexes(f.Body, c);
-        var reg = plain > 0 && other == 0 ? Register.Y : Register.X;
+        Register reg;
+        if (_reserved.Count == 0)
+        {
+            var (plain, other) = PointerIndexes(f.Body, c);
+            reg = plain > 0 && other == 0 ? Register.Y : Register.X;
+        }
+        else if (_reserved.Count == 1 && IndexesHeld(f.Body, c, null, null) && !Descendants(f.Body).Any(n => n is MatchStmt || (n is IndexExpr ix && IsPointerIndex(ix))))
+        {
+            // M18 F13: beside a register already held (an outer counter in Y), the other one, when
+            // every index in the body is this counter or already in a register.
+            reg = _reserved.Contains(Register.X) ? Register.Y : Register.X;
+        }
+        else return;
         if (_fn.ReturnRegister is { } ret && ret.Uses(reg) && Descendants(f.Body).Any(n => n is ReturnStmt { Value: not null })) return;
+        c.Register = reg;
+        _fn.FrameVariables.Remove(c);
+    }
+
+    /// <summary>
+    /// True if every index in <paramref name="body"/> needs no index register of its own: a constant,
+    /// the counter <paramref name="c"/>, a variable already in a register, or <paramref name="outer"/>
+    /// (about to be held in <paramref name="outerReg"/>). A pointer access needs its index in Y.
+    /// </summary>
+    private bool IndexesHeld(Node body, VariableSymbol c, VariableSymbol? outer, Register? outerReg)
+    {
+        Register? RegisterOf(Expr e) => e is NameExpr { Symbol: { } s } ? s == outer ? outerReg : s.Register : null;
+        foreach (var ix in Descendants(body).OfType<IndexExpr>())
+        {
+            if (ix.Index.ConstValue is not null) continue;
+            if (IsPointerIndex(ix))
+            {
+                if (!PlainPointerIndex(ix) || RegisterOf(ix.Index) != Register.Y) return false;
+                continue;
+            }
+            var index = FoldIndexOffset(ix.Index, ArrayOf(ix)).Index;
+            if (!(index is NameExpr { Symbol: var s } && s == c) && RegisterOf(index) is null) return false;
+        }
+        return true;
+    }
+
+    /// <summary>
+    /// M18 F13: the counter of a loop with loops inside goes in a register too, when the body has
+    /// one level of <c>for</c> loops and no call, asm block, <c>return</c> or <c>while</c>, and every
+    /// use of the counter is one a register serves as well as memory. Y, leaving X to the inner
+    /// loops (they take it if every index in them is in a register, see
+    /// <see cref="ChooseCounterRegister"/>); X if a pointer access other than <c>p[counter]</c> needs
+    /// Y. An inner loop with <c>using</c> must use the other register, and every index in it must
+    /// already be in a register.
+    /// </summary>
+    private void ChooseOuterCounterRegister(ForStmt f, VariableSymbol c)
+    {
+        if (c.Type.Size != 1 || Math.Abs(f.StepValue) != 1 || c.AddressTaken || _reserved.Count > 0 || f.VariableStep) return;
+        var nodes = Descendants(f.Body).ToList();
+        var inner = nodes.OfType<ForStmt>().ToList();
+        if (inner.Count == 0 || nodes.Any(n => n is WhileStmt or ReturnStmt or AsmStmt or CallExpr { Function: not null })
+            || inner.Any(l => Descendants(l.Body).Any(n => n is ForStmt or WhileStmt))) return;
+        var parents = new Dictionary<Node, Node>();
+        foreach (var n in nodes) foreach (var child in Children(n)) parents[child] = n;
+        if (nodes.OfType<NameExpr>().Any(n => n.Symbol == c && !Served(n, parents.GetValueOrDefault(n)))) return;
+
+        bool pointersNeedY = nodes.OfType<IndexExpr>().Any(ix => IsPointerIndex(ix) && !(PlainPointerIndex(ix) && ix.Index is NameExpr { Symbol: var s } && s == c));
+        var reg = pointersNeedY || inner.Any(l => l.Symbol!.Register == Register.Y) ? Register.X : Register.Y;
+        foreach (var l in inner.Where(l => l.Symbol!.Register is not null))
+            if (l.Symbol!.Register == reg || !IndexesHeld(l.Body, l.Symbol, c, reg)) return;
         c.Register = reg;
         _fn.FrameVariables.Remove(c);
     }
