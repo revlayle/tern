@@ -1,10 +1,10 @@
 # Tern user guide
 
-A quick guide to the Tern language and compiler as built today (through milestone M13). The full rules are in `docs/spec-v0.md`; this guide shows how to use them. Every example here compiles with the current compiler.
+A quick guide to the Tern language and compiler as built today (through milestone M19 part 1). The full rules are in `docs/spec-v0.md`; this guide shows how to use them. Every example here compiles with the current compiler.
 
 ## 1. What Tern is
 
-Tern is a small language for the 6502 that compiles to compact, predictable machine code. Carefully hand-written assembly is still smaller and faster (on the benchmarks, Tern's code is about 30% larger and 54% slower), so Tern makes it cheap to write the routines that need it in assembly. The first target is the Commodore 64.
+Tern is a small language for the 6502 that compiles to compact, predictable machine code. Carefully hand-written assembly is still a little smaller and faster (on the benchmarks, Tern's code is about 2% larger and 5% slower), and Tern makes it cheap to write the routines that need it in assembly. The first target is the Commodore 64.
 
 A few rules shape everything else:
 
@@ -166,10 +166,17 @@ match state {
     3..=7 => attack()
     _ => {}
 }
+
+indexed match op & 3 {             // a jump table: the value is not checked
+    0 => push()
+    1 => pop()
+    2 => add()
+    3 => halt()
+}
 ```
 
 - `for` bounds are evaluated once, and the loop variable is read-only in the body. The compiler picks the loop shape (counting down with `dex` / `bne` when it can).
-- `match` works on `u8` and `i8`. Dense cases compile to a jump table, others to a chain of compares. There is no fall-through.
+- `match` works on `u8` and `i8`. A plain `match` is a chain of compares, tested in source order. `indexed match` is a jump table over the span from the lowest pattern value to the highest; a value outside the span is not checked, so list every value that can occur or mask the value (`op & 3`). There is no fall-through. Which to choose: section 7.8.
 - `&&`, `||`, `!` are logical (on `bool`, short-circuit); `&`, `|`, `^`, `~` are bitwise. `x += 1` on memory is `inc x`.
 
 ### 3.6 Functions
@@ -321,7 +328,7 @@ import level2 @ levels
 - **Loading** is `c64.load(name, len, device)`, which returns `true` if loading failed.
 - **Calls:** resident code calls into an overlay with a plain `jsr`, and an overlay may call resident code and overlays in other areas. Two overlays of the same area cannot call each other or use each other's variables (they are never loaded together); that is a compile error.
 - Making sure the right overlay is loaded before calling it is your job: the compiler cannot check it, and a check on every call would cost every call.
-- A fixed-address variable over an overlay's file is an error. The spec now allows it when the variable is marked `volatile` (to read memory an overlay loads on purpose, e.g. a level header); that is built in the next coding session.
+- A fixed-address variable over an overlay's file is an error unless it is marked `volatile`, which reads whatever overlay is loaded (memory an overlay loads on purpose, e.g. a level header).
 
 ### 3.13 Built-ins
 
@@ -550,27 +557,133 @@ Tern trusts you and does not add hidden checks. These are deliberate and often u
 - **Loading an overlay resets its variables** to their initial values; keep anything that must survive in resident memory.
 - **A binary's entries are one root.** The host must not call one entry from an interrupt while another is running.
 - **Division by zero** in the library gives an unspecified result.
+- **`indexed match` does not check its value.** Outside the span of its patterns it jumps through whatever bytes follow its tables; `_` catches only values inside the span. A plain `match` skips values it does not list.
 
-## 7. Not supported yet
+## 7. Writing fast Tern
+
+Each rule here was measured with `tern bench` (7.10) on the current compiler; the percentages are cycles saved in the example or benchmark named (`tests/benchmarks/variants.md` has the benchmark pairs). They describe this compiler, not the language: as the optimizer improves, a rule may stop paying, so measure when it matters.
+
+### 7.1 Arrays before pointers
+
+An array indexed by a `u8` is `lda a,x`; a pointer access is `lda (p),y`, with the pointer to set up first. When the data fits in 256 elements, use an array, and for records an array of structs (one table per field) rather than a pointer to records:
+
+```
+struct Enemy { x: u8, y: u8, hp: u8 }
+var enemies: [Enemy; 32]
+
+for i in 0..32 { enemies[i].x += enemies[i].y }   // 45% faster than stepping a ptr Enemy
+```
+
+Copying 200 bytes, `dst[i] = src[i]` is 12% faster than `q[i] = p[i]` through pointers. Pointers are for blocks longer than 256 bytes and for data whose address is known only at runtime.
+
+### 7.2 Through a pointer, index with Y and step by pages
+
+Keep the pointer fixed while Y walks a page, then step the pointer by 256 (`p += 256` is `inc p+1`):
+
+```
+fn same(a: ptr u8, b: ptr u8, pages: u8) -> bool {
+    for _ in 0..pages {
+        for j in 0..=255 using Y {
+            if a[j] != b[j] { return false }
+        }
+        a += 256
+        b += 256
+    }
+    return true
+}
+```
+
+Stepping the pointer for every byte (`p[0]`, then `p += 1`) takes nearly twice the cycles of `p[i]` in a `using Y` loop. Walking memory in small records (`p += 4`) instead of pages costs 15% in the `copy` benchmark (`copy.pages`).
+
+### 7.3 Store a result before testing it
+
+After `enemies[i].x = x`, A still holds `x`, so the tests that follow need no load. Testing first and storing afterwards loads it again: storing first saves 17% in the `enemies` benchmark (`enemies.first`).
+
+```
+var x: u8 = enemies[i].x + (enemies[i].dx as u8)
+enemies[i].x = x                       // store first
+if x < 8 || x > 200 { enemies[i].dx = -enemies[i].dx }
+```
+
+### 7.4 Leave a loop with `break` or `return`, not a flag
+
+A `running` flag costs a store where it is set and a load and test on every pass. `while true` with `break` or `return` has neither: 5% in the `interp` benchmark (`interp.return`). `break` and `return` give the same code, also from inside a `match` arm (`HALT => break`).
+
+### 7.5 Small functions in a hot loop: `inline fn`
+
+A call costs `jsr` / `rts` (12 cycles) and a store for each argument. An `inline fn` puts the body in the caller, where the arguments often are already in registers, and a `bool` result becomes the caller's branch. Making three small functions inline saves 35% in the `calls` benchmark (`calls.inline`), and bytes too, since each is called once. Every call site gets its own copy, so a large function called from many places makes the program bigger.
+
+### 7.6 `using` on a parameter, only where the body needs that register
+
+A plain parameter is fixed memory in the function, and the caller stores the argument straight into it. `using` pays when the body needs the value in that register anyway: as an index, or used once in A.
+
+```
+var t: [u8; 200]
+fn bump(i: u8 using X) { t[i] += 1 }     // inc t,x / rts: 9% faster than a plain i
+```
+
+A parameter used once in A (`n = n ^ v` with `v: u8 using A`) saves 16%. When the body compares or combines two parameters, one of them has to go to memory anyway, and plain parameters are as fast or faster: `fn bigger(a: u8 using A, b: u8 using X) -> bool { return a > b }` is 4% slower than with plain parameters.
+
+### 7.7 Multiplying by a constant
+
+`*` takes only constants; at runtime write shifts and adds, or use a table. Compute in `u8` while the value fits, then widen:
+
+```
+var w: u16 = (row << 2) + row          // row * 5 in 8 bits (row <= 51)
+var offset: u16 = w << 3               // * 8 in 16 bits: row * 40
+```
+
+For `row * 40` over 25 rows, this is 58% faster than widening first (`(w << 5) + (w << 3)` with `w = row`) and 65% faster than `math.mul8(row, 40)`. A `data` table of the 25 results is faster still (`offset = rows[row]`, 57% faster than the shifts above), at two bytes per entry.
+
+### 7.8 `match` or `indexed match`
+
+A plain `match` tests its values in source order, so put the most common first. `indexed match` costs the same for every value (subtract the lowest value, then the table jump, about 25 cycles). With values spread evenly, a plain `match` is faster up to about 8 values (4 values: 26% faster than `indexed match`; 8 values: 7%); at 16 dense values `indexed match` is 26% faster and smaller. In the `interp` benchmark (10 opcodes) `indexed match` is 2% faster.
+
+`indexed match` does not check its value (section 6): list every value that can occur, or mask it into the span (`indexed match op & 15` with patterns 0 to 15). `_` catches only the values inside the span that no pattern lists.
+
+### 7.9 What not to rewrite
+
+The optimizer already does these, so write the plain form:
+
+- A local copy of an element (`var a: u8 = values[i]`, then `if values[i + 1] < a`) costs nothing: the compare reads the element directly (`cmp values,x`).
+- `a[i + 1]` in a `for` loop whose bounds prove the sum does not wrap is `lda a+1,x`, with no add.
+- Loop counters, and globals used by one function in its loop, stay in free registers across the loop.
+- Variables used most go in zero page (spec 8.2); arrays are placed so their indexed range does not cross a page when there is room.
+- `return a > b` from a `-> bool` function is `lda a / clc / sbc b / rts`.
+
+The `bubble.direct` (comparing the elements, no locals) and `bubble.minus` (`i - 1` instead of `i + 1`) forms of the `bubble` benchmark are not faster than the plain one.
+
+### 7.10 Measuring
+
+`tern bench` runs two or more versions in the built-in emulator and prints the bytes and cycles of each (`tern` is `dotnet run --project src/Tern.Cli --`):
+
+```
+tern bench --decl "var n: u8" --code "for i in 0..200 { n += i }" --code "for i in 0..200 using X { n += i }" --dump n
+tern bench old.tern new.tern --dump result        // whole programs; --fn f measures one function
+tern run game.tern --profile                      // the cycles of each function and source line
+```
+
+`--dump` shows a value after each run, to check that the versions agree.
+
+## 8. Not supported yet
 
 Signed loop variables; `match` on 16-bit values (match on `.lo` / `.hi`); arrays of structs inside structs; a function with a body at a fixed address; fixed-address `data` inside an overlay (under discussion); bank switching. Each gives a clear error rather than a confusing one.
 
-## 8. The future
+## 9. The future
 
 ### Next
 
-- **M13 follow-up**: a `volatile` fixed-address variable may overlap an overlay's file, so the resident program can read what an overlay loads on purpose (3.12).
-- Nothing else is scheduled yet. The next milestone is picked from the list below.
+- **M19 part 2**: a Claude Code skill for writing Tern, built from this guide.
+- **M20**: in test runs, the built-in emulator reports an array index outside its array and an `indexed match` value outside its span, with the source line; signed loop variables.
 
 ### Later highlights
 
-- **`const fn` and code generators.** Functions that run at compile time to build lookup tables (`data rows = [row_addr(i) for i in 0..25]`), with unlimited-size `int` and `real` math. A generator can `emit` assembly, to produce unrolled "speedcode" whose shape depends on parameters.
+- **Plug-ins against a fixed interface** (M21): binaries built separately against one interface module, loaded in turn into one slot.
+- **`const fn` and code generators** (M22). Functions that run at compile time to build lookup tables, with unlimited-size `int` and `real` math. A generator can `emit` assembly, to produce unrolled "speedcode" whose shape depends on parameters.
+- **Doc comments (`///`) and a language server** (M23) that shows errors, types and costs in your editor.
+- **Floats as a library** (M24).
 - **C64 device I/O library**: load and save files on disk or tape, sequential files, the drive's command channel and error status, through the KERNAL.
-- **Inline helpers usable from any root**: an inline function's locals move into each caller's memory, so it can be called from both main and interrupts.
-- **Checks in test runs**: overflow and array-index checks in the built-in emulator, at no cost in the real program.
-- **Tooling**: doc comments (`///`) and a language server that shows them in your editor.
 - **A full developer guide**, growing out of this one, with an example for each machine-level behavior.
-- Signed loop variables, and floats as a library (low priority).
 
 ### New platforms (last)
 
