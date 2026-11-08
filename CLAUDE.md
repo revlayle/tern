@@ -32,6 +32,9 @@ src/lib/                 standard library source (.tern); platform modules in sr
 tests/Tern.Cpu.Tests/    CPU tests, including Klaus Dormann's 6502 functional test
 tests/Tern.Compiler.Tests/  end-to-end tests: compile, run in the emulator, check memory
 examples/                example .tern programs
+.claude/commands/        session commands: /spec, /code, /review, /merge
+.claude/skills/tern/     the Tern skill for coding agents (checked by SkillTests)
+.claude-plugin/          plugin.json and marketplace.json: the repository as a Claude Code plugin
 ```
 
 ## Commands
@@ -66,4 +69,5 @@ These come from the spec and `docs/decisions.md`. Apply them to every change.
 - A spec keyword that is not implemented yet must give "'x' is not supported yet", not a confusing parse error.
 - No new NuGet dependencies without asking.
 - `BenchmarkTests` fails on any change in bytes or cycles, better or worse. Rewrite the baseline (`TERN_UPDATE_BENCHMARKS=1 dotnet test`) in the same commit as the change that caused it, and give the old and new totals in the commit message.
+- `SkillTests` fails when the skill's examples or tool outputs change (addresses, cycles). Rewrite them with `TERN_UPDATE_SKILL=1 dotnet test --filter SkillTests` in the same commit as the change that moved them, read the diff, and fix any prose that no longer matches. Listing excerpts (```` ```lst ````) are updated by hand.
 - Commit messages: a short summary line, then what changed and why.

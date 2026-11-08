@@ -231,6 +231,29 @@ e.pos.y = 5                        // ldy #1 / sta (e),y
 - Runtime `as` never checks a value; it keeps the low bits. (Compile-time values are checked, see 4.1.)
 - **Not allowed:** narrowing without `as`; mixing signed and unsigned in one operation; `u8 as bool` (write `x != 0`).
 
+### 3.6 Operator precedence
+
+Tightest first. Binary operators on one line are left associative.
+
+| Level | Operators |
+|---|---|
+| 1 | postfix: index `a[i]`, member `s.x`, conversion `x as T` |
+| 2 | unary `-` `+` `~` `!` |
+| 3 | `*` `/` `%` (constant expressions only, 3.1) |
+| 4 | `+` `-` |
+| 5 | `<<` `>>` |
+| 6 | `&` |
+| 7 | `^` |
+| 8 | `\|` |
+| 9 | `==` `!=` `<` `<=` `>` `>=` |
+| 10 | `&&` |
+| 11 | `\|\|` |
+
+- Unlike C, `&`, `^` and `|` bind tighter than the compares: `flags & 4 != 0` is `(flags & 4) != 0`.
+- As in C, `<<` and `>>` bind looser than `+`: `w << 5 + 3` is `w << 8`; write `(w << 5) + 3`.
+- `as` is postfix, so it binds tighter than a unary operator: `-x as i16` is `-(x as i16)`. For an `i8` holding -128 that is 128, while `(-x) as i16` is -128.
+- Compares do not chain: `a < b < c` is a compile error. Write `a < b && b < c`.
+
 ## 4. Declarations
 
 ```

@@ -11,7 +11,7 @@ You are the **coding session** for the Tern compiler. You start with no memory o
 4. Get onto the milestone branch: create it from the latest `main` (`git switch -c m<N>-<name> main`), or if it exists, switch to it and merge `main` into it.
 5. Run `dotnet test` to confirm a clean start.
 6. Write a short plan: the steps, and how each will be verified. Then implement in small steps. After each step: build, run the tests, commit.
-7. Follow the design rules and coding conventions in `CLAUDE.md`. Edit only files the coding session owns (`src/`, `tests/`, `examples/`, `docs/status.md`).
+7. Follow the design rules and coding conventions in `CLAUDE.md`. Edit only files the coding session owns (`src/`, `tests/`, `examples/`, `.claude/skills/`, `.claude-plugin/`, `docs/status.md`).
 8. If the spec is unclear or contradicts itself, make the smallest reasonable choice, mark it provisional in `docs/status.md`, and add the question under "Questions for the spec session". Do not edit the spec.
 9. Before ending: all tests pass, everything is committed, and `docs/status.md` is updated so a fresh session can continue without asking anything (current milestone, branch, what is done, the next step, open problems).
 10. Finish with a short summary for the user: what was done, test counts, what remains, and whether the branch is ready for `/review`.
