@@ -361,6 +361,33 @@ public class InterruptTests
     }
 
     [Fact]
+    public void Loop_counters_using_x_and_y_let_a_function_be_shared_with_a_handler()
+    {
+        // Question 67: only 'using X' / 'using Y' guarantees the counter needs no memory (spec 8.1).
+        var r = Run.Program($$"""
+            var cells: [u8; 16]
+            var done: u8
+            fn clear() {
+                for i in 0..4 using Y {
+                    for j in 0..4 using X { cells[j] = i }
+                }
+            }
+            interrupt fn handler() { clear() }
+            fn main() {
+                {{Install}}
+                for _ in 0..50 { clear() }
+                asm {
+                    sei
+                }
+                done = 1
+            }
+            """, irqEvery: 2000);
+        Assert.True(r.Interrupts > 0);
+        Assert.Equal(1, r.U8("done"));
+        Assert.Equal(3, r.U8("cells", 0));
+    }
+
+    [Fact]
     public void Public_variables_and_private_data_may_be_shared_with_a_handler()
     {
         // math.remainder8 is public; text.DIGITS, used by hex8 and dec8, is private but read-only data.
@@ -401,7 +428,10 @@ public class InterruptTests
     [InlineData("var v: u8\nfn f(n: u8) { v = n }\ninterrupt fn h() { f(1) }\nfn main() { f(2) }", "its memory: the parameter 'n' in memory")]
     [InlineData("var v: u8\nfn f(n: u8 using A) { v = n }\ninterrupt fn h() { f(1) }\nfn main() { f(2) }", "its memory: the parameter 'n', which it keeps in memory (it arrives in A)")]
     // The inner counter goes in X; the outer one stays in memory (its loop calls g).
-    [InlineData("var v: u8\nfn g() {}\nfn f() {\n for _ in 0..v {\n for _ in 0..v { v += 1 }\n g()\n }\n}\ninterrupt fn h() { f() }\nfn main() { f() }", "its memory: the counter of the loop at line 4")]
+    [InlineData("var v: u8\nfn g() {}\nfn f() {\n for _ in 0..v {\n for _ in 0..v { v += 1 }\n g()\n }\n}\ninterrupt fn h() { f() }\nfn main() { f() }",
+        "its memory: the counter of the loop at line 4. Only a function with no memory of its own can be shared between main and interrupt handlers. Write 'using X' or 'using Y' on the loop at line 4, which keeps its counter in a register, or use a copy for each")]
+    [InlineData("var v: u8\nfn g() {}\nfn f() {\n for i in 0..v {\n for j in 0..v { v += i }\n g()\n }\n}\ninterrupt fn h() { f() }\nfn main() { f() }",
+        "its memory: the counter 'i' of the loop at line 4. Only a function with no memory of its own can be shared between main and interrupt handlers. Write 'using X' or 'using Y' on the loop at line 4")]
     [InlineData("var v: u16\nvar w: u16\nfn g() -> u8 { return 1 }\nfn f() {\n v = w + (g() as u16)\n}\ninterrupt fn h() { f() }\nfn main() { f() }",
         "its memory: a hidden temporary for the code at line 5")]
     [InlineData("var v: u8\nfn g() { var t = v\n v = t + 1 }\nfn f() { g() }\ninterrupt fn h() { f() }\nfn main() { f() }", "'g' is called from main and from the interrupt handler 'h'")]

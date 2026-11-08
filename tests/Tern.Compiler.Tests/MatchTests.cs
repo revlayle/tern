@@ -400,9 +400,10 @@ public class MatchTests
     [Fact]
     public void A_match_with_only_a_default_still_reads_a_volatile_value()
     {
-        // Review M6, finding 3: spec 4, every read of a fixed-address variable happens.
+        // Review M6, finding 3. A fixed address outside the volatile areas is ordinary memory (spec 4,
+        // question 65), so hardware the platform does not list is declared volatile.
         var r = Run.Program("""
-            var reg: u8 @ $C000
+            volatile var reg: u8 @ $C000
             var r: u8
             fn main() { match reg { _ => r = 1 } }
             """);

@@ -163,6 +163,8 @@ public sealed class VariableSymbol(string name, SourcePos pos, TernType type, Va
     /// <summary>The function whose frame holds this variable; null for globals.</summary>
     public FunctionSymbol? Owner { get; } = owner;
 
+    /// <summary>The counter of a <c>for</c> loop (named, or hidden for <c>_</c>).</summary>
+    public bool IsLoopCounter { get; init; }
     /// <summary>Set for <c>@ $addr</c> variables.</summary>
     public int? FixedAddress { get; set; }
     /// <summary>Set for <c>@ region</c> variables and data: the region's name. The allocator gives them an address in it.</summary>
