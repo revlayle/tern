@@ -1,0 +1,12 @@
+{
+  "name": "tern",
+  "description": "The Tern language's Claude Code plugin",
+  "owner": { "name": "layle" },
+  "plugins": [
+    {
+      "name": "tern",
+      "source": "./",
+      "description": "The Tern skill: writing, checking and measuring Tern programs for the 6502 (Commodore 64)"
+    }
+  ]
+}

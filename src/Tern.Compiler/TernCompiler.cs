@@ -49,6 +49,8 @@ public sealed class CompileResult
     public IReadOnlyList<PlacedInstruction> Instructions { get; init; } = [];
     /// <summary>Every global, data item, local and parameter with its address and size (locals as "function.name").</summary>
     public IReadOnlyDictionary<string, VariableInfo> Variables { get; init; } = new Dictionary<string, VariableInfo>();
+    /// <summary>Every function declared in the program and its modules ("module.name"), compiled or not.</summary>
+    public IReadOnlySet<string> DeclaredFunctions { get; init; } = new HashSet<string>();
 }
 
 public static class TernCompiler
@@ -319,6 +321,7 @@ public static class TernCompiler
             ApiModuleName = apiName,
             Instructions = code.Instructions,
             Variables = variables,
+            DeclaredFunctions = program.Modules.SelectMany(m => m.Scope.Values.OfType<FunctionSymbol>()).Select(f => f.Name).ToHashSet(),
         };
     }
 
