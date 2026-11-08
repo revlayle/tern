@@ -4,11 +4,17 @@ Owned by the coding session. Updated at the end of every coding session.
 
 ## Current
 
-- **Milestone:** M18, fixes from the analysis (roadmap). Parts 1 (local code shapes) and 2 (dataflow) are reviewed and merged into `main`. Part 3 (registers across loops, layout: F7/F11/F15, F13, F9, F12) is done and waits for review; with it merged, all three parts of M18 are in.
-- **Branch:** `m18-fixes` (`main` merged in; part 2's merge was a fast-forward). 1682 compiler tests pass plus 36 CPU tests. `baseline.txt` total 1311 / 363980 (after part 2) -> 1259 / 351130; `comparison.md` Tern 1020 / 354,819 -> 968 / 341,969 (assembly 947 / 324,419).
-- **Next step:** review of part 3 (`/review`). After it is clean and merged, M18 is done: the roadmap's "done when" (three parts merged, `comparison.md` with the new totals, the `bubble.minus` advice dropped) holds. The spec session then writes the guide advice from what is still true (`analysis.md` section 8 lists what remains), and schedules M19.
+- **Milestone:** M18, fixes from the analysis (roadmap). Parts 1 (local code shapes) and 2 (dataflow) are reviewed and merged into `main`. Part 3 (registers across loops, layout: F7/F11/F15, F13, F9, F12) is done; its first review's finding and suggestions are fixed (see "M18 part 3, review fixes"), and it waits for the re-review. With it merged, all three parts of M18 are in.
+- **Branch:** `m18-fixes` (`main` merged in; part 2's merge was a fast-forward). 1684 compiler tests pass plus 36 CPU tests. `baseline.txt` total 1311 / 363980 (after part 2) -> 1259 / 351130; `comparison.md` Tern 1020 / 354,819 -> 968 / 341,969 (assembly 947 / 324,419).
+- **Next step:** re-review of part 3 (`/review`; `docs/reviews/m18.md`, part 3 section). After it is clean and merged, M18 is done: the roadmap's "done when" (three parts merged, `comparison.md` with the new totals, the `bubble.minus` advice dropped) holds. The spec session then writes the guide advice from what is still true (`analysis.md` section 8 lists what remains), and schedules M19.
 
 ## Done
+
+- **M18 part 3, review fixes** (2026-11-07, `docs/reviews/m18.md`, part 3 section; `e41bf07`).
+  - Finding 1 (must fix): `CheckFixedAddresses` runs inside the placement loop in `TernCompiler`, so variables placed by page that overlap a fixed-address variable (or do not fit) are placed one after another instead, as on `main`; that second try reports any error. `PagePlacementTests.A_fixed_address_variable_where_the_placed_block_would_go_keeps_the_variables_together` (the review's program).
+  - Suggestion 2: only indexed reads count for placement (not stores or read-modify-write instructions, which take the same cycles across a page). `PagePlacementTests.An_array_only_stored_through_an_index_is_not_placed`.
+  - Suggestion 3: the retry loop's `try` / `catch` is indented with its body; the redundant second `catch` is gone.
+  - No benchmark changed (1259 / 351130). 1684 compiler tests and 36 CPU tests pass.
 
 - **M18 part 3, registers across loops and layout** (2026-11-07). One commit per step, each with its benchmark delta; measured savings in `analysis.md` section 8 ("Part 3").
   - *F7, dead stores into globals* (`bf592b9`, `Optimizer.RemoveDeadStores`, `OrdinaryGlobal`): F3's backward liveness also follows one-root globals of ordinary memory (not volatile, address not taken, not fixed, in a region, an overlay or data). A call, `rts`/`rti`, a jump out of the code, the end of the code, and a read through a pointer or at a number may read them (`Live.Globals`, with the bytes stored since in `Dead`). `DeadStoreTests`.
