@@ -310,7 +310,7 @@ Working material: `analysis.md` section 2 gives each finding with Tern's instruc
 - F9: loop entry `jmp` and empty-range test dropped when the first test is known true; `dec / bne` where the decrement already set Z
 - F12: an indexed array placed so its indexed range does not cross a page when there is room (RAM, no bytes in the file); the report shows the placement
 
-Deferred: F20 (moving an independent shift before a bit test, 50 cycles) and F14 (no `match` range check when the value's range is known, 350 cycles; wants a value-range analysis once more cases need it). Question 63 (b), the fold proved from another access, is deferred too.
+Deferred: F20 (moving an independent shift before a bit test, 50 cycles) and F14 (no `match` range check when the value's range is known, 350 cycles; wants a value-range analysis once more cases need it). Question 63 (b), the fold proved from another access, is deferred too. Since 2026-11-08: F20 is rejected and F14 is replaced by `indexed match` (M20).
 
 For every fix: correctness tests on programs other than the benchmarks, at edge values (0, 255, 256, wrap-around), compared with C#; a listing test of the new shape; the benchmark delta in the commit message (`BenchmarkTests` baseline rewritten in the same commit); in `analysis.md`, the measured saving next to the report's estimate.
 
@@ -358,15 +358,17 @@ Decision 2026-11-07, scheduled 2026-11-08. User documentation that explains how 
 - evaluation order: in `a[i] = v` the index is evaluated first; with a call in the index, and inside expressions, the order is unspecified (5)
 - a fixed address outside the platform's volatile areas is ordinary memory: unlisted hardware needs `volatile` (4)
 - a function shared by main and a handler may have loop counters only in registers; only `using X` / `using Y` guarantees one (8.1)
+- `indexed match` does not check its value: outside the span it jumps through whatever follows the tables; a plain `match` skips values it does not list (5.2)
 
-## M20: Index checks in the emulator, and signed loop variables
+## M20: Index checks in the emulator, signed loop variables, and `indexed match`
 
-Spec: 14.4, 3.2, 5.1.
+Spec: 14.4, 3.2, 5.1, 5.2, 11.
 
 - In test runs (`Run.Program`, and the M19 run tool), the built-in emulator reports a variable array index outside its array (`a[i]`, not pointer accesses), with the source line, using the compiler's debug information (the M19 source-to-instruction map). No code is added to the program. Arithmetic overflow is not checked (decision 2026-11-07).
+- `indexed match` (spec 5.2, 11; decision 2026-11-08): always a jump table with no range check; a plain `match` becomes always a compare chain, and the programs that relied on the automatic table (`interp`, the raster example, others found by the tests) say `indexed match`. The emulator check above also reports an `indexed match` value outside its span. `BenchmarkTests` (bytes and cycles in the commit message; `interp` should lose its range check, about 350 / 5)
 - `for` loops with `i8` and `i16` counters, counting up and down, with constant and variable bounds and steps as for unsigned counters; the spec 5.1 and 11 shapes for them come from the spec session before coding.
 
-Tests: the check fires on an index past the end (also through a folded offset such as `a[i - 1]`) and stays quiet on a correct program, including one whose arithmetic wraps; loops at edge values (-128, 127, 0, wrap) against C#.
+Tests: the check fires on an index past the end (also through a folded offset such as `a[i - 1]`) and on an `indexed match` value outside its span, and stays quiet on a correct program, including one whose arithmetic wraps; loops at edge values (-128, 127, 0, wrap) against C#; `indexed match` on `u8` and `i8` (negative lowest value), with and without `_`, gaps in the span, ranges, a value masked into the span, the listing shape and the tables in the report; a plain `match` of 8 or more compares stays a chain (listing).
 
 ## M21: Plug-ins against a fixed interface
 
@@ -437,7 +439,7 @@ Decision 2026-11-08: the first release comes once all five platforms work. Done 
 
 Each has a reason to wait; the spec session schedules one when that reason changes.
 
-- **F20, F14 and question 63 (b)** (deferred 2026-11-07): moving an independent shift before a bit test (50 cycles over the benchmarks; statement reordering is the riskiest kind of optimizer change); no `match` range check when the value's range is known (350 cycles; needs a value-range analysis, worth building once more optimizations can use it); folding `a[i + c]` proved from another access (no benchmark needs it, and it makes one line's cost depend on another, rule 4). Reconsider when a real program needs one.
+- **Question 63 (b)** (deferred 2026-11-07): folding `a[i + c]` proved from another access (no benchmark needs it, and it makes one line's cost depend on another, rule 4). Reconsider when a real program needs it. F20 is rejected and F14 is replaced by `indexed match` (decision 2026-11-08).
 - **Second copies of functions called from two roots** (spec 14.2) and **arrays of structs as struct fields** (14.11): discussed after the first release.
 - **The `nmos6502+undoc` CPU variant** (spec 12.1, opt-in undocumented opcodes).
 
