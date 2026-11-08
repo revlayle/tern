@@ -68,6 +68,48 @@ public class LineTableTests
     }
 
     [Fact]
+    public void Code_after_an_inlined_call_belongs_to_the_callers_line()
+    {
+        // Review M19, finding 1.
+        var result = TernCompiler.Compile("""
+            var a: [u8; 4]
+            var k: u8 = 2
+            inline fn g() -> u8 { return k + 1 }
+            fn main() {
+                for i in 0..4 {
+                    a[i] = g()
+                }
+            }
+            """);
+        var store = Assert.Single(result.Instructions, i => i.Text.StartsWith("sta a,"));
+        Assert.Equal(6, store.Line);
+        var rows = LineTable.Rows(result, "game.tern");
+        var row = Assert.Single(rows, r => r.Line == 6);
+        Assert.Contains(row.Addresses, a => a.First <= store.Address && store.Address <= a.Last);
+        // The inline function's line has only its own code: lda k / clc / adc #1.
+        Assert.Equal(3, Assert.Single(rows, r => r.Line == 3).Instructions);
+    }
+
+    [Theory]
+    [InlineData("if cpu.carry() { n = 1 }", "bcc")]
+    [InlineData("while cpu.overflow() {\n        n += 1\n        asm { clv }\n    }", "bvs")]
+    [InlineData("r = cpu.overflow() as u8", "bvc")]
+    public void A_cpu_flag_test_is_on_the_line_that_uses_it(string statement, string branch)
+    {
+        var result = TernCompiler.Compile($$"""
+            import cpu
+            var n: u8
+            var r: u8
+            fn main() {
+                asm { sec }
+                {{statement}}
+            }
+            """);
+        Assert.Equal(6, Assert.Single(result.Instructions, i => i.Text.StartsWith(branch)).Line);
+        Assert.DoesNotContain(result.Instructions, i => i.File == "cpu.tern");
+    }
+
+    [Fact]
     public void The_table_text()
     {
         var result = TernCompiler.Compile("var x: u8\nfn main() {\n    x = 5\n}\n");

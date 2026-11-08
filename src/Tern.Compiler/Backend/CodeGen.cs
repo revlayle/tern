@@ -131,9 +131,10 @@ public sealed class CodeGen
 
     private bool EndsWithJump() => _out.Count > 0 && _out[^1] is Instr { Mnemonic: Rts or Mnemonic.Jmp };
 
-    private void Source(Node node)
+    private void Source(Node node) => Source(node.Pos);
+
+    private void Source(SourcePos pos)
     {
-        var pos = node.Pos;
         if ((pos.Line == _lastSource.Line && pos.File == _lastSource.File)
             || !_sourceLines.TryGetValue(pos.File ?? "", out var lines) || pos.Line <= 0 || pos.Line > lines.Length) return;
         _lastSource = pos;
@@ -370,6 +371,7 @@ public sealed class CodeGen
     private void GenInline(FunctionSymbol f)
     {
         var (caller, callerExit, interruptExit, callerTemps) = (_fn, _inlineExit, _interruptExit, _freeTemps.ToList());
+        var callerSource = _lastSource;
         _fn = f;
         _interruptExit = null;
         _freeTemps.Clear();
@@ -391,7 +393,12 @@ public sealed class CodeGen
         _inlineTemps[f] = _freeTemps.ToList();
         _freeTemps.Clear();
         _freeTemps.AddRange(callerTemps);
-        _lastSource = default;
+        // The rest of the caller's statement belongs to the caller's line again (source map).
+        if (_lastSource != callerSource)
+        {
+            _lastSource = default;
+            Source(callerSource);
+        }
     }
 
     /// <summary>
