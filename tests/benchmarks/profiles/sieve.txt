@@ -33,6 +33,7 @@
                                                      ;   11: composite[m] = m
     335 x     1675  $082F  99 00 09  sta composite,y       ; 5
                      main.fnext5:
+                                                     ;   10: for m in (n << 1)..=255 step n using Y {
     335 x      670  $0832  18        clc                   ; 2
     335 x     1005  $0833  65 03     adc main.n            ; 3
     335 x      670  $0835  A8        tay                   ; 2
@@ -42,6 +43,7 @@
                                                      ;   14: n += 1
      14 x       70  $0838  E6 03     inc main.n            ; 5
                      main.test1:
+                                                     ;    7: while n < 16 {
      14 x       42  $083A  A5 03     lda main.n            ; 3
      14 x       28  $083C  C9 10     cmp #$10              ; 2
      14 x       41  $083E  90 E6     bcc main.while0       ; 2+
@@ -56,10 +58,12 @@
      54 x      108  $0849  C8        iny                   ; 2
                      main.endif10:
                      main.fnext8:
+                                                     ;   16: for i in 2..=255 {
     254 x      508  $084A  E8        inx                   ; 2
     254 x      761  $084B  D0 F7     bne main.for9         ; 2+
                      main.fend7:
       1 x        3  $084D  84 02     sty count             ; 3
+                                                     ;    5: fn main() {
       1 x        6  $084F  60        rts                   ; 6
                      ; $0850: 176 byte(s) left free so that indexed reads of the variables do not cross a page (not in the file)
                      

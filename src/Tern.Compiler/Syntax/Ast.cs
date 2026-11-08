@@ -207,6 +207,8 @@ public sealed class MatchStmt(SourcePos pos, Expr subject, List<MatchArm> arms) 
 {
     public Expr Subject { get; set; } = subject;
     public List<MatchArm> Arms { get; } = arms;
+    /// <summary>Written <c>indexed match</c>: always a jump table, with no range check (spec 5.2).</summary>
+    public bool IsIndexed { get; init; }
 }
 
 /// <summary>One arm: its patterns (empty for <c>_</c>) and its body.</summary>

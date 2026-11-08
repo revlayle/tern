@@ -44,6 +44,7 @@
      16 x       32  $0844  A9 FE     lda #$FE              ; 2
      16 x       80  $0846  9D 30 09  sta enemies+48,x      ; 5
                      main.fnext1:
+                                                     ;    7: for i in 0..16 {
      16 x       32  $0849  E8        inx                   ; 2
      16 x       32  $084A  E0 10     cpx #$10              ; 2
      16 x       47  $084C  D0 D8     bne main.for2         ; 2+
@@ -102,14 +103,17 @@
                      main.inc14:
                      main.endif12:
                      main.fnext7:
+                                                     ;   14: for i in 0..16 {
     800 x     1600  $0897  E8        inx                   ; 2
     800 x     1600  $0898  E0 10     cpx #$10              ; 2
     800 x     2350  $089A  D0 B6     bne main.for8         ; 2+
                      main.fend6:
                      main.fnext4:
+                                                     ;   13: for _ in 0..50 {
      50 x      100  $089C  88        dey                   ; 2
      50 x      149  $089D  D0 B1     bne main.for5         ; 2+
                      main.fend3:
+                                                     ;    6: fn main() {
       1 x        6  $089F  60        rts                   ; 6
                      ; $08A0: 96 byte(s) left free so that indexed reads of the variables do not cross a page (not in the file)
                      

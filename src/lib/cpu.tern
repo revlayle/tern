@@ -1,0 +1,19 @@
+// The CPU flags as left by the asm block just before the test (spec 7, 10.1). Each function has an
+// empty body, so a call adds no instructions: `if cpu.carry()` is one bcc. The result is defined only
+// directly after an asm block, as the statement `if f()`, `while f()` or `v = f()` (also with `!`);
+// after compiled Tern code the flags are unspecified.
+//
+//     asm { jsr read_byte }       // carry set at end of file
+//     if cpu.carry() { done = true }
+
+// The C flag.
+inline asm fn carry() -> bool using carry {}
+
+// The Z flag: true when the last result was 0.
+inline asm fn zero() -> bool using zero {}
+
+// The N flag: bit 7 of the last result.
+inline asm fn negative() -> bool using negative {}
+
+// The V flag: a signed overflow of adc or sbc, or bit 6 of the byte that bit tested.
+inline asm fn overflow() -> bool using overflow {}

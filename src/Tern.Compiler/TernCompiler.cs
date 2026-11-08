@@ -14,6 +14,9 @@ public sealed record OverlayFile(string Name, string Area, int LoadAddress, byte
     public byte[] Prg => new byte[] { (byte)LoadAddress, (byte)(LoadAddress >> 8) }.Concat(Image).ToArray();
 }
 
+/// <summary>A variable's place: its type as written (<c>u16</c>, <c>[u8; 10]</c>), and the function whose frame holds it (null for a global).</summary>
+public sealed record VariableInfo(string Name, int Address, int Size, string Type, string? Function, bool IsData);
+
 public sealed class CompileResult
 {
     /// <summary>The program file: 2-byte load address followed by <see cref="Image"/>.</summary>
@@ -42,6 +45,10 @@ public sealed class CompileResult
     public string? ApiModule { get; init; }
     /// <summary>The module's name, such as <c>player_api</c>; the file is <c>player_api.tern</c>.</summary>
     public string? ApiModuleName { get; init; }
+    /// <summary>Every instruction with the source line it belongs to (the source map; <see cref="Tools.LineTable"/>).</summary>
+    public IReadOnlyList<PlacedInstruction> Instructions { get; init; } = [];
+    /// <summary>Every global, data item, local and parameter with its address and size (locals as "function.name").</summary>
+    public IReadOnlyDictionary<string, VariableInfo> Variables { get; init; } = new Dictionary<string, VariableInfo>();
 }
 
 public static class TernCompiler
@@ -176,13 +183,21 @@ public static class TernCompiler
         var prg = new byte[] { (byte)loadAddress, (byte)(loadAddress >> 8) }.Concat(image).ToArray();
 
         var symbols = new Dictionary<string, int>();
-        foreach (var g in program.Globals) symbols[g.Name] = g.Address;
+        var variables = new Dictionary<string, VariableInfo>();
+        foreach (var g in program.Globals)
+        {
+            symbols[g.Name] = g.Address;
+            variables[g.Name] = new VariableInfo(g.Name, g.Address, g.Type.Size, g.Type.ToString(), null, g.IsData);
+        }
         foreach (var f in program.Functions)
         {
             // An inline function has no code of its own, only a frame.
             if (!f.IsInline) symbols[f.Name] = gen.LabelOf(f).Address;
             foreach (var v in f.FrameVariables.Where(v => v.Kind != VariableKind.Temp))
+            {
                 symbols[v.QualifiedName] = v.Address;
+                variables[v.QualifiedName] = new VariableInfo(v.QualifiedName, v.Address, v.Type.Size, v.Type.ToString(), f.Name, false);
+            }
         }
 
         // VICE accepts dots inside labels, so names stay as in the listing and cannot clash (util.bump, util_bump).
@@ -257,6 +272,9 @@ public static class TernCompiler
             : "Variables after the program: 0 bytes");
         foreach (var table in program.Globals.Where(g => g.IsOffsetTable))
             report.AppendLine($"Offset table {table.Name}: {table.Type.Size} bytes, in the program");
+        // The low table follows the high one.
+        foreach (var (function, pos, high, _, span) in gen.MatchTables)
+            report.AppendLine($"Jump table of the indexed match at {pos} in {function.Name}: {new AddressRange(high.Address, high.Address + 2 * span - 1)}, {2 * span} bytes for {span} values");
         if (code.Areas.Count > 1 || layout.Regions.Count > 0)
         {
             report.AppendLine("Program areas:");
@@ -299,6 +317,8 @@ public static class TernCompiler
             Overlays = overlayFiles,
             ApiModule = apiModule,
             ApiModuleName = apiName,
+            Instructions = code.Instructions,
+            Variables = variables,
         };
     }
 

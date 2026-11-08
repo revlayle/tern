@@ -483,6 +483,9 @@ public sealed partial class Checker
                 _ => Register.A,
             };
             CheckRegisterFits(fn.ReturnRegister.Value, fn.ReturnType, decl.ReturnType.Pos, allowFlags: true);
+            if (fn.ReturnRegister == Register.Overflow && !decl.IsAsm && decl.Address is null)
+                throw new CompileError(decl.ReturnType.Pos,
+                    "Only an asm fn, an inline asm fn or a routine at a fixed address can return a bool using overflow: no instruction sets the V flag, so a fn cannot 'return true' in it. Return it using carry, zero or negative");
         }
         else if (decl.ReturnUsing is not null)
             throw new CompileError(decl.Pos, "'using' needs a return type");
@@ -1052,6 +1055,7 @@ public sealed partial class Checker
         {
             ReadOnly = true,
             Register = f.UsingRegister,
+            IsLoopCounter = true,
         };
         f.Symbol = counter;
         if (counter.InMemory) _function!.FrameVariables.Add(counter);
@@ -1140,6 +1144,8 @@ public sealed partial class Checker
             }
             CheckBlock(arm.Body);
         }
+        if (m.IsIndexed && m.Arms.All(a => a.IsDefault))
+            throw new CompileError(m.Pos, "An 'indexed match' needs at least one pattern besides '_': its table covers the values from the lowest pattern to the highest");
     }
 
     /// <summary>A constant in a match pattern, as a value of the subject's type.</summary>
@@ -1941,12 +1947,16 @@ public sealed partial class Checker
                 VariableKind.Temp => $"a hidden temporary for the code at line {v.Pos.Line} (e.g. for 16-bit arithmetic or an argument)",
                 VariableKind.Parameter when v.PassedIn is { } reg => $"the parameter '{v.Name}', which it keeps in memory (it arrives in {reg})",
                 VariableKind.Parameter => $"the parameter '{v.Name}' in memory",
-                _ when v.Name.StartsWith("_loop") => $"the counter of the loop at line {v.Pos.Line}",
+                _ when v.IsLoopCounter => v.Name.StartsWith("_loop") ? $"the counter of the loop at line {v.Pos.Line}" : $"the counter '{v.Name}' of the loop at line {v.Pos.Line}",
                 _ => $"the local variable '{v.Name}'",
             };
+            // Only 'using X' / 'using Y' guarantees a counter is not memory (spec 8.1).
+            string fix = v.IsLoopCounter && v.InlineOf is null
+                ? $"Write 'using X' or 'using Y' on the loop at line {v.Pos.Line}, which keeps its counter in a register, or use a copy for each"
+                : "Use a copy for each";
             throw new CompileError(f.Pos,
                 $"'{f.Name}' is called from {DescribeRoot(roots[0])} and from {DescribeRoot(roots[1])}. An interrupt can stop it halfway and run it again, " +
-                $"which would overwrite its memory: {memory}. Only a function with no memory of its own can be shared between main and interrupt handlers. Use a copy for each");
+                $"which would overwrite its memory: {memory}. Only a function with no memory of its own can be shared between main and interrupt handlers. {fix}");
         }
     }
 

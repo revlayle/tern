@@ -52,7 +52,7 @@ public static class BinaryInterface
         if (f is null || f.ReturnType.Kind == TypeKind.Void) return "";
         string register = f.ReturnRegister!.Value switch
         {
-            Register.Carry => "carry", Register.Zero => "zero", Register.Negative => "negative",
+            Register.Carry => "carry", Register.Zero => "zero", Register.Negative => "negative", Register.Overflow => "overflow",
             var other => other.ToString(),
         };
         return $" -> {TypeText(f.ReturnType)} using {register}";

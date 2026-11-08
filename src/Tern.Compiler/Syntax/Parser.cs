@@ -476,12 +476,13 @@ public sealed class Parser
 
     private Register ParseRegister()
     {
-        var t = Expect(TokenKind.Identifier, "a register or flag (A, X, Y, AX, AY, XY, carry, zero, negative)");
+        var t = Expect(TokenKind.Identifier, "a register or flag (A, X, Y, AX, AY, XY, carry, zero, negative, overflow)");
         return t.Text switch
         {
             "A" => Register.A, "X" => Register.X, "Y" => Register.Y,
             "AX" => Register.AX, "AY" => Register.AY, "XY" => Register.XY,
             "carry" => Register.Carry, "zero" => Register.Zero, "negative" => Register.Negative,
+            "overflow" => Register.Overflow,
             _ => throw new CompileError(t.Pos, $"Unknown register or flag '{t.Text}'"),
         };
     }
@@ -548,6 +549,9 @@ public sealed class Parser
             }
             case TokenKind.For: return ParseFor();
             case TokenKind.Match: return ParseMatch();
+            case TokenKind.Identifier when Current.Text == "indexed" && PeekAt(1).Kind == TokenKind.Match:
+                Advance();
+                return ParseMatch(indexed: true);
             case TokenKind.Break:
             {
                 var t = Advance();
@@ -622,7 +626,7 @@ public sealed class Parser
     /// <c>match x { arm... }</c>; one arm per line: patterns separated by ',', then '=>' and a block
     /// or a single statement.
     /// </summary>
-    private MatchStmt ParseMatch()
+    private MatchStmt ParseMatch(bool indexed = false)
     {
         var start = Expect(TokenKind.Match, "'match'");
         var subject = ParseExpr();
@@ -670,7 +674,7 @@ public sealed class Parser
             arms.Add(new MatchArm(armPos, isDefault ? [] : patterns, body));
             SkipTerminators();
         }
-        return new MatchStmt(start.Pos, subject, arms);
+        return new MatchStmt(start.Pos, subject, arms) { IsIndexed = indexed };
     }
 
     private ForStmt ParseFor()

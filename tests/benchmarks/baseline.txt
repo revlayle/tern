@@ -7,7 +7,7 @@ copy            195     61393
 crc8             53     27173
 enemies         167     55975
 fib16           168      1878
-interp          242      5573
+interp          237      5223
 sieve            79     11052
 sum16           150     29304
-total          1259    351130
+total          1254    350780

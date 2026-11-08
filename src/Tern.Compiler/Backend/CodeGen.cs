@@ -131,9 +131,10 @@ public sealed class CodeGen
 
     private bool EndsWithJump() => _out.Count > 0 && _out[^1] is Instr { Mnemonic: Rts or Mnemonic.Jmp };
 
-    private void Source(Node node)
+    private void Source(Node node) => Source(node.Pos);
+
+    private void Source(SourcePos pos)
     {
-        var pos = node.Pos;
         if ((pos.Line == _lastSource.Line && pos.File == _lastSource.File)
             || !_sourceLines.TryGetValue(pos.File ?? "", out var lines) || pos.Line <= 0 || pos.Line > lines.Length) return;
         _lastSource = pos;
@@ -185,7 +186,11 @@ public sealed class CodeGen
         GenBlock(f.Declaration!.Body);
         _aParameter = null;
         if (kept is { } r) _reserved.Remove(r);
-        if (!EndsWithJump()) Emit(Rts);
+        if (!EndsWithJump())
+        {
+            Source(f.Declaration!); // the closing rts belongs to the function's line (source map)
+            Emit(Rts);
+        }
     }
 
     /// <summary>The <c>using A</c> or <c>using AX</c> parameter of the function being generated, and where its body's code starts.</summary>
@@ -366,6 +371,7 @@ public sealed class CodeGen
     private void GenInline(FunctionSymbol f)
     {
         var (caller, callerExit, interruptExit, callerTemps) = (_fn, _inlineExit, _interruptExit, _freeTemps.ToList());
+        var callerSource = _lastSource;
         _fn = f;
         _interruptExit = null;
         _freeTemps.Clear();
@@ -387,7 +393,12 @@ public sealed class CodeGen
         _inlineTemps[f] = _freeTemps.ToList();
         _freeTemps.Clear();
         _freeTemps.AddRange(callerTemps);
-        _lastSource = default;
+        // The rest of the caller's statement belongs to the caller's line again (source map).
+        if (_lastSource != callerSource)
+        {
+            _lastSource = default;
+            Source(callerSource);
+        }
     }
 
     /// <summary>
@@ -515,6 +526,7 @@ public sealed class CodeGen
             _loops.Add((end, top));
             GenBlock(w.Body);
             _loops.RemoveAt(_loops.Count - 1);
+            Source(w);
             Jmp(top);
         }
         else
@@ -541,6 +553,7 @@ public sealed class CodeGen
                 _ => false,
             };
             Place(test);
+            Source(w);
             if (zFromDecrement) Branch(Bne, top);
             else GenCond(w.Condition, top, true);
         }
@@ -616,18 +629,15 @@ public sealed class CodeGen
         if (AssignsVar(body, held)) Op(reg == Register.X ? Stx : Sty, Var(held));
     }
 
-    /// <summary>
-    /// A match uses a jump table when a compare chain would need at least this many compares (a
-    /// range needs two) and the values span at most twice that many. Below that, the chain is
-    /// about as fast (5 cycles per compare against about 30 for the table) and shorter.
-    /// </summary>
-    private const int JumpTableTests = 8;
+    /// <summary>The jump tables of <c>indexed match</c> statements, for the report.</summary>
+    public List<(FunctionSymbol Function, SourcePos Pos, Label High, Label Low, int Span)> MatchTables { get; } = [];
 
     /// <summary>
-    /// <c>match</c>: the value is loaded into A once (for an <c>i8</c>, with <c>eor #$80</c>, so that
-    /// signed order becomes unsigned order). Dense cases use a jump table, others a chain of
-    /// <c>cmp</c> and branches. Arm bodies follow, each ending with a jump to the end; the default
-    /// arm (or the end) is where values that match nothing go.
+    /// <c>match</c>: the value is loaded into A once. A plain match is a chain of <c>cmp</c> and
+    /// branches (for an <c>i8</c>, after <c>eor #$80</c>, so that signed order becomes unsigned
+    /// order); <c>indexed match</c> is a jump table with no range check (spec 5.2). Arm bodies follow,
+    /// each ending with a jump to the end; the default arm (or the end) is where values that match
+    /// nothing go.
     /// </summary>
     private void GenMatch(MatchStmt m)
     {
@@ -644,20 +654,22 @@ public sealed class CodeGen
         var otherwise = fallback is null ? end : NewLabel("default");
 
         GenA(m.Subject);
-        if (m.Subject.Type.IsSigned) Op(Eor, Byte(0x80));
 
+        // Pattern values are biased by 128 for an i8, so that signed order is unsigned order.
+        int bias = m.Subject.Type.IsSigned ? 128 : 0;
         var patterns = arms.SelectMany(a => a.Patterns.Select(p => (Arm: a, p.From, p.To))).ToList();
-        int tests = patterns.Sum(p => p.From == p.To ? 1 : 2);
         int low = patterns.Min(p => p.From), high = patterns.Max(p => p.To);
         int span = high - low + 1;
         List<MatchArm> order;
-        // A jump table needs X or Y; inside loops using both, the compare chain needs neither.
-        bool indexFree = !_reserved.Contains(Register.X) || !_reserved.Contains(Register.Y);
-        if (tests >= JumpTableTests && span <= 2 * tests && indexFree)
+        if (m.IsIndexed)
         {
-            // Jump table: push the target address minus 1, high byte first, and rts to it.
-            if (low > 0) { Emit(Sec); Op(Sbc, Byte(low)); }
-            if (span < 256) { Op(Cmp, Byte(span)); Branch(Bcs, otherwise); }
+            // Jump table: push the target address minus 1, high byte first, and rts to it. The value
+            // minus the lowest pattern value indexes the tables (for an i8, v - low is the same byte
+            // with or without the bias). A value outside the span is not checked (spec 5.2).
+            int offset = (low - bias) & 0xFF;
+            if (offset != 0) { Emit(Sec); Op(Sbc, Byte(offset)); }
+            if (_reserved.Contains(Register.X) && _reserved.Contains(Register.Y))
+                throw new CompileError(m.Pos, "An 'indexed match' needs X or Y to index its table, but both hold loop variables here. Use a plain 'match', or free a register");
             var reg = FreeIndexRegister(m.Pos);
             Emit(reg == Register.X ? Tax : Tay);
             var targets = new Label[span];
@@ -671,10 +683,12 @@ public sealed class CodeGen
             Emit(Rts);
             Place(hiTable); _out.Add(new LabelTable(targets, High: true, Offset: -1));
             Place(loTable); _out.Add(new LabelTable(targets, High: false, Offset: -1));
+            MatchTables.Add((_fn, m.Pos, hiTable, loTable, span));
             order = arms;
         }
         else
         {
+            if (bias != 0) Op(Eor, Byte(0x80));
             // Compare chain, in source order. The last test is inverted to go to the default, so the
             // last arm's body follows it directly.
             for (int i = 0; i < patterns.Count; i++)
@@ -1304,11 +1318,11 @@ public sealed class CodeGen
                     case Register.X: Emit(Txa); break;
                     case Register.Y: Emit(Tya); break;
                     case Register.Carry: Op(Lda, Byte(0)); Emit(Rol, Accumulator); break;
-                    case Register.Zero or Register.Negative:
+                    case Register.Zero or Register.Negative or Register.Overflow:
                     {
                         var isFalse = NewLabel("f");
                         var done = NewLabel("b");
-                        Branch(call.Function.ReturnRegister == Register.Zero ? Bne : Bpl, isFalse);
+                        Branch(call.Function.ReturnRegister switch { Register.Zero => Bne, Register.Negative => Bpl, _ => Bvc }, isFalse);
                         Op(Lda, Byte(1));
                         Branch(Bne, done);
                         Place(isFalse);
@@ -1794,6 +1808,7 @@ public sealed class CodeGen
                     case Register.Carry: Branch(jumpIf ? Bcs : Bcc, target); return;
                     case Register.Zero: Branch(jumpIf ? Beq : Bne, target); return;
                     case Register.Negative: Branch(jumpIf ? Bmi : Bpl, target); return;
+                    case Register.Overflow: Branch(jumpIf ? Bvs : Bvc, target); return;
                     case Register.X: Op(Cpx, Byte(0)); break;
                     case Register.Y: Op(Cpy, Byte(0)); break;
                     default: Op(Cmp, Byte(0)); break;
@@ -2504,6 +2519,7 @@ public sealed class CodeGen
         _loopDepth--;
         _loops.RemoveAt(_loops.Count - 1);
         Place(cont);
+        Source(f); // the step and the test belong to the loop's line (source map)
 
         if (type.Size == 1 && d == 1 && !f.VariableStep)
             StepByOne(c, up, inclusive, from, to, bound, top, end);
@@ -2691,6 +2707,7 @@ public sealed class CodeGen
             _loopDepth--;
             _loops.RemoveAt(_loops.Count - 1);
             Place(cont);
+            Source(f);
             DecCounter(c);
             Branch(Bne, top);
             if (c.Register is { } r) _reserved.Remove(r);
@@ -2706,6 +2723,7 @@ public sealed class CodeGen
             _loopDepth--;
             _loops.RemoveAt(_loops.Count - 1);
             Place(cont);
+            Source(f);
             var noBorrow = NewLabel("nb");
             Op(Lda, Var(c)); Branch(Bne, noBorrow); Op(Dec, Var(c, 1));
             Place(noBorrow);

@@ -30,7 +30,7 @@ inline fn acknowledge() { c64.vic.irq_status = 1 }
 
 interrupt fn raster() {
     acknowledge()
-    match band {
+    indexed match band {
         0 => c64.vic.border = c64.RED
         1 => c64.vic.border = c64.ORANGE
         2 => c64.vic.border = c64.YELLOW
