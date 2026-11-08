@@ -134,4 +134,41 @@ public class PagePlacementTests
         Assert.Equal(r.Address("a") + 200, r.Address("b"));
         Assert.Equal(r.Address("b") + 200, r.Address("c"));
     }
+
+    // Review M18 part 3, finding 1.
+    [Fact]
+    public void A_fixed_address_variable_where_the_placed_block_would_go_keeps_the_variables_together()
+    {
+        var r = Run.Program("""
+            var arr: [u8; 250]
+            var gfx: [u8; 16] @ $0980
+            var total: u8
+            fn main() {
+                gfx[0] = 1
+                for i in 0..250 { total += arr[i] }
+            }
+            """, setup: ram => { for (int k = 0; k < 250; k++) ram.Bytes[0x0900 + k] = 0xEE; });
+        Assert.Equal(0, r.U8("total"));   // arr was cleared at startup
+        Assert.Equal(1, r.U8("gfx"));
+        Assert.DoesNotContain("placed so that", r.Result.Report);
+        int a = r.Address("arr");
+        Assert.True(a + 250 <= 0x0980, $"arr at ${a:X4}");
+    }
+
+    // Review M18 part 3, suggestion 2.
+    [Fact]
+    public void An_array_only_stored_through_an_index_is_not_placed()
+    {
+        var r = Run.Program("""
+            noinit var buf: [u8; 250]
+            var out: u8 @ $C000
+            fn main() {
+                for i in 0..250 { buf[i] = i }
+                out = buf[249]
+            }
+            """);
+        Assert.Equal(249, r.U8("out"));
+        Assert.DoesNotContain("placed so that", r.Result.Report);
+        Assert.DoesNotContain("left free", r.Result.Listing);
+    }
 }

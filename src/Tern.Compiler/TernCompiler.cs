@@ -73,9 +73,11 @@ public static class TernCompiler
         var halt = new Label("halt");
         var bss = new Label("bss");
         var setup = new Label("setup");
+        // Indexed reads only: a store or a read-modify-write takes the same cycles across a page.
         var indexed = new Dictionary<VariableSymbol, List<int>>();
         foreach (var i in functionCode.OfType<Instr>())
             if (i.Mode is Tern.Cpu.AddressingMode.AbsoluteX or Tern.Cpu.AddressingMode.AbsoluteY or Tern.Cpu.AddressingMode.ZeroPageX or Tern.Cpu.AddressingMode.ZeroPageY
+                && AsmEffects.ReadsMemory(i.Mnemonic, i.Mode) && !AsmEffects.WritesMemory(i.Mnemonic, i.Mode)
                 && i.Operand is VarOperand { Variable: var v } o)
                 (indexed.TryGetValue(v.Storage, out var list) ? list : indexed[v.Storage] = []).Add(v.AliasOffset + o.Offset);
         for (bool byPage = true; ; byPage = false)
@@ -149,20 +151,22 @@ public static class TernCompiler
 
             var overlayAreas = program.Modules.Where(m => m.OverlayArea is not null)
                 .ToDictionary(m => m.Name, m => layout.Overlays[m.OverlayArea!]);
+            // Placed by page, the variables may not fit, or may now overlap a fixed-address variable
+            // (review M18 part 3, finding 1): then place them one after another. That try reports
+            // any error as before.
             try
             {
-            code = Assembler.Assemble(items, layout.Program, () =>
-            {
-                foreach (var (g, label) in imageLabels) g.Address = label.Address;
-                foreach (var (v, offset) in plan.ZeroedGlobals.Concat(plan.NoinitGlobals)) v.Address = bss.Address + offset;
-                foreach (var (v, offset) in plan.FrameVariables) v.Address = bss.Address + offset;
-            }, overlayAreas, program.Modules.Where(m => m.ImportedBy is not null && m.OverlayArea is not null).ToDictionary(m => m.Name, m => m.ImportedBy!.Pos));
-            break;
+                code = Assembler.Assemble(items, layout.Program, () =>
+                {
+                    foreach (var (g, label) in imageLabels) g.Address = label.Address;
+                    foreach (var (v, offset) in plan.ZeroedGlobals.Concat(plan.NoinitGlobals)) v.Address = bss.Address + offset;
+                    foreach (var (v, offset) in plan.FrameVariables) v.Address = bss.Address + offset;
+                }, overlayAreas, program.Modules.Where(m => m.ImportedBy is not null && m.OverlayArea is not null).ToDictionary(m => m.Name, m => m.ImportedBy!.Pos));
+                CheckFixedAddresses(program, platform, code, plan);
+                break;
             }
-            catch (Assembler.NoPageStart) when (byPage) { }
-
+            catch (Exception e) when (byPage && plan.PageArrays.Count > 0 && e is Assembler.NoPageStart or CompileError) { }
         }
-        CheckFixedAddresses(program, platform, code, plan);
 
         // The file covers every byte from the lowest to the highest address used; gaps are zeros.
         int loadAddress = code.Segments.Min(s => s.Address);
