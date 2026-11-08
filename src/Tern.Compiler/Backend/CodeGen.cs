@@ -435,8 +435,19 @@ public sealed class CodeGen
 
     private void GenBlock(BlockStmt block)
     {
-        foreach (var s in block.Statements) GenStmt(s);
+        for (int k = 0; k < block.Statements.Count; k++)
+        {
+            _previous = (k > 0 ? block.Statements[k - 1] : null, block.Statements[k]);
+            GenStmt(block.Statements[k]);
+        }
+        _previous = default;
     }
+
+    /// <summary>The statement of a block being generated, and the one before it in the block (null for the first).</summary>
+    private (Stmt? Before, Stmt? Current) _previous;
+
+    /// <summary><c>for</c> loops whose range cannot be empty because of where they are (<see cref="GenWhile"/>).</summary>
+    private readonly HashSet<ForStmt> _nonEmpty = [];
 
     private void GenStmt(Stmt stmt)
     {
@@ -494,6 +505,7 @@ public sealed class CodeGen
         var top = NewLabel("while");
         var test = NewLabel("test");
         var end = NewLabel("wend");
+        var previous = _previous.Current == w ? _previous.Before : null;
         // An endless loop never reaches the store after it.
         var held = w.Condition.ConstValue == 1 ? null : HoldInRegister(w.Body, w.Condition, null);
         _loopDepth++;
@@ -507,19 +519,93 @@ public sealed class CodeGen
         }
         else
         {
-            // Test at the bottom: one branch per pass instead of a branch and a jump.
-            Jmp(test);
+            // Test at the bottom: one branch per pass instead of a branch and a jump. The first test
+            // goes when the statement before the loop makes it true (F9); a loop that ends by counting
+            // down to zero tests the Z flag of its decrement, after one test on entry.
+            var decremented = DecrementTest(w);
+            bool firstTrue = FirstTestTrue(w, previous);
+            if (firstTrue) { }
+            else if (decremented is not null) GenCond(w.Condition, end, false);
+            else Jmp(test);
+            if (w.Body.Statements.FirstOrDefault() is ForStmt first && NonEmptyInside(w.Condition, first)) _nonEmpty.Add(first);
             Place(top);
             _loops.Add((end, test));
             GenBlock(w.Body);
             _loops.RemoveAt(_loops.Count - 1);
+            // The decrement must be the body's last instruction: dec v, or dex / dey for a held v.
+            bool zFromDecrement = decremented is { } d && _out.Count > 0 && _out[^1] switch
+            {
+                Instr { Mnemonic: Dec, Operand: VarOperand o } => o == d,
+                Instr { Mnemonic: Dex } => d.Variable.Register == Register.X && d.Offset == 0,
+                Instr { Mnemonic: Dey } => d.Variable.Register == Register.Y && d.Offset == 0,
+                _ => false,
+            };
             Place(test);
-            GenCond(w.Condition, top, true);
+            if (zFromDecrement) Branch(Bne, top);
+            else GenCond(w.Condition, top, true);
         }
         _loopDepth--;
         Place(end);
         ReleaseHeld(held, w.Body);
     }
+
+    /// <summary>
+    /// For <c>while v &gt; 0</c> or <c>while v != 0</c> (v a one-byte variable, or the high byte of a
+    /// 16-bit one) whose body ends with <c>v -= 1</c> (<c>w -= 256</c>) and has no <c>continue</c>:
+    /// the byte the decrement leaves Z for. Null otherwise.
+    /// </summary>
+    private static VarOperand? DecrementTest(WhileStmt w)
+    {
+        if (w.Condition is not BinaryExpr { Op: TokenKind.Greater or TokenKind.NotEq, Right.ConstValue: 0 } c
+            || c.Left.Type is not { Size: 1, IsSigned: false } || ContinuesLoop(w.Body)) return null;
+        (VariableSymbol? v, int offset, long step) = c.Left switch
+        {
+            NameExpr { Symbol: { Type.Size: 1 } s } => (s, 0, 1L),
+            MemberExpr { Member: "hi", Target: NameExpr { Symbol: { Type.Size: 2 } s } } => (s, 1, 256L),
+            _ => (null, 0, 0L),
+        };
+        if (v is null || v.IsVolatile || v.AliasOf is not null) return null;
+        return w.Body.Statements.LastOrDefault() is AssignStmt { Op: TokenKind.MinusEq, Target: NameExpr { Symbol: var t } } a
+            && t == v && a.Value.ConstValue == step ? new VarOperand(v, offset) : null;
+    }
+
+    /// <summary>True if a <c>continue</c> in the code goes to this loop's test (not one inside a loop of its own).</summary>
+    private static bool ContinuesLoop(Node node) => node switch
+    {
+        ContinueStmt => true,
+        WhileStmt or ForStmt => false,
+        _ => Children(node).Any(ContinuesLoop),
+    };
+
+    /// <summary>
+    /// True if the statement before a <c>while</c> sets its variable to a constant that makes the
+    /// first test true: <c>var n: u8 = 2</c> before <c>while n &lt; 16</c>.
+    /// </summary>
+    private static bool FirstTestTrue(WhileStmt w, Stmt? previous)
+    {
+        if (w.Condition is not BinaryExpr { Left: NameExpr { Symbol: { Type: { Size: 1, IsSigned: false }, IsVolatile: false } v }, Right.ConstValue: long r } c) return false;
+        long? value = previous switch
+        {
+            VarDecl { Symbol: var s, Init.ConstValue: long i } when s == v => i,
+            AssignStmt { Op: TokenKind.Eq, Target: NameExpr { Symbol: var s }, Value.ConstValue: long i } when s == v => i,
+            _ => null,
+        };
+        if (value is not long l) return false;
+        l &= 0xFF;
+        return c.Op switch
+        {
+            TokenKind.Less => l < r, TokenKind.LessEq => l <= r, TokenKind.Greater => l > r, TokenKind.GreaterEq => l >= r,
+            TokenKind.EqEq => l == r, TokenKind.NotEq => l != r, _ => false,
+        };
+    }
+
+    /// <summary>
+    /// True if <c>for i in 0..v</c>, the first statement of a body entered only when the loop's
+    /// condition <c>v &gt; 0</c> (or <c>v != 0</c>) holds, cannot be empty.
+    /// </summary>
+    private static bool NonEmptyInside(Expr condition, ForStmt f) =>
+        condition is BinaryExpr { Op: TokenKind.Greater or TokenKind.NotEq, Left: NameExpr { Symbol: { Type: { Size: 1, IsSigned: false }, IsVolatile: false } v }, Right.ConstValue: 0 }
+        && f.From.ConstValue == 0 && !f.Inclusive && f.StepValue == 1 && !f.VariableStep && f.To is NameExpr { Symbol: var to } && to == v;
 
     /// <summary>Ends <see cref="HoldInRegister"/>: stores the variable if the loop assigns it, and frees the register.</summary>
     private void ReleaseHeld(VariableSymbol? held, Stmt body)
@@ -1748,6 +1834,9 @@ public sealed class CodeGen
                 TokenKind.LessEq => TokenKind.GreaterEq, TokenKind.GreaterEq => TokenKind.LessEq, _ => op,
             };
         }
+        // Unsigned, x > 0 is x != 0 and x <= 0 is x == 0: the load sets Z, no cmp needed (F9).
+        if (type.Size == 1 && !signed && right.ConstValue == 0 && op is TokenKind.Greater or TokenKind.LessEq)
+            op = op == TokenKind.Greater ? TokenKind.NotEq : TokenKind.EqEq;
         if (type.Size == 1 && op is TokenKind.Greater or TokenKind.LessEq && right.ConstValue is long c && c < type.MaxValue)
         {
             right = new NumberExpr(right.Pos, c + 1) { Type = right.Type, ConstValue = c + 1 };
@@ -2395,7 +2484,7 @@ public sealed class CodeGen
         // Skip the loop if the range is empty, unless the bounds prove it is not.
         long max = type.MaxValue;
         bool provablyNonEmpty = (from is not null && to is not null)
-            || (inclusive && up && to == max) || (inclusive && !up && to == 0);
+            || (inclusive && up && to == max) || (inclusive && !up && to == 0) || _nonEmpty.Contains(f);
         if (!provablyNonEmpty)
         {
             var emptyIf = (up, inclusive) switch
