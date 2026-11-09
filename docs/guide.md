@@ -665,20 +665,20 @@ tern run game.tern --profile                      // the cycles of each function
 
 `--dump` shows a value after each run, to check that the versions agree.
 
+`tern run` also checks every variable array index (the program itself never does, section 6). An index outside its array is printed with the source line, and the run goes on, so one run shows every bad access. An `indexed match` value outside its span is printed and stops the run. The exit code is 0 when `main` returned with no error, 3 when `main` returned but the check reported an error, and 2 when `main` did not return (the cycle limit, or a stop after a bad `indexed match` value). Pointer accesses and `asm` are not checked.
+
 ## 8. Not supported yet
 
-Signed loop variables; `match` on 16-bit values (match on `.lo` / `.hi`); arrays of structs inside structs; a function with a body at a fixed address; fixed-address `data` inside an overlay (under discussion); bank switching. Each gives a clear error rather than a confusing one.
+`match` on 16-bit values (match on `.lo` / `.hi`); arrays of structs inside structs; a function with a body at a fixed address; fixed-address `data` inside an overlay (under discussion); bank switching. Each gives a clear error rather than a confusing one.
 
 ## 9. The future
 
 ### Next
 
-- **M19 part 2**: a Claude Code skill for writing Tern, built from this guide.
-- **M20**: in test runs, the built-in emulator reports an array index outside its array and an `indexed match` value outside its span, with the source line; signed loop variables.
+- **M21**: plug-ins against a fixed interface: binaries built separately against one interface module, loaded in turn into one slot.
 
 ### Later highlights
 
-- **Plug-ins against a fixed interface** (M21): binaries built separately against one interface module, loaded in turn into one slot.
 - **`const fn` and code generators** (M22). Functions that run at compile time to build lookup tables, with unlimited-size `int` and `real` math. A generator can `emit` assembly, to produce unrolled "speedcode" whose shape depends on parameters.
 - **Doc comments (`///`) and a language server** (M23) that shows errors, types and costs in your editor.
 - **Floats as a library** (M24).

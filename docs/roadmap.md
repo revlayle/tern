@@ -376,6 +376,8 @@ Tests: the check fires on an index past the end (also through a folded offset su
 
 Spec: 12.3 (planned).
 
+- **First, small** (from M20; decision 2026-11-08): `tern run --set $DC00=$FF` (and `tern bench`) sets a memory byte before the run, so a whole game loop can be checked with a joystick value; `tern bench` prints index errors (`RunResult.IndexErrors`) and fails a variant that has them; `v += 2` / `v -= 2` on a variable held in X or Y is `inx` / `inx` (`dex`, `iny`, `dey`), a spec 11 row. `BenchmarkTests` and `SkillTests` are rewritten in the same commit if they move.
+
 `export module` in a binary (exports matched by name to the module's fixed-address routines, with checks on parameters, return, `keeps`, the interface's fixed variables defined as `data`, `setup` at entry 0) and `export f, g @ addr` in a program with `main` (a jump table at a fixed address, `name_api.tern` written). Tests: two level binaries built against one interface module, exported in different source orders, loaded in turn into one reserved slot and called by a host; a level calling the host's table; each error. Example: a game with levels on disk plus one built separately, checked in VICE
 
 ## M22: `const fn` and code generators

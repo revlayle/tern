@@ -893,9 +893,10 @@ These are the intended translations. The optimizer may produce something shorter
 |---|---|
 | `x = 0` | `lda #0` / `sta x` (no code at the start of `main` when x is a global zeroed at startup, 4) |
 | `x += 1` (x in memory) | `inc x` |
-| `x += 2`, `x -= 2` (u8 in memory, not `volatile`) | `inc x` / `inc x`, `dec x` / `dec x` (4 bytes against 7, the same cycles, A unchanged; a `volatile` variable gets the add, since two `inc`s write the value in between) |
+| `x += 2`, `x -= 2` (one-byte variable in memory, `u8` or `i8`, not `volatile`) | `inc x` / `inc x`, `dec x` / `dec x` (4 bytes against 7, the same cycles, A unchanged; a `volatile` variable gets the add, since two `inc`s write the value in between) |
 | `w += 1` (u16) | `inc w` / `bne +` / `inc w+1` |
 | `w += b as u16` (b: u8) | `lda b` / `clc` / `adc w` / `sta w` / `bcc +` / `inc w+1` |
+| `v += 2`, `v -= 2` (one-byte variable held in X or Y, e.g. a loop counter) | `inx` / `inx`, `dex` / `dex` (`iny`, `dey` for Y) |
 | `p += 256`, `w -= 256` | `inc p+1`, `dec w+1` |
 | `b = a[i + 1]` in `for i in 0..last` (last: u8) | `lda a+1,x` / `sta b` (3.2) |
 | `a[i] = v` | `ldx i` / `lda v` / `sta a,x` |
@@ -1004,7 +1005,7 @@ source → lexer → parser → AST
 ```
 
 - **Built-in assembler.** There is no text assembly step. The compiler works on typed instruction objects, which the encoder turns into bytes. The instruction table includes sizes and cycle counts, so layout can pick short branches, avoid page-crossing penalties in marked loops, and report cycles.
-- **Errors for habits from other languages.** Where a C habit does not parse, the error names the habit and gives the Tern spelling, instead of a generic parse error at a later token: `n++` / `n--` at the end of a statement or before a closing bracket ("Write 'n += 1'"; `a++b` stays `a + (+b)`), a `*` dereference such as `*p = 1` ("Write 'p[0]'"), `%0000_1111` where a value is expected ("Write binary numbers as 0b0000_1111"), and a keyword used as a name, such as `fn step()` ("'step' is a keyword; Use another name").
+- **Errors for habits from other languages.** Where a C habit does not parse, the error names the habit and gives the Tern spelling, instead of a generic parse error at a later token: `n++` / `n--` at the end of a statement or before a closing bracket ("Write 'n += 1'"; `a++b` stays `a + (+b)`), a `*` dereference such as `*p = 1` ("Write 'p[0]'"), `%0000_1111` where a value is expected ("Write binary numbers as 0b0000_1111"), and a keyword used as a name, such as `fn step()`: the error says what was expected and names the keyword ("Expected function name, found 'step', which is a keyword. Use another name").
 - **Branch range fixing.** A conditional branch reaches only −128 to +127 bytes. Layout repeats until every branch fits. Branches that do not fit become an inverted branch over a `jmp`.
 - **Outputs:**
   - the program file (`.prg` for C64),
@@ -1033,7 +1034,7 @@ Each item is decided when the feature it belongs to is built.
 1. **Bank switching** (NES mappers, C64 cartridges). Placement is `@ bank(n)`; the model follows overlays (8.5), with a bank area switched in by a mapper. Open: how calls between banks work. Likely direction: the compiler generates a small stub for each call into another bank, and direct access to another bank's data is an error.
 2. **Functions called from both main and interrupts.** v0: a compile error, except for functions with no memory of their own (8.1). Likely direction: the compiler makes a second copy of the function for the interrupt side, which costs ROM but no speed and needs no stack. Microchip's XC8 compiler does this. A first step is built (M16, decisions 2026-11-07): an inline function's variables go in each caller's frame, as in C, so an `inline fn` or `inline asm fn` with locals can be used from any root (6.2); an `inline asm fn` body may have `var` lines (9). Still open: a second copy for ordinary functions.
 3. **`pha`/`pla` for temporaries.** `pha`/`pla` is 2 bytes and 7 cycles, against 4 bytes and 6 cycles for a zero-page temporary. Likely direction: the optimizer chooses, but never across a function call. Settle with benchmarks.
-4. **Checks in debug builds.** Settled 2026-11-07: there is no check in the program. In test runs the built-in emulator reports a variable array index outside its array, with the source line, as a debugging aid (3.2); the program behaves the same with or without it. Arithmetic is not checked: it wraps by definition (3.1), and wrapping is often intended.
+4. **Checks in debug builds.** Settled 2026-11-07: there is no check in the program. In test runs the built-in emulator reports a variable array index outside its array, with the source line, as a debugging aid (3.2); the program behaves the same with or without it. The run goes on after a bad index, so one run reports every bad access (counted per instruction). An `indexed match` value outside its span (5.2) is reported too and stops the run, since its jump lands on whatever bytes follow the tables. Arithmetic is not checked: it wraps by definition (3.1), and wrapping is often intended.
 5. **User-defined encodings,** e.g. for the NES, where each game decides which tile shows which character: a character-to-byte table declared in source. Built-in encodings are settled (2.1).
 6. **`using` on local variables** (`var count: u8 using Y`). Not planned (2026-11-07). Loop counters and register parameters already go in registers, the optimizer removes reloads, and A, X and Y are needed by most expressions and indexing, so a local held in one would mostly produce errors; a hidden save and reload would break rule 1. The M17 analysis found no gap that needs it (its class 3 is empty): values held in registers across loops are an optimizer change (M18).
 7. **A general decorator syntax.** Only if modifier keywords grow past five or six.
