@@ -85,6 +85,7 @@ public class ErrorTests
     [InlineData("fn f(in: u8) { }\nfn main() { }", 1, 6, "'in', which is a keyword")]
     [InlineData("fn main() { for step in 0..3 { } }", 1, 17, "'step', which is a keyword")]
     [InlineData("export fn get() { }", 1, 8, "'export' lists functions declared elsewhere, so it is not followed by 'fn'. Remove 'fn' here")]
+    [InlineData("export fn update() { }", 1, 8, "declare the function on its own: 'export update' and 'fn update() { }'")]
     public void Names_habits_from_c(string source, int line, int column, string expected)
     {
         var e = Assert.Throws<CompileError>(() => TernCompiler.Compile(source));

@@ -179,8 +179,11 @@ public sealed class Parser
                     Advance();
                     // export fn f() { } (Rust's pub fn, JavaScript's export function): export only lists names.
                     if (At(TokenKind.Fn))
+                    {
+                        string name = PeekAt(1).Kind == TokenKind.Identifier ? PeekAt(1).Text : "f";
                         throw new CompileError(Current.Pos,
-                            "'export' lists functions declared elsewhere, so it is not followed by 'fn'. Remove 'fn' here and declare the function on its own: 'export get' and 'fn get() { }'");
+                            $"'export' lists functions declared elsewhere, so it is not followed by 'fn'. Remove 'fn' here and declare the function on its own: 'export {name}' and 'fn {name}() {{ }}'");
+                    }
                     do
                     {
                         var f = Expect(TokenKind.Identifier, "a function name after 'export'");
