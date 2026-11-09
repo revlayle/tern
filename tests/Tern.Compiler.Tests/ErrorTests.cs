@@ -63,6 +63,75 @@ public class ErrorTests
         Assert.Contains(expected, e.Description, StringComparison.OrdinalIgnoreCase);
     }
 
+    // Habits from C get the Tern spelling (spec 13), at the habit's own position.
+    [Theory]
+    [InlineData("var n: u8\nfn main() {\n    n++\n}", 3, 6, "Tern has no '++'. Write 'n += 1'")]
+    [InlineData("var n: u8\nfn main() {\n    n--\n}", 3, 6, "Tern has no '--'. Write 'n -= 1'")]
+    [InlineData("var n: u8\nfn main() { n++ }", 2, 14, "Write 'n += 1'")]
+    [InlineData("var n: u8\nfn main() { n++; n = 2 }", 2, 14, "Write 'n += 1'")]
+    [InlineData("var n: u8\nfn main() {\n    n++ // count\n}", 3, 6, "Write 'n += 1'")]
+    [InlineData("var a: [u8; 4]\nvar i: u8\nfn main() { a[i]++ }", 3, 17, "Write 'a[i] += 1'")]
+    [InlineData("struct P { x: u8 }\nvar e: [P; 4]\nvar i: u8\nfn main() { e[i + 1].x-- }", 4, 23, "Write 'e[i + 1].x -= 1'")]
+    [InlineData("var n: u8\nfn main() { (n)++ }", 2, 16, "Tern has no '++'. Write '+= 1' instead")]
+    [InlineData("fn f(x: u8) { }\nvar n: u8\nfn main() { f(n--) }", 3, 16, "Write 'n -= 1'")]
+    [InlineData("var p: ptr u8\nfn main() {\n    *p = 1\n}", 3, 5, "Tern has no '*' to read through a pointer. Write 'p[0]' for the value p points to")]
+    [InlineData("var p: ptr u8\nvar v: u8\nfn main() { v = *p }", 3, 17, "Write 'p[0]'")]
+    [InlineData("var v: u8\nfn main() { v = %0000_1111 }", 2, 17, "'%' does not start a binary number. Write binary numbers as 0b0000_1111")]
+    [InlineData("const M = %101\nfn main() { }", 1, 11, "Write binary numbers as 0b101")]
+    [InlineData("const M = %2\nfn main() { }", 1, 11, "Expected an expression, found '%'")]
+    [InlineData("const M = %0xFF\nfn main() { }", 1, 11, "Expected an expression, found '%'")]
+    [InlineData("fn step() { }\nfn main() { }", 1, 4, "Expected function name, found 'step', which is a keyword. Use another name")]
+    [InlineData("var data: u8\nfn main() { }", 1, 5, "'data', which is a keyword")]
+    [InlineData("fn f(in: u8) { }\nfn main() { }", 1, 6, "'in', which is a keyword")]
+    [InlineData("fn main() { for step in 0..3 { } }", 1, 17, "'step', which is a keyword")]
+    [InlineData("export fn get() { }", 1, 8, "'export' lists functions declared elsewhere, so it is not followed by 'fn'. Remove 'fn' here")]
+    [InlineData("export fn update() { }", 1, 8, "declare the function on its own: 'export update' and 'fn update() { }'")]
+    public void Names_habits_from_c(string source, int line, int column, string expected)
+    {
+        var e = Assert.Throws<CompileError>(() => TernCompiler.Compile(source));
+        Assert.Contains(expected, e.Description);
+        Assert.Equal((line, column), (e.Pos.Line, e.Pos.Column));
+    }
+
+    [Fact]
+    public void A_keyword_where_no_name_was_meant_gets_no_rename_hint()
+    {
+        // The name is missing, not a keyword in its place (review M20, second review, suggestion 4).
+        var e = Assert.Throws<CompileError>(() => TernCompiler.Compile("fn main() { for in 0..3 { } }"));
+        Assert.Equal("Expected loop variable name or '_', found 'in'", e.Description);
+        e = Assert.Throws<CompileError>(() => TernCompiler.Compile("fn main() { }\nexport return"));
+        Assert.Equal("Expected a function name after 'export', found 'return'", e.Description);
+    }
+
+    [Fact]
+    public void The_fix_for_a_c_habit_is_the_suggestion()
+    {
+        var e = Assert.Throws<CompileError>(() => TernCompiler.Compile("var n: u8\nfn main() { n++ }"));
+        Assert.Equal(("Tern has no '++'.", "Write 'n += 1'"), Tools.Diagnostic.Split(e.Description));
+        e = Assert.Throws<CompileError>(() => TernCompiler.Compile("fn step() { }\nfn main() { }"));
+        Assert.Equal("Use another name", Tools.Diagnostic.Split(e.Description).Suggestion);
+    }
+
+    [Fact]
+    public void Plus_plus_and_minus_minus_between_operands_are_still_two_operators()
+    {
+        var run = Run.Program("""
+            var a: u8 = 10
+            var b: u8 = 3
+            var r1: u8
+            var r2: u8
+            var r3: u8
+            var r4: u8
+            fn main() {
+                r1 = a++b
+                r2 = a--b
+                r3 = a+ +b
+                r4 = a - -b
+            }
+            """);
+        Assert.Equal((13, 13, 13, 13), (run.U8("r1"), run.U8("r2"), run.U8("r3"), run.U8("r4")));
+    }
+
     [Fact]
     public void Zero_page_overflow_is_an_error()
     {

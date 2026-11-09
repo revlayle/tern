@@ -36,9 +36,26 @@ public sealed record ImmVarByte(VariableSymbol Variable, bool High, int Offset =
     public override string ToString() => $"#{ImmLabelByte.OffsetText(Variable.QualifiedName, Offset)}.{(High ? "hi" : "lo")}";
 }
 
+/// <summary>
+/// The table an indexed instruction must stay in, for the emulator's index check (M20; spec 3.2, 5.2).
+/// The table starts <see cref="Shift"/> bytes before the operand's address (a folded offset such as
+/// <c>a-1,x</c>) and holds <see cref="Length"/> bytes: <see cref="Elements"/> elements, <see cref="Stride"/> bytes apart. For an
+/// <c>indexed match</c>, <see cref="MatchLow"/> is its lowest pattern value.
+/// </summary>
+/// With <see cref="InA"/> the check is on A before an instruction (the index before it is scaled), not on an address.
+public sealed record IndexCheck(string Name, int Shift, int Length, int Elements, int Stride = 1, int? MatchLow = null, bool Signed = false, bool InA = false)
+{
+    /// <summary>The index expression's position: the checks of one access (both bytes, the scaled index) share it.</summary>
+    public SourcePos? At { get; init; }
+}
+
 /// <summary>A byte of a variable: its address plus <see cref="Offset"/>.</summary>
 public sealed record VarOperand(VariableSymbol Variable, int Offset = 0) : Operand
 {
+    /// <summary>Set on an array index the emulator checks; not part of the operand's identity.</summary>
+    public IndexCheck? Check { get; init; }
+    public bool Equals(VarOperand? other) => other is not null && Variable == other.Variable && Offset == other.Offset;
+    public override int GetHashCode() => HashCode.Combine(Variable, Offset);
     public override string ToString() => Offset == 0 ? Variable.QualifiedName : $"{Variable.QualifiedName}{Offset:+0;-0}";
 }
 
@@ -50,6 +67,10 @@ public sealed record AddrOperand(int Address) : Operand
 
 public sealed record LabelOperand(Label Label, int Offset = 0) : Operand
 {
+    /// <summary>Set on a jump table read the emulator checks; not part of the operand's identity.</summary>
+    public IndexCheck? Check { get; init; }
+    public bool Equals(LabelOperand? other) => other is not null && Label == other.Label && Offset == other.Offset;
+    public override int GetHashCode() => HashCode.Combine(Label, Offset);
     public override string ToString() => Offset == 0 ? Label.Name : $"{Label.Name}{Offset:+0;-0}";
 }
 
@@ -63,7 +84,13 @@ public abstract record AsmItem;
 /// Set for instructions written in an asm block. The assembler never replaces them (an out-of-range
 /// branch is an error at this position instead of a branch over a <c>jmp</c>).
 /// </param>
-public sealed record Instr(Mnemonic Mnemonic, AddressingMode Mode = AddressingMode.Implied, Operand? Operand = null, SourcePos? AsmPos = null) : AsmItem;
+public sealed record Instr(Mnemonic Mnemonic, AddressingMode Mode = AddressingMode.Implied, Operand? Operand = null, SourcePos? AsmPos = null) : AsmItem
+{
+    /// <summary>Set on the shift that scales a linear array's index: A must be below the element count (M20). Not part of the identity.</summary>
+    public IndexCheck? Check { get; init; }
+    public bool Equals(Instr? other) => other is not null && Mnemonic == other.Mnemonic && Mode == other.Mode && Equals(Operand, other.Operand) && AsmPos == other.AsmPos;
+    public override int GetHashCode() => HashCode.Combine(Mnemonic, Mode, Operand, AsmPos);
+}
 
 public sealed record LabelDef(Label Label) : AsmItem;
 

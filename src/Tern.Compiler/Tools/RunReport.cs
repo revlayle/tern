@@ -79,6 +79,11 @@ public static class RunReport
         sb.AppendLine($"{Capitalize(run.Stop)}: {run.Cycles} cycles" + (run.MainCycles is { } m ? $" ({m} in main)" : "")
             + (run.Interrupts > 0 ? $", {run.Interrupts} interrupts" : ""));
         sb.AppendLine($"A=${run.Cpu.A:X2} X=${run.Cpu.X:X2} Y=${run.Cpu.Y:X2} SP=${run.Cpu.SP:X2} PC=${run.Cpu.PC:X4}");
+        if (run.IndexErrors.Count > 0)
+        {
+            sb.AppendLine("Index check (the program has no check; the emulator found these):");
+            foreach (var e in run.IndexErrors) foreach (var line in e.ToString().Split('\n')) sb.AppendLine("  " + line);
+        }
         if (run.Output.Length > 0)
         {
             sb.AppendLine("Printed:");
@@ -135,6 +140,7 @@ public static class RunReport
             interrupts = run.Interrupts,
             registers = new { a = run.Cpu.A, x = run.Cpu.X, y = run.Cpu.Y, sp = run.Cpu.SP, pc = run.Cpu.PC },
             output = run.Output,
+            indexErrors = run.IndexErrors.Select(e => new { file = e.File, line = e.Line, source = e.Source, message = e.Message, cycle = e.Cycle, count = e.Count }),
             memory = dumps.Select(d => new
             {
                 what = d.What,

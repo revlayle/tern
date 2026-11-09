@@ -51,6 +51,8 @@ public static class Lexer
 
     public static bool IsRawByte(char c) => c >= RawByteBase && c <= RawByteBase + 0xFF;
 
+    public static bool IsKeyword(TokenKind kind) => kind >= TokenKind.Const && kind <= TokenKind.Export;
+
     private static readonly Dictionary<string, TokenKind> Keywords = new()
     {
         ["const"] = TokenKind.Const, ["var"] = TokenKind.Var, ["data"] = TokenKind.Data,
@@ -118,6 +120,33 @@ public static class Lexer
             if (quote == '\'' && text.Length != 1)
                 throw new CompileError(Pos(start), "A character literal holds exactly one character; use \"...\" for a string");
             Add(quote == '"' ? TokenKind.String : TokenKind.Char, text, 0, start, encoding);
+        }
+
+        // The source text of the operand before i on this line, such as n, a[i] or p.x: names joined by
+        // dots, each with any [ ] after it. Null if there is none.
+        string? OperandText()
+        {
+            int k = tokens.Count - 1, start = -1;
+            while (k >= 0)
+            {
+                if (tokens[k].Kind == TokenKind.RBracket)
+                {
+                    int depth = 0;
+                    for (; k >= 0; k--)
+                    {
+                        if (tokens[k].Kind == TokenKind.RBracket) depth++;
+                        else if (tokens[k].Kind == TokenKind.LBracket && --depth == 0) break;
+                    }
+                    k--;
+                    continue;
+                }
+                if (k < 0 || tokens[k].Kind != TokenKind.Identifier) break;
+                start = k--;
+                if (k >= 0 && tokens[k].Kind == TokenKind.Dot) { k--; continue; }
+                break;
+            }
+            if (start < 0 || tokens[start].Pos.Line != line) return null;
+            return source[(lineStart + tokens[start].Pos.Column - 1)..i].Trim();
         }
 
         while (i < source.Length)
@@ -200,6 +229,16 @@ public static class Lexer
                 continue;
             }
 
+            // C's n++ / n-- at the end of a statement or before a closing bracket (spec 13). Elsewhere
+            // they stay two operators: a++b is a + (+b).
+            if (c is '+' or '-' && Peek(source, i + 1) == c && EndsAfter(source, i + 2))
+            {
+                string op = c == '+' ? "+=" : "-=";
+                throw new CompileError(Pos(i), OperandText() is { } target
+                    ? $"Tern has no '{c}{c}'. Write '{target} {op} 1'"
+                    : $"Tern has no '{c}{c}'. Write '{op} 1' instead");
+            }
+
             bool matched = false;
             foreach (var (text, kind) in Operators)
             {
@@ -254,6 +293,13 @@ public static class Lexer
                     throw new CompileError(escapePos, $"Unknown escape '\\{e}'. Use \\0, \\n, \\\\, \\\", \\' or \\$NN for a byte");
             }
         }
+    }
+
+    /// <summary>True if only spaces stand between <paramref name="i"/> and the end of the line, a comment, a closing bracket or ';'.</summary>
+    private static bool EndsAfter(string s, int i)
+    {
+        while (i < s.Length && s[i] is ' ' or '\t' or '\r') i++;
+        return i >= s.Length || s[i] is '\n' or ';' or ')' or ']' or '}' || (s[i] == '/' && Peek(s, i + 1) is '/' or '*');
     }
 
     private static char Peek(string s, int i) => i < s.Length ? s[i] : '\0';

@@ -32,7 +32,13 @@ public sealed class Parser
     private Token Expect(TokenKind kind, string what)
     {
         if (!At(kind))
+        {
+            // A keyword where a name is meant (fn step(), var data: u8), told by the token after it.
+            if (kind == TokenKind.Identifier && Lexer.IsKeyword(Current.Kind) && PeekAt(1).Kind is
+                    TokenKind.LParen or TokenKind.RParen or TokenKind.Colon or TokenKind.Eq or TokenKind.LBrace or TokenKind.Comma or TokenKind.In)
+                throw new CompileError(Current.Pos, $"Expected {what}, found '{Current.Text}', which is a keyword. Use another name");
             throw new CompileError(Current.Pos, $"Expected {what}, found {Describe(Current)}");
+        }
         return Advance();
     }
 
@@ -171,6 +177,13 @@ public sealed class Parser
                 case TokenKind.Export:
                 {
                     Advance();
+                    // export fn f() { } (Rust's pub fn, JavaScript's export function): export only lists names.
+                    if (At(TokenKind.Fn))
+                    {
+                        string name = PeekAt(1).Kind == TokenKind.Identifier ? PeekAt(1).Text : "f";
+                        throw new CompileError(Current.Pos,
+                            $"'export' lists functions declared elsewhere, so it is not followed by 'fn'. Remove 'fn' here and declare the function on its own: 'export {name}' and 'fn {name}() {{ }}'");
+                    }
                     do
                     {
                         var f = Expect(TokenKind.Identifier, "a function name after 'export'");
@@ -420,7 +433,7 @@ public sealed class Parser
             do
             {
                 // A fixed input: a constant in place of the name, e.g. "true using carry".
-                if (!(At(TokenKind.Identifier) && PeekAt(1).Kind == TokenKind.Colon))
+                if (!((At(TokenKind.Identifier) || Lexer.IsKeyword(Current.Kind)) && PeekAt(1).Kind == TokenKind.Colon))
                 {
                     var value = ParseExpr();
                     if (!At(TokenKind.Using))
@@ -957,6 +970,17 @@ public sealed class Parser
                 Expect(TokenKind.RParen, "')'");
                 return new CallExpr(t.Pos, name, args);
             }
+            // Habits from C, with the Tern spelling (spec 13).
+            case TokenKind.Star:
+            {
+                string p = PeekAt(1).Kind == TokenKind.Identifier ? PeekAt(1).Text : "p";
+                throw new CompileError(t.Pos, $"Tern has no '*' to read through a pointer. Write '{p}[0]' for the value {p} points to");
+            }
+            case TokenKind.Percent when PeekAt(1) is { Kind: TokenKind.Number } bits && bits.Pos.Column == t.Pos.Column + 1
+                && bits.Text.All(ch => ch is '0' or '1' or '_')
+                && !(PeekAt(2).Kind is TokenKind.Identifier or TokenKind.Number
+                     && PeekAt(2).Pos.Line == bits.Pos.Line && PeekAt(2).Pos.Column == bits.Pos.Column + bits.Text.Length):
+                throw new CompileError(t.Pos, $"'%' does not start a binary number. Write binary numbers as 0b{PeekAt(1).Text}");
             default:
                 throw new CompileError(t.Pos, $"Expected an expression, found {Describe(t)}");
         }

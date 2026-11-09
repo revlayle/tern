@@ -32,7 +32,10 @@ public static class Cli
         main returns, then prints the cycles taken and the registers. Memory is plain RAM (no
         VIC-II, SID or CIA); CHROUT, GETIN and PLOT have stand-ins, other ROM calls stop the run.
         Only the program file is loaded: overlays are not, so a call into one stops at a brk.
-          --cycles <n>     stop after n cycles (default 20000000)
+        The emulator reports an array index outside its array and an 'indexed match' value
+        outside its span, with the source line (a match value outside stops the run). Exit
+        code: 0 when main returned, 2 when it did not, 3 when it did but an index was outside.
+          --cycles <n>    stop after n cycles (default 20000000)
           --irq <n>        raise an IRQ every n cycles, through the vector at $FFFE
           --dump <what>    show memory after the run: a variable (score, main.count), a
                            variable with a byte count (table:4), $C000-$C0FF or $C000:16;
@@ -144,11 +147,11 @@ public static class Cli
             try { parsed = dumps.Select(d => MemoryDump.Parse(d, program)).ToList(); }
             catch (FormatException e) { return Fail(json, new Diagnostic(input, 0, 0, "error", "--dump " + e.Message, null), "--dump " + e.Message); }
             RunResult run;
-            try { run = Runner.Run(program, new RunOptions { MaxCycles = cycles, IrqEvery = irq }); }
+            try { run = Runner.Run(program, new RunOptions { MaxCycles = cycles, IrqEvery = irq, MainFile = Path.GetFileName(input) }); }
             catch (InvalidOperationException e) { return Fail(json, new Diagnostic(input, 0, 0, "error", e.Message, null), e.Message); }
             var lines = profile ? LineTable.Rows(program, Path.GetFileName(input), run.Profile) : null;
             output.Write(json ? RunReport.Json(run, parsed, screen, lines) + Environment.NewLine : RunReport.Text(run, parsed, screen, lines));
-            return run.Returned ? 0 : 2;
+            return !run.Returned ? 2 : run.IndexErrors.Count > 0 ? 3 : 0;
         }
 
         // ---------- tern bench ----------

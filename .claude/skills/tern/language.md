@@ -106,7 +106,8 @@ fn main() {
 ## 4. Arrays
 
 - `a[i]` with `i: u8` is `lda a,x` or `lda a,y`. A constant index is a fixed address (`lda a+3`).
-- An index is not checked, and wraps: with `head = 255`, `buf[head + 1]` is `buf[0]`.
+- An index wraps: with `head = 255`, `buf[head + 1]` is `buf[0]`. The program never checks it;
+  `tern run` reports an index outside its array (section 1 of `SKILL.md`).
 - Arrays of `u16` (and pointers) are stored as two tables, low bytes and high bytes, so `a[i]` is
   `lda a,x` / `lda a+n,x`. `linear var pts: [u16; 32]` stores them interleaved, for hardware or
   assembly that needs it, and costs an `asl` per index.
@@ -277,14 +278,17 @@ log $08BE [u8; 16] (10 bytes):
 ```
 
 - There is no C-style `for (;;)` and no `do`/`until`. `a..b` excludes `b`, `a..=b` includes it.
-- `for` bounds are evaluated once, and the counter is read-only in the body. A counter is `u8`; with
-  constant bounds the order gives the direction, an end of `0` counts down, a negative `step` too.
-  Signed loop counters are not supported yet.
+- `for` bounds are evaluated once, and the counter is read-only in the body. A counter is `u8`
+  (`u16` if a bound needs it); with constant bounds the order gives the direction, an end of `0`
+  counts down, a negative `step` too. A negative constant or a signed bound makes it `i8` (`i16` if
+  the bounds do not fit): `for i in -10..10`, `for i in n..=0` with `n: i8`. A signed counter takes
+  only a constant step, and an unsigned variable bound must be converted (`-5..n as i8`).
 - `match` works on `u8` and `i8` (for a `u16`, match `.lo` or `.hi`). Patterns are constants, lists
   `1, 2` and inclusive ranges `3..=7`; `_` is last. One arm per line, no fall-through. A value no
   pattern lists skips the match.
 - `indexed match` is a jump table over the span from the lowest to the highest pattern. A value
   outside the span is not checked and jumps to garbage: list every value that can occur, or mask it.
+  `tern run` reports such a value and stops there.
 
 ```tern
 // dispatch.tern
