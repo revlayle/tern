@@ -1025,6 +1025,10 @@ public sealed class CodeGen
 
     private void Assign(Expr target, Expr value)
     {
+        // Spec 5: the index's calls and volatile reads before the value's, then the value's parts in order.
+        var tix = target as IndexExpr ?? (target as MemberExpr)?.Target as IndexExpr;
+        if (tix is not null && InSourceOrder(tix.Index, value, i => tix.Index = i, () => Assign(target, value))) return;
+        if (value is BinaryExpr vb && InSourceOrder(vb.Left, vb.Right, l => vb.Left = l, () => Assign(target, value))) return;
         if (target.Type.Size == 1)
         {
             if (target is IndexExpr pix && IsPointerIndex(pix) && StorePointerByteIndexFirst(pix, value)) return;
@@ -1432,6 +1436,7 @@ public sealed class CodeGen
 
     private void GenBinaryA(BinaryExpr b)
     {
+        if (InSourceOrder(b.Left, b.Right, l => b.Left = l, () => GenBinaryA(b))) return;
         if (b.Op is TokenKind.Shl or TokenKind.Shr)
         {
             GenA(b.Left);
@@ -1723,6 +1728,7 @@ public sealed class CodeGen
             return;
         }
 
+        if (e is BinaryExpr eb && InSourceOrder(eb.Left, eb.Right, l => eb.Left = l, () => Gen16(eb, d))) return;
         switch (e)
         {
             case NameExpr { Symbol: { } v }:
@@ -1838,13 +1844,22 @@ public sealed class CodeGen
                     return;
                 if (right is not null && ReadsVar(b.Right, d.Var)) right = null;
                 VariableSymbol? temp = null;
-                if (right is null)
+                if (right is null && b.Op != TokenKind.Minus && Simple2(b.Left) is { } left && !ReadsVar(b.Left, d.Var))
                 {
-                    temp = AcquireTemp(2);
-                    Gen16(b.Right, new Loc(temp));
-                    right = (Var(temp), Var(temp, 1));
+                    // x + f(): the right side into the destination, then x as the operand, with no temporary.
+                    Gen16(b.Right, d);
+                    right = left;
                 }
-                Gen16(b.Left, d);
+                else
+                {
+                    if (right is null)
+                    {
+                        temp = AcquireTemp(2);
+                        Gen16(b.Right, new Loc(temp));
+                        right = (Var(temp), Var(temp, 1));
+                    }
+                    Gen16(b.Left, d);
+                }
 
                 var m = ArithMnemonic(b.Op);
                 CarryFor(b.Op);
@@ -1950,6 +1965,7 @@ public sealed class CodeGen
 
     private void GenCompare(BinaryExpr b, Label target, bool jumpIf)
     {
+        if (InSourceOrder(b.Left, b.Right, l => b.Left = l, () => GenCompare(b, target, jumpIf))) return;
         var op = jumpIf ? b.Op : Negate(b.Op);
         Expr left = b.Left, right = b.Right;
         var type = left.Type.Size >= right.Type.Size ? left.Type : right.Type;
@@ -2357,10 +2373,19 @@ public sealed class CodeGen
         var early = new Dictionary<int, VariableSymbol>();
 
         // Calls inside arguments run before any parameter is written: the callee of the inner
-        // call may share memory with this call's parameters.
+        // call may share memory with this call's parameters. An argument with a call or a volatile
+        // read that a later argument also has goes early too, so they run left to right (spec 5).
+        var isEarly = new bool[call.Args.Count];
+        bool effectAfter = false;
+        for (int i = call.Args.Count - 1; i >= 0; i--)
+        {
+            bool effect = HasEffect(call.Args[i]);
+            isEarly[i] = ContainsCall(call.Args[i]) || (effect && effectAfter);
+            effectAfter |= effect;
+        }
         for (int i = 0; i < call.Args.Count; i++)
         {
-            if (!ContainsCall(call.Args[i])) continue;
+            if (!isEarly[i]) continue;
             var t = AcquireTemp(fn.Parameters[i].Type.Size);
             temps.Add(t);
             if (t.Type.Size == 1) { GenA(call.Args[i]); Op(Sta, Var(t)); }
@@ -3276,6 +3301,42 @@ public sealed class CodeGen
         CastExpr c => ContainsCall(c.Operand),
         _ => false,
     };
+
+    /// <summary>
+    /// True if <paramref name="e"/> calls a function or reads <c>volatile</c> memory: the parts whose
+    /// order can be seen, which run left to right (spec 5).
+    /// </summary>
+    private static bool HasEffect(Expr e) => e.ConstValue is null && e switch
+    {
+        CallExpr call => call.Function is not null,
+        NameExpr { Symbol: { } v } => v.IsVolatile,
+        UnaryExpr u => HasEffect(u.Operand),
+        BinaryExpr b => HasEffect(b.Left) || HasEffect(b.Right),
+        IndexExpr ix => HasEffect(ix.Target) || HasEffect(ix.Index),
+        MemberExpr m => HasEffect(m.Target),
+        CastExpr c => HasEffect(c.Operand),
+        _ => false,
+    };
+
+    /// <summary>
+    /// Spec 5: when <paramref name="first"/> and a part after it, <paramref name="later"/>, both call a
+    /// function or read volatile memory, <paramref name="first"/> is computed into a temporary first,
+    /// and <paramref name="gen"/> generates the code with the temporary in its place (<paramref name="put"/>
+    /// swaps it in and back). The code generators may then order the parts as they like. False, with no
+    /// code, otherwise.
+    /// </summary>
+    private bool InSourceOrder(Expr first, Expr later, Action<Expr> put, Action gen)
+    {
+        if (!HasEffect(first) || !HasEffect(later)) return false;
+        var t = AcquireTemp(first.Type.Size);
+        if (first.Type.Size == 1) { GenA(first); Op(Sta, Var(t)); }
+        else Gen16(first, new Loc(t));
+        put(new NameExpr(first.Pos, t.Name) { Symbol = t, Type = first.Type });
+        try { gen(); }
+        finally { put(first); }
+        Release(t);
+        return true;
+    }
 
     /// <summary>True if <paramref name="e"/> reads any byte of <paramref name="v"/>'s memory.</summary>
     private static bool ReadsVar(Expr e, VariableSymbol v) => e switch
