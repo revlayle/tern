@@ -490,7 +490,7 @@ public class C64LibraryTests
     }
 
     /// <summary>The KERNAL's IRQ entry at $FF48 (pha / txa / pha / tya / pha, then through $0316 for brk or $0314), with $FFFE pointing to it.</summary>
-    private static void KernalIrqEntry(Ram ram)
+    internal static void KernalIrqEntry(Ram ram)
     {
         byte[] entry = [0x48, 0x8A, 0x48, 0x98, 0x48, 0xBA, 0xBD, 0x04, 0x01, 0x29, 0x10, 0xF0, 0x03, 0x6C, 0x16, 0x03, 0x6C, 0x14, 0x03];
         entry.CopyTo(ram.Bytes, 0xFF48);
