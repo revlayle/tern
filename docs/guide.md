@@ -86,6 +86,7 @@ fn main()
 - All arithmetic **wraps**, and there is no integer promotion: `u8 + u8` is a `u8`.
 - `u8` mixed with `u16` widens to `u16`. Narrowing needs `as`: `x = big as u8` keeps the low byte.
 - Mixing signed and unsigned is an error; cast one side.
+- Constant expressions are computed exactly and checked only at the end: `const MAX_X: u16 = 320 - BOX` is fine with `BOX: u8`, and a constant sum converts to a pointer like a number (planned, M21).
 - `*`, `/` and `%` work only on constants (`const SIZE = 40 * 25`). At runtime, use shifts or the `math` library:
 
 ```
@@ -224,7 +225,9 @@ if fire_pressed() { shoot() }      // lda #$10 / bit $DC00 / bne skip
 
 `interrupt fn` saves only the registers it changes and ends with `rti`. It is its own root: its memory never overlaps main's. A function called from both main and a handler is an error, unless it has no memory of its own (like `acknowledge` above). One `interrupt fn` called from another becomes a *part* (no saving, ends with `rts`), which is how the library's raster code is combined into one handler you install.
 
-The `c64` module installs handlers: `kernal_off()`, `set_irq(addr(handler))`, `interrupts_on()` (see example 4.3).
+The `c64` module installs handlers: `kernal_off()`, `set_irq(addr(handler))`, `interrupts_on()` (see example 4.3). With the KERNAL left in (needed by the `io` library), `set_kernal_irq(addr(handler))` installs the same kind of handler through `$0314` (planned, M21); the KERNAL's keyboard scan then stops.
+
+A handler starts with `cld` only when it can do decimal arithmetic: when its code or asm blocks have `adc` or `sbc`, or it calls anything (`jsr`). A handler without them leaves decimal mode alone, which is safe since nothing in it depends on it.
 
 ### 3.9 Inline assembly
 

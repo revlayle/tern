@@ -118,6 +118,7 @@ fn main() {
 - `<<` and `>>` require a constant shift count and compile to `asl`/`lsr`/`rol`/`ror` sequences. Shifting by a variable amount uses the library functions `math.shl8`/`math.shr8` (section 10.1).
 - `>>` on unsigned types is a logical shift (`lsr`). On signed types it keeps the sign (`cmp #$80` / `ror` per shift), which rounds down, not toward zero: `-1 >> 1` is `-1`, and `-3 >> 1` is `-2`.
 - **A number literal takes its type from where it is used.** A literal that does not fit that type is a compile error: `300` or `-1` assigned to a `u8`.
+- **A constant expression is computed exactly.** An expression made only of literals and constants, typed or not, is evaluated at compile time as an `int` (4.1), with no wrapping, and takes its type from where it is used, like a literal: only the final value is checked against that type. With `const BOX: u8 = 13`, `const MAX_X: u16 = 320 - BOX` is 307, and `const SECS: u8 = 400 / 50` is 8 with no `as`; `const B: u8 = BOX + 250` is an error (263 does not fit), where `(BOX + 250) as u8` keeps the low byte on purpose. `~` and a negative value take the width of that type: `x & ~$0F` on a `u8` is `and #$F0`. A typed constant mixed with a runtime value is a value of its type (`x + BOX` is `u8`); only the constant part is exact (`x + BOX * 2` adds 26).
 
 ### 3.2 Arrays
 
@@ -200,7 +201,7 @@ e.pos.y = 5                        // ldy #1 / sta (e),y
 ### 3.4 Pointers
 
 - `ptr T` is a 16-bit address. `addr(name)` gives a pointer to a variable or array: `ptr T` for a variable of type `T`, a pointer to the first element for an array of one-byte elements, `ptr u8` to the low-byte table for a split array of 16-bit values, and `ptr u16` (or the element type) for a `linear` array of 16-bit values (3.2). A field of a struct variable or of a struct at a fixed address works too: `addr(player.name)` (no code beyond loading the constant address). Fields through a pointer and in an array of structs are errors. Use `as u16` for the address as a number. `addr(f)` of a function is a `u16` constant: its address, e.g. for a vector or a jump table (6.5).
-- A number literal (or an untyped `const`) converts to a pointer without `as`, since literals take their type from context: `var p: ptr u8 = $0400`, `p == 0`. A typed `u16` value needs `as`.
+- A number literal, or any constant expression (3.1), converts to a pointer without `as`, since it takes its type from context: `var p: ptr u8 = $0400`, `p == 0`, `mem.copy(CHARSET + FIRST * 8, ...)`. A `u16` variable or other runtime value needs `as`.
 - `p[i]` with `i: u8` compiles to `(zp),Y` addressing. There is no separate dereference operator: use `p[0]`.
 - On a pointer to a 16-bit type, the index counts elements: `p[i]` reads the bytes at offsets `2*i` and `2*i+1`. The byte offset must fit in the 256 bytes `(zp),Y` reaches: a constant index above 127 is an error, and a variable index of 128 or more wraps within those 256 bytes.
 - `.lo` and `.hi` cannot be used on pointers, since `p.name` means a field of the struct `p` points to (3.3). Write `(p as u16).hi`.
@@ -272,6 +273,7 @@ data msg = "GAME OVER"
 
 - `const` always means "known at compile time": `const` values take no memory, and `const fn` functions (4.1) run only during compilation.
 - `data` declares read-only arrays and strings stored in memory.
+- **`[T; _]` takes the length from the list**: `data script: [u8; _] = [1, 2, 3]` has length 3, as has a `var` global with a list initial value. A written length is still checked against the list. `_` is allowed only there, with a list literal.
 - **`@` gives a location**, and that is its only meaning. In a struct field it is the offset from the start of the struct (3.3). Elsewhere it is followed by one of:
   - a constant expression: a fixed address, e.g. `@ $D020` or `@ VIC + $20`,
   - `zp`: anywhere in zero page, chosen by the compiler. This is a guarantee: if zero page is full, compilation fails (8.2),
@@ -847,6 +849,8 @@ Each is an empty-body `inline asm fn` (section 7), so a call adds no instruction
 | `cursor(row: u8 using X, col: u8 using Y)` | Move the text cursor (KERNAL `PLOT`, `$FFF0`, fixed carry clear) |
 | `get_cursor() -> u16 using XY` | Read the cursor position: row in the low byte, column in the high byte (KERNAL `PLOT`, fixed carry set) |
 | `vic: Vic @ $D000` | VIC-II registers: `sprite0_x`, `sprite0_y` ... `sprite7_y`, `sprite_x_msb`, `control1`, `raster`, `light_pen_x`, `light_pen_y`, `sprite_enable`, `control2`, `sprite_expand_y`, `memory`, `irq_status`, `irq_enable`, `sprite_priority`, `sprite_multicolor`, `sprite_expand_x`, `sprite_collision`, `sprite_bg_collision`, `border`, `background`, `background1`-`background3`, `sprite_mc0`, `sprite_mc1`, `sprite_color: [u8; 8]` |
+| `sprite_xy: [u8; 16] @ $D000` | The sprite position registers as an array: x of sprite n at `2n`, y at `2n + 1` (the same memory as `vic.sprite0_x` ... `vic.sprite7_y`) |
+| `set_kernal_irq(handler: u16)` | Install an `interrupt fn` with the KERNAL left in: `$0314` points to a library stub that pulls the A, X and Y the KERNAL's entry pushed (`pla` / `tay` / `pla` / `tax` / `pla`) and jumps to the handler, which then runs as if called through `$FFFE` (about 20 cycles more than the KERNAL entry alone). The KERNAL's own IRQ work (keyboard scan, clock) no longer runs, so `getin()` sees no new keys; the handler acknowledges its interrupt source, and a CIA timer interrupt that is left on reaches it too |
 | `sid: Sid @ $D400` | SID registers: `voice1`-`voice3: Voice` (`freq: u16`, `pulse: u16`, `control`, `attack_decay`, `sustain_release`), `cutoff: u16`, `resonance`, `volume`, `paddle_x`, `paddle_y`, `osc3`, `env3` |
 | `cia1: Cia @ $DC00`, `cia2: Cia @ $DD00` | CIA registers: `port_a`, `port_b`, `ddr_a`, `ddr_b`, `timer_a: u16`, `timer_b: u16`, `tod_tenths`, `tod_seconds`, `tod_minutes`, `tod_hours`, `serial`, `icr`, `control_a`, `control_b` |
 
