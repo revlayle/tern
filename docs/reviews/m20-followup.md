@@ -70,3 +70,52 @@ A test with these three lines would guard it.
 - [x] `c64.sprite_xy` and `c64.set_kernal_irq`, checked in VICE (by the coding session), skill notes on `cld` and the KERNAL (`LibraryTests`, `examples/kernal_irq.tern`)
 - [x] `BenchmarkTests` and `SkillTests` unchanged
 - [x] Done when: the gaps 1, 3, 4, 5, 7, 8, 9 and 10 compile in their plain form (`GalaxyStarsGapTests`); the port itself still compiles
+
+## Second review (`de4adb0`), 2026-11-09
+
+**Not ready to merge: one must-fix item.** A pointer now converts to `u16` in a compound assignment (`w += p`), which was an error on `main` and which spec 3.1 and 3.5 still make an error. It is a one-line check. Everything else is good. The first review's two must-fix items and suggestions 3, 5 and 6 are fixed and tested, and questions 79-85 are built as decided. `.lo` / `.hi` on `addr(...) ± constant` give the right bytes and one load. The Galaxy Stars port (`main.tern`, `check_player.tern`) still compiles.
+
+2149 tests pass (36 CPU, 2113 compiler). `BenchmarkTests` and `SkillTests` pass with no baseline change (1254 / 350780).
+
+### Findings
+
+**1. Must fix: `w += p` (also `-=`, `&=`, `|=`, `^=`) adds a pointer to a number with no error.** `Checker.cs:1052` coerces a compound assignment's value to the target type. Since `Coerce` now accepts a pointer where a `u16` is expected (`Checker.cs:1980`), `w op= p` passes, while `w = w + p` is "A number before a pointer is not pointer arithmetic". Spec 3.1 says a compound assignment is checked as the operation it stands for, and spec 3.5 says "Inside an operator a pointer still needs `as`". On `main` this was "Expected u16, found ptr u8. Convert with 'as u16'".
+
+```tern
+var map: [u8; 4]
+var p: ptr u8
+var w: u16 = 1
+fn main() { p = addr(map)
+  w += p }      // branch: compiles, w = 1 + address; also w += addr(map), w -= p, w &= p
+```
+
+A fix: in the compound-assignment branch (next to the typed-constant check at line 1045), reject a value whose type is a pointer and give the same error as `w + p`, or "Convert the pointer with 'as u16'". Add `w += p`, `w -= p` and `w += addr(map)` to `AddressConversionTests.A_pointer_still_needs_as_in_an_operator`.
+
+**2. Suggestion: `x += BOX * 30` gives a shorter error than `x = x + BOX * 30`.** With `const BOX: u8 = 13` and `x: u8`, the compound form says only "390 does not fit in u8 (0 to 255)". There is no fix sentence, against the coding conventions. The written-out form says "..., the type of 'x', which it is combined with. Convert 'x' with 'as u16'". Since the compound assignment is "the operation it stands for", it could use `CoerceNamed` with the target's name too. The same plain message comes from `x += 300`, on `main` as well, so this is not new.
+
+**3. Suggestion (later, optimizer): a whole address plus a constant is computed at run time.** `p = addr(map) + 5` and `w = addr(map) - 1` are `lda #map.lo / sta / lda #map.hi / sta` followed by a 16-bit add (17+ bytes). `(addr(map) + 5).lo` is a single `lda #(map+5).lo`. `CodeGen.AddressBytes` already gives both bytes, so the assignment could be two loads and two stores, as for a constant. This was the same on `main` and is outside this milestone.
+
+### Checked and correct
+
+- First review, finding 1: `LINE.hi` / `.lo` with `LINE: u16 = 250` (`ConstantWidthTests.Lo_and_hi_of_a_typed_16_bit_constant_below_256`). Finding 2: `const N = ~$0F` and `~$0F << 4` on `u8` and `u16`, including `&=` (`A_named_not_constant_keeps_its_bit_pattern`). A pattern wider than the type has its own error (`x & ~$100`, tested). Suggestion 6's zero-page startup test is in `AddressConversionTests`.
+- Question 79: `w &= ~M` (`$1234` gives `$1230`), `w ^= ~M` (`$EDC4`), `w -= BOX * 30` (subtracts 390), `x &= ~M`, `x <<= BIG` (a shift count, unaffected). `x += BIG` with `BIG: u16` is an error, and `x += NEG` with `NEG: i8` gives the same mixing error as `x = x + NEG`.
+- Question 81: untyped constants no longer carry `ConstType` on the symbol. Only `IsBitPattern` is kept, and only for untyped constants.
+- Questions 83 and 84 in code: `(addr(map) + 299).hi` is `lda #(map+299).hi`. These all give the right bytes: `(addr(map) - 1).lo`, `(2 + addr(map)).lo`, `(addr(map) + 299 - 1).hi`, `(addr(map) as ptr u16 + 2).lo`, `((addr(map) + 299) as u16).hi`, `(addr(map) as u16 + 299).hi`, `(addr(s) + 1).lo` for a struct with fields named `lo` and `hi`, `(addr(main) - 1).hi`, and `(addr(map) - 3000).hi`, which wraps below 0 to `$FC`. `(p + 1).hi` and `(addr(map) + i).hi` keep the pointer error.
+- Question 85: `w + p` gives "Write 'p + w'", and `x + addr(map)` gives "Write 'addr(map) + x'". `1 + addr(map)` stays pointer arithmetic.
+- A pointer into `u16` in an assignment, an initial value, a table, an argument and a return value. `p == addr(map)` still compiles, and `for i in 0..p` is an error.
+
+### Checklist (roadmap, M20 follow-up)
+
+- [x] Tools: `tern run --set` and `tern bench --set`; `tern bench` prints index errors and fails the variant
+- [x] `v += 2` / `v -= 2` on a variable held in X or Y
+- [x] `addr()` in initial values, with each form and error
+- [x] Constant expressions computed exactly, tested at the edges (the first review's regressions are fixed)
+- [x] A typed constant next to a wider value (question 79), in expressions and compound assignments (`ConstantWidthTests`)
+- [x] An untyped constant computed from typed ones is a plain number (question 81)
+- [x] `.lo` / `.hi` on `addr(...)` in code (question 83), including a struct with a field named `lo`
+- [x] `.lo` / `.hi` on `addr(...) ± constant` in code (question 84); the question 85 error names the operands as written
+- [ ] A pointer converts to `u16` where a `u16` is expected: done and tested, but finding 1 lets it through in a compound assignment, where `w + p` remains an error
+- [x] `[T; _]` with its errors
+- [x] `c64.sprite_xy` and `c64.set_kernal_irq`
+- [x] `BenchmarkTests` and `SkillTests` unchanged
+- [x] Done when: gaps 1, 3, 4, 5, 7, 8, 9 and 10 compile in their plain form (`GalaxyStarsGapTests`); the port still compiles
