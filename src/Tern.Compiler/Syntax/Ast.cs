@@ -35,6 +35,15 @@ public abstract class Expr(SourcePos pos) : Node(pos)
     /// <summary>Set by the checker when the expression is a compile-time constant.</summary>
     public long? ConstValue { get; set; }
     /// <summary>
+    /// For a constant expression (type <c>IntLiteral</c>, computed exactly, spec 3.1): the type its typed
+    /// constants give it, which it takes when mixed with a runtime value or used with no context, and
+    /// the constant that set it. Null for one made only of literals and untyped constants.
+    /// </summary>
+    public TernType? ConstType { get; set; }
+    public string? ConstTypeFrom { get; set; }
+    /// <summary>A constant made with <c>~</c>: a negative value takes the width of the type it is used as (spec 3.1).</summary>
+    public bool IsBitPattern { get; set; }
+    /// <summary>
     /// Set by the checker for a struct field: the same access written with plain variables, arrays
     /// and pointers (<c>player.hp</c> becomes a view of <c>player</c>'s memory). It replaces this
     /// expression before code generation.

@@ -34,6 +34,10 @@ Each example is a whole program that compiles. The full rules are in the Tern re
 - Signed and unsigned operands cannot be mixed: cast one side.
 - `>>` on a signed value keeps the sign and rounds down (`-3 >> 1` is `-2`).
 - `*`, `/`, `%` only in constant expressions. Shift counts are constants.
+- A constant expression (literals and constants, typed or not) is computed exactly and checked only
+  where it is used: with `const BOX: u8 = 13`, `const MAX_X: u16 = 320 - BOX` is 307, and
+  `CHARSET + FIRST * 8` converts to a pointer. Mixed with a runtime value, a typed constant keeps its
+  type (`x + BOX` is a `u8`). `~$0F` is as wide as what it is used with: `x & ~$0F` is `and #$F0`.
 
 ```tern
 // arith.tern
