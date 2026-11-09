@@ -993,6 +993,8 @@ public sealed partial class Checker
                     throw new CompileError(a.Length?.Pos ?? a.Pos, len > 256
                         ? $"An array of {element} has at most 256 elements. Only a global var or data of u8 or i8 may be longer (spec 3.2), and it is used through a pointer"
                         : $"Array length must be 1 to 256, not {len}");
+                if (len > 0x10000)
+                    throw new CompileError(a.Length?.Pos ?? a.Pos, $"An array of {element} has at most 65536 elements, all of memory, not {len}. Use a smaller length");
                 return TernType.ArrayOf(element, (int)len);
             default:
                 throw new InvalidOperationException();

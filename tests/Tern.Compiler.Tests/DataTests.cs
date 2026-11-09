@@ -382,6 +382,18 @@ public class DataTests
     }
 
     [Theory]
+    [InlineData("var a: [u8; 4294967298]", "An array of u8 has at most 65536 elements, all of memory, not 4294967298. Use a smaller length")]
+    [InlineData("data d: [u8; 4294967298] = [1, 2]", "An array of u8 has at most 65536 elements, all of memory, not 4294967298")]
+    [InlineData("var a: [i8; 2147483648]", "An array of i8 has at most 65536 elements, all of memory, not 2147483648")]
+    [InlineData("var a: [u8; 65537]", "An array of u8 has at most 65536 elements, all of memory, not 65537")]
+    public void A_long_byte_array_fits_in_memory(string declaration, string expected)
+    {
+        // Second review, finding 1: the length used to keep only its low 32 bits.
+        var e = Assert.Throws<CompileError>(() => TernCompiler.Compile($"{declaration}\nfn main() {{ }}"));
+        Assert.Contains(expected, e.Description);
+    }
+
+    [Theory]
     [InlineData("var d: [u8; _]", 257, "'d' is a long byte array (257 bytes)")]
     [InlineData("data d: [u16; _]", 257, "An array of u16 has at most 256 elements")]
     [InlineData("var d: [u8; _]", 0, "Array length must be 1 to 256, not 0")]

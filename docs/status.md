@@ -5,10 +5,15 @@ Owned by the coding session. Updated at the end of every coding session.
 ## Current
 
 - **Milestone:** M20 follow-up 2 (roadmap). All six items are done, and the "done when" test passes. M20 follow-up was merged into `main` (`909489f`).
-- **Branch:** `m20-followup2`, with `main` merged in (the review and the settling of questions 86 and 87). 2374 compiler tests pass plus 36 CPU tests. No benchmark changed (1254 / 350780); `SkillTests` pass. All examples and the Galaxy Stars port compile.
-- **Next step:** a short `/review` of the question 86/87 commit (the roadmap's "after the review, before the merge" item), then `/merge m20-followup2`. The review's suggestions 1-4 are done. No questions are open.
+- **Branch:** `m20-followup2`, with `main` merged in (both reviews). 2384 compiler tests pass plus 36 CPU tests. No benchmark changed (1254 / 350780); `SkillTests` pass. All examples and the Galaxy Stars port compile.
+- **Next step:** `/review` of the second review's fixes (finding 1 and suggestions 2, 3), then `/merge m20-followup2`. No questions are open.
 
 ## Done
+
+- **M20 follow-up 2, second review** (2026-11-09, `docs/reviews/m20-followup2.md`, second review).
+  - Finding 1 (must fix): a long byte array over 65536 elements is "An array of u8 has at most 65536 elements, all of memory, not N. Use a smaller length" (`Checker.ResolveType`), checked before the `(int)` cast that kept only the low 32 bits. `DataTests.A_long_byte_array_fits_in_memory` (2^32 + 2, 2^31, 65537).
+  - Suggestion 2: a list cut off by the end of the file, a `}` or a `)` says "Write ']' to end the list" instead of "Write ',' between the elements". `StructLiteralTests.Reports_errors`.
+  - Suggestion 3: an assembly `label + offset` (also inside `.lo` / `.hi`) with an offset outside -65535 to 65535 is "Offset N from an address is outside memory. Use an offset from -65535 to 65535" (`Checker.AsmMode`); before, the assembler kept 16 bits of the sum. `AsmTests`.
 
 - **Questions 86 and 87, after the review** (2026-11-09, decisions 2026-11-09, roadmap M20 follow-up 2 "after the review").
   - 87: a number literal may be up to 2^63 - 1 (spec 2.1). `Lexer` checks `value > (long.MaxValue - digit) / radix` before each digit, so the accumulation never overflows; the error is "Number is too large. Use a value up to $7FFFFFFFFFFFFFFF (9223372036854775807)". `ConstantRangeTests` writes `MAX` as `9223372036854775807` and `MIN` as `-9223372036854775807 - 1`, and tests the largest decimal, hex (with and without `_`) and binary literals, one above each, larger ones, `-9223372036854775808` (an error: the literal has no sign), and the lowest value.
