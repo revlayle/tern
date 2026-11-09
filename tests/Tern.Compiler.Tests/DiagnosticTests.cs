@@ -45,6 +45,16 @@ public class DiagnosticTests
     }
 
     [Fact]
+    public void A_string_in_code_suggests_declaring_it_as_data()
+    {
+        var d = Error("import c64\nfn main() { c64.print(\"HI\", 2) }");
+        Assert.Equal("A string can only be the value of data or a global array.", d.Message);
+        Assert.Equal("Declare it as data, e.g. 'data HI = \"HI\"', and pass addr(HI), len(HI)", d.Suggestion);
+        Assert.Equal(2, d.Line);
+        Assert.Equal(23, d.Column);
+    }
+
+    [Fact]
     public void An_error_with_no_fix_has_no_suggestion()
     {
         var d = Error("fn main() { x = 1 }");

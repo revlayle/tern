@@ -1338,7 +1338,8 @@ public sealed partial class Checker
                 break;
 
             case StringExpr:
-                throw new CompileError(e.Pos, "A string can only be the value of data or a global array");
+                throw new CompileError(e.Pos, "A string can only be the value of data or a global array. "
+                    + "Declare it as data, e.g. 'data HI = \"HI\"', and pass addr(HI), len(HI)");
 
             case NameExpr n:
                 switch (Lookup(n.Name))
