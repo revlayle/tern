@@ -174,7 +174,9 @@ $08B8  E5 0E     sbc below.v           ; 3
 $08BA  60        rts                   ; 6
 ```
 
-Other shapes: `-x` is `lda #0 / sec / sbc x`; `x << 2` is `asl` twice; a 16-bit compare is two byte
+Other shapes: `-x` is `lda #0 / sec / sbc x`; `x << 2` is `asl` twice; a 16-bit shift by 8 to 15
+moves a byte first (`w = v << 8` is `lda v / sta w+1 / lda #0 / sta w`, `<< 10` adds two `asl`), while
+a 16-bit shift by 1 to 7 costs an `asl` / `rol` pair per bit; a 16-bit compare is two byte
 compares; a signed compare costs a few instructions more than an unsigned one; `as` between sizes
 of the same signedness is free or one `lda #0`. A plain `match` is one `cmp` / `beq` per value, in
 source order.

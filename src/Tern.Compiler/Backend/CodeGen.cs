@@ -1630,11 +1630,23 @@ public sealed class CodeGen
         if (Simple2(s.Left) is not { } y || InPlace16(other, d.Var) is not { } x) return false;
 
         var t = AcquireTemp(1);
-        Op(Lda, y.Hi); Op(Sta, Var(t)); Op(Lda, y.Lo);
-        for (int i = 0; i < s.Right.ConstValue; i++)
+        int k = (int)s.Right.ConstValue!.Value;
+        if (k >= 8)
         {
-            if (s.Op == TokenKind.Shl) { Emit(Asl, Accumulator); Op(Rol, Var(t)); }
-            else { Op(Lsr, Var(t)); Emit(Ror, Accumulator); }
+            // A byte moves first: << puts the shifted low byte in t and 0 in A; >> 0 in t and the shifted high byte in A.
+            if (s.Op == TokenKind.Shr) { Op(Lda, Byte(0)); Op(Sta, Var(t)); }
+            Op(Lda, s.Op == TokenKind.Shl ? y.Lo : y.Hi);
+            for (int i = 8; i < k; i++) Emit(s.Op == TokenKind.Shl ? Asl : Lsr, Accumulator);
+            if (s.Op == TokenKind.Shl) { Op(Sta, Var(t)); Op(Lda, Byte(0)); }
+        }
+        else
+        {
+            Op(Lda, y.Hi); Op(Sta, Var(t)); Op(Lda, y.Lo);
+            for (int i = 0; i < k; i++)
+            {
+                if (s.Op == TokenKind.Shl) { Emit(Asl, Accumulator); Op(Rol, Var(t)); }
+                else { Op(Lsr, Var(t)); Emit(Ror, Accumulator); }
+            }
         }
         var m = ArithMnemonic(b.Op);
         CarryFor(b.Op);
@@ -1642,6 +1654,45 @@ public sealed class CodeGen
         Op(Lda, Var(t)); x(m, 1); Op(Sta, d.Hi);
         Release(t);
         return true;
+    }
+
+    /// <summary>
+    /// A 16-bit shift by k = 8 to 15 moves a byte first (spec 11): <c>w = v &lt;&lt; 8</c> is
+    /// <c>lda v / sta w+1 / lda #0 / sta w</c>, <c>w = v &gt;&gt; 8</c> is <c>lda v+1 / sta w / lda #0 / sta w+1</c>,
+    /// with k - 8 more shifts of the moved byte in A before its store. A signed <c>&gt;&gt;</c> shifts with
+    /// <c>cmp #$80 / ror</c> and fills the high byte from the sign.
+    /// </summary>
+    private void ShiftByBytes(BinaryExpr b, int k, Loc d)
+    {
+        Operand lo, hi;
+        if (Simple2(b.Left) is { } s) (lo, hi) = s;
+        else { Gen16(b.Left, d); (lo, hi) = (d.Lo, d.Hi); }
+        if (b.Op == TokenKind.Shl)
+        {
+            Op(Lda, lo);
+            for (int i = 8; i < k; i++) Emit(Asl, Accumulator);
+            Op(Sta, d.Hi);
+            Op(Lda, Byte(0)); Op(Sta, d.Lo);
+            return;
+        }
+        Op(Lda, hi);
+        for (int i = 8; i < k; i++)
+        {
+            if (b.Type.IsSigned) { Op(Cmp, Byte(0x80)); Emit(Ror, Accumulator); }
+            else Emit(Lsr, Accumulator);
+        }
+        Op(Sta, d.Lo);
+        if (b.Type.IsSigned)
+        {
+            var positive = NewLabel("sx");
+            Op(Ora, Byte(0x7F));
+            Branch(Bmi, positive);
+            Op(Lda, Byte(0));
+            Place(positive);
+        }
+        else
+            Op(Lda, Byte(0));
+        Op(Sta, d.Hi);
     }
 
     private void Gen16(Expr e, Loc d)
@@ -1735,6 +1786,10 @@ public sealed class CodeGen
                     Op(Lda, d.Lo); Op(Eor, Byte(0xFF)); Op(Sta, d.Lo);
                     Op(Lda, d.Hi); Op(Eor, Byte(0xFF)); Op(Sta, d.Hi);
                 }
+                return;
+
+            case BinaryExpr b when b.Op is TokenKind.Shl or TokenKind.Shr && b.Right.ConstValue >= 8:
+                ShiftByBytes(b, (int)b.Right.ConstValue!.Value, d);
                 return;
 
             case BinaryExpr b when b.Op is TokenKind.Shl or TokenKind.Shr:

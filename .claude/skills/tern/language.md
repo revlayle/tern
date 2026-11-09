@@ -145,7 +145,7 @@ fn main() {
 
 ```console
 $ tern run ring.tern --dump 'buf:2' --dump total --dump speeds
-Main returned: 3905 cycles (1160 in main)
+Main returned: 3217 cycles (472 in main)
 A=$1C X=$08 Y=$00 SP=$FF PC=$082D
 buf $0910 [u8; 256] (2 bytes):
   $0910  2A 00
