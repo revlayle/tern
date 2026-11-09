@@ -726,7 +726,7 @@ tern run game.tern --profile                      // the cycles of each function
 
 ### Next
 
-- **M20 follow-up**: exact constant expressions, `addr()` in initial values, `[T; _]`, `c64.set_kernal_irq` and `c64.sprite_xy`, `tern run --set`.
+- **M20 follow-up 2**: struct literals in initial values (`data lines: [Line; _] = [Line { row = 1, col = 14 }, ...]`), `const` inside functions, constants checked to 64 bits, and 16-bit shifts by 8 or more as a byte move.
 - **M21**: plug-ins against a fixed interface: binaries built separately against one interface module, loaded in turn into one slot.
 
 ### Later highlights
