@@ -181,6 +181,8 @@ public class AddressConversionTests
     [InlineData("var p: ptr u8\nvar w: u16\nfn main() { w -= p }", "Expected u16, found ptr u8. Convert with 'as u16'")]
     [InlineData("var p: ptr u8\nvar w: u16\nfn main() { w &= p }", "Expected u16, found ptr u8. Convert with 'as u16'")]
     [InlineData("var map: [u8; 4]\nvar w: u16\nfn main() { w += addr(map) }", "Expected u16, found ptr u8. Convert with 'as u16'")]
+    // Review 3, suggestion 1: a target that is not u16 gets the usual conversion error.
+    [InlineData("var p: ptr u8\nvar x: u8\nfn main() { x += p }", "Expected u8, found ptr u8")]
     public void A_pointer_still_needs_as_in_an_operator(string source, string expected)
     {
         var e = Assert.Throws<CompileError>(() => TernCompiler.Compile(source));

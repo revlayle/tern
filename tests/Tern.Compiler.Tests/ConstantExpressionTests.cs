@@ -170,6 +170,15 @@ public class ConstantExpressionTests
         "200 does not fit in i8 (-128 to 127), the type of 's', which it is combined with. Declare 's' as i16, or use a smaller value")]
     [InlineData("var hp: [u8; 4]\nfn main() { hp[1] += 1000 }",
         "1000 does not fit in u8 (0 to 255), the type of 'hp[1]', which it is combined with. Use a smaller value")]
+    // Review 3, suggestion 2: a negative value on an unsigned target is the other operator.
+    [InlineData("var x: u8\nfn main() { x += -1 }",
+        "-1 does not fit in u8 (0 to 255), the type of 'x', which it is combined with. Write 'x -= 1'")]
+    [InlineData("var hp: [u8; 4]\nfn main() { hp[2] -= -5 }",
+        "-5 does not fit in u8 (0 to 255), the type of 'hp[2]', which it is combined with. Write 'hp[2] += 5'")]
+    [InlineData("var w: u16\nfn main() { w += -300 }",
+        "-300 does not fit in u16 (0 to 65535), the type of 'w', which it is combined with. Write 'w -= 300'")]
+    [InlineData("var x: u8\nfn main() { x += -300 }",
+        "-300 does not fit in u8 (0 to 255), the type of 'x', which it is combined with. Use a smaller value")]
     [InlineData("var w: u16\nfn main() { w += 70000 }",
         "70000 does not fit in u16 (0 to 65535), the type of 'w', which it is combined with. Use a smaller value")]
     public void Reports_errors(string source, string expected) => Assert.Contains(expected, Error(source));

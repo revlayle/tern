@@ -5,10 +5,14 @@ Owned by the coding session. Updated at the end of every coding session.
 ## Current
 
 - **Milestone:** M20 follow-up (roadmap). All items are done, the first review's findings are fixed, and the spec decisions of 2026-11-09 (questions 79-85, a pointer to `u16`) are built.
-- **Branch:** `m20-followup`, with `main` merged in at `b8869df`. 2122 compiler tests pass plus 36 CPU tests. No benchmark changed (1254 / 350780); `SkillTests` pass.
-- **Next step:** third review (`/review`) of the second review's fixes. No questions open.
+- **Branch:** `m20-followup`, with `main` merged in (third review). 2127 compiler tests pass plus 36 CPU tests. No benchmark changed (1254 / 350780); `SkillTests` pass.
+- **Next step:** merge (`/merge m20-followup`): the third review says ready to merge, and its two wording suggestions are done. No questions open.
 
 ## Done
+
+- **M20 follow-up, third review suggestions** (2026-11-09).
+  - Suggestion 1: the pointer check in a compound assignment applies only to a `u16` target; `x += p` with `x: u8` gets `Coerce`'s "Expected u8, found ptr u8" again.
+  - Suggestion 2: a negative value on an unsigned target of `+=` / `-=` suggests the other operator ("-1 does not fit in u8 ... Write 'x -= 1'") when the negated value fits. Tests in `ConstantExpressionTests` and `AddressConversionTests`.
 
 - **M20 follow-up, second review fixes** (2026-11-09, `docs/reviews/m20-followup.md`, second review).
   - Finding 1 (must fix): a pointer value in a compound assignment (`w += p`, `-=`, `&=`, `w += addr(map)`) is "Expected u16, found ptr u8. Convert with 'as u16'", as on `main`, since `w = w + p` is an error too (spec 3.1, 3.5). `AddressConversionTests.A_pointer_still_needs_as_in_an_operator`.
