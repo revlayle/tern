@@ -58,3 +58,44 @@ People writing tables of records will hit this often, because the rule changes b
 - [x] 16-bit shifts by 8 to 15 move a byte first: unsigned and signed, in place and into another variable, every count at edge values against C# (`ByteShiftTests`); no benchmark moved; the skill's ring example went from 3905 to 3217 cycles
 - [x] A listing test for each new spec 11 row: compares, `&&`, `||`, a compare stored in a `bool`, `i8 >> 1` (`CompareShapeTests`)
 - [x] Done when: the `how_row` / `how_col` / `how_text` group compiles as an array of struct literals and gives the same tables (`GalaxyStarsPagesTests`)
+
+## Second review (`9db9de6`): review suggestions and questions 86, 87, 2026-11-09
+
+Commits since the first review: `a8cd7e4` (suggestions 1-4), the merge of `main`, and `9db9de6` (question 87, and the question 86 test).
+
+**Not ready to merge: one must fix.** The lexer change is right: the check `value > (long.MaxValue - dv) / radix` before each digit is exact, so every literal up to 2^63 - 1 is accepted and nothing above it, in decimal, hex and binary. But one place still turns a literal into an `int` without a range check, and with the wider literals it now silently gives a small array. The four suggestion fixes give the messages the first review asked for.
+
+2410 tests pass (36 CPU, 2374 compiler). `BenchmarkTests` and `SkillTests` pass with no change.
+
+### Findings
+
+**1. Must fix: an array length above 2^32 wraps to a small length with no error.** `Checker.cs:992-996`: the length check skips its upper bound for a long byte array (`_allowLongBytes`, a global `var` or `data` of `u8` / `i8`), then `(int)len` keeps the low 32 bits:
+
+```tern
+var a: [u8; 4294967552]              // compiles: a 256-byte array
+data d: [u8; 4294967298] = [1, 2]    // compiles: a 2-byte array
+var z: [u8; 2147483648]              // compiles: 0 bytes
+```
+
+Before question 87 the lexer stopped at `$FFFFFFFF`, so only lengths 2^31 to 2^32 - 1 reached the cast (and gave a negative or zero length); now any length from 2^32 up gives a valid-looking small array. A length that does not fit in memory should be an error before the cast, e.g. `len > 0x10000`: "An array of u8 has at most 65536 elements" or the existing "no program area has room" message (70000 already gives that). One test with a length of 2^32 + 2 and one with 2^31.
+
+**2. Suggestion: a list with no closing `]` says "Write ',' between the elements".** `Parser.cs:1001` (the suggestion 3 change): `var a: [u8; 2] = [1, 2` at the end of the file gives "Expected ',' or ']' after this element, found end of file. Write ',' between the elements". Before, it was "Expected ']', found end of file". The fix sentence only fits when the next token could start another element. At the end of the file (or before a `}` or `)`), say "Write ']' to end the list".
+
+**3. Suggestion (from before this branch): an assembly operand `label + offset` is not range checked.** `CodeGen.cs:2492` casts the offset with `(int)`, and the assembler keeps 16 bits: `lda B + 65536` assembles as `lda B`, and `lda B + 4294967296` too (listed as `lda B`). `lda $1_0000_0001` alone is "Address ... is outside memory", so the label form should be checked the same way. `main` has the same gap for offsets up to `$FFFFFFFF`; question 87 only widens it. Not needed for this merge.
+
+### Checked and correct
+
+- **Literals (question 87):** `9223372036854775807`, `$7FFFFFFFFFFFFFFF`, `$7FFF_FFFF_FFFF_FFFF` and the 63-bit binary literal are accepted; one above each, `99999999999999999999` and `$FFFFFFFFFFFFFFFFFF` give the new message at the literal's start; `-9223372036854775808` is the same error at the digits (the literal has no sign). `-9223372036854775807 - 1` is the lowest value, `~0` is all bits set. A large literal in other places gives the right error: `x += 2^32` ("does not fit in u8 ..."), an index, a `match` arm, `as u8`, `.lo`, a shift count, an address `@ $1_0000_D020`, `addr(B) + 2^32` in an initial value, `lda #4294967297`, `lda $1_0000_0001`, a struct field array length (over 256). `ConstantRangeTests` writes `MAX` and `MIN` as literals.
+- **Question 86:** `[10` / `-5]` on two lines is one element (`10 - 5`), as spec 2 now says; a newline between `1` and `2` is the missing-`,` error (test added).
+- **Suggestion 2 messages:** a pointer field given a record, a record for a `ptr` global, for an element of a `[ptr L; 2]` field, for a `u8` / `bool` field, for an element of a `[u8; 2]` global, and a `const` (top level and local) all get the new messages. A wrong nested struct type keeps "This is a P literal, but the value here is a Q". Only a literal inside a constant expression (`const K = 1 + P { x = 1 }`) still gets the "in code" message; that is rare enough to leave.
+- **Suggestions 3 and 4:** `[1 2]` and the multi-line list of literals give the new messages; `lda #1 << 64` and `>> -1` say "Shift count must be 0 to 63".
+- The skill and guide do not mention the old 32-bit limit.
+
+### Checklist (roadmap, M20 follow-up 2, "after the review, before the merge")
+
+- [x] Number literals up to 2^63 - 1, with an accumulation that cannot overflow (`Lexer.cs:225`)
+- [x] The error says "Use a value up to $7FFFFFFFFFFFFFFF (9223372036854775807)"
+- [x] `ConstantRangeTests` writes `MAX` and `MIN` as literals
+- [x] Tests: the largest decimal and hex literals, one above each, `-9223372036854775807 - 1`
+- [x] Line breaks between struct literal fields stay as built; a test that a newline between list elements is still the missing-`,` error
+- [ ] No literal silently wraps where it is used: see finding 1
