@@ -129,3 +129,20 @@ gives "Expected ',' or ']' after this element, found 'fn'. Write ',' between the
 - [x] Tests: the largest decimal and hex literals, one above each, `-9223372036854775807 - 1`
 - [x] Line breaks between struct literal fields stay as built; a test that a newline between list elements is still the missing-`,` error
 - [x] No literal silently wraps where it is used (finding 1; finding 3 is a smaller gap from before this branch)
+
+## Fourth review (`a508a4a`): third review suggestions, 2026-11-09
+
+**Ready to merge.** Both suggestions are done and tested. 2429 tests pass (36 CPU, 2393 compiler). `BenchmarkTests` and `SkillTests` pass with no change. Every example that is a program compiles (`level1`, `level2` and `player_api` are modules).
+
+### Findings
+
+**1. Done (was suggestion 3): the address in an assembly operand is checked when the program is placed.** `Assembler.cs:334`: an asm instruction (not a branch) whose label or variable plus offset is outside `$0000-$FFFF` is "The address v+16384 is $10000, outside memory. Use a smaller offset". `lda B + 65000`, `lda B + 65535`, `lda v - 5` at `$02`, `sta v + $4000, x`, `jmp f + 65000` and `jmp (p + 16)` with `p` at `$FFF0` are errors. `lda v - $FFFF` with `v` at `$FFFF` (address 0) still compiles. `.lo` / `.hi` of a sum past memory stay allowed (`A_byte_of_an_address_past_memory_is_allowed`). Code from the compiler has no `AsmPos`, so it is not checked, and nothing it emits changed.
+
+**2. Done (was suggestion 4): a list cut off by a keyword** (`fn`, `var`, ... but not `true` / `false`, the only keywords that start a value) says "Write ']' to end the list". Three tests.
+
+**3. Suggestion: the address error names a local asm label by its internal name.** `jmp .x + 65000` gives "The address main.x0+65000 is $105FC, outside memory". The source says `.x`; write that (the label's name as written, as the other asm errors do). Rare; it can wait.
+
+### Checklist
+
+- [x] Every item of the roadmap's M20 follow-up 2 section, including "after the review, before the merge" (see the earlier checklists)
+- [x] No literal or assembly offset silently wraps where it is used
