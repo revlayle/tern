@@ -108,6 +108,8 @@ fn main() {
 - Globals with no initial value are zeroed at startup, so `x = 0` at the start of `main` costs nothing.
 - A local's memory is shared with functions that never run at the same time, so it holds leftovers on
   entry: scalars need an initial value. Local arrays do not, and hold leftovers.
+- A `const` may be declared inside a function too; it is visible to the end of its block. No local or
+  constant may reuse a name that is visible there (a parameter, an enclosing local, a top-level name).
 - `noinit` skips the zeroing (not on locals, `data` or fixed addresses).
 - `data` cannot be written. `include_bytes("ship.bin")` loads a file: `data ship = include_bytes("ship.bin")`.
 - `[u8; _]` takes the length from the list, for a global `var` or `data` with a list: `data script: [u8; _] = [3, 1, 4]`.
@@ -143,7 +145,7 @@ fn main() {
 
 ```console
 $ tern run ring.tern --dump 'buf:2' --dump total --dump speeds
-Main returned: 3905 cycles (1160 in main)
+Main returned: 3217 cycles (472 in main)
 A=$1C X=$08 Y=$00 SP=$FF PC=$082D
 buf $0910 [u8; 256] (2 bytes):
   $0910  2A 00
@@ -159,9 +161,9 @@ array of structs is dumped the same way, one table per field byte.
 ## 5. Structs
 
 A struct is a memory layout, always used in place: there is no struct assignment, parameter, return
-value, comparison or literal. Use it as a variable, at a fixed address (hardware registers), as an
-array of structs (stored as one table per field: `enemies[i].x` is `lda enemies_x,x`) or through a
-pointer (`e.hp` is `ldy #2 / lda (e),y`).
+value or comparison, and a struct literal is only an initial value (below). Use it as a variable, at
+a fixed address (hardware registers), as an array of structs (stored as one table per field:
+`enemies[i].x` is `lda enemies_x,x`) or through a pointer (`e.hp` is `ldy #2 / lda (e),y`).
 
 ```tern
 // structs.tern
@@ -208,6 +210,44 @@ player $0918 Enemy (3 bytes):
 - `linear var list: [Enemy; 20]` stores whole records (for a pointer to walk); a variable index into
   it needs a struct size of 1, 2, 4 or 8. `indexed var list: [Enemy; 20]` adds an offset table so any
   size works. Plain arrays of structs need neither.
+
+A global struct, a global array of structs, and `data` may start with **struct literals**: the
+struct's name, then `field = value` for the fields to set (the others are 0). The bytes are built at
+compile time, in the array's layout, so a table of records costs what the parallel arrays would.
+Values are anything an initial value allows: constants, `addr()` forms, a list or string for an
+array field, a nested literal. In code, or as a local's initial value, a struct literal is an error:
+assign the fields one by one.
+
+```tern
+// lines.tern
+struct Line { row: u8, col: u8, text: ptr u8 }
+
+data TITLE = screen"TITLE"
+data HELP = screen"HELP"
+data lines: [Line; _] = [
+    Line { row = 1, col = 14, text = addr(TITLE) },
+    Line { row = 3, text = addr(HELP) },          // col is 0
+]
+var player = Line { row = 12, col = 20 }
+var cols: u8
+
+fn main() {
+    for i in 0..len(lines) { cols += lines[i].col }
+    cols += player.col
+}
+```
+
+```console
+$ tern run lines.tern --dump cols --dump lines
+Main returned: 67 cycles (54 in main)
+A=$22 X=$02 Y=$00 SP=$FF PC=$0815
+cols $0002 u8 = 34 ($22)
+lines $0837 [Line; 2] (8 bytes):
+  $0837  01 03 0E 00 2E 33 08 08
+```
+
+The dump shows the tables of the array: the rows (`01 03`), the columns (`0E 00`), then the low and
+high bytes of the text pointers.
 
 ## 6. Pointers
 

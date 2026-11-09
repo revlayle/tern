@@ -94,7 +94,7 @@ public sealed partial class Checker
             {
                 var inner = AsmOperand(u.Operand, labels);
                 if (!inner.IsNumber) throw new CompileError(u.Pos, "Only numbers can be negated or inverted");
-                return new AsmValue(u.Op switch { TokenKind.Minus => -inner.Number, TokenKind.Tilde => ~inner.Number, _ => inner.Number });
+                return new AsmValue(u.Op switch { TokenKind.Minus => ConstNegate(u.Pos, inner.Number), TokenKind.Tilde => ~inner.Number, _ => inner.Number });
             }
         }
 
@@ -106,17 +106,11 @@ public sealed partial class Checker
 
     private static long FoldAsm(BinaryExpr b, long l, long r) => b.Op switch
     {
-        TokenKind.Plus => l + r,
-        TokenKind.Minus => l - r,
-        TokenKind.Star => l * r,
         TokenKind.Slash or TokenKind.Percent when r == 0 => throw new CompileError(b.Pos, "Division by zero"),
-        TokenKind.Slash => l / r,
-        TokenKind.Percent => l % r,
-        TokenKind.Amp => l & r,
-        TokenKind.Pipe => l | r,
-        TokenKind.Caret => l ^ r,
-        TokenKind.Shl when r is >= 0 and < 32 => l << (int)r,
-        TokenKind.Shr when r is >= 0 and < 32 => l >> (int)r,
+        TokenKind.Plus or TokenKind.Minus or TokenKind.Star or TokenKind.Slash or TokenKind.Percent
+            or TokenKind.Amp or TokenKind.Pipe or TokenKind.Caret => ConstArithmetic(b.Pos, b.Op, l, r),
+        TokenKind.Shl or TokenKind.Shr when r is >= 0 and < 64 => ConstArithmetic(b.Pos, b.Op, l, r),
+        TokenKind.Shl or TokenKind.Shr => throw new CompileError(b.Right.Pos, "Shift count must be 0 to 63"),
         _ => throw new CompileError(b.Pos, "Assembly operands can only use + - * / % & | ^ << >>"),
     };
 
@@ -129,6 +123,9 @@ public sealed partial class Checker
         var m = ins.Mnemonic;
         string name = m.ToString().ToLowerInvariant();
         bool Has(AddressingMode mode) => InstructionSet.TryGet(m, mode, out _);
+        // The code generator keeps the offset in an int. The assembler checks the address itself.
+        if (v is { IsNumber: false, Number: < -0xFFFF or > 0xFFFF })
+            throw new CompileError(ins.Operand!.Pos, $"Offset {v.Number} from an address is outside memory. Use a smaller offset");
 
         switch (ins.Form)
         {

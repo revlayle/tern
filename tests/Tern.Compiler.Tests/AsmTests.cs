@@ -505,6 +505,16 @@ public class AsmTests
     [InlineData("fn main() { asm {\n lda nothing\n } }", "'nothing' is not declared")]
     [InlineData("var t: [u8; 2]\nfn main() { asm {\n lda t[1]\n } }", "An assembly operand must be a constant, or the name of a variable, function or .label")]
     [InlineData("fn main() { asm {\n lda 70000\n } }", "Address 70000 is outside memory")]
+    [InlineData("data B: [u8; 1] = [0]\nfn main() { asm {\n lda B + 65536\n } }", "Offset 65536 from an address is outside memory. Use a smaller offset")]
+    // The address itself, once the program is placed (third review, suggestion 3).
+    [InlineData("data B: [u8; 1] = [0]\nfn main() { asm {\n lda B + 65000\n } }", "outside memory. Use a smaller offset")]
+    [InlineData("data B: [u8; 1] = [0]\nfn main() { asm {\n lda B + 65535\n } }", "outside memory. Use a smaller offset")]
+    [InlineData("var v: u8 @ $02\nfn main() { asm {\n lda v - 5\n } }", "The address v-5 is -$3, outside memory. Use a smaller offset")]
+    [InlineData("var v: u8 @ $C000\nfn main() { asm {\n sta v + $4000, x\n } }", "The address v+16384 is $10000, outside memory")]
+    [InlineData("fn f() { }\nfn main() { asm {\n jmp f + 65000\n } }", "outside memory. Use a smaller offset")]
+    [InlineData("data B: [u8; 1] = [0]\nfn main() { asm {\n lda B + 4294967296\n } }", "Offset 4294967296 from an address is outside memory")]
+    [InlineData("var v: u8\nfn main() { asm {\n lda v - 65536\n } }", "Offset -65536 from an address is outside memory")]
+    [InlineData("var v: u16\nfn main() { asm {\n lda #(v + 65536).hi\n } }", "Offset 65536 from an address is outside memory")]
     [InlineData("fn main() { asm {\n lda 1/0\n } }", "Division by zero")]
     [InlineData("fn main() { asm {\n lda #1 == 1\n } }", "Assembly operands can only use + - * / % & | ^ << >>")]
     [InlineData("data d: [u8; 2] = [1, 2]\nfn main() { asm {\n inc d\n } }", "'d' is data, which is read-only")]
@@ -525,6 +535,15 @@ public class AsmTests
     {
         var e = Assert.Throws<CompileError>(() => TernCompiler.Compile(source));
         Assert.Contains(expected, e.Description);
+    }
+
+    [Fact]
+    public void A_byte_of_an_address_past_memory_is_allowed()
+    {
+        // Only an address operand is checked; .lo / .hi take a byte of the sum (third review, suggestion 3).
+        var r = Run.Program("var v: u16 @ $C000\nvar a: u8\nvar b: u8\nfn main() { asm {\n lda #(v + $4005).lo\n sta a\n lda #(v + $4005).hi\n sta b\n } }");
+        Assert.Equal(0x05, r.U8("a"));
+        Assert.Equal(0x00, r.U8("b"));
     }
 
     [Fact]

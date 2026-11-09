@@ -330,6 +330,11 @@ public static class Assembler
                 case Instr i:
                 {
                     int begin = bytes.Count;
+                    // An asm operand 'name + offset' must stay in memory; the encoder would keep 16 bits of it.
+                    if (i.AsmPos is { } at && s.Mode != AddressingMode.Relative
+                        && i.Operand switch { LabelOperand l => Resolve(l.Label) + l.Offset, VarOperand v => v.Variable.Address + v.Offset, _ => (int?)null }
+                            is int sum and (< 0 or > 0xFFFF))
+                        throw new CompileError(at, $"The address {i.Operand} is {(sum < 0 ? "-" : "")}${Math.Abs(sum):X}, outside memory. Use a smaller offset");
                     if (s.LongBranch)
                     {
                         // bne far  ->  beq +3 / jmp far

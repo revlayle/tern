@@ -420,6 +420,8 @@ public sealed partial class Checker
 
     private void DeclareConst(ConstDecl decl)
     {
+        if (decl.Value is StructLiteralExpr lit)
+            throw new CompileError(lit.Pos, $"A constant cannot be a struct. Declare it as data: 'data {decl.Name} = {lit.StructName} {{ ... }}'");
         CheckExpr(decl.Value);
         if (decl.Value.ConstValue is not long value)
             throw new CompileError(decl.Value.Pos, $"The value of '{decl.Name}' is not known at compile time");
@@ -603,12 +605,8 @@ public sealed partial class Checker
         if (decl.IsNoinit && v.FixedAddress is not null)
             throw new CompileError(decl.Pos, $"'{decl.Name}' is at a fixed address, which is never zeroed; leave out 'noinit'");
 
-        if (decl.IsData && (type.IsStruct || type.IsStructArray))
-            throw new CompileError(decl.Pos, "Data cannot hold structs yet. Use a var, or data arrays of numbers");
-        if (decl.IsData && !type.IsArray)
-            throw new CompileError(decl.Pos, "Data must be an array or a string. For a single value, use 'const'");
-        if (decl.Init is not null && (type.IsStruct || type.IsStructArray))
-            throw new CompileError(decl.Init.Pos, "A struct cannot have an initial value. Assign its fields at the start of main");
+        if (decl.IsData && !type.IsArray && !type.IsStruct)
+            throw new CompileError(decl.Pos, "Data must be an array, a string or a struct. For a single value, use 'const'");
         if (decl.Init is not null)
         {
             if (v.FixedAddress is not null && !decl.IsData)
@@ -715,6 +713,7 @@ public sealed partial class Checker
             throw new CompileError(decl.Pos, decl.IsData
                 ? $"Data arrays need a written type, e.g. data {decl.Name}: [u8; _] = [...], where '_' takes the length from the list"
                 : $"Array variables need a written type, e.g. var {decl.Name}: [u8; _] = [...], where '_' takes the length from the list");
+        if (decl.Init is StructLiteralExpr lit) return ResolveType(new NamedTypeSyntax(lit.Pos, lit.StructName));
         CheckExpr(decl.Init);
         if (decl.Init.Type.IsStruct) Coerce(decl.Init, decl.Init.Type); // "A struct cannot be used as a value"
         return DefaultType(decl.Init);
@@ -752,6 +751,7 @@ public sealed partial class Checker
     /// <param name="target">Collects the function addresses (<c>addr(f)</c>) in the value.</param>
     private byte[] ConstantBytes(Expr init, TernType type, VariableSymbol target, int at = 0)
     {
+        if (type.IsStruct) return StructBytes(init, type, target, at);
         if (type.IsArray)
         {
             if (init is not ArrayLiteralExpr list)
@@ -763,6 +763,7 @@ public sealed partial class Checker
             return bytes.ToArray();
         }
 
+        if (init is StructLiteralExpr lit) throw LiteralForScalar(lit, type, null);
         if (UsesAddr(init)) return AddressBytes(init, type, target, at);
         CheckExpr(init);
         Coerce(init, type);
@@ -771,12 +772,118 @@ public sealed partial class Checker
         return type.Size == 1 ? [(byte)value] : [(byte)value, (byte)(value >> 8)];
     }
 
+    /// <summary>A struct literal where a number, bool or pointer is expected; <paramref name="field"/> names the field, if any.</summary>
+    private static CompileError LiteralForScalar(StructLiteralExpr lit, TernType type, string? field)
+    {
+        if (!type.IsPointer) return new CompileError(lit.Pos, $"Expected {type}, found a {lit.StructName} literal");
+        string what = field is null ? "This value" : $"'{field}'";
+        string write = field is null ? "addr(name)" : $"{field} = addr(name)";
+        return new CompileError(lit.Pos,
+            $"{what} is {type}, an address, not a {lit.StructName}. Declare the record as data and write '{write}'");
+    }
+
+    /// <summary>
+    /// The bytes of a struct literal (spec 3.3), in the record's memory layout; fields not listed are 0.
+    /// <paramref name="at"/> is the record's first byte in the global's value, for addresses filled in later.
+    /// </summary>
+    private byte[] StructBytes(Expr init, TernType type, VariableSymbol target, int at)
+    {
+        var s = type.Struct!;
+        var named = s.Fields.Where(f => f.Name != "_").Select(f => f.Name).ToList();
+        if (init is not StructLiteralExpr lit)
+            throw new CompileError(init.Pos,
+                $"A {s.Name} is initialized with a struct literal. Write '{s.Name} {{ {named.FirstOrDefault() ?? "field"} = ... }}'");
+        var written = ResolveType(new NamedTypeSyntax(lit.Pos, lit.StructName));
+        if (!written.IsStruct)
+            throw new CompileError(lit.Pos, $"'{lit.StructName}' is not a struct, so '{lit.StructName} {{ ... }}' is not a struct literal");
+        if (written.Struct != s)
+            throw new CompileError(lit.Pos, $"This is a {written.Struct!.Name} literal, but the value here is a {s.Name}. Write '{s.Name} {{ ... }}'");
+        var bytes = new byte[s.Size];
+        var given = new HashSet<string>();
+        foreach (var f in lit.Fields)
+        {
+            if (f.Name == "_")
+                throw new CompileError(f.Pos, $"'_' is padding, which has no value; fields not listed are 0. Remove '_ = ...'");
+            var field = s.Field(f.Name)
+                ?? throw new CompileError(f.Pos, $"'{s.Name}' has no field '{f.Name}'. Use one of its fields: {string.Join(", ", named)}");
+            if (!given.Add(f.Name))
+                throw new CompileError(f.Pos, $"'{f.Name}' is given twice in this {s.Name} literal. Remove one");
+            FieldBytes(f.Value, field, target, bytes, at);
+        }
+        return bytes;
+    }
+
+    /// <summary>
+    /// One field's value into <paramref name="record"/>: a nested literal, a list or string for an array
+    /// field (an array of 16-bit values split into low and high bytes inside the record, spec 3.3), or a
+    /// value as any initial value of the field's type allows.
+    /// </summary>
+    private void FieldBytes(Expr value, StructField field, VariableSymbol target, byte[] record, int at)
+    {
+        var type = field.Type;
+        int offset = field.Offset;
+        if (type.IsStruct)
+        {
+            StructBytes(value, type, target, at + offset).CopyTo(record, offset);
+            return;
+        }
+        if (!type.IsArray)
+        {
+            if (value is StructLiteralExpr lit) throw LiteralForScalar(lit, type, field.Name);
+            ScalarInto(value, type, target, record, offset, type.Size == 2 ? offset + 1 : null, at);
+            return;
+        }
+        int n = type.Length;
+        var element = type.Element!;
+        if (ByteSource(value) is { } text)
+        {
+            if (element.Size != 1 || !element.IsInteger)
+                throw new CompileError(value.Pos, $"A string is a [u8; {text.Length}] array, but the field '{field.Name}' is {type}");
+            if (text.Length != n)
+                throw new CompileError(value.Pos, $"The field '{field.Name}' is {type}: expected {n} bytes, found {text.Length}");
+            text.CopyTo(record, offset);
+            return;
+        }
+        if (value is not ArrayLiteralExpr list)
+            throw new CompileError(value.Pos, $"The field '{field.Name}' is {type}, so its value is a list. Write [ ... ] with {n} values");
+        if (list.Elements.Count != n)
+            throw new CompileError(value.Pos, $"The field '{field.Name}' is {type}: expected {n} values, found {list.Elements.Count}");
+        for (int i = 0; i < n; i++)
+            ScalarInto(list.Elements[i], element, target, record, offset + i, element.Size == 2 ? offset + n + i : null, at);
+    }
+
+    /// <summary>A number, bool or pointer into <paramref name="record"/>: the low byte at <paramref name="lo"/>, the high byte (if any) at <paramref name="hi"/>.</summary>
+    private void ScalarInto(Expr e, TernType type, VariableSymbol target, byte[] record, int lo, int? hi, int at)
+    {
+        if (e is StructLiteralExpr lit) throw LiteralForScalar(lit, type, null);
+        if (UsesAddr(e))
+        {
+            AddressBytes(e, type, target, at + lo, hi is { } h ? at + h : null);
+            return;
+        }
+        var bytes = ConstantBytes(e, type, target);
+        record[lo] = bytes[0];
+        if (hi is { } high) record[high] = bytes[1];
+    }
+
+    /// <summary>The error for a struct literal outside an initial value of a global or data (spec 3.3).</summary>
+    private static CompileError StructLiteralInCode(StructLiteralExpr lit, string? name)
+    {
+        string example = lit.Fields.FirstOrDefault() is { } f
+            ? $"{name ?? "s"}.{f.Name} = {Describe(f.Value) ?? "..."}"
+            : $"{name ?? "s"}.field = ...";
+        return new CompileError(lit.Pos,
+            "A struct literal is only the initial value of a global or of data: structs are never copied, so here it would be stores at run time. "
+            + $"Assign the fields one by one, e.g. '{example}'");
+    }
+
     /// <summary>
     /// An address in an initial value (spec 4): <c>addr()</c> of a function, global, data or field of a
     /// struct global, alone, plus or minus a constant, or its <c>.lo</c> / <c>.hi</c>. Filled in when the
     /// program is placed; the bytes are zeros until then.
     /// </summary>
-    private byte[] AddressBytes(Expr init, TernType type, VariableSymbol target, int at)
+    /// <param name="highAt">Where the high byte of a whole address goes, when not right after the low byte (a 16-bit array field, split inside its record).</param>
+    private byte[] AddressBytes(Expr init, TernType type, VariableSymbol target, int at, int? highAt = null)
     {
         var part = AddressPart.Word;
         var e = init;
@@ -798,7 +905,13 @@ public sealed partial class Checker
             throw new CompileError(init.Pos,
                 $"'{name}' is in {otherModule!.Name}, which is in the same overlay area '{area}' as {target.Module!.Name}. They are never loaded together, so the address would point at the wrong memory. " +
                 "Take the address in resident code, or put one of them in another area");
-        target.AddressFills.Add(new AddressFill(at, function, variable?.AliasOf ?? variable, (int)offset + (variable?.AliasOffset ?? 0), part));
+        var (fillVariable, fillOffset) = (variable?.AliasOf ?? variable, (int)offset + (variable?.AliasOffset ?? 0));
+        if (part == AddressPart.Word && highAt is { } h && h != at + 1)
+        {
+            target.AddressFills.Add(new AddressFill(at, function, fillVariable, fillOffset, AddressPart.Low));
+            target.AddressFills.Add(new AddressFill(h, function, fillVariable, fillOffset, AddressPart.High));
+        }
+        else target.AddressFills.Add(new AddressFill(at, function, fillVariable, fillOffset, part));
         return new byte[part == AddressPart.Word ? 2 : 1];
     }
 
@@ -826,6 +939,7 @@ public sealed partial class Checker
         CastExpr c => UsesAddr(c.Operand),
         MemberExpr m => UsesAddr(m.Target),
         ArrayLiteralExpr a => a.Elements.Any(UsesAddr),
+        StructLiteralExpr s => s.Fields.Any(f => UsesAddr(f.Value)),
         _ => false,
     };
 
@@ -879,6 +993,8 @@ public sealed partial class Checker
                     throw new CompileError(a.Length?.Pos ?? a.Pos, len > 256
                         ? $"An array of {element} has at most 256 elements. Only a global var or data of u8 or i8 may be longer (spec 3.2), and it is used through a pointer"
                         : $"Array length must be 1 to 256, not {len}");
+                if (len > 0x10000)
+                    throw new CompileError(a.Length?.Pos ?? a.Pos, $"An array of {element} has at most 65536 elements, all of memory, not {len}. Use a smaller length");
                 return TernType.ArrayOf(element, (int)len);
             default:
                 throw new InvalidOperationException();
@@ -930,6 +1046,7 @@ public sealed partial class Checker
         switch (stmt)
         {
             case VarDecl v: CheckLocal(v); break;
+            case ConstDecl c: DeclareConst(c); break;
             case AssignStmt a: CheckAssign(a); break;
             case ExprStmt e:
                 if (e.Expr is not CallExpr)
@@ -1001,6 +1118,7 @@ public sealed partial class Checker
         }
         else
         {
+            if (decl.Init is StructLiteralExpr lit) throw StructLiteralInCode(lit, decl.Name);
             if (type.IsStruct || type.IsStructArray)
                 throw new CompileError(decl.Init.Pos, "A struct cannot have an initial value. Assign its fields");
             if (type.IsArray) throw new CompileError(decl.Init.Pos, "Local arrays cannot have initial values yet");
@@ -1014,6 +1132,7 @@ public sealed partial class Checker
 
     private void CheckAssign(AssignStmt a)
     {
+        if (a.Value is StructLiteralExpr lit) throw StructLiteralInCode(lit, Describe(a.Target));
         CheckExpr(a.Target);
         var target = a.Target;
         if (target.Type.IsStruct)
@@ -1290,7 +1409,7 @@ public sealed partial class Checker
     private static bool AlwaysReturns(Stmt stmt) => stmt switch
     {
         ReturnStmt => true,
-        BlockStmt b => b.Statements.Count > 0 && AlwaysReturns(b.Statements[^1]),
+        BlockStmt { Code: [.., var last] } => AlwaysReturns(last),
         IfStmt i => i.Else is not null && AlwaysReturns(i.Then) && AlwaysReturns(i.Else),
         WhileStmt w => w.Condition.ConstValue == 1 && !ContainsBreak(w.Body),
         MatchStmt m => m.Arms.Count > 0 && m.Arms[^1].IsDefault && m.Arms.All(a => AlwaysReturns(a.Body)),
@@ -1337,8 +1456,12 @@ public sealed partial class Checker
                 e.ConstValue = Encode(ch.Value, EncodingOf(ch.Encoding, ch.Pos), ch.Pos);
                 break;
 
+            case StructLiteralExpr lit:
+                throw StructLiteralInCode(lit, null);
+
             case StringExpr:
-                throw new CompileError(e.Pos, "A string can only be the value of data or a global array");
+                throw new CompileError(e.Pos, "A string can only be the value of data or a global array. "
+                    + "Declare it as data, e.g. 'data HI = \"HI\"', and pass addr(HI), len(HI)");
 
             case NameExpr n:
                 switch (Lookup(n.Name))
@@ -1481,7 +1604,7 @@ public sealed partial class Checker
                 if (t.Kind == TypeKind.IntLiteral)
                 {
                     u.Type = t;
-                    u.ConstValue = u.Op == TokenKind.Minus ? -v : v;
+                    u.ConstValue = u.Op == TokenKind.Minus ? ConstNegate(u.Pos, v!.Value) : v;
                     KeepConstType(u, u.Operand);
                     u.IsBitPattern = u.Op == TokenKind.Plus && u.Operand.IsBitPattern;
                     return;
@@ -1568,7 +1691,9 @@ public sealed partial class Checker
                 b.Type = t;
                 if (l is not null)
                 {
-                    long shifted = b.Op == TokenKind.Shl ? l.Value << (int)r!.Value : l.Value >> (int)r!.Value;
+                    long shifted = t.Kind == TypeKind.IntLiteral
+                        ? ConstArithmetic(b.Pos, b.Op, l.Value, r!.Value)
+                        : b.Op == TokenKind.Shl ? l.Value << (int)r!.Value : l.Value >> (int)r!.Value;
                     b.ConstValue = t.Kind == TypeKind.IntLiteral ? shifted : Normalize(shifted, t);
                     if (t.Kind == TypeKind.IntLiteral) { KeepConstType(b, b.Left); b.IsBitPattern = b.Left.IsBitPattern; }
                 }
@@ -1582,7 +1707,7 @@ public sealed partial class Checker
                         $"'{OpText(b.Op)}' only works on constants. At runtime use a library function (mul8, div8, ...), or shifts for powers of two");
                 var t = Unify(b.Left, b.Right, b.Pos);
                 if (b.Op != TokenKind.Star && r == 0) throw new CompileError(b.Pos, "Division by zero");
-                long value = b.Op switch { TokenKind.Star => l.Value * r.Value, TokenKind.Slash => l.Value / r.Value, _ => l.Value % r.Value };
+                long value = ConstArithmetic(b.Pos, b.Op, l.Value, r.Value);
                 b.Type = t;
                 b.ConstValue = t.Kind == TypeKind.IntLiteral ? value : Normalize(value, t);
                 if (t.Kind == TypeKind.IntLiteral) KeepConstType(b, b.Left, b.Right);
@@ -1602,11 +1727,7 @@ public sealed partial class Checker
                 b.Type = t;
                 if (l is not null && r is not null)
                 {
-                    long value = b.Op switch
-                    {
-                        TokenKind.Plus => l.Value + r.Value, TokenKind.Minus => l.Value - r.Value,
-                        TokenKind.Amp => l.Value & r.Value, TokenKind.Pipe => l.Value | r.Value, _ => l.Value ^ r.Value,
-                    };
+                    long value = ConstArithmetic(b.Pos, b.Op, l.Value, r.Value);
                     b.ConstValue = t.Kind == TypeKind.IntLiteral ? value : Normalize(value, t);
                     if (t.Kind == TypeKind.IntLiteral)
                     {
@@ -1680,7 +1801,7 @@ public sealed partial class Checker
     {
         if (count.ConstValue is not long n)
             throw new CompileError(count.Pos, "The shift count must be a constant. Use shl8/shr8 for a variable count");
-        int bits = shifted.Kind == TypeKind.IntLiteral ? 32 : shifted.Size * 8;
+        int bits = shifted.Kind == TypeKind.IntLiteral ? 64 : shifted.Size * 8;
         if (n < 0 || n >= bits)
             throw new CompileError(count.Pos, $"Shift count must be 0 to {bits - 1}");
         if (count.Type.Kind == TypeKind.IntLiteral) Coerce(count, TernType.U8);
@@ -2039,6 +2160,43 @@ public sealed partial class Checker
         BinaryExpr b when Describe(b.Left) is { } l && Describe(b.Right) is { } r => $"{l} {OpText(b.Op)} {r}",
         _ => null,
     };
+
+    /// <summary>
+    /// One step of constant arithmetic, in signed 64 bits (spec 3.1): a result outside that range is
+    /// an error. <c>/</c> rounds toward zero, <c>%</c> has the left operand's sign, <c>&gt;&gt;</c>
+    /// rounds down. The shift count is already checked (0 to 63).
+    /// </summary>
+    internal static long ConstArithmetic(SourcePos pos, TokenKind op, long l, long r)
+    {
+        try
+        {
+            return op switch
+            {
+                TokenKind.Plus => checked(l + r),
+                TokenKind.Minus => checked(l - r),
+                TokenKind.Star => checked(l * r),
+                TokenKind.Slash => checked(l / r),
+                TokenKind.Percent => r == -1 ? 0 : l % r,
+                TokenKind.Amp => l & r,
+                TokenKind.Pipe => l | r,
+                TokenKind.Caret => l ^ r,
+                TokenKind.Shl => (l << (int)r) >> (int)r == l ? l << (int)r : throw new OverflowException(),
+                TokenKind.Shr => l >> (int)r,
+                _ => throw new InvalidOperationException(),
+            };
+        }
+        catch (OverflowException)
+        {
+            throw OutOfConstantRange(pos);
+        }
+    }
+
+    /// <summary>Negates a constant, in signed 64 bits (spec 3.1).</summary>
+    internal static long ConstNegate(SourcePos pos, long v) => v == long.MinValue ? throw OutOfConstantRange(pos) : -v;
+
+    private static CompileError OutOfConstantRange(SourcePos pos) => new(pos,
+        "This constant expression goes outside the signed 64-bit range of constant arithmetic "
+        + "(-9223372036854775808 to 9223372036854775807). Use smaller values");
 
     /// <summary>Wraps a value to the range of <paramref name="t"/>, as the CPU would.</summary>
     public static long Normalize(long v, TernType t) => t.Kind switch

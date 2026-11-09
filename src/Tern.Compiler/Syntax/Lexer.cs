@@ -222,8 +222,10 @@ public static class Lexer
                 {
                     int dv = Convert.ToInt32(d.ToString(), 16);
                     if (dv >= radix) throw new CompileError(Pos(start), $"Invalid digit '{d}' in number {source[start..i]}");
+                    // Spec 2.1: up to 2^63 - 1. Checked before the step, so the sum never overflows.
+                    if (value > (long.MaxValue - dv) / radix)
+                        throw new CompileError(Pos(start), "Number is too large. Use a value up to $7FFFFFFFFFFFFFFF (9223372036854775807)");
                     value = value * radix + dv;
-                    if (value > 0xFFFF_FFFF) throw new CompileError(Pos(start), "Number is too large");
                 }
                 Add(TokenKind.Number, source[start..i], value, start);
                 continue;

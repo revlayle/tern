@@ -571,10 +571,10 @@ public class StructTests
     [InlineData("var y: u8\nvar x: y\nfn main() { }", "'y' is not a type")]
     [InlineData(P + "fn main() { var n: u8 = sizeof(3) }", "sizeof() takes one type name")]
     // Variables
-    [InlineData(P + "var p: Point = 3\nfn main() { }", "A struct cannot have an initial value")]
+    [InlineData(P + "var p: Point = 3\nfn main() { }", "A Point is initialized with a struct literal. Write 'Point { x = ... }'")]
     [InlineData(P + "fn main() { var p: Point = 3 }", "A struct cannot have an initial value")]
-    [InlineData(P + "var ps: [Point; 2] = [1, 2]\nfn main() { }", "A struct cannot have an initial value")]
-    [InlineData(P + "data ps: [Point; 2] = [1, 2]\nfn main() { }", "Data cannot hold structs yet")]
+    [InlineData(P + "var ps: [Point; 2] = [1, 2]\nfn main() { }", "A Point is initialized with a struct literal")]
+    [InlineData(P + "data ps: [Point; 2] = [1, 2]\nfn main() { }", "A Point is initialized with a struct literal")]
     [InlineData("linear var a: u8\nfn main() { }", "'linear' is for arrays of 16-bit values or structs")]
     [InlineData("linear fn main() { }", "'linear' goes before 'var' or 'data'")]
     [InlineData(P + "fn main() { var n: u8 = Point }", "'Point' is a struct type, not a value")]

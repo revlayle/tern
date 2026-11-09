@@ -548,6 +548,7 @@ public sealed class Parser
         switch (Current.Kind)
         {
             case TokenKind.Var: return ParseVar();
+            case TokenKind.Const: return ParseConst();
             case TokenKind.Linear when PeekAt(1).Kind == TokenKind.Data:
                 throw new CompileError(PeekAt(1).Pos, "'data' must be declared outside functions");
             case TokenKind.Linear: return ParseLinearVar();
@@ -559,7 +560,7 @@ public sealed class Parser
             case TokenKind.While:
             {
                 var start = Advance();
-                var cond = ParseExpr();
+                var cond = ParseHeaderExpr();
                 return new WhileStmt(start.Pos, cond, ParseBlock());
             }
             case TokenKind.For: return ParseFor();
@@ -622,7 +623,7 @@ public sealed class Parser
     private IfStmt ParseIf()
     {
         var start = Expect(TokenKind.If, "'if'");
-        var cond = ParseExpr();
+        var cond = ParseHeaderExpr();
         var then = ParseBlock();
 
         // "else" may be on the line after the closing brace.
@@ -644,7 +645,7 @@ public sealed class Parser
     private MatchStmt ParseMatch(bool indexed = false)
     {
         var start = Expect(TokenKind.Match, "'match'");
-        var subject = ParseExpr();
+        var subject = ParseHeaderExpr();
         SkipBreaksBeforeBrace();
         var open = Expect(TokenKind.LBrace, "'{' after the match value");
         var arms = new List<MatchArm>();
@@ -697,13 +698,13 @@ public sealed class Parser
         var start = Expect(TokenKind.For, "'for'");
         var name = Expect(TokenKind.Identifier, "loop variable name or '_'");
         Expect(TokenKind.In, "'in'");
-        var from = ParseExpr();
+        var from = ParseHeaderExpr();
         bool inclusive;
         if (Accept(TokenKind.DotDotEq)) inclusive = true;
         else if (Accept(TokenKind.DotDot)) inclusive = false;
         else throw new CompileError(Current.Pos, $"Expected '..' or '..=', found {Describe(Current)}");
-        var to = ParseExpr();
-        Expr? step = Accept(TokenKind.Step) ? ParseExpr() : null;
+        var to = ParseHeaderExpr();
+        Expr? step = Accept(TokenKind.Step) ? ParseHeaderExpr() : null;
         Register? reg = Accept(TokenKind.Using) ? ParseRegister() : null;
         var body = ParseBlock();
         return new ForStmt(start.Pos, name.Text == "_" ? null : name.Text, from, to, inclusive, step, reg, body);
@@ -831,6 +832,56 @@ public sealed class Parser
 
     private Expr ParseExpr() => ParseOr();
 
+    /// <summary>
+    /// Set while the expression of an <c>if</c>, <c>while</c>, <c>for</c> or <c>match</c> header is parsed:
+    /// there a name followed by '{' is the name and the block, not a struct literal.
+    /// </summary>
+    private bool _inHeader;
+
+    private Expr ParseHeaderExpr()
+    {
+        bool saved = _inHeader;
+        _inHeader = true;
+        try { return ParseExpr(); }
+        finally { _inHeader = saved; }
+    }
+
+    private void SkipNewlines()
+    {
+        while (Accept(TokenKind.Newline)) { }
+    }
+
+    /// <summary>
+    /// <c>Name { field = value, ... }</c> (spec 3.3): fields separated by ',' or line breaks, a trailing
+    /// ',' allowed, values parsed as any expression (a nested literal too).
+    /// </summary>
+    private StructLiteralExpr ParseStructLiteral(SourcePos pos, string name)
+    {
+        var open = Expect(TokenKind.LBrace, "'{'");
+        bool saved = _inHeader;
+        _inHeader = false;
+        try
+        {
+            var fields = new List<FieldValue>();
+            SkipNewlines();
+            while (!Accept(TokenKind.RBrace))
+            {
+                if (At(TokenKind.Eof)) throw new CompileError(open.Pos, $"The struct literal '{name} {{' is not closed with '}}'");
+                var field = Expect(TokenKind.Identifier, "field name");
+                if (At(TokenKind.Colon))
+                    throw new CompileError(Current.Pos,
+                        $"A struct literal gives a field its value with '=', since ':' means \"has type\". Write '{field.Text} = ...'");
+                Expect(TokenKind.Eq, $"'=' and the value of '{field.Text}'");
+                fields.Add(new FieldValue(field.Pos, field.Text, ParseExpr()));
+                if (!Accept(TokenKind.Comma) && !At(TokenKind.Newline) && !At(TokenKind.RBrace))
+                    throw new CompileError(Current.Pos, $"Expected ',' or '}}' after the value of '{field.Text}', found {Describe(Current)}");
+                SkipNewlines();
+            }
+            return new StructLiteralExpr(pos, name, fields);
+        }
+        finally { _inHeader = saved; }
+    }
+
     private Expr ParseOr() => ParseLeftAssoc(ParseAnd, TokenKind.PipePipe);
     private Expr ParseAnd() => ParseLeftAssoc(ParseComparison, TokenKind.AmpAmp);
 
@@ -934,11 +985,25 @@ public sealed class Parser
                 return new BoolExpr(t.Pos, false);
             case TokenKind.LBracket:
             {
+                // A '}' of a struct literal ends the lexer's bracket rule, so line breaks may appear here.
                 Advance();
+                SkipNewlines();
                 var elements = new List<Expr>();
                 if (!At(TokenKind.RBracket))
                 {
-                    do elements.Add(ParseExpr()); while (Accept(TokenKind.Comma));
+                    do
+                    {
+                        SkipNewlines();
+                        if (At(TokenKind.RBracket)) break; // a trailing ','
+                        var element = ParseExpr();
+                        elements.Add(element);
+                        SkipNewlines();
+                        if (!At(TokenKind.Comma) && !At(TokenKind.RBracket))
+                            throw new CompileError(Current.Pos, $"Expected ',' or ']' after this element, found {Describe(Current)}. "
+                                + (At(TokenKind.Eof) || At(TokenKind.RBrace) || At(TokenKind.RParen)
+                                   || Lexer.IsKeyword(Current.Kind) && !At(TokenKind.True) && !At(TokenKind.False) ? "Write ']' to end the list"
+                                    : element is StructLiteralExpr ? "Write ',' after the '}'" : "Write ',' between the elements"));
+                    } while (Accept(TokenKind.Comma));
                 }
                 Expect(TokenKind.RBracket, "']'");
                 return new ArrayLiteralExpr(t.Pos, elements);
@@ -962,6 +1027,7 @@ public sealed class Parser
                     Advance();
                     name += "." + Expect(TokenKind.Identifier, $"a name in module '{t.Text}' after '.'").Text;
                 }
+                if (At(TokenKind.LBrace) && !_inHeader) return ParseStructLiteral(t.Pos, name);
                 if (!At(TokenKind.LParen)) return new NameExpr(t.Pos, name);
                 Advance();
                 var args = new List<Expr>();

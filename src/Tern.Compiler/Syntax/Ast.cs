@@ -72,6 +72,18 @@ public sealed class StringExpr(SourcePos pos, string text, string? encoding) : E
     /// <summary>The encoding prefix, or null for the target's default.</summary>
     public string? Encoding { get; } = encoding;
 }
+/// <summary>One <c>field = value</c> of a struct literal.</summary>
+public sealed record FieldValue(SourcePos Pos, string Name, Expr Value);
+
+/// <summary>
+/// A struct literal, <c>Point { x = 1, y = 2 }</c>: only an initial value of a global or data (spec 3.3).
+/// The checker turns it into bytes; it is never a runtime value.
+/// </summary>
+public sealed class StructLiteralExpr(SourcePos pos, string structName, List<FieldValue> fields) : Expr(pos)
+{
+    public string StructName { get; } = structName;
+    public List<FieldValue> Fields { get; } = fields;
+}
 public sealed class BoolExpr(SourcePos pos, bool value) : Expr(pos)
 {
     public bool Value { get; } = value;
@@ -184,6 +196,8 @@ public sealed class ExprStmt(SourcePos pos, Expr expr) : Stmt(pos)
 public sealed class BlockStmt(SourcePos pos, List<Stmt> statements) : Stmt(pos)
 {
     public List<Stmt> Statements { get; } = statements;
+    /// <summary>The statements that may have code: all but local <c>const</c> declarations.</summary>
+    public List<Stmt> Code => Statements.Where(s => s is not ConstDecl).ToList();
 }
 public sealed class IfStmt(SourcePos pos, Expr condition, BlockStmt then, Stmt? @else) : Stmt(pos)
 {
@@ -330,7 +344,8 @@ public sealed class ReturnStmt(SourcePos pos, Expr? value) : Stmt(pos)
 
 // ---------- Declarations ----------
 
-public sealed class ConstDecl(SourcePos pos, string name, TypeSyntax? type, Expr value) : Node(pos)
+/// <summary>A <c>const</c> declaration: at the top level, or a statement scoped to its block (spec 4).</summary>
+public sealed class ConstDecl(SourcePos pos, string name, TypeSyntax? type, Expr value) : Stmt(pos)
 {
     public string Name { get; } = name;
     public TypeSyntax? TypeSyntax { get; } = type;

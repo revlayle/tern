@@ -255,7 +255,7 @@ public class DataTests
     [Theory]
     [InlineData("data d: [u8; 2] = [1, 2]\nfn main() { d[0] = 5 }", "'d' is data, which is read-only")]
     [InlineData("data d: [u16; 2] = [1, 2]\nfn main() { d[0].lo = 5 }", "'d' is data, which is read-only")]
-    [InlineData("data d = 5\nfn main() { }", "Data must be an array or a string")]
+    [InlineData("data d = 5\nfn main() { }", "Data must be an array, a string or a struct")]
     [InlineData("data d: [u8; 2]\nfn main() { }", "Expected '=' and the data's value")]
     [InlineData("data d @ $C000 = \"A\"\nfn main() { }", "'d' at $C000 is not in a program or reserved area")]
     [InlineData("fn main() { data d = \"A\" }", "'data' must be declared outside functions")]
@@ -378,6 +378,18 @@ public class DataTests
     public void Underscore_length_errors(string source, string expected)
     {
         var e = Assert.Throws<CompileError>(() => TernCompiler.Compile(source));
+        Assert.Contains(expected, e.Description);
+    }
+
+    [Theory]
+    [InlineData("var a: [u8; 4294967298]", "An array of u8 has at most 65536 elements, all of memory, not 4294967298. Use a smaller length")]
+    [InlineData("data d: [u8; 4294967298] = [1, 2]", "An array of u8 has at most 65536 elements, all of memory, not 4294967298")]
+    [InlineData("var a: [i8; 2147483648]", "An array of i8 has at most 65536 elements, all of memory, not 2147483648")]
+    [InlineData("var a: [u8; 65537]", "An array of u8 has at most 65536 elements, all of memory, not 65537")]
+    public void A_long_byte_array_fits_in_memory(string declaration, string expected)
+    {
+        // Second review, finding 1: the length used to keep only its low 32 bits.
+        var e = Assert.Throws<CompileError>(() => TernCompiler.Compile($"{declaration}\nfn main() {{ }}"));
         Assert.Contains(expected, e.Description);
     }
 
