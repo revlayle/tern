@@ -4,11 +4,18 @@ Owned by the coding session. Updated at the end of every coding session.
 
 ## Current
 
-- **Milestone:** M20 follow-up (roadmap): the small items from M20 and the Galaxy Stars port. All eight items are done, with the "done when" check (`GalaxyStarsGapTests`).
-- **Branch:** `m20-followup`, from `main` at `2a76d0d` (M20 is merged). 2085 compiler tests pass plus 36 CPU tests. No benchmark changed (1254 / 350780); `SkillTests` pass.
-- **Next step:** review (`/review`). Questions 79-83 ask the spec session about provisional choices.
+- **Milestone:** M20 follow-up (roadmap). All items are done, the first review's findings are fixed, and the spec decisions of 2026-11-09 (questions 79-83, a pointer to `u16`) are built.
+- **Branch:** `m20-followup`, with `main` merged in at `62f3373`. 2108 compiler tests pass plus 36 CPU tests. No benchmark changed (1254 / 350780); `SkillTests` pass.
+- **Next step:** second review (`/review`). Questions 84-85 are open, neither blocking.
 
 ## Done
+
+- **M20 follow-up, review fixes and the 2026-11-09 decisions** (2026-11-09, `ef833c3`, `docs/reviews/m20-followup.md`).
+  - Finding 1 (must fix): `.lo` / `.hi` of a typed `u16` constant below 256 uses the constant's 16-bit type. Finding 2 (must fix): `ConstSymbol.IsBitPattern` keeps `const N = ~$0F` a bit pattern; a pattern wider than the type has its own error. Suggestion 3 is moot after question 81; 4 is question 83 (below); 5: "this value is i8"; 6: a zero-page startup test.
+  - Question 79: `Unify` picks the operation's type with the constant's written type as a variable's (`TypedOperationType`), then checks the constant at that width (`w & ~M` is `$FFF0`, `w + BOX * 30` adds 390). A compound assignment with a typed constant gets the same type check (`x += BIG` with `BIG: u16` is an error).
+  - Question 81: untyped constants no longer inherit a type. Question 83: `addr(x).lo` / `.hi` in code, rewritten to `(addr(x) as u16).lo` before field lookup.
+  - A pointer converts to `u16` in `Coerce` (assignment, initial value, argument, return). A runtime number before a pointer (`w + p`) is now an error (spec 3.5); a constant first (`2 + addr(map)`) is still pointer arithmetic. `PointerTests`' `small + p` became `p + small`.
+  - Tests: `ConstantWidthTests`, `AddressConversionTests`, updated expectations elsewhere. The Galaxy Stars port and all examples compile.
 
 - **M20 follow-up** (2026-11-09). One commit per item.
   - *Tools* (`2acc844`): `tern run --set $DC00=$7B` (and `tern bench --set`; decimal or `$`, may be repeated) writes a byte after the program is loaded, before it starts (`RunOptions.Sets`, `MemorySet`). Addresses only (question 82). `tern bench` runs each variant with the index check and prints its errors (a snippet's on its own lines); a variant with any fails: exit code 1, `ok: false` and `indexErrors` in `--json`. `RunToolTests`, `BenchToolTests`; `SKILL.md`.
@@ -434,17 +441,11 @@ Not bugs; things to improve, mostly in M7 (optimizer).
 
 ## Questions for the spec session
 
-79. **`~` of a typed constant next to a wider value** (M20 follow-up). `w & ~M` with `const M: u8 = $0F` and `w: u16`: a typed constant mixed with a runtime value keeps its type (spec 3.1), so `~M` is the `u8` `$F0`, widened to `$00F0`, which clears `w`'s high byte (as before the change). With an untyped `M` it is `$FFF0`. As built; should `~` of a typed constant take the width of the other operand instead?
+84. **`(addr(map) + 299).hi` in code** (M20 follow-up). Spec 3.4 allows `.lo` / `.hi` on `addr(...)` itself; with an offset it is a pointer, so in code it is the pointer error ("convert the pointer first: (p as u16).hi"), while spec 4 accepts the same text in an initial value. As built, following 3.4; should the exception cover `addr(...) ± constant` too?
 
-80. **A typed constant alone takes its destination's type** (M20 follow-up). "Typed or not ... takes its type from where it is used, like a literal" (spec 3.1) is applied to a constant on its own too: with `const BOX: u8 = 13`, `var s: i8 = BOX` and `f(BOX)` for an `i16` parameter compile (they were type errors). The constant's type applies only next to a runtime value, with no context (`var v = BOX` is a `u8`), and to a `for` bound (an `i8` constant still makes an `i8` counter). Provisional; is this the intent?
+85. **A runtime number before a pointer** (M20 follow-up). Spec 3.5 makes `w + p` an error; the compiler used to accept `n + p` as pointer arithmetic (the checker's comment said so, spec 3.4 never did). As built: an error when the number is not a constant (`2 + addr(map)` still works, as review M20 follow-up checked). Fine?
 
-81. **An untyped constant computed from typed ones** (M20 follow-up). `const D = BOX * 2` keeps `BOX`'s type for the rules in 80 (`x16 + D` adds it as a `u8`, and `D` must fit one), as `D` was a `u8` before. Provisional; or should `D` be a plain number like `const D = 26`?
-
-82. **`--set` takes addresses only** (M20 follow-up). The startup code zeroes or sets the program's globals after the load, so `--set score=5` would be overwritten; only `$DC00=$FF` or `56320=255` forms are accepted. Fine?
-
-83. **Forms of an address in an initial value** (M20 follow-up). Besides spec 4's forms, `as` to another two-byte type is accepted (`addr(b) as u16` in a `[u16; n]` table, since a pointer does not convert to `u16` by itself), and `.lo` / `.hi` may be written straight on `addr()` of a variable (`addr(map).lo`), though `.lo` on a pointer is otherwise an error (3.4). Provisional; should the spec list these?
-
-Questions 76-78 were settled on 2026-11-08 (decisions.md), as built.
+Questions 79-83 were settled on 2026-11-09 and are built. Questions 76-78 were settled on 2026-11-08 (decisions.md), as built.
 
 Questions 1-63 and 65-75 are settled (decisions.md; 44, 45 and 59-63 on 2026-11-07, 65-75 on 2026-11-08). Question 64 was withdrawn.
 
