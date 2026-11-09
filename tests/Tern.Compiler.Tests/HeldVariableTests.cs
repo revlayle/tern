@@ -260,4 +260,73 @@ public class HeldVariableTests
             """);
         Assert.Contains("inc sp", Code(endless.Listing));
     }
+
+    [Theory]
+    [InlineData(0, 60)]
+    [InlineData(1, 60)]
+    [InlineData(251, 255)]
+    public void Adding_two_to_a_variable_held_in_x_is_two_inx(int start, int limit)
+    {
+        // M20 follow-up, spec 11: v += 2 on a variable held in X is inx / inx.
+        var r = Run.Program($$"""
+            var a: [u8; 256]
+            var v: u8 = {{start}}
+            var n: u8
+            fn main() {
+                while v < {{limit}} {
+                    a[v] = 1
+                    v += 2
+                    n += 1
+                }
+            }
+            """);
+        Assert.Contains("|ldx v|", "|" + Code(r) + "|");
+        Assert.Contains("sta a,x|inx|inx|", Code(r));
+        int v = start, n = 0;
+        var a = new byte[256];
+        while (v < limit) { a[v] = 1; v = (v + 2) & 0xFF; n++; }
+        Assert.Equal(v, r.U8("v"));
+        Assert.Equal(n & 0xFF, r.U8("n"));
+        for (int k = 0; k < 256; k++) Assert.Equal(a[k], r.U8("a", k));
+    }
+
+    [Theory]
+    [InlineData(20)]
+    [InlineData(1)]
+    [InlineData(0)]
+    public void Subtracting_two_from_a_variable_held_in_y_beside_a_counter_is_two_dey(int start)
+    {
+        var r = Run.Program($$"""
+            var a: [u8; 16]
+            var b: [u8; 256]
+            var w: u8 = {{start}}
+            fn main() {
+                for i in 0..16 {
+                    b[w] = a[i] + 1
+                    w -= 2
+                }
+            }
+            """);
+        Assert.Contains("|dey|dey|", Code(r));
+        Assert.DoesNotContain("sbc", Code(r));
+        var b = new byte[256];
+        int w = start;
+        for (int i = 0; i < 16; i++) { b[w] = 1; w = (w - 2) & 0xFF; }
+        Assert.Equal(w, r.U8("w"));
+        for (int k = 0; k < 256; k++) Assert.Equal(b[k], r.U8("b", k));
+    }
+
+    [Fact]
+    public void Adding_two_alone_makes_a_variable_worth_holding()
+    {
+        // inx / inx and cpx against inc / inc and lda / cmp in memory.
+        var r = Run.Program("""
+            var v: u8 = 1
+            fn main() {
+                while v < 100 { v += 2 }
+            }
+            """);
+        Assert.Equal("ldx v|inx|inx|cpx #$64|bcc main.while0|stx v|rts", Code(r).Replace("jmp main.test1|", ""));
+        Assert.Equal(101, r.U8("v"));
+    }
 }

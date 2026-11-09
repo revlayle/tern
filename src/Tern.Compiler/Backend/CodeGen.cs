@@ -886,11 +886,12 @@ public sealed class CodeGen
         var target = a.Target;
         bool byOne = a.Value.ConstValue == 1 && a.Op is TokenKind.PlusEq or TokenKind.MinusEq;
 
-        // x += 1 / x -= 1 on a variable held in a register for a loop: inx / dex / iny / dey.
-        if (byOne && target is NameExpr { Symbol.Register: Register.X or Register.Y } held)
+        // x += 1 / x -= 1 on a variable held in a register for a loop: inx / dex / iny / dey; x += 2 / x -= 2 twice (spec 11).
+        if (a.Op is TokenKind.PlusEq or TokenKind.MinusEq && a.Value.ConstValue is 1 or 2
+            && target is NameExpr { Symbol.Register: Register.X or Register.Y } held)
         {
             bool x = held.Symbol!.Register == Register.X;
-            Emit(a.Op == TokenKind.PlusEq ? (x ? Inx : Iny) : (x ? Dex : Dey));
+            for (long k = 0; k < a.Value.ConstValue; k++) Emit(a.Op == TokenKind.PlusEq ? (x ? Inx : Iny) : (x ? Dex : Dey));
             return;
         }
 
@@ -2703,7 +2704,7 @@ public sealed class CodeGen
         // Each use of a candidate, with the node it is part of.
         var parents = new Dictionary<Node, Node>();
         foreach (var n in nodes) foreach (var c in Children(n)) parents[c] = n;
-        // Per candidate: uses where the register saves a load or an inc (an index, v += 1), and all uses.
+        // Per candidate: uses where the register saves a load or an inc (an index, v += 1 or 2), and all uses.
         var uses = new Dictionary<VariableSymbol, (int Strong, int All)>();
         var bad = new HashSet<VariableSymbol>();
         foreach (var n in nodes.OfType<NameExpr>())
@@ -2711,7 +2712,7 @@ public sealed class CodeGen
             if (n.Symbol is not { } v || !Ordinary(v) || bad.Contains(v)) continue;
             var parent = parents.GetValueOrDefault(n);
             if (!Served(n, parent)) { bad.Add(v); uses.Remove(v); continue; }
-            bool strong = parent is IndexExpr || (parent is AssignStmt { Op: TokenKind.PlusEq or TokenKind.MinusEq, Value.ConstValue: 1 } a && a.Target == n);
+            bool strong = parent is IndexExpr || (parent is AssignStmt { Op: TokenKind.PlusEq or TokenKind.MinusEq, Value.ConstValue: 1 or 2 } a && a.Target == n);
             var (st, all) = uses.GetValueOrDefault(v);
             uses[v] = (st + (strong ? 1 : 0), all + 1);
         }
