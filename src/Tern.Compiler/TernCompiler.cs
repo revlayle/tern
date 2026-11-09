@@ -411,12 +411,15 @@ public static class TernCompiler
         foreach (var g in plan.ZeroPageGlobals.Where(g => !g.NoInit))
         {
             var bytes = ByteLayout(g, g.InitialBytes ?? new byte[g.Type.Size]);
-            var functions = FunctionBytes(g);
+            var addresses = AddressBytes(g);
             for (int i = 0; i < bytes.Length; i++)
             {
-                if (functions.TryGetValue(i, out var f))
+                if (addresses.TryGetValue(i, out var f))
                 {
-                    items.Add(new Instr(Lda, Immediate, new ImmLabelByte(labelOf(f.Function), f.High)));
+                    Operand half = f.Fill.Function is { } fn
+                        ? new ImmLabelByte(labelOf(fn), f.High, f.Fill.Offset)
+                        : new ImmVarByte(f.Fill.Variable!, f.High, f.Fill.Offset);
+                    items.Add(new Instr(Lda, Immediate, half));
                     a = null;
                 }
                 else if (a != bytes[i])
@@ -461,31 +464,34 @@ public static class TernCompiler
     }
 
     /// <summary>
-    /// The initial value of a global in the program image. Function addresses in it are bytes of
-    /// the functions' labels.
+    /// The initial value of a global in the program image. Addresses in it (spec 4) are filled in
+    /// by the assembler from the functions' labels and the variables' addresses.
     /// </summary>
     private static IEnumerable<AsmItem> ImageBytes(VariableSymbol g, Func<FunctionSymbol, Label> labelOf)
     {
         var bytes = ByteLayout(g, g.InitialBytes ?? new byte[g.Type.Size]);
-        var functions = FunctionBytes(g);
         int start = 0;
-        foreach (var (at, (function, high)) in functions.OrderBy(f => f.Key))
+        foreach (var (at, (fill, high)) in AddressBytes(g).OrderBy(f => f.Key))
         {
             if (at > start) yield return new DataBytes(bytes[start..at]);
-            yield return new LabelTable([labelOf(function)], high);
+            yield return new AddressByte(fill.Function is { } f ? labelOf(f) : null, fill.Variable, fill.Offset, high, fill.Name);
             start = at + 1;
         }
         if (start < bytes.Length) yield return new DataBytes(bytes[start..]);
     }
 
-    /// <summary>Where the bytes of function addresses are in a global's memory layout.</summary>
-    private static Dictionary<int, (FunctionSymbol Function, bool High)> FunctionBytes(VariableSymbol g)
+    /// <summary>Where the bytes of addresses are in a global's memory layout, and which half of the address each is.</summary>
+    private static Dictionary<int, (AddressFill Fill, bool High)> AddressBytes(VariableSymbol g)
     {
-        var bytes = new Dictionary<int, (FunctionSymbol, bool)>();
-        foreach (var (index, f) in g.FunctionAddresses)
+        var bytes = new Dictionary<int, (AddressFill, bool)>();
+        foreach (var fill in g.AddressFills)
         {
-            bytes[LayoutIndex(g, index)] = (f, false);
-            bytes[LayoutIndex(g, index + 1)] = (f, true);
+            if (fill.Part == AddressPart.Word)
+            {
+                bytes[LayoutIndex(g, fill.Index)] = (fill, false);
+                bytes[LayoutIndex(g, fill.Index + 1)] = (fill, true);
+            }
+            else bytes[LayoutIndex(g, fill.Index)] = (fill, fill.Part == AddressPart.High);
         }
         return bytes;
     }

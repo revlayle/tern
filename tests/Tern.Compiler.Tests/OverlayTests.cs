@@ -913,4 +913,69 @@ public class OverlayTests
         Assert.Contains("$6000", r.Result.Listing);
         Assert.Contains(r.Result.Sections, s => s.Overlay == "level2" && s.Address == 0x6000);
     }
+
+    // ---------- Addresses in initial values (M20 follow-up, spec 4) ----------
+
+    [Fact]
+    public void Resident_data_holds_the_address_of_an_overlays_data_and_function()
+    {
+        var r = Compile($$"""
+            {{Header}}
+            data refs: [u16; 2] = [addr(level1.TABLE) as u16 + 3, addr(level1.run)]
+            var got: u8
+            fn main() {
+                load(1)
+                var p: ptr u8 = refs[0] as ptr u8
+                got = p[0]
+            }
+            """);
+        Assert.Equal(44, r.U8("got"));
+        int refs = r.Address("refs");
+        Assert.Equal(r.Address("level1.TABLE") + 3, r.Ram.Bytes[refs] | r.Ram.Bytes[refs + 2] << 8);
+        Assert.Equal(r.Address("level1.run"), r.Ram.Bytes[refs + 1] | r.Ram.Bytes[refs + 3] << 8);
+        Assert.InRange(r.Address("level1.TABLE"), 0x6000, 0x6FFF);
+    }
+
+    [Fact]
+    public void An_overlay_holds_addresses_of_its_own_data_and_of_resident_data()
+    {
+        var modules = new Dictionary<string, string>(Modules)
+        {
+            ["util"] = Util + Environment.NewLine + "var shared: u8",
+            ["level1"] = Level1 + """
+
+                data mine: [ptr u8; 2] = [addr(TABLE) + 1, addr(util.shared)]
+                fn second() -> u8 using A {
+                    var p: ptr u8 = mine[0]
+                    return p[0]
+                }
+                fn mark() {
+                    var q: ptr u8 = mine[1]
+                    q[0] = 99
+                }
+                """,
+        };
+        var r = Compile($$"""
+            {{Header}}
+            var got: u8
+            fn main() {
+                load(1)
+                got = level1.second()
+                level1.mark()
+            }
+            """, modules);
+        Assert.Equal(22, r.U8("got"));
+        Assert.Equal(99, r.U8("util.shared"));
+    }
+
+    [Theory]
+    [InlineData("data other: [ptr u8; 1] = [addr(level2.lives)]",
+        "'level2.lives' is in level2, which is in the same overlay area 'levels' as level1. They are never loaded together, so the address would point at the wrong memory. Take the address in resident code, or put one of them in another area")]
+    [InlineData("data other: [u16; 1] = [addr(level2.run)]", "'level2.run' is in level2, which is in the same overlay area 'levels' as level1")]
+    [InlineData("data other: [u8; 1] = [addr(level2.run).hi]", "'level2.run' is in level2, which is in the same overlay area 'levels' as level1")]
+    public void An_overlay_cannot_hold_an_address_in_a_sibling(string line, string expected)
+    {
+        var modules = new Dictionary<string, string>(Modules) { ["level1"] = "import level2" + Environment.NewLine + Level1 + Environment.NewLine + line + Environment.NewLine };
+        Assert.Contains(expected, Message(Header + Environment.NewLine + "fn main() { load(1) }", modules));
+    }
 }

@@ -87,6 +87,24 @@ fn main() {
 example.tern:1:13: error: 300 does not fit in u8 (0 to 255)
 ```
 
+Next to a variable, a literal takes the variable's type, and the error names it:
+
+```tern error
+var x: u8
+var w: u16
+
+fn main() {
+    w = x + 300
+}
+```
+
+```text
+example.tern:5:13: error: 300 does not fit in u8 (0 to 255), the type of 'x', which it is combined with. Convert 'x' with 'as u16'
+```
+
+Fix: `w = x as u16 + 300`. A sum of constants alone is computed exactly and needs no `as`
+(`const MAX_X: u16 = 320 - BOX` with `BOX: u8`).
+
 Binary numbers are written `0b...`, not `%...`:
 
 ```tern error

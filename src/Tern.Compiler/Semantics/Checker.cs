@@ -71,6 +71,9 @@ public sealed partial class Checker
             foreach (var s in program.Structs) LayOut((StructSymbol)module.Scope[s.Name]);
             foreach (var f in program.Functions) DeclareFunction(f);
             foreach (var g in program.Globals) DeclareGlobal(g);
+            // Initial values with addresses after all of the file's globals, so they can name globals declared below.
+            foreach (var (decl, v) in _addressInits) v.InitialBytes = ConstantBytes(decl.Init!, v.Type, v);
+            _addressInits.Clear();
             // After the globals, so that a variable named as an address gets the right error.
             foreach (var f in program.Functions.Where(f => f.Address is not null)) DeclareRoutine(f, f.Symbol!);
             foreach (var a in program.Asserts) CheckAssert(a, module);
@@ -146,7 +149,19 @@ public sealed partial class Checker
         CheckPrivateGlobalsPerRoot(modules, reachable);
         MarkGlobalsUsedFromTwoRoots(reachable);
         var used = reachable.SelectMany(f => f.UsedGlobals).Concat(mainModule.Scope.Values.OfType<VariableSymbol>()).ToHashSet();
+        // A kept global keeps the globals whose addresses are in its initial value.
+        foreach (var g in used.ToList()) used.UnionWith(GlobalsNamedBy(g.Storage));
         return new CheckedProgram(modules, _globals.Where(used.Contains).ToList(), reachable, main) { Layout = _layout, Exports = exports };
+    }
+
+    /// <summary>A global and the globals whose addresses are in its initial value, and in theirs (spec 4).</summary>
+    private static List<VariableSymbol> GlobalsNamedBy(VariableSymbol g)
+    {
+        var all = new List<VariableSymbol> { g };
+        for (int i = 0; i < all.Count; i++)
+            foreach (var fill in all[i].AddressFills)
+                if (fill.Variable is { } v && !all.Contains(v)) all.Add(v);
+        return all;
     }
 
     /// <summary>The name of the root that stands for a binary's entries (spec 12.3); it has no code.</summary>
@@ -281,8 +296,8 @@ public sealed partial class Checker
                 "Keep shared state in a resident module or the main file");
         if (_dead) return;
         _function.UsedGlobals.Add(v);
-        // A table of function addresses keeps those functions in the program.
-        foreach (var (_, f) in v.Storage.FunctionAddresses) _function.UsedAddresses.Add(f);
+        // A table of function addresses keeps those functions in the program, also through a table it names.
+        foreach (var f in GlobalsNamedBy(v.Storage).SelectMany(g => g.FunctionAddresses)) _function.UsedAddresses.Add(f);
     }
 
     /// <summary>The main file with the constants it can declare without any import, for evaluating module parameter values.</summary>
@@ -419,6 +434,8 @@ public sealed partial class Checker
         CollectNames(decl.Value, names);
         Declare(new ConstSymbol(decl.Name, decl.Pos, type, decl.Value.ConstValue!.Value)
         {
+            // A constant has a type only when its declaration writes one (spec 3.1).
+            IsBitPattern = type.Kind == TypeKind.IntLiteral && decl.Value.IsBitPattern,
             UsedParameters = names.SelectMany(n => _module.Scope.GetValueOrDefault(n) is ConstSymbol c ? c.UsedParameters : []).ToHashSet(),
         });
     }
@@ -557,15 +574,20 @@ public sealed partial class Checker
 
     /// <summary>Set while a global's type is resolved: a byte array there may be longer than 256 (spec 3.2).</summary>
     private bool _allowLongBytes;
+    /// <summary>Set while a global's type is resolved: the length of its list initial value, for <c>[T; _]</c> (spec 4).</summary>
+    private int? _listLength;
+    /// <summary>Globals of the file being declared whose initial values hold addresses (spec 4), worked out after its last global.</summary>
+    private readonly List<(VarDecl Decl, VariableSymbol Variable)> _addressInits = [];
 
     private void DeclareGlobal(VarDecl decl)
     {
         // A string or include_bytes() gives a [u8; N] array, which may be longer than 256 bytes.
         var bytes = decl.Init is null ? null : ByteSource(decl.Init);
         _allowLongBytes = !decl.IsLinear && !decl.IsIndexed;
+        _listLength = decl is { TypeSyntax: ArrayTypeSyntax { Length: null }, Init: ArrayLiteralExpr list } ? list.Elements.Count : null;
         TernType type;
         try { type = bytes is not null && decl.TypeSyntax is null ? TernType.ArrayOf(TernType.U8, bytes.Length) : DeclaredType(decl); }
-        finally { _allowLongBytes = false; }
+        finally { _allowLongBytes = false; _listLength = null; }
         if (!decl.IsData && decl.TypeSyntax is not null && decl.Init is not null && type.IsArray && type.Length > 256)
             throw new CompileError(decl.Init.Pos,
                 $"'{decl.Name}' is a long byte array ({type.Length} bytes), which is zeroed at startup and has no initial value. Fill it at run time, or declare it with 'data'");
@@ -601,6 +623,7 @@ public sealed partial class Checker
                     throw new CompileError(decl.Init.Pos, $"Expected {type.Length} bytes, found {bytes.Length}");
                 v.InitialBytes = bytes;
             }
+            else if (UsesAddr(decl.Init)) _addressInits.Add((decl, v));
             else
                 v.InitialBytes = ConstantBytes(decl.Init, type, v);
         }
@@ -690,8 +713,8 @@ public sealed partial class Checker
         if (decl.Init is null) throw new CompileError(decl.Pos, $"'{decl.Name}' needs a type or an initial value");
         if (decl.Init is ArrayLiteralExpr)
             throw new CompileError(decl.Pos, decl.IsData
-                ? $"Data arrays need a written type, e.g. data {decl.Name}: [u8; 4] = [...]"
-                : "Array variables need a written type, e.g. [u8; 4]");
+                ? $"Data arrays need a written type, e.g. data {decl.Name}: [u8; _] = [...], where '_' takes the length from the list"
+                : $"Array variables need a written type, e.g. var {decl.Name}: [u8; _] = [...], where '_' takes the length from the list");
         CheckExpr(decl.Init);
         if (decl.Init.Type.IsStruct) Coerce(decl.Init, decl.Init.Type); // "A struct cannot be used as a value"
         return DefaultType(decl.Init);
@@ -740,40 +763,69 @@ public sealed partial class Checker
             return bytes.ToArray();
         }
 
+        if (UsesAddr(init)) return AddressBytes(init, type, target, at);
         CheckExpr(init);
         Coerce(init, type);
-        if (init is CallExpr { FunctionAddress: { } f })
-        {
-            // Filled in when the program is placed.
-            target.FunctionAddresses.Add((at, f));
-            return [0, 0];
-        }
         if (init.ConstValue is not long value)
-            throw new CompileError(init.Pos, UsesFunctionAddress(init)
-                ? "addr() of a function can be an initial value only on its own, not in a calculation"
-                : UsesAddr(init)
-                ? "addr() cannot be used in an initial value, since addresses are known only after compiling. Assign it at the start of main"
-                : "A global's initial value must be known at compile time");
+            throw new CompileError(init.Pos, "A global's initial value must be known at compile time");
         return type.Size == 1 ? [(byte)value] : [(byte)value, (byte)(value >> 8)];
     }
 
+    /// <summary>
+    /// An address in an initial value (spec 4): <c>addr()</c> of a function, global, data or field of a
+    /// struct global, alone, plus or minus a constant, or its <c>.lo</c> / <c>.hi</c>. Filled in when the
+    /// program is placed; the bytes are zeros until then.
+    /// </summary>
+    private byte[] AddressBytes(Expr init, TernType type, VariableSymbol target, int at)
+    {
+        var part = AddressPart.Word;
+        var e = init;
+        if (init is MemberExpr { Member: "lo" or "hi" } half)
+        {
+            part = half.Member == "lo" ? AddressPart.Low : AddressPart.High;
+            e = half.Target;
+            if (type.Kind != TypeKind.U8)
+                throw new CompileError(init.Pos, $"'.{half.Member}' of an address is one byte, a u8, but this value is {type}. Use a [u8; n] table, or the whole address");
+        }
+        CheckExpr(e);
+        if (part == AddressPart.Word) Coerce(e, type);
+        if (Placed(e) is not var (function, variable, offset))
+            throw new CompileError(init.Pos,
+                "An address in an initial value is filled in when the program is placed, so it can only be used alone, plus or minus a constant, or as .lo / .hi. Assign other values at the start of main");
+        // Overlays in one area share their memory: the other one's code or data is not there while this one is loaded (spec 8.5).
+        var (otherArea, otherModule, name) = function is not null ? (function.OverlayArea, function.Module, function.Name) : (variable!.OverlayArea, variable.Module, variable.QualifiedName);
+        if (target.OverlayArea is { } area && otherArea == area && otherModule != target.Module && (variable is null || variable.FixedAddress is null || variable.IsData))
+            throw new CompileError(init.Pos,
+                $"'{name}' is in {otherModule!.Name}, which is in the same overlay area '{area}' as {target.Module!.Name}. They are never loaded together, so the address would point at the wrong memory. " +
+                "Take the address in resident code, or put one of them in another area");
+        target.AddressFills.Add(new AddressFill(at, function, variable?.AliasOf ?? variable, (int)offset + (variable?.AliasOffset ?? 0), part));
+        return new byte[part == AddressPart.Word ? 2 : 1];
+    }
+
+    /// <summary>What an address in an initial value names, with its constant offset; null for any other use of an address.</summary>
+    private static (FunctionSymbol? Function, VariableSymbol? Variable, long Offset)? Placed(Expr e)
+    {
+        switch (e)
+        {
+            case CallExpr { FunctionAddress: { } f }: return (f, null, 0);
+            case CallExpr { AddressOf: { } v }: return (null, v, 0);
+            case CastExpr { Type.Size: 2 } c: return Placed(c.Operand);
+            case BinaryExpr { Op: TokenKind.Plus } b when b.Right.ConstValue is long r && Placed(b.Left) is var (f1, v1, o1): return (f1, v1, o1 + r);
+            case BinaryExpr { Op: TokenKind.Plus } b when b.Left.ConstValue is long l && Placed(b.Right) is var (f2, v2, o2): return (f2, v2, o2 + l);
+            case BinaryExpr { Op: TokenKind.Minus } b when b.Right.ConstValue is long r && Placed(b.Left) is var (f3, v3, o3): return (f3, v3, o3 - r);
+            default: return null;
+        }
+    }
+
+    /// <summary>Whether the expression has an <c>addr()</c> in it, before it is checked.</summary>
     private static bool UsesAddr(Expr e) => e switch
     {
-        CallExpr c => c.AddressOf is not null,
+        CallExpr c => c.Name == "addr" || c.Args.Any(UsesAddr),
         UnaryExpr u => UsesAddr(u.Operand),
         BinaryExpr b => UsesAddr(b.Left) || UsesAddr(b.Right),
         CastExpr c => UsesAddr(c.Operand),
         MemberExpr m => UsesAddr(m.Target),
-        _ => false,
-    };
-
-    private static bool UsesFunctionAddress(Expr e) => e switch
-    {
-        CallExpr c => c.FunctionAddress is not null,
-        UnaryExpr u => UsesFunctionAddress(u.Operand),
-        BinaryExpr b => UsesFunctionAddress(b.Left) || UsesFunctionAddress(b.Right),
-        CastExpr c => UsesFunctionAddress(c.Operand),
-        MemberExpr m => UsesFunctionAddress(m.Target),
+        ArrayLiteralExpr a => a.Elements.Any(UsesAddr),
         _ => false,
     };
 
@@ -811,11 +863,20 @@ public sealed partial class Checker
             case ArrayTypeSyntax a:
                 var element = ResolveType(a.Element);
                 if (!element.IsScalar && !element.IsStruct) throw new CompileError(a.Pos, "Array elements must be numbers, bool, pointers or structs");
-                CheckExpr(a.Length);
-                if (a.Length.ConstValue is not long len)
-                    throw new CompileError(a.Length.Pos, "Array length must be known at compile time");
+                long len;
+                if (a.Length is null)
+                {
+                    len = _listLength ?? throw new CompileError(a.Pos,
+                        "The length '_' is taken from a list initial value, so it works only on a global var or data with a list, as in 'data t: [u8; _] = [1, 2, 3]'. Write the length here");
+                    _listLength = null;
+                }
+                else
+                {
+                    CheckExpr(a.Length);
+                    len = a.Length.ConstValue ?? throw new CompileError(a.Length.Pos, "Array length must be known at compile time");
+                }
                 if (len < 1 || len > 256 && !(_allowLongBytes && element.Size == 1 && element.IsInteger))
-                    throw new CompileError(a.Length.Pos, len > 256
+                    throw new CompileError(a.Length?.Pos ?? a.Pos, len > 256
                         ? $"An array of {element} has at most 256 elements. Only a global var or data of u8 or i8 may be longer (spec 3.2), and it is used through a pointer"
                         : $"Array length must be 1 to 256, not {len}");
                 return TernType.ArrayOf(element, (int)len);
@@ -980,7 +1041,31 @@ public sealed partial class Checker
         if (a.Op is TokenKind.ShlEq or TokenKind.ShrEq)
             CheckShiftCount(a.Value, target.Type);
         else
-            Coerce(a.Value, target.Type);
+        {
+            // Checked as the operation it stands for (spec 3.1): x op= e is x = x op e.
+            if (a.Value is { Type.Kind: TypeKind.IntLiteral, ConstType: { } typed })
+            {
+                var operation = TypedOperationType(target.Type, typed, a.Pos);
+                if (!operation.SameAs(target.Type))
+                    throw new CompileError(a.Value.Pos, $"Expected {target.Type}, found {operation}: '{a.Value.ConstTypeFrom}' is {typed}. Convert with 'as {target.Type}'");
+            }
+            // Inside an operator a pointer still needs 'as' (spec 3.5), as in w = w + p.
+            if (a.Value.Type.IsPointer && target.Type.Kind == TypeKind.U16)
+                throw new CompileError(a.Value.Pos, $"Expected {target.Type}, found {a.Value.Type}. Convert with 'as u16'");
+            try { Coerce(a.Value, target.Type); }
+            catch (CompileError error) when (a.Value.ConstValue is long v && error.Description.Contains(" does not fit in "))
+            {
+                var wider = WiderFor(v, target.Type);
+                var written = Describe(target);
+                var name = written is not null ? $"'{written}'" : "the left side";
+                // x += -1 on an unsigned x is x -= 1.
+                var fix = v < 0 && !target.Type.IsSigned && -v <= target.Type.MaxValue && written is not null && a.Op is TokenKind.PlusEq or TokenKind.MinusEq
+                    ? $"Write '{written} {(a.Op == TokenKind.PlusEq ? "-=" : "+=")} {-v}'"
+                    : wider is not null && Unwrap(target) is NameExpr ? $"Declare {name} as {wider}, or use a smaller value" : "Use a smaller value";
+                throw new CompileError(a.Value.Pos,
+                    $"{v} does not fit in {target.Type} ({target.Type.MinValue} to {target.Type.MaxValue}), the type of {name}, which it is combined with. {fix}");
+            }
+        }
     }
 
     private bool IsAssignable(Expr e)
@@ -1007,8 +1092,12 @@ public sealed partial class Checker
         CheckExpr(f.From);
         CheckExpr(f.To);
         foreach (var bound in new[] { f.From, f.To })
+        {
             if (!(bound.Type.IsInteger || bound.Type.Kind == TypeKind.IntLiteral))
                 throw new CompileError(bound.Pos, "Loop bounds must be numbers");
+            // A typed constant gives the counter its type, as a variable of that type would.
+            if (bound is { Type.Kind: TypeKind.IntLiteral, ConstType: { } typed }) Coerce(bound, typed);
+        }
 
         // The loop variable's type: the wider of the bounds, or u8/u16 for literals. A negative
         // literal or a signed bound makes it i8 if the bounds fit in -128..127, else i16 (spec 5.1).
@@ -1256,8 +1345,10 @@ public sealed partial class Checker
                 {
                     case null: throw NotDeclared(n.Name, n.Pos);
                     case ConstSymbol c:
-                        e.Type = c.Type;
+                        // An integer constant, typed or not, is computed exactly in constant expressions (spec 3.1).
                         e.ConstValue = c.Value;
+                        if (c.Type.IsInteger) { e.Type = TernType.IntLiteral; e.ConstType = c.Type; e.ConstTypeFrom = c.Name; }
+                        else { e.Type = c.Type; e.IsBitPattern = c.IsBitPattern; }
                         break;
                     case VariableSymbol v:
                         n.Symbol = v;
@@ -1316,8 +1407,14 @@ public sealed partial class Checker
             }
 
             case MemberExpr m:
+                // addr(x).lo / .hi are the bytes of the address, even for a struct with a field named lo (spec 3.4).
+                if (m.Member is "lo" or "hi" && m.Target is CallExpr { Name: "addr" } address)
+                    m.Target = new CastExpr(address.Pos, address, new NamedTypeSyntax(address.Pos, "u16"));
                 CheckMemberTarget(m);
                 CheckExpr(m.Target);
+                // So are those of addr(x) plus or minus a constant, the forms an initial value allows (question 84).
+                if (m.Member is "lo" or "hi" && m.Target is BinaryExpr { Type.IsPointer: true } && Placed(m.Target) is not null)
+                    m.Target = new CastExpr(m.Target.Pos, m.Target, new NamedTypeSyntax(m.Target.Pos, "u16")) { Type = TernType.U16 };
                 if (m.Target.Type.IsStruct || m.Target.Type is { IsPointer: true, Element.IsStruct: true })
                 {
                     CheckField(m);
@@ -1325,7 +1422,8 @@ public sealed partial class Checker
                 }
                 if (m.Member is not ("lo" or "hi"))
                     throw new CompileError(m.Pos, $"Unknown member '.{m.Member}'");
-                if (m.Target.Type.Kind == TypeKind.IntLiteral) Coerce(m.Target, DefaultType(m.Target));
+                // A typed 16-bit constant keeps its size (LINE.hi with LINE: u16 = 250 is 0); otherwise the size of the value.
+                if (m.Target.Type.Kind == TypeKind.IntLiteral) Coerce(m.Target, m.Target.ConstType is { Size: 2 } wide ? wide : LiteralType(m.Target));
                 if (m.Target.Type.IsPointer)
                     throw new CompileError(m.Pos, $".{m.Member} needs a number; convert the pointer first: (p as u16).{m.Member}");
                 if (m.Target.Type.Size != 2 || !m.Target.Type.IsInteger)
@@ -1352,7 +1450,7 @@ public sealed partial class Checker
                         throw new CompileError(c.Pos, $"Cannot convert {source} to {target}; a pointer converts only to u16 or another pointer");
                 }
                 else if (source.Kind == TypeKind.IntLiteral)
-                    Coerce(c.Operand, DefaultType(c.Operand));
+                    Coerce(c.Operand, c.Operand.IsBitPattern && c.Operand.ConstValue < 0 ? target : LiteralType(c.Operand));
                 else if (!source.IsScalar)
                     throw new CompileError(c.Pos, $"Cannot convert {source} to {target}");
                 e.Type = target;
@@ -1384,6 +1482,8 @@ public sealed partial class Checker
                 {
                     u.Type = t;
                     u.ConstValue = u.Op == TokenKind.Minus ? -v : v;
+                    KeepConstType(u, u.Operand);
+                    u.IsBitPattern = u.Op == TokenKind.Plus && u.Operand.IsBitPattern;
                     return;
                 }
                 if (!t.IsInteger) throw new CompileError(u.Pos, $"Unary '{(u.Op == TokenKind.Minus ? "-" : "+")}' needs a number");
@@ -1391,7 +1491,15 @@ public sealed partial class Checker
                 if (v is not null) u.ConstValue = Normalize(u.Op == TokenKind.Minus ? -v.Value : v.Value, t);
                 return;
             case TokenKind.Tilde:
-                if (t.Kind == TypeKind.IntLiteral) { Coerce(u.Operand, DefaultType(u.Operand)); t = u.Operand.Type; }
+                if (t.Kind == TypeKind.IntLiteral)
+                {
+                    // Exact, and negative: it takes the width of the type it is used as (x & ~$0F on a u8 is and #$F0).
+                    u.Type = t;
+                    u.ConstValue = ~v!.Value;
+                    KeepConstType(u, u.Operand);
+                    u.IsBitPattern = true;
+                    return;
+                }
                 if (!t.IsInteger) throw new CompileError(u.Pos, "'~' needs a number; use '!' for bool");
                 u.Type = t;
                 if (v is not null) u.ConstValue = Normalize(~v.Value, t);
@@ -1462,6 +1570,7 @@ public sealed partial class Checker
                 {
                     long shifted = b.Op == TokenKind.Shl ? l.Value << (int)r!.Value : l.Value >> (int)r!.Value;
                     b.ConstValue = t.Kind == TypeKind.IntLiteral ? shifted : Normalize(shifted, t);
+                    if (t.Kind == TypeKind.IntLiteral) { KeepConstType(b, b.Left); b.IsBitPattern = b.Left.IsBitPattern; }
                 }
                 return;
             }
@@ -1476,6 +1585,7 @@ public sealed partial class Checker
                 long value = b.Op switch { TokenKind.Star => l.Value * r.Value, TokenKind.Slash => l.Value / r.Value, _ => l.Value % r.Value };
                 b.Type = t;
                 b.ConstValue = t.Kind == TypeKind.IntLiteral ? value : Normalize(value, t);
+                if (t.Kind == TypeKind.IntLiteral) KeepConstType(b, b.Left, b.Right);
                 return;
             }
 
@@ -1498,9 +1608,29 @@ public sealed partial class Checker
                         TokenKind.Amp => l.Value & r.Value, TokenKind.Pipe => l.Value | r.Value, _ => l.Value ^ r.Value,
                     };
                     b.ConstValue = t.Kind == TypeKind.IntLiteral ? value : Normalize(value, t);
+                    if (t.Kind == TypeKind.IntLiteral)
+                    {
+                        KeepConstType(b, b.Left, b.Right);
+                        b.IsBitPattern = b.Op is TokenKind.Amp or TokenKind.Pipe or TokenKind.Caret && (b.Left.IsBitPattern || b.Right.IsBitPattern);
+                    }
                 }
                 return;
             }
+        }
+    }
+
+    /// <summary>
+    /// The type a constant expression takes from its typed constants (spec 3.1): the wider of the two
+    /// operands' types. With signed and unsigned ones mixed it has none, and is a plain number.
+    /// </summary>
+    private static void KeepConstType(Expr result, Expr left, Expr? right = null)
+    {
+        var (a, b) = (left.ConstType, right?.ConstType);
+        if (a is null || b is null || a.IsSigned == b.IsSigned)
+        {
+            bool fromLeft = b is null || (a is not null && a.Size >= b.Size);
+            result.ConstType = fromLeft ? a : b;
+            result.ConstTypeFrom = fromLeft ? left.ConstTypeFrom : right!.ConstTypeFrom;
         }
     }
 
@@ -1524,6 +1654,10 @@ public sealed partial class Checker
         }
         if (!leftPtr && b.Op == TokenKind.Minus)
             throw new CompileError(b.Pos, "A pointer cannot be subtracted from a number");
+        // w + p would be a pointer while w + (p as u16) is a number: only a constant may come first (spec 3.5).
+        if (!leftPtr && b.Left.ConstValue is null)
+            throw new CompileError(b.Pos,
+                $"A number before a pointer is not pointer arithmetic. Write '{Describe(b.Right) ?? "p"} + {Describe(b.Left) ?? "n"}' to move the pointer, or convert the pointer with 'as u16' for a number");
         CheckPointerOffset(leftPtr ? b.Right : b.Left);
         b.Type = leftPtr ? b.Left.Type : b.Right.Type;
     }
@@ -1778,8 +1912,18 @@ public sealed partial class Checker
 
     // ---------- Type rules ----------
 
-    /// <summary>Type of a number literal with no context: the smallest type that holds it.</summary>
+    /// <summary>
+    /// Type of a constant expression with no context: the type of its typed constants, or for one of
+    /// literals and untyped constants the smallest type that holds it.
+    /// </summary>
     private static TernType DefaultType(Expr e)
+    {
+        if (e.Type.Kind == TypeKind.IntLiteral && e.ConstType is { } typed) return typed;
+        return LiteralType(e);
+    }
+
+    /// <summary>The smallest type that holds a constant's value, whatever its constants' types (for 'as', '.lo' and '.hi').</summary>
+    private static TernType LiteralType(Expr e)
     {
         if (e.Type.Kind != TypeKind.IntLiteral) return e.Type;
         long v = e.ConstValue!.Value;
@@ -1793,11 +1937,28 @@ public sealed partial class Checker
     /// <summary>Makes two operands the same type, applying the automatic conversions.</summary>
     private TernType Unify(Expr left, Expr right, SourcePos pos)
     {
-        var lt = left.Type;
-        var rt = right.Type;
-        if (lt.Kind == TypeKind.IntLiteral && rt.Kind == TypeKind.IntLiteral) return lt;
-        if (lt.Kind == TypeKind.IntLiteral) { Coerce(left, rt); return rt; }
-        if (rt.Kind == TypeKind.IntLiteral) { Coerce(right, lt); return lt; }
+        if (left.Type.Kind == TypeKind.IntLiteral && right.Type.Kind == TypeKind.IntLiteral) return left.Type;
+        if (left.Type.Kind == TypeKind.IntLiteral || right.Type.Kind == TypeKind.IntLiteral)
+        {
+            // A constant next to a runtime value: the operation's type is chosen as if the constant were a
+            // variable of its written type, then the constant is computed exactly at that width (spec 3.1).
+            var (constant, value) = left.Type.Kind == TypeKind.IntLiteral ? (left, right) : (right, left);
+            var operation = value.Type;
+            bool constantSetIt = false;
+            if (constant.ConstType is { } typed && value.Type.IsInteger)
+            {
+                operation = TypedOperationType(value.Type, typed, pos);
+                constantSetIt = !operation.SameAs(value.Type);
+            }
+            CoerceNamed(constant, operation, constantSetIt ? constant.ConstTypeFrom : Describe(value), constantSetIt);
+            return operation;
+        }
+        return TypedOperationType(left.Type, right.Type, pos);
+    }
+
+    /// <summary>The type of an operation on two runtime types: the wider one; signed and unsigned do not mix.</summary>
+    private static TernType TypedOperationType(TernType lt, TernType rt, SourcePos pos)
+    {
         if (!lt.IsInteger || !rt.IsInteger)
             throw new CompileError(pos, $"Cannot combine {lt} and {rt}");
         if (lt.IsSigned != rt.IsSigned)
@@ -1820,12 +1981,19 @@ public sealed partial class Checker
             if (!target.IsInteger && !target.IsPointer)
                 throw new CompileError(e.Pos, $"Expected {target}, found a number");
             long v = e.ConstValue!.Value;
+            // ~$0F is the bit pattern ...1111_0000, as wide as the type it is used as.
+            if (e.IsBitPattern && v < 0 && !target.IsSigned && v >= -(1L << (8 * target.Size)))
+                e.ConstValue = v = Normalize(v, target);
+            if (e.IsBitPattern && v < 0 && !target.IsSigned)
+                throw new CompileError(e.Pos, $"'~' gives {v} here, a pattern wider than {target}: the value before '~' has bits above {target}. Use a value that fits in {target} before '~'");
             if (v < target.MinValue || v > target.MaxValue)
                 throw new CompileError(e.Pos, $"{v} does not fit in {target} ({target.MinValue} to {target.MaxValue})");
             e.Type = target;
             return;
         }
         if (source.SameAs(target)) return;
+        // The address as a number, where a u16 is expected (spec 3.5): no code.
+        if (source.IsPointer && target.Kind == TypeKind.U16) return;
         if (target.IsPointer && source.IsPointer)
             throw new CompileError(e.Pos, $"Expected {target}, found {source}. Convert with 'as {target}'");
         if (source.IsInteger && target.IsInteger && source.IsSigned == target.IsSigned && source.Size < target.Size)
@@ -1833,6 +2001,44 @@ public sealed partial class Checker
         bool convertible = (source.IsInteger || source.IsPointer) && (target.IsInteger || target.IsPointer);
         throw new CompileError(e.Pos, $"Expected {target}, found {source}" + (convertible ? $". Convert with 'as {target}'" : ""));
     }
+
+    /// <summary>
+    /// Coerce for a constant combined with a runtime value: when it does not fit, the error names what
+    /// set the type, the other operand or the typed constant (spec 3.1).
+    /// </summary>
+    private static void CoerceNamed(Expr e, TernType target, string? setBy, bool isConstant)
+    {
+        try { Coerce(e, target); }
+        catch (CompileError error) when (setBy is not null && target.IsInteger && error.Description.Contains(" does not fit in "))
+        {
+            long v = e.ConstValue!.Value;
+            var wider = WiderFor(v, target);
+            throw new CompileError(e.Pos, isConstant
+                ? $"{v} does not fit in {target} ({target.MinValue} to {target.MaxValue}), the type of the constant '{setBy}' in it, which sets the operation's type. " +
+                  (wider is null ? "Use a smaller value" : $"Give '{setBy}' the type {wider}")
+                : $"{v} does not fit in {target} ({target.MinValue} to {target.MaxValue}), the type of '{setBy}', which it is combined with. " +
+                  (wider is null ? "Use a smaller value" : $"Convert '{setBy}' with 'as {wider}'"));
+        }
+    }
+
+    /// <summary>A type of the same signedness as <paramref name="t"/> that holds <paramref name="v"/>, if one is wider.</summary>
+    private static TernType? WiderFor(long v, TernType t)
+    {
+        var wide = t.IsSigned ? TernType.I16 : TernType.U16;
+        return t.Size < 2 && v >= wide.MinValue && v <= wide.MaxValue ? wide : null;
+    }
+
+    /// <summary>Source text for a simple operand, to name it in an error; null for anything else.</summary>
+    private static string? Describe(Expr e) => e switch
+    {
+        NameExpr n => n.Name,
+        MemberExpr m when Describe(m.Target) is { } t => $"{t}.{m.Member}",
+        IndexExpr ix when Describe(ix.Target) is { } t => $"{t}[{Describe(ix.Index) ?? "..."}]",
+        CallExpr c => $"{c.Name}({string.Join(", ", c.Args.Select(a => Describe(a) ?? "..."))})",
+        NumberExpr n => n.Value.ToString(),
+        BinaryExpr b when Describe(b.Left) is { } l && Describe(b.Right) is { } r => $"{l} {OpText(b.Op)} {r}",
+        _ => null,
+    };
 
     /// <summary>Wraps a value to the range of <paramref name="t"/>, as the CPU would.</summary>
     public static long Normalize(long v, TernType t) => t.Kind switch
@@ -1887,7 +2093,7 @@ public sealed partial class Checker
         }
         // The main file's globals are all kept, so the functions in their initial values are too.
         foreach (var g in mainModule.Scope.Values.OfType<VariableSymbol>())
-            foreach (var (_, f) in g.FunctionAddresses) Named(f);
+            foreach (var f in GlobalsNamedBy(g).SelectMany(t => t.FunctionAddresses)) Named(f);
 
         void Add(FunctionSymbol root, bool isRoot)
         {
@@ -1934,7 +2140,7 @@ public sealed partial class Checker
         Visit(main);
         foreach (var f in mainModule.Scope.Values.OfType<FunctionSymbol>().Where(f => f.IsInterrupt)) Compiled(f);
         foreach (var g in mainModule.Scope.Values.OfType<VariableSymbol>())
-            foreach (var (_, f) in g.FunctionAddresses) Named(f);
+            foreach (var f in GlobalsNamedBy(g).SelectMany(t => t.FunctionAddresses)) Named(f);
     }
 
     /// <summary>A handler is entered by the CPU, with nothing to pass: only a part may have parameters or a return value.</summary>

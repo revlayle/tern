@@ -86,6 +86,8 @@ struct Vic {
     sprite_color: [u8; 8] @ $27
 }
 var vic: Vic @ $D000
+// The sprite position registers as an array: x of sprite n at 2n, y at 2n + 1 (vic.sprite0_x ... vic.sprite7_y).
+var sprite_xy: [u8; 16] @ $D000
 
 // One SID voice.
 struct Voice {
@@ -173,6 +175,39 @@ asm fn set_irq(handler: u16 using XY) {
     sty $FFFF
     plp
     rts
+}
+
+// Install an IRQ handler with the KERNAL left in (needed by the io library): c64.set_kernal_irq(addr(handler)).
+// The handler is an 'interrupt fn', as for set_irq. The KERNAL's IRQ entry pushes A, X and Y and
+// jumps through $0314, which then points to a stub that pulls them again and jumps to the handler,
+// so the handler runs as if called through $FFFE (about 20 cycles more than the KERNAL entry alone).
+// The KERNAL's own IRQ work (keyboard scan, clock) no longer runs, so getin() sees no new keys. The
+// handler acknowledges its interrupt source; the KERNAL's CIA 1 timer interrupt is still on and
+// reaches it too, so turn it off for a raster interrupt alone: c64.cia1.icr = $7F.
+// Interrupts are held off while the vector changes.
+asm fn set_kernal_irq(handler: u16 using XY) {
+    php
+    sei
+    stx kernal_handler
+    sty kernal_handler+1
+    lda #kernal_entry.lo
+    sta $0314
+    lda #kernal_entry.hi
+    sta $0315
+    plp
+    rts
+}
+
+private var kernal_handler: u16
+
+// Reached through $0314: undoes the KERNAL entry's pushes of A, X and Y, then goes to the handler.
+private asm fn kernal_entry() {
+    pla
+    tay
+    pla
+    tax
+    pla
+    jmp (kernal_handler)
 }
 
 // Install an NMI handler: c64.set_nmi(addr(handler)). The handler must be an 'interrupt fn'.

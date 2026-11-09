@@ -33,24 +33,24 @@ the compiler is. The standard library is in `lib/` next to it.
 |---|---|
 | `tern game.tern` | compile: writes `game.prg`, `game.lst` (listing: every source line with its addresses, bytes and cycles), `game.vs` (VICE labels), `game.lines` (bytes and cycles per source line) and prints the memory report |
 | `tern --json game.tern` | the same, with the result and any error as JSON: `file`, `line`, `column`, `message`, `suggestion` |
-| `tern run game.tern` | compile and run in the built-in emulator until `main` returns; `--dump name` shows a variable, `--screen` the screen as text, `--profile` the cycles of each function and source line |
+| `tern run game.tern` | compile and run in the built-in emulator until `main` returns; `--dump name` shows a variable, `--screen` the screen as text, `--profile` the cycles of each function and source line; `--set '$DC00=$7B'` writes a byte before the run |
 | `tern bench a.tern b.tern` | run each version and compare bytes and cycles; `--fn f` measures one function (a module's function with its module: `--fn ship.move`); `--code '...'` measures statements as the body of `main`, after `--decl '...'` lines |
 
 Work in this loop: write a small piece, compile, `tern run` it with `--dump` to check the values,
-and `tern bench` two versions when speed matters. Quote `--code`, `--decl` and `--dump` arguments
+and `tern bench` two versions when speed matters. Quote `--code`, `--decl`, `--dump` and `--set` arguments
 with single quotes: `$C000` in double quotes is a shell variable.
 
 The emulator is a 6502 with plain RAM: there is no VIC-II, SID or CIA, so a hardware register reads
-back what was last written (the joystick reads 0, which means every direction pressed) and a wait
-for a raster line never ends. CHROUT, GETIN and PLOT work (printing goes to the screen at `$0400`);
+back what was last written (the joystick reads 0, which means every direction pressed, unless
+`--set '$DC00=$FF'` gives it a value) and a wait for a raster line never ends. CHROUT, GETIN and PLOT work (printing goes to the screen at `$0400`);
 any other KERNAL call stops the run. Keep game logic in functions that take their inputs as
 parameters, so that it can be run and measured (`sprite.md` shows how). Check the finished program
 in VICE: `x64sc -autostart game.prg`.
 
 The program never checks an array index, but `tern run` does: an index outside its array, and an
 `indexed match` value outside its patterns (which also stops the run), are printed with the source
-line, and the exit code is 3 (2 when an `indexed match` value stopped the run). Pointer accesses and
-`asm` are not checked.
+line, and the exit code is 3 (2 when an `indexed match` value stopped the run). `tern bench` prints
+them too, and a variant with any fails. Pointer accesses and `asm` are not checked.
 
 ```tern
 // bad.tern

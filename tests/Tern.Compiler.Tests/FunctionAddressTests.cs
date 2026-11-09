@@ -247,7 +247,6 @@ public class FunctionAddressTests
         "'f' takes 'n' in memory, which a call through an address cannot set. Pass it in a register (n: u8 using A)")]
     [InlineData("fn f() { }\nvar v: ptr u8\nfn main() { v = addr(f) }", "Expected ptr u8, found u16")]
     [InlineData("fn f() { }\nvar v: u8\nfn main() { v = addr(f) }", "Expected u8, found u16")]
-    [InlineData("fn f() { }\ndata t: [u16; 1] = [addr(f) + 1]\nfn main() { }", "addr() of a function can be an initial value only on its own, not in a calculation")]
     [InlineData("fn f() { }\ndata t: [u8; 1] = [addr(f)]\nfn main() { }", "Expected u8, found u16")]
     [InlineData("fn f() { }\nconst C = addr(f)\nfn main() { }", "addr(f) is known only when the program is placed, so it cannot be part of a constant")]
     public void Reports_errors(string source, string expected)

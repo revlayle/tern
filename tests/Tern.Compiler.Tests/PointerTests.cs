@@ -175,7 +175,7 @@ public class PointerTests
             var stepped: ptr u8
             fn main() {
                 plus = p + n
-                plus8 = small + p
+                plus8 = p + small
                 minus = p - n
                 inc = p
                 inc += 1

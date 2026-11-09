@@ -30,10 +30,18 @@ Each example is a whole program that compiles. The full rules are in the Tern re
   is `w << 8`: write `(w << 5) + 3`. Compares do not chain (`a < b < c` is an error).
 - Everything wraps; `u8 + u8` is a `u8`. `u8` mixed with `u16` widens to `u16`.
 - `as` converts: `w as u8` (low byte), `b as u16`, `x as i8` (same bits), `p as u16`, `p as ptr Enemy`.
-  `as` binds tighter than any operator. There is no `u8 as bool`: write `x != 0`.
+  A pointer becomes a `u16` by itself where a `u16` is expected (`var a: u16 = p`, an argument, a
+  return value), but not inside an operator (`w + p` is an error). `as` binds tighter than any operator. There is no `u8 as bool`: write `x != 0`.
 - Signed and unsigned operands cannot be mixed: cast one side.
 - `>>` on a signed value keeps the sign and rounds down (`-3 >> 1` is `-2`).
 - `*`, `/`, `%` only in constant expressions. Shift counts are constants.
+- A constant expression (literals and constants, typed or not) is computed exactly and checked only
+  where it is used: with `const BOX: u8 = 13`, `const MAX_X: u16 = 320 - BOX` is 307, and
+  `CHARSET + FIRST * 8` converts to a pointer. Next to a runtime value, a typed constant helps choose
+  the operation's type like a variable of its type (`x + BOX` is a `u8`, `w + BOX` a `u16`), and the
+  constant part is computed at that width (`w + BOX * 30` adds 390; `x + BOX * 30` is an error).
+  `~$0F` is as wide as what it is used with: `x & ~$0F` is `and #$F0`, `w & ~$0F` keeps `$FFF0`.
+  A constant has a type only if its declaration writes one: `const AREA = BOX * 30` is plain 390.
 
 ```tern
 // arith.tern
@@ -102,6 +110,10 @@ fn main() {
   entry: scalars need an initial value. Local arrays do not, and hold leftovers.
 - `noinit` skips the zeroing (not on locals, `data` or fixed addresses).
 - `data` cannot be written. `include_bytes("ship.bin")` loads a file: `data ship = include_bytes("ship.bin")`.
+- `[u8; _]` takes the length from the list, for a global `var` or `data` with a list: `data script: [u8; _] = [3, 1, 4]`.
+- An initial value may hold addresses, filled in when the program is placed: `addr()` of a global, data,
+  a field of a struct global or a function, alone, plus or minus a constant, or its `.lo` / `.hi`:
+  `data rows: [ptr u8; 2] = [addr(map), addr(map) + 40]`, `data jlo: [u8; 1] = [(addr(f) - 1).lo]`.
 
 ## 4. Arrays
 
@@ -205,6 +217,9 @@ player $0918 Enemy (3 bytes):
   the index counts elements.
 - Arithmetic is in bytes: `p + 1`, `p += 256` (`inc p+1`), `p - q` gives a `u16`.
 - `.lo` and `.hi` are not allowed on pointers (`p.name` is a struct field): write `(p as u16).hi`.
+  On `addr(...)`, alone or plus or minus a constant, they are the address bytes: `addr(map).lo` is
+  `lda #<map`, `(addr(map) + 299).hi` is `lda #>(map+299)`.
+- Pointer arithmetic puts the pointer first: `p + n`. `n + p` with a runtime `n` is an error.
 - A pointer that is dereferenced is placed in zero page automatically.
 
 ```tern
@@ -518,6 +533,14 @@ band $0002 u8 = 3 ($03)
 - An `interrupt fn` called from another one is a *part* (no saving, `rts`): this is how library
   raster code (`sprites.raster()`, `scroll.top()`) goes into your own handler.
 - `tern run --irq n` raises an IRQ every n cycles through `$FFFE`.
+- A handler starts with `cld` only when it can do decimal arithmetic: `adc` or `sbc` in its code or
+  asm blocks, or any call (`jsr`). Without them it leaves decimal mode alone, which is safe.
+- To keep the KERNAL in (needed by `io` and `chrout`), install the handler with
+  `c64.set_kernal_irq(addr(raster))` instead of `kernal_off` / `set_irq`: it goes through `$0314`,
+  and the same `interrupt fn` works. The KERNAL's keyboard scan stops (`getin` sees no keys), and its
+  CIA 1 timer interrupt still reaches the handler: turn it off with `c64.cia1.icr = $7F`.
+  `examples/kernal_irq.tern` reads the drive's status while a raster split runs. `tern run` has no
+  KERNAL, so check such a program in VICE.
 
 ## 12. Modules
 
@@ -571,7 +594,7 @@ a $0003 u8 = 21 ($15)
 | `bcd` | packed decimal counters of 1-4 bytes for scores |
 | `random` | `seed`, `next8`, `next16`, `below(n)` |
 | `cpu` | `carry()`, `zero()`, `negative()`, `overflow()` after an `asm` block |
-| `c64` | `SCREEN`, `COLOR`, the 16 colors (`c64.BLACK` ... `c64.LIGHT_GREY`), `chrout`, `print`, `getin`, `cursor`, `load`; registers `vic`, `sid`, `cia1`, `cia2`; `kernal_off`, `set_irq`, `set_nmi`, `interrupts_on`, `interrupts_off` |
+| `c64` | `SCREEN`, `COLOR`, the 16 colors (`c64.BLACK` ... `c64.LIGHT_GREY`), `chrout`, `print`, `getin`, `cursor`, `load`; registers `vic`, `sid`, `cia1`, `cia2`; `sprite_xy` (the sprite positions as an array: x of sprite n at `2n`, y at `2n + 1`); `kernal_off`, `set_irq`, `set_kernal_irq`, `set_nmi`, `interrupts_on`, `interrupts_off` |
 | `io` (C64) | disk files through the KERNAL: `load`, `save`, `open`, `read`, `write`, `close`, the command channel |
 | `sprites` (C64) | a sprite multiplexer, 8 to 64 sprites |
 | `scroll` (C64) | smooth eight-way character scrolling |

@@ -311,4 +311,84 @@ public class DataTests
             dir.Delete(recursive: true);
         }
     }
+
+    [Fact]
+    public void An_array_length_of_underscore_is_taken_from_the_list()
+    {
+        // M20 follow-up, spec 4: [T; _] on data and on global vars with a list.
+        var r = Run.Program("""
+            data script: [u8; _] = [3, 1, 4, 1, 5]
+            data words: [u16; _] = [1000, 65535, 0]
+            linear data pairs: [u16; _] = [$1234, $5678]
+            data signed: [i8; _] = [-128, 127]
+            var table: [u8; _] = [9, 8, 7]
+            var n: u8
+            var w: u8
+            var lin: u8
+            var sum: u16
+            var last: i8
+            fn main() {
+                n = len(script)
+                w = len(words)
+                lin = len(pairs)
+                for i in 0..len(words) { sum += words[i] }
+                table[2] += script[4]
+                last = signed[1]
+            }
+            """);
+        Assert.Equal(5, r.U8("n"));
+        Assert.Equal(3, r.U8("w"));
+        Assert.Equal(2, r.U8("lin"));
+        Assert.Equal((1000 + 65535) & 0xFFFF, r.U16("sum"));
+        Assert.Equal([9, 8, 12], Bytes(r, "table", 3));
+        Assert.Equal(127, (sbyte)r.U8("last"));
+        Assert.Equal([3, 1, 4, 1, 5], Bytes(r, "script", 5));
+        Assert.Equal([0x34, 0x12, 0x78, 0x56], Bytes(r, "pairs", 4));
+        Assert.Equal("[u8; 5]", r.Result.Variables["script"].Type);
+    }
+
+    [Fact]
+    public void A_long_byte_list_with_underscore_is_long_data()
+    {
+        string list = string.Join(", ", Enumerable.Range(0, 300).Select(i => i & 0xFF));
+        var r = Run.Program($$"""
+            data big: [u8; _] = [{{list}}]
+            var n: u16
+            var p: ptr u8
+            var at: u8
+            fn main() {
+                n = len(big)
+                p = addr(big) + 256
+                at = p[43]
+            }
+            """);
+        Assert.Equal(300, r.U16("n"));
+        Assert.Equal(299 & 0xFF, r.U8("at"));
+    }
+
+    [Theory]
+    [InlineData("data d: [u8; _] = \"AB\"\nfn main() { }", "The length '_' is taken from a list initial value, so it works only on a global var or data with a list, as in 'data t: [u8; _] = [1, 2, 3]'. Write the length here")]
+    [InlineData("var d: [u8; _]\nfn main() { }", "The length '_' is taken from a list initial value")]
+    [InlineData("fn main() { var d: [u8; _] }", "The length '_' is taken from a list initial value")]
+    [InlineData("fn f(p: ptr [u8; _]) { }\nfn main() { }", "The length '_' is taken from a list initial value")]
+    [InlineData("struct S { a: [u8; _] }\nvar s: S\nfn main() { }", "The length '_' is taken from a list initial value")]
+    [InlineData("data d: [u8; _] = []\nfn main() { }", "Array length must be 1 to 256, not 0")]
+    [InlineData("var d: [u8; _] = [1, 2, 300]\nfn main() { }", "300 does not fit in u8")]
+    [InlineData("data d = [1, 2, 3]\nfn main() { }", "Data arrays need a written type, e.g. data d: [u8; _] = [...], where '_' takes the length from the list")]
+    public void Underscore_length_errors(string source, string expected)
+    {
+        var e = Assert.Throws<CompileError>(() => TernCompiler.Compile(source));
+        Assert.Contains(expected, e.Description);
+    }
+
+    [Theory]
+    [InlineData("var d: [u8; _]", 257, "'d' is a long byte array (257 bytes)")]
+    [InlineData("data d: [u16; _]", 257, "An array of u16 has at most 256 elements")]
+    [InlineData("var d: [u8; _]", 0, "Array length must be 1 to 256, not 0")]
+    public void A_list_length_is_checked_like_a_written_one(string declaration, int count, string expected)
+    {
+        string source = $"{declaration} = [{string.Join(", ", Enumerable.Repeat("0", count))}]\nfn main() {{ }}";
+        var e = Assert.Throws<CompileError>(() => TernCompiler.Compile(source));
+        Assert.Contains(expected, e.Description);
+    }
 }

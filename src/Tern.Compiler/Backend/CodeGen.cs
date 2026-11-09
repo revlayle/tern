@@ -886,11 +886,12 @@ public sealed class CodeGen
         var target = a.Target;
         bool byOne = a.Value.ConstValue == 1 && a.Op is TokenKind.PlusEq or TokenKind.MinusEq;
 
-        // x += 1 / x -= 1 on a variable held in a register for a loop: inx / dex / iny / dey.
-        if (byOne && target is NameExpr { Symbol.Register: Register.X or Register.Y } held)
+        // x += 1 / x -= 1 on a variable held in a register for a loop: inx / dex / iny / dey; x += 2 / x -= 2 twice (spec 11).
+        if (a.Op is TokenKind.PlusEq or TokenKind.MinusEq && a.Value.ConstValue is 1 or 2
+            && target is NameExpr { Symbol.Register: Register.X or Register.Y } held)
         {
             bool x = held.Symbol!.Register == Register.X;
-            Emit(a.Op == TokenKind.PlusEq ? (x ? Inx : Iny) : (x ? Dex : Dey));
+            for (long k = 0; k < a.Value.ConstValue; k++) Emit(a.Op == TokenKind.PlusEq ? (x ? Inx : Iny) : (x ? Dex : Dey));
             return;
         }
 
@@ -1515,19 +1516,42 @@ public sealed class CodeGen
         {
             case NameExpr { Symbol: { InMemory: true } v }:
                 return (Var(v), Var(v, 1));
-            case CallExpr { FunctionAddress: { } f }:
-                return (new ImmLabelByte(_functionLabels[f], false), new ImmLabelByte(_functionLabels[f], true));
-            case CallExpr { AddressOf: { } av }:
-            {
-                // A field of a struct variable is a view: its storage plus an offset.
-                var (v, offset) = av.AliasOf is { } storage ? (storage, av.AliasOffset) : (av, 0);
-                return (new ImmVarByte(v, false, offset), new ImmVarByte(v, true, offset));
-            }
+            case CallExpr or BinaryExpr when AddressBytes(e, 0) is { } address:
+                return address;
             case IndexExpr ix when !IsPointerIndex(ix) && ix.Index.ConstValue is long i:
                 var arr = ArrayOf(ix);
                 return (Var(arr, (int)i), Var(arr, HighTable(arr) + (int)i));
             case CastExpr cast when cast.Operand.Type.Size == 2:
                 return Simple2(cast.Operand);
+            default:
+                return null;
+        }
+    }
+
+    /// <summary>
+    /// The two bytes of an address the assembler fills in: <c>addr(x)</c> plus or minus constants,
+    /// through casts between two-byte types (<c>#&lt;(map+299)</c>). Null for anything else.
+    /// </summary>
+    private (Operand Lo, Operand Hi)? AddressBytes(Expr e, int offset)
+    {
+        switch (e)
+        {
+            case CallExpr { FunctionAddress: { } f }:
+                return (new ImmLabelByte(_functionLabels[f], false, offset), new ImmLabelByte(_functionLabels[f], true, offset));
+            case CallExpr { AddressOf: { } av }:
+            {
+                // A field of a struct variable is a view: its storage plus an offset.
+                var (v, field) = av.AliasOf is { } storage ? (storage, av.AliasOffset) : (av, 0);
+                return (new ImmVarByte(v, false, field + offset), new ImmVarByte(v, true, field + offset));
+            }
+            case CastExpr { Type.Size: 2, Operand.Type.Size: 2 } cast:
+                return AddressBytes(cast.Operand, offset);
+            case BinaryExpr { Op: TokenKind.Plus, Type.Size: 2, Right.ConstValue: long r } b:
+                return AddressBytes(b.Left, offset + (int)r);
+            case BinaryExpr { Op: TokenKind.Plus, Type.Size: 2, Left.ConstValue: long l } b:
+                return AddressBytes(b.Right, offset + (int)l);
+            case BinaryExpr { Op: TokenKind.Minus, Type.Size: 2, Right.ConstValue: long r } b:
+                return AddressBytes(b.Left, offset - (int)r);
             default:
                 return null;
         }
@@ -2703,7 +2727,7 @@ public sealed class CodeGen
         // Each use of a candidate, with the node it is part of.
         var parents = new Dictionary<Node, Node>();
         foreach (var n in nodes) foreach (var c in Children(n)) parents[c] = n;
-        // Per candidate: uses where the register saves a load or an inc (an index, v += 1), and all uses.
+        // Per candidate: uses where the register saves a load or an inc (an index, v += 1 or 2), and all uses.
         var uses = new Dictionary<VariableSymbol, (int Strong, int All)>();
         var bad = new HashSet<VariableSymbol>();
         foreach (var n in nodes.OfType<NameExpr>())
@@ -2711,7 +2735,7 @@ public sealed class CodeGen
             if (n.Symbol is not { } v || !Ordinary(v) || bad.Contains(v)) continue;
             var parent = parents.GetValueOrDefault(n);
             if (!Served(n, parent)) { bad.Add(v); uses.Remove(v); continue; }
-            bool strong = parent is IndexExpr || (parent is AssignStmt { Op: TokenKind.PlusEq or TokenKind.MinusEq, Value.ConstValue: 1 } a && a.Target == n);
+            bool strong = parent is IndexExpr || (parent is AssignStmt { Op: TokenKind.PlusEq or TokenKind.MinusEq, Value.ConstValue: 1 or 2 } a && a.Target == n);
             var (st, all) = uses.GetValueOrDefault(v);
             uses[v] = (st + (strong ? 1 : 0), all + 1);
         }
