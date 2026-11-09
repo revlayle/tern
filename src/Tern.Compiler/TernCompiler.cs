@@ -497,24 +497,23 @@ public static class TernCompiler
     }
 
     /// <summary>Where byte <paramref name="i"/> of a value is in its memory layout (see <see cref="ByteLayout"/>).</summary>
-    private static int LayoutIndex(VariableSymbol v, int i) =>
-        !v.Type.IsArray || v.Type.Element!.Size == 1 || v.Type.Linear ? i
-        : i % 2 == 0 ? i / 2 : v.Type.Length + i / 2;
+    private static int LayoutIndex(VariableSymbol v, int i)
+    {
+        if (!v.Type.IsArray || v.Type.Element!.Size == 1 || v.Type.Linear) return i;
+        int size = v.Type.Element.Size;
+        return i % size * v.Type.Length + i / size;
+    }
 
     /// <summary>
-    /// Converts a value's bytes (little endian, elements in order) to its layout in memory:
-    /// arrays of 16-bit values are split into a low-byte table followed by a high-byte table.
+    /// Converts a value's bytes (elements in order, each little endian or in its record's layout) to
+    /// its layout in memory: an array of 16-bit values or of structs, unless linear, is split into one
+    /// table per element byte (spec 3.2, 3.3): byte k of element i is at k * length + i.
     /// </summary>
     private static byte[] ByteLayout(VariableSymbol v, byte[] bytes)
     {
         if (!v.Type.IsArray || v.Type.Element!.Size == 1 || v.Type.Linear) return bytes;
-        int n = v.Type.Length;
         var split = new byte[bytes.Length];
-        for (int i = 0; i < n; i++)
-        {
-            split[i] = bytes[2 * i];
-            split[n + i] = bytes[2 * i + 1];
-        }
+        for (int i = 0; i < bytes.Length; i++) split[LayoutIndex(v, i)] = bytes[i];
         return split;
     }
 }

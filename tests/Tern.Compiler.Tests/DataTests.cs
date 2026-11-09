@@ -255,7 +255,7 @@ public class DataTests
     [Theory]
     [InlineData("data d: [u8; 2] = [1, 2]\nfn main() { d[0] = 5 }", "'d' is data, which is read-only")]
     [InlineData("data d: [u16; 2] = [1, 2]\nfn main() { d[0].lo = 5 }", "'d' is data, which is read-only")]
-    [InlineData("data d = 5\nfn main() { }", "Data must be an array or a string")]
+    [InlineData("data d = 5\nfn main() { }", "Data must be an array, a string or a struct")]
     [InlineData("data d: [u8; 2]\nfn main() { }", "Expected '=' and the data's value")]
     [InlineData("data d @ $C000 = \"A\"\nfn main() { }", "'d' at $C000 is not in a program or reserved area")]
     [InlineData("fn main() { data d = \"A\" }", "'data' must be declared outside functions")]

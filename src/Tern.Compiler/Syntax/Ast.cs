@@ -72,6 +72,18 @@ public sealed class StringExpr(SourcePos pos, string text, string? encoding) : E
     /// <summary>The encoding prefix, or null for the target's default.</summary>
     public string? Encoding { get; } = encoding;
 }
+/// <summary>One <c>field = value</c> of a struct literal.</summary>
+public sealed record FieldValue(SourcePos Pos, string Name, Expr Value);
+
+/// <summary>
+/// A struct literal, <c>Point { x = 1, y = 2 }</c>: only an initial value of a global or data (spec 3.3).
+/// The checker turns it into bytes; it is never a runtime value.
+/// </summary>
+public sealed class StructLiteralExpr(SourcePos pos, string structName, List<FieldValue> fields) : Expr(pos)
+{
+    public string StructName { get; } = structName;
+    public List<FieldValue> Fields { get; } = fields;
+}
 public sealed class BoolExpr(SourcePos pos, bool value) : Expr(pos)
 {
     public bool Value { get; } = value;

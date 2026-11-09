@@ -603,12 +603,8 @@ public sealed partial class Checker
         if (decl.IsNoinit && v.FixedAddress is not null)
             throw new CompileError(decl.Pos, $"'{decl.Name}' is at a fixed address, which is never zeroed; leave out 'noinit'");
 
-        if (decl.IsData && (type.IsStruct || type.IsStructArray))
-            throw new CompileError(decl.Pos, "Data cannot hold structs yet. Use a var, or data arrays of numbers");
-        if (decl.IsData && !type.IsArray)
-            throw new CompileError(decl.Pos, "Data must be an array or a string. For a single value, use 'const'");
-        if (decl.Init is not null && (type.IsStruct || type.IsStructArray))
-            throw new CompileError(decl.Init.Pos, "A struct cannot have an initial value. Assign its fields at the start of main");
+        if (decl.IsData && !type.IsArray && !type.IsStruct)
+            throw new CompileError(decl.Pos, "Data must be an array, a string or a struct. For a single value, use 'const'");
         if (decl.Init is not null)
         {
             if (v.FixedAddress is not null && !decl.IsData)
@@ -715,6 +711,7 @@ public sealed partial class Checker
             throw new CompileError(decl.Pos, decl.IsData
                 ? $"Data arrays need a written type, e.g. data {decl.Name}: [u8; _] = [...], where '_' takes the length from the list"
                 : $"Array variables need a written type, e.g. var {decl.Name}: [u8; _] = [...], where '_' takes the length from the list");
+        if (decl.Init is StructLiteralExpr lit) return ResolveType(new NamedTypeSyntax(lit.Pos, lit.StructName));
         CheckExpr(decl.Init);
         if (decl.Init.Type.IsStruct) Coerce(decl.Init, decl.Init.Type); // "A struct cannot be used as a value"
         return DefaultType(decl.Init);
@@ -752,6 +749,7 @@ public sealed partial class Checker
     /// <param name="target">Collects the function addresses (<c>addr(f)</c>) in the value.</param>
     private byte[] ConstantBytes(Expr init, TernType type, VariableSymbol target, int at = 0)
     {
+        if (type.IsStruct) return StructBytes(init, type, target, at);
         if (type.IsArray)
         {
             if (init is not ArrayLiteralExpr list)
@@ -772,11 +770,105 @@ public sealed partial class Checker
     }
 
     /// <summary>
+    /// The bytes of a struct literal (spec 3.3), in the record's memory layout; fields not listed are 0.
+    /// <paramref name="at"/> is the record's first byte in the global's value, for addresses filled in later.
+    /// </summary>
+    private byte[] StructBytes(Expr init, TernType type, VariableSymbol target, int at)
+    {
+        var s = type.Struct!;
+        var named = s.Fields.Where(f => f.Name != "_").Select(f => f.Name).ToList();
+        if (init is not StructLiteralExpr lit)
+            throw new CompileError(init.Pos,
+                $"A {s.Name} is initialized with a struct literal. Write '{s.Name} {{ {named.FirstOrDefault() ?? "field"} = ... }}'");
+        var written = ResolveType(new NamedTypeSyntax(lit.Pos, lit.StructName));
+        if (!written.IsStruct)
+            throw new CompileError(lit.Pos, $"'{lit.StructName}' is not a struct, so '{lit.StructName} {{ ... }}' is not a struct literal");
+        if (written.Struct != s)
+            throw new CompileError(lit.Pos, $"This is a {written.Struct!.Name} literal, but the value here is a {s.Name}. Write '{s.Name} {{ ... }}'");
+        var bytes = new byte[s.Size];
+        var given = new HashSet<string>();
+        foreach (var f in lit.Fields)
+        {
+            if (f.Name == "_")
+                throw new CompileError(f.Pos, $"'_' is padding, which has no value; fields not listed are 0. Remove '_ = ...'");
+            var field = s.Field(f.Name)
+                ?? throw new CompileError(f.Pos, $"'{s.Name}' has no field '{f.Name}'. Use one of its fields: {string.Join(", ", named)}");
+            if (!given.Add(f.Name))
+                throw new CompileError(f.Pos, $"'{f.Name}' is given twice in this {s.Name} literal. Remove one");
+            FieldBytes(f.Value, field, target, bytes, at);
+        }
+        return bytes;
+    }
+
+    /// <summary>
+    /// One field's value into <paramref name="record"/>: a nested literal, a list or string for an array
+    /// field (an array of 16-bit values split into low and high bytes inside the record, spec 3.3), or a
+    /// value as any initial value of the field's type allows.
+    /// </summary>
+    private void FieldBytes(Expr value, StructField field, VariableSymbol target, byte[] record, int at)
+    {
+        var type = field.Type;
+        int offset = field.Offset;
+        if (type.IsStruct)
+        {
+            StructBytes(value, type, target, at + offset).CopyTo(record, offset);
+            return;
+        }
+        if (!type.IsArray)
+        {
+            ScalarInto(value, type, target, record, offset, type.Size == 2 ? offset + 1 : null, at);
+            return;
+        }
+        int n = type.Length;
+        var element = type.Element!;
+        if (ByteSource(value) is { } text)
+        {
+            if (element.Size != 1 || !element.IsInteger)
+                throw new CompileError(value.Pos, $"A string is a [u8; {text.Length}] array, but the field '{field.Name}' is {type}");
+            if (text.Length != n)
+                throw new CompileError(value.Pos, $"The field '{field.Name}' is {type}: expected {n} bytes, found {text.Length}");
+            text.CopyTo(record, offset);
+            return;
+        }
+        if (value is not ArrayLiteralExpr list)
+            throw new CompileError(value.Pos, $"The field '{field.Name}' is {type}, so its value is a list. Write [ ... ] with {n} values");
+        if (list.Elements.Count != n)
+            throw new CompileError(value.Pos, $"The field '{field.Name}' is {type}: expected {n} values, found {list.Elements.Count}");
+        for (int i = 0; i < n; i++)
+            ScalarInto(list.Elements[i], element, target, record, offset + i, element.Size == 2 ? offset + n + i : null, at);
+    }
+
+    /// <summary>A number, bool or pointer into <paramref name="record"/>: the low byte at <paramref name="lo"/>, the high byte (if any) at <paramref name="hi"/>.</summary>
+    private void ScalarInto(Expr e, TernType type, VariableSymbol target, byte[] record, int lo, int? hi, int at)
+    {
+        if (UsesAddr(e))
+        {
+            AddressBytes(e, type, target, at + lo, hi is { } h ? at + h : null);
+            return;
+        }
+        var bytes = ConstantBytes(e, type, target);
+        record[lo] = bytes[0];
+        if (hi is { } high) record[high] = bytes[1];
+    }
+
+    /// <summary>The error for a struct literal outside an initial value of a global or data (spec 3.3).</summary>
+    private static CompileError StructLiteralInCode(StructLiteralExpr lit, string? name)
+    {
+        string example = lit.Fields.FirstOrDefault() is { } f
+            ? $"{name ?? "s"}.{f.Name} = {Describe(f.Value) ?? "..."}"
+            : $"{name ?? "s"}.field = ...";
+        return new CompileError(lit.Pos,
+            "A struct literal is only the initial value of a global or of data: structs are never copied, so here it would be stores at run time. "
+            + $"Assign the fields one by one, e.g. '{example}'");
+    }
+
+    /// <summary>
     /// An address in an initial value (spec 4): <c>addr()</c> of a function, global, data or field of a
     /// struct global, alone, plus or minus a constant, or its <c>.lo</c> / <c>.hi</c>. Filled in when the
     /// program is placed; the bytes are zeros until then.
     /// </summary>
-    private byte[] AddressBytes(Expr init, TernType type, VariableSymbol target, int at)
+    /// <param name="highAt">Where the high byte of a whole address goes, when not right after the low byte (a 16-bit array field, split inside its record).</param>
+    private byte[] AddressBytes(Expr init, TernType type, VariableSymbol target, int at, int? highAt = null)
     {
         var part = AddressPart.Word;
         var e = init;
@@ -798,7 +890,13 @@ public sealed partial class Checker
             throw new CompileError(init.Pos,
                 $"'{name}' is in {otherModule!.Name}, which is in the same overlay area '{area}' as {target.Module!.Name}. They are never loaded together, so the address would point at the wrong memory. " +
                 "Take the address in resident code, or put one of them in another area");
-        target.AddressFills.Add(new AddressFill(at, function, variable?.AliasOf ?? variable, (int)offset + (variable?.AliasOffset ?? 0), part));
+        var (fillVariable, fillOffset) = (variable?.AliasOf ?? variable, (int)offset + (variable?.AliasOffset ?? 0));
+        if (part == AddressPart.Word && highAt is { } h && h != at + 1)
+        {
+            target.AddressFills.Add(new AddressFill(at, function, fillVariable, fillOffset, AddressPart.Low));
+            target.AddressFills.Add(new AddressFill(h, function, fillVariable, fillOffset, AddressPart.High));
+        }
+        else target.AddressFills.Add(new AddressFill(at, function, fillVariable, fillOffset, part));
         return new byte[part == AddressPart.Word ? 2 : 1];
     }
 
@@ -826,6 +924,7 @@ public sealed partial class Checker
         CastExpr c => UsesAddr(c.Operand),
         MemberExpr m => UsesAddr(m.Target),
         ArrayLiteralExpr a => a.Elements.Any(UsesAddr),
+        StructLiteralExpr s => s.Fields.Any(f => UsesAddr(f.Value)),
         _ => false,
     };
 
@@ -1002,6 +1101,7 @@ public sealed partial class Checker
         }
         else
         {
+            if (decl.Init is StructLiteralExpr lit) throw StructLiteralInCode(lit, decl.Name);
             if (type.IsStruct || type.IsStructArray)
                 throw new CompileError(decl.Init.Pos, "A struct cannot have an initial value. Assign its fields");
             if (type.IsArray) throw new CompileError(decl.Init.Pos, "Local arrays cannot have initial values yet");
@@ -1015,6 +1115,7 @@ public sealed partial class Checker
 
     private void CheckAssign(AssignStmt a)
     {
+        if (a.Value is StructLiteralExpr lit) throw StructLiteralInCode(lit, Describe(a.Target));
         CheckExpr(a.Target);
         var target = a.Target;
         if (target.Type.IsStruct)
@@ -1337,6 +1438,9 @@ public sealed partial class Checker
                 e.Type = TernType.IntLiteral;
                 e.ConstValue = Encode(ch.Value, EncodingOf(ch.Encoding, ch.Pos), ch.Pos);
                 break;
+
+            case StructLiteralExpr lit:
+                throw StructLiteralInCode(lit, null);
 
             case StringExpr:
                 throw new CompileError(e.Pos, "A string can only be the value of data or a global array. "
