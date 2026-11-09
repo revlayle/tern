@@ -4,9 +4,9 @@ Owned by the coding session. Updated at the end of every coding session.
 
 ## Current
 
-- **Milestone:** M20, index checks in the emulator, and signed loop variables (roadmap). M19 is merged into `main`. Every item of the roadmap's M20 list is done.
-- **Branch:** `m20-checks`, from `main` at `3bed098`. 1999 compiler tests pass plus 36 CPU tests. No benchmark changed (1254 / 350780).
-- **Next step:** review of M20 (`/review`). Provisional choices are listed in the M20 entry below; questions 76-78 ask about them.
+- **Milestone:** M20, index checks in the emulator, and signed loop variables (roadmap). Reviewed (`docs/reviews/m20.md`: not ready, one must-fix finding); the finding and suggestions 2-6 are fixed, and it waits for the re-review.
+- **Branch:** `m20-checks`, from `main` at `3bed098`, with `main` merged in for the review (`233b3c0`). 2007 compiler tests pass plus 36 CPU tests. No benchmark changed (1254 / 350780).
+- **Next step:** re-review of M20 (`/review`; `docs/reviews/m20.md`). Questions 76-78 ask the spec session about provisional choices.
 
 ## Done
 
@@ -373,6 +373,8 @@ Including `jsr` and `rts`; from the tests.
 ## Known limitations and technical debt
 
 - `using X` with a call in the loop suggests removing `using X` but not why an `inline fn` does not help.
+- `tern bench` runs with the index check but does not print its errors (`RunResult.IndexErrors` has them); a wrong index in a variant gives misleading cycles (review M20, note 8).
+- `v += 2` on a variable held in X or Y for a loop is `txa / clc / adc #2 / tax`; `inx / inx` would be 2 bytes and 4 cycles (review M20, suggestion 7).
 - `tern run` cannot set an input before the run (the joystick at `$DC00` reads 0, every direction pressed). `sprite.md` works around it with logic that takes the joystick as a parameter; a `--set $DC00=$FF` option would let a whole game loop be checked.
 - The skill's outputs include addresses and cycles, so a code generator or library change that moves code fails `SkillTests` until `TERN_UPDATE_SKILL=1 dotnet test --filter SkillTests` rewrites them (read the diff: a prose claim next to an output may need changing too). Listing excerpts (```` ```lst ````) are updated by hand. Question 74 asks for this as a CLAUDE.md convention.
 - `tern run` / `tern bench` (M19): memory is plain RAM, so the VIC-II, SID and CIAs are not emulated (a raster wait never ends; the cycle limit stops it). The KERNAL stand-ins (CHROUT, GETIN, PLOT) take no cycles; any other ROM call stops the run, so overlays (loaded with KERNAL LOAD) cannot be run. A dumped local may not hold its last value: the compiler may keep it in a register or remove stores nobody reads.
