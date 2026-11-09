@@ -671,7 +671,13 @@ public sealed partial class Checker
         // A string or include_bytes() gives a [u8; N] array, which may be longer than 256 bytes.
         var bytes = decl.Init is null ? null : ByteSource(decl.Init);
         _allowLongBytes = !decl.IsLinear && !decl.IsIndexed;
-        _listLength = decl is { TypeSyntax: ArrayTypeSyntax { Length: null }, Init: ArrayLiteralExpr list } ? list.Elements.Count : null;
+        // [T; _] takes its length from a list or a string (spec 4).
+        _listLength = decl is { TypeSyntax: ArrayTypeSyntax { Length: null } } ? decl.Init switch
+        {
+            ArrayLiteralExpr list => list.Elements.Count,
+            StringExpr => bytes!.Length,
+            _ => null,
+        } : null;
         TernType type;
         try { type = bytes is not null && decl.TypeSyntax is null ? TernType.ArrayOf(TernType.U8, bytes.Length) : DeclaredType(decl); }
         finally { _allowLongBytes = false; _listLength = null; }
@@ -1066,7 +1072,7 @@ public sealed partial class Checker
                 if (a.Length is null)
                 {
                     len = _listLength ?? throw new CompileError(a.Pos,
-                        "The length '_' is taken from a list initial value, so it works only on a global var or data with a list, as in 'data t: [u8; _] = [1, 2, 3]'. Write the length here");
+                        "The length '_' is taken from a list or string initial value, so it works only on a global var or data with one, as in 'data t: [u8; _] = [1, 2, 3]'. Write the length here");
                     _listLength = null;
                 }
                 else
