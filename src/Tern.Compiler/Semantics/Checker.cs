@@ -1482,7 +1482,7 @@ public sealed partial class Checker
                 if (t.Kind == TypeKind.IntLiteral)
                 {
                     u.Type = t;
-                    u.ConstValue = u.Op == TokenKind.Minus ? -v : v;
+                    u.ConstValue = u.Op == TokenKind.Minus ? ConstNegate(u.Pos, v!.Value) : v;
                     KeepConstType(u, u.Operand);
                     u.IsBitPattern = u.Op == TokenKind.Plus && u.Operand.IsBitPattern;
                     return;
@@ -1569,7 +1569,9 @@ public sealed partial class Checker
                 b.Type = t;
                 if (l is not null)
                 {
-                    long shifted = b.Op == TokenKind.Shl ? l.Value << (int)r!.Value : l.Value >> (int)r!.Value;
+                    long shifted = t.Kind == TypeKind.IntLiteral
+                        ? ConstArithmetic(b.Pos, b.Op, l.Value, r!.Value)
+                        : b.Op == TokenKind.Shl ? l.Value << (int)r!.Value : l.Value >> (int)r!.Value;
                     b.ConstValue = t.Kind == TypeKind.IntLiteral ? shifted : Normalize(shifted, t);
                     if (t.Kind == TypeKind.IntLiteral) { KeepConstType(b, b.Left); b.IsBitPattern = b.Left.IsBitPattern; }
                 }
@@ -1583,7 +1585,7 @@ public sealed partial class Checker
                         $"'{OpText(b.Op)}' only works on constants. At runtime use a library function (mul8, div8, ...), or shifts for powers of two");
                 var t = Unify(b.Left, b.Right, b.Pos);
                 if (b.Op != TokenKind.Star && r == 0) throw new CompileError(b.Pos, "Division by zero");
-                long value = b.Op switch { TokenKind.Star => l.Value * r.Value, TokenKind.Slash => l.Value / r.Value, _ => l.Value % r.Value };
+                long value = ConstArithmetic(b.Pos, b.Op, l.Value, r.Value);
                 b.Type = t;
                 b.ConstValue = t.Kind == TypeKind.IntLiteral ? value : Normalize(value, t);
                 if (t.Kind == TypeKind.IntLiteral) KeepConstType(b, b.Left, b.Right);
@@ -1603,11 +1605,7 @@ public sealed partial class Checker
                 b.Type = t;
                 if (l is not null && r is not null)
                 {
-                    long value = b.Op switch
-                    {
-                        TokenKind.Plus => l.Value + r.Value, TokenKind.Minus => l.Value - r.Value,
-                        TokenKind.Amp => l.Value & r.Value, TokenKind.Pipe => l.Value | r.Value, _ => l.Value ^ r.Value,
-                    };
+                    long value = ConstArithmetic(b.Pos, b.Op, l.Value, r.Value);
                     b.ConstValue = t.Kind == TypeKind.IntLiteral ? value : Normalize(value, t);
                     if (t.Kind == TypeKind.IntLiteral)
                     {
@@ -1681,7 +1679,7 @@ public sealed partial class Checker
     {
         if (count.ConstValue is not long n)
             throw new CompileError(count.Pos, "The shift count must be a constant. Use shl8/shr8 for a variable count");
-        int bits = shifted.Kind == TypeKind.IntLiteral ? 32 : shifted.Size * 8;
+        int bits = shifted.Kind == TypeKind.IntLiteral ? 64 : shifted.Size * 8;
         if (n < 0 || n >= bits)
             throw new CompileError(count.Pos, $"Shift count must be 0 to {bits - 1}");
         if (count.Type.Kind == TypeKind.IntLiteral) Coerce(count, TernType.U8);
@@ -2040,6 +2038,43 @@ public sealed partial class Checker
         BinaryExpr b when Describe(b.Left) is { } l && Describe(b.Right) is { } r => $"{l} {OpText(b.Op)} {r}",
         _ => null,
     };
+
+    /// <summary>
+    /// One step of constant arithmetic, in signed 64 bits (spec 3.1): a result outside that range is
+    /// an error. <c>/</c> rounds toward zero, <c>%</c> has the left operand's sign, <c>&gt;&gt;</c>
+    /// rounds down. The shift count is already checked (0 to 63).
+    /// </summary>
+    internal static long ConstArithmetic(SourcePos pos, TokenKind op, long l, long r)
+    {
+        try
+        {
+            return op switch
+            {
+                TokenKind.Plus => checked(l + r),
+                TokenKind.Minus => checked(l - r),
+                TokenKind.Star => checked(l * r),
+                TokenKind.Slash => checked(l / r),
+                TokenKind.Percent => r == -1 ? 0 : l % r,
+                TokenKind.Amp => l & r,
+                TokenKind.Pipe => l | r,
+                TokenKind.Caret => l ^ r,
+                TokenKind.Shl => (l << (int)r) >> (int)r == l ? l << (int)r : throw new OverflowException(),
+                TokenKind.Shr => l >> (int)r,
+                _ => throw new InvalidOperationException(),
+            };
+        }
+        catch (OverflowException)
+        {
+            throw OutOfConstantRange(pos);
+        }
+    }
+
+    /// <summary>Negates a constant, in signed 64 bits (spec 3.1).</summary>
+    internal static long ConstNegate(SourcePos pos, long v) => v == long.MinValue ? throw OutOfConstantRange(pos) : -v;
+
+    private static CompileError OutOfConstantRange(SourcePos pos) => new(pos,
+        "This constant expression goes outside the signed 64-bit range of constant arithmetic "
+        + "(-9223372036854775808 to 9223372036854775807). Use smaller values");
 
     /// <summary>Wraps a value to the range of <paramref name="t"/>, as the CPU would.</summary>
     public static long Normalize(long v, TernType t) => t.Kind switch
