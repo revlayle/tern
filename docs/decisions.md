@@ -546,3 +546,8 @@ From the review that also gave the spec cleanup of the same day. Most state what
 - **`\n` is an error in an encoding with no line break** (`screen`, `screen_mixed`; spec 2.1), as built.
 - **Spec 11 gains rows** for signed and 16-bit compares, `&&`, `||`, a compare stored in a `bool`, `i8 >> 1` (as built), and 16-bit shifts by 8 to 15, which are to move a byte first instead of shifting eight times (today 32 bytes and 80 cycles for `w << 8`).
 - **Order:** the coding items (struct literals, 64-bit constants, local `const`, the string error's fix, the byte-move shifts) are a small milestone, the M20 follow-up 2, before M21 (roadmap). Reason: the Galaxy Stars port would use struct literals before it reaches `pages`, `title` and `score`, and `/code` takes a milestone whole, so a list inside M21 would start the plug-in work too.
+
+## 2026-11-09: section D of the consistency review
+
+- **`@ align(n)` is planned, not scheduled** (roadmap, Not scheduled). It fits `@` (a location) and costs no code, but fixed addresses in a `reserved` area cover today's cases, and the Galaxy Stars source has no aligned data. Built when a program needs alignment that a fixed address handles badly.
+- **Unchanged, each waiting for a program that needs it:** calls through function pointers (spec 6.5, planned), second copies of functions used from two roots (14.2, after the first release), bank switching (14.1, with the NES), leaving nested loops, 16-bit `match`, a function body at a fixed address, and `muls16` / `divs16` (added to the library when a program needs them, as decided for M10).

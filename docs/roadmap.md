@@ -480,6 +480,7 @@ Each has a reason to wait; the spec session schedules one when that reason chang
 - **Question 63 (b)** (deferred 2026-11-07): folding `a[i + c]` proved from another access (no benchmark needs it, and it makes one line's cost depend on another, rule 4). Reconsider when a real program needs it. F20 is rejected and F14 is replaced by `indexed match` (decision 2026-11-08).
 - **Second copies of functions called from two roots** (spec 14.2) and **arrays of structs as struct fields** (14.11): discussed after the first release.
 - **The `nmos6502+undoc` CPU variant** (spec 12.1, opt-in undocumented opcodes).
+- **Alignment as a placement, `@ align(n)`** (decision 2026-11-09): place a `var` or `data` at the next multiple of `n` (64 for sprites, 1 KB for screens, 2 KB for character sets, 256 for page-aligned tables); `@` keeps its one meaning, a location. No code; the padding shows in the report. Today a fixed address in a `reserved` area does the same. Build it when a program needs alignment that a fixed address handles badly, such as a library module whose tables must be aligned wherever the program places them.
 
 After the compiler is complete (far off, not planned):
 
