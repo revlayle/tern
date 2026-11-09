@@ -61,6 +61,85 @@ public class AddressConversionTests
     }
 
     [Fact]
+    public void Lo_and_hi_of_an_address_plus_or_minus_a_constant_in_code()
+    {
+        // Question 84: every address form an initial value allows, also with a struct field named hi.
+        var r = Run.Program("""
+            struct S { lo: u8, hi: u8 }
+            var t: S
+            var map: [u8; 300]
+            fn f() { }
+            const K = 40
+            var a: u8
+            var b: u8
+            var c: u8
+            var d: u8
+            var e: u8
+            var g: u8
+            var h: u8
+            data table: [u8; 2] = [(addr(map) + 299).hi, (2 + addr(map)).lo]
+            fn main() {
+                a = (addr(map) + 299).hi
+                b = (addr(map) + 299).lo
+                c = (2 + addr(map)).lo
+                d = (addr(f) - 1).hi
+                e = (addr(t) + 1).hi
+                g = (addr(map) + K * 7 - 3).hi
+                h = (addr(t) + 1).lo
+                t.hi = 9
+            }
+            """);
+        int map = r.Address("map"), t = r.Address("t");
+        Assert.Equal((map + 299) >> 8, r.U8("a"));
+        Assert.Equal((map + 299) & 0xFF, r.U8("b"));
+        Assert.Equal((map + 2) & 0xFF, r.U8("c"));
+        Assert.Equal((r.Address("f") - 1) >> 8, r.U8("d"));
+        Assert.Equal((t + 1) >> 8, r.U8("e"));
+        Assert.Equal((map + 277) >> 8, r.U8("g"));
+        Assert.Equal((t + 1) & 0xFF, r.U8("h"));
+        Assert.Equal(9, r.U8("t", 1));
+        Assert.Equal([(byte)((map + 299) >> 8), (byte)(map + 2)], r.Ram.Bytes.AsSpan(r.Address("table"), 2).ToArray());
+    }
+
+    [Fact]
+    public void Lo_and_hi_of_an_address_with_an_offset_is_one_load()
+    {
+        var r = Run.Program("""
+            var map: [u8; 300]
+            var a: u8
+            var b: u8
+            fn main() {
+                a = (addr(map) + 299).hi
+                b = (addr(map) - 1).lo
+            }
+            """);
+        var main = r.Result.Listing[r.Result.Listing.IndexOf("main:")..];
+        main = main[..main.IndexOf("rts")];
+        Assert.Contains("lda #(map+299).hi", main);
+        Assert.Contains("lda #(map-1).lo", main);
+        Assert.DoesNotContain("adc", main);
+        Assert.DoesNotContain("sbc", main);
+        Assert.Equal((r.Address("map") - 1) & 0xFF, r.U8("b"));
+    }
+
+    [Theory]
+    [InlineData("var p: ptr u8\nvar x: u8\nfn main() { x = p.hi }", ".hi needs a number; convert the pointer first: (p as u16).hi")]
+    [InlineData("var map: [u8; 9]\nvar n: u8\nvar x: u8\nfn main() { x = (addr(map) + n).hi }", ".hi needs a number; convert the pointer first: (p as u16).hi")]
+    public void Lo_and_hi_of_a_pointer_that_is_not_a_filled_in_address_is_an_error(string source, string expected)
+    {
+        var e = Assert.Throws<CompileError>(() => TernCompiler.Compile(source));
+        Assert.Contains(expected, e.Description);
+    }
+
+    [Fact]
+    public void A_number_before_a_pointer_names_the_operands_as_written()
+    {
+        // Question 85.
+        var e = Assert.Throws<CompileError>(() => TernCompiler.Compile("var map: [u8; 9]\nvar p: ptr u8\nvar n: u8\nfn main() { p = n + addr(map) }"));
+        Assert.Contains("Write 'addr(map) + n' to move the pointer", e.Description);
+    }
+
+    [Fact]
     public void A_pointer_converts_to_u16_where_a_u16_is_expected()
     {
         // Spec 3.5: assignment, initial value, table element, argument, return value.

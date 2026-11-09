@@ -1516,19 +1516,42 @@ public sealed class CodeGen
         {
             case NameExpr { Symbol: { InMemory: true } v }:
                 return (Var(v), Var(v, 1));
-            case CallExpr { FunctionAddress: { } f }:
-                return (new ImmLabelByte(_functionLabels[f], false), new ImmLabelByte(_functionLabels[f], true));
-            case CallExpr { AddressOf: { } av }:
-            {
-                // A field of a struct variable is a view: its storage plus an offset.
-                var (v, offset) = av.AliasOf is { } storage ? (storage, av.AliasOffset) : (av, 0);
-                return (new ImmVarByte(v, false, offset), new ImmVarByte(v, true, offset));
-            }
+            case CallExpr or BinaryExpr when AddressBytes(e, 0) is { } address:
+                return address;
             case IndexExpr ix when !IsPointerIndex(ix) && ix.Index.ConstValue is long i:
                 var arr = ArrayOf(ix);
                 return (Var(arr, (int)i), Var(arr, HighTable(arr) + (int)i));
             case CastExpr cast when cast.Operand.Type.Size == 2:
                 return Simple2(cast.Operand);
+            default:
+                return null;
+        }
+    }
+
+    /// <summary>
+    /// The two bytes of an address the assembler fills in: <c>addr(x)</c> plus or minus constants,
+    /// through casts between two-byte types (<c>#&lt;(map+299)</c>). Null for anything else.
+    /// </summary>
+    private (Operand Lo, Operand Hi)? AddressBytes(Expr e, int offset)
+    {
+        switch (e)
+        {
+            case CallExpr { FunctionAddress: { } f }:
+                return (new ImmLabelByte(_functionLabels[f], false, offset), new ImmLabelByte(_functionLabels[f], true, offset));
+            case CallExpr { AddressOf: { } av }:
+            {
+                // A field of a struct variable is a view: its storage plus an offset.
+                var (v, field) = av.AliasOf is { } storage ? (storage, av.AliasOffset) : (av, 0);
+                return (new ImmVarByte(v, false, field + offset), new ImmVarByte(v, true, field + offset));
+            }
+            case CastExpr { Type.Size: 2, Operand.Type.Size: 2 } cast:
+                return AddressBytes(cast.Operand, offset);
+            case BinaryExpr { Op: TokenKind.Plus, Type.Size: 2, Right.ConstValue: long r } b:
+                return AddressBytes(b.Left, offset + (int)r);
+            case BinaryExpr { Op: TokenKind.Plus, Type.Size: 2, Left.ConstValue: long l } b:
+                return AddressBytes(b.Right, offset + (int)l);
+            case BinaryExpr { Op: TokenKind.Minus, Type.Size: 2, Right.ConstValue: long r } b:
+                return AddressBytes(b.Left, offset - (int)r);
             default:
                 return null;
         }

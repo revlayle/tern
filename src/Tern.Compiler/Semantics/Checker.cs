@@ -1397,6 +1397,9 @@ public sealed partial class Checker
                     m.Target = new CastExpr(address.Pos, address, new NamedTypeSyntax(address.Pos, "u16"));
                 CheckMemberTarget(m);
                 CheckExpr(m.Target);
+                // So are those of addr(x) plus or minus a constant, the forms an initial value allows (question 84).
+                if (m.Member is "lo" or "hi" && m.Target is BinaryExpr { Type.IsPointer: true } && Placed(m.Target) is not null)
+                    m.Target = new CastExpr(m.Target.Pos, m.Target, new NamedTypeSyntax(m.Target.Pos, "u16")) { Type = TernType.U16 };
                 if (m.Target.Type.IsStruct || m.Target.Type is { IsPointer: true, Element.IsStruct: true })
                 {
                     CheckField(m);
@@ -2016,7 +2019,7 @@ public sealed partial class Checker
         NameExpr n => n.Name,
         MemberExpr m when Describe(m.Target) is { } t => $"{t}.{m.Member}",
         IndexExpr ix when Describe(ix.Target) is { } t => $"{t}[{Describe(ix.Index) ?? "..."}]",
-        CallExpr c => $"{c.Name}()",
+        CallExpr c => $"{c.Name}({string.Join(", ", c.Args.Select(a => Describe(a) ?? "..."))})",
         NumberExpr n => n.Value.ToString(),
         BinaryExpr b when Describe(b.Left) is { } l && Describe(b.Right) is { } r => $"{l} {OpText(b.Op)} {r}",
         _ => null,

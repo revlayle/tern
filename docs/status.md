@@ -4,11 +4,16 @@ Owned by the coding session. Updated at the end of every coding session.
 
 ## Current
 
-- **Milestone:** M20 follow-up (roadmap). All items are done, the first review's findings are fixed, and the spec decisions of 2026-11-09 (questions 79-83, a pointer to `u16`) are built.
-- **Branch:** `m20-followup`, with `main` merged in at `62f3373`. 2108 compiler tests pass plus 36 CPU tests. No benchmark changed (1254 / 350780); `SkillTests` pass.
-- **Next step:** second review (`/review`). Questions 84-85 are open, neither blocking.
+- **Milestone:** M20 follow-up (roadmap). All items are done, the first review's findings are fixed, and the spec decisions of 2026-11-09 (questions 79-85, a pointer to `u16`) are built.
+- **Branch:** `m20-followup`, with `main` merged in at `93c52b5`. 2113 compiler tests pass plus 36 CPU tests. No benchmark changed (1254 / 350780); `SkillTests` pass.
+- **Next step:** second review (`/review`). No questions open.
 
 ## Done
+
+- **Questions 84 and 85** (2026-11-09).
+  - 84: `.lo` / `.hi` on `addr(...) ± constant` in code. The checker wraps such a target (a pointer `BinaryExpr` that `Placed` accepts) in a `u16` cast before the field lookup, so a struct field named `hi` does not interfere; a runtime offset keeps the pointer error. `CodeGen.AddressBytes` gives the two bytes of `addr(x)` plus or minus constants through two-byte casts (used by `Simple2`), so `(addr(map) + 299).hi` is `lda #(map+299).hi`.
+  - 85: `Describe` writes a call with its arguments, so `n + addr(map)` suggests "Write 'addr(map) + n'".
+  - `AddressConversionTests` (4 new); `language.md` gives the offset form and the pointer-first rule.
 
 - **M20 follow-up, review fixes and the 2026-11-09 decisions** (2026-11-09, `ef833c3`, `docs/reviews/m20-followup.md`).
   - Finding 1 (must fix): `.lo` / `.hi` of a typed `u16` constant below 256 uses the constant's 16-bit type. Finding 2 (must fix): `ConstSymbol.IsBitPattern` keeps `const N = ~$0F` a bit pattern; a pattern wider than the type has its own error. Suggestion 3 is moot after question 81; 4 is question 83 (below); 5: "this value is i8"; 6: a zero-page startup test.
@@ -438,14 +443,13 @@ Not bugs; things to improve, mostly in M7 (optimizer).
 - The scroller copies 14 cycles a byte; an unrolled version with absolute addressing for each direction would take about 10.
 - The color redraw (`COLORS = true`) is untested against the beam (the stand-in VIC does not read color RAM). It can fall behind the beam in the lower rows when combined with the multiplexer's interrupts (review finding 4); the scroll header says so.
 - `src/lib/wide.tern` has the 24- and 32-bit code written out twice (generated once from a template).
+- `w = addr(map) - 1` (or `+`) into a 16-bit variable stores `addr(map)` and then subtracts at run time; `CodeGen.AddressBytes` could make it two `lda #` / `sta` pairs, as it already does for `.lo` / `.hi`.
 
 ## Questions for the spec session
 
-84. **`(addr(map) + 299).hi` in code** (M20 follow-up). Spec 3.4 allows `.lo` / `.hi` on `addr(...)` itself; with an offset it is a pointer, so in code it is the pointer error ("convert the pointer first: (p as u16).hi"), while spec 4 accepts the same text in an initial value. As built, following 3.4; should the exception cover `addr(...) ± constant` too?
+None open.
 
-85. **A runtime number before a pointer** (M20 follow-up). Spec 3.5 makes `w + p` an error; the compiler used to accept `n + p` as pointer arithmetic (the checker's comment said so, spec 3.4 never did). As built: an error when the number is not a constant (`2 + addr(map)` still works, as review M20 follow-up checked). Fine?
-
-Questions 79-83 were settled on 2026-11-09 and are built. Questions 76-78 were settled on 2026-11-08 (decisions.md), as built.
+Questions 79-85 were settled on 2026-11-09 and are built. Questions 76-78 were settled on 2026-11-08 (decisions.md), as built.
 
 Questions 1-63 and 65-75 are settled (decisions.md; 44, 45 and 59-63 on 2026-11-07, 65-75 on 2026-11-08). Question 64 was withdrawn.
 

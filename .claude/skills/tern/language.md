@@ -217,7 +217,9 @@ player $0918 Enemy (3 bytes):
   the index counts elements.
 - Arithmetic is in bytes: `p + 1`, `p += 256` (`inc p+1`), `p - q` gives a `u16`.
 - `.lo` and `.hi` are not allowed on pointers (`p.name` is a struct field): write `(p as u16).hi`.
-  On `addr(...)` itself they are the address bytes: `addr(map).lo` is `lda #<map`.
+  On `addr(...)`, alone or plus or minus a constant, they are the address bytes: `addr(map).lo` is
+  `lda #<map`, `(addr(map) + 299).hi` is `lda #>(map+299)`.
+- Pointer arithmetic puts the pointer first: `p + n`. `n + p` with a runtime `n` is an error.
 - A pointer that is dereferenced is placed in zero page automatically.
 
 ```tern
