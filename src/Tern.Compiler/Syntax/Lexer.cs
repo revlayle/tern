@@ -223,7 +223,7 @@ public static class Lexer
                     int dv = Convert.ToInt32(d.ToString(), 16);
                     if (dv >= radix) throw new CompileError(Pos(start), $"Invalid digit '{d}' in number {source[start..i]}");
                     value = value * radix + dv;
-                    if (value > 0xFFFF_FFFF) throw new CompileError(Pos(start), "Number is too large");
+                    if (value > 0xFFFF_FFFF) throw new CompileError(Pos(start), "Number is too large. Use a value up to $FFFFFFFF (4294967295)");
                 }
                 Add(TokenKind.Number, source[start..i], value, start);
                 continue;

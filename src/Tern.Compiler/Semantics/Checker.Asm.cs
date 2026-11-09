@@ -110,6 +110,7 @@ public sealed partial class Checker
         TokenKind.Plus or TokenKind.Minus or TokenKind.Star or TokenKind.Slash or TokenKind.Percent
             or TokenKind.Amp or TokenKind.Pipe or TokenKind.Caret => ConstArithmetic(b.Pos, b.Op, l, r),
         TokenKind.Shl or TokenKind.Shr when r is >= 0 and < 64 => ConstArithmetic(b.Pos, b.Op, l, r),
+        TokenKind.Shl or TokenKind.Shr => throw new CompileError(b.Right.Pos, "Shift count must be 0 to 63"),
         _ => throw new CompileError(b.Pos, "Assembly operands can only use + - * / % & | ^ << >>"),
     };
 

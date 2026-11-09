@@ -113,6 +113,9 @@ public class ConstantRangeTests
     [InlineData("const V = 1 >> 64\nfn main() { }", "Shift count must be 0 to 63")]
     [InlineData("const V = 1 << -1\nfn main() { }", "Shift count must be 0 to 63")]
     [InlineData("var x: u8\nfn main() { x = x << 8 }", "Shift count must be 0 to 7")]
+    [InlineData("fn main() { asm { lda #1 << 64 } }", "Shift count must be 0 to 63")]
+    [InlineData("fn main() { asm { lda #1 >> -1 } }", "Shift count must be 0 to 63")]
+    [InlineData("const V = 4294967296\nfn main() { }", "Number is too large. Use a value up to $FFFFFFFF (4294967295)")]
     [InlineData("var w: u16\nfn main() { w = w >> 16 }", "Shift count must be 0 to 15")]
     public void Shift_counts(string source, string expected) => Assert.Contains(expected, Error(source));
 

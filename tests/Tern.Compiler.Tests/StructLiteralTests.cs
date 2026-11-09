@@ -261,6 +261,21 @@ public class StructLiteralTests
     [InlineData(P + "var p: Point @ $C000 = Point { x = 1 }\nfn main() { }", "A variable at a fixed address cannot have an initial value")]
     [InlineData(P + "var p = Pad { b = addr(main) + addr(main) }\nfn main() { }", "An address in an initial value is filled in when the program is placed")]
     [InlineData(P + "indexed data ps: [Point; 2] = [Point { }, Point { }]\nfn main() { }", "indexed")]
+    // A literal in the wrong place inside an initial value (review M20 follow-up 2, suggestion 2).
+    [InlineData("struct L { x: u8, n: ptr L }\nvar a: L = L { n = L { x = 1 } }\nfn main() { }",
+        "'n' is ptr L, an address, not a L. Declare the record as data and write 'n = addr(name)'")]
+    [InlineData("struct L { x: u8, n: ptr L }\ndata B: [u8; 1] = [1]\nvar a: L = L { n = L { n = addr(B) } }\nfn main() { }",
+        "'n' is ptr L, an address, not a L")]
+    [InlineData("struct L { x: u8, n: ptr L }\nvar p: ptr L = L { x = 1 }\nfn main() { }", "This value is ptr L, an address, not a L")]
+    [InlineData("struct L { x: u8, ps: [ptr L; 2] }\nvar a: L = L { ps = [0, L { }] }\nfn main() { }", "This value is ptr L, an address, not a L")]
+    [InlineData(P + "var b: u8 = Point { x = 1 }\nfn main() { }", "Expected u8, found a Point literal")]
+    [InlineData(P + "var a = Pad { a = Point { } }\nfn main() { }", "Expected u8, found a Point literal")]
+    [InlineData(P + "const K = Point { x = 1 }\nfn main() { }", "A constant cannot be a struct. Declare it as data: 'data K = Point { ... }'")]
+    [InlineData(P + "fn main() { const K = Point { x = 1 } }", "A constant cannot be a struct")]
+    // A missing ',' between list elements (suggestion 3).
+    [InlineData(P + "var ps: [Point; 2] = [\n  Point { x = 1 }\n  Point { x = 2 }\n]\nfn main() { }",
+        "Expected ',' or ']' after this element, found 'Point'. Write ',' after the '}'")]
+    [InlineData("var a: [u8; 2] = [1 2]\nfn main() { }", "Expected ',' or ']' after this element, found '2'. Write ',' between the elements")]
     public void Reports_errors(string source, string expected) => Assert.Contains(expected, Error(source));
 
     [Fact]

@@ -420,6 +420,8 @@ public sealed partial class Checker
 
     private void DeclareConst(ConstDecl decl)
     {
+        if (decl.Value is StructLiteralExpr lit)
+            throw new CompileError(lit.Pos, $"A constant cannot be a struct. Declare it as data: 'data {decl.Name} = {lit.StructName} {{ ... }}'");
         CheckExpr(decl.Value);
         if (decl.Value.ConstValue is not long value)
             throw new CompileError(decl.Value.Pos, $"The value of '{decl.Name}' is not known at compile time");
@@ -761,12 +763,23 @@ public sealed partial class Checker
             return bytes.ToArray();
         }
 
+        if (init is StructLiteralExpr lit) throw LiteralForScalar(lit, type, null);
         if (UsesAddr(init)) return AddressBytes(init, type, target, at);
         CheckExpr(init);
         Coerce(init, type);
         if (init.ConstValue is not long value)
             throw new CompileError(init.Pos, "A global's initial value must be known at compile time");
         return type.Size == 1 ? [(byte)value] : [(byte)value, (byte)(value >> 8)];
+    }
+
+    /// <summary>A struct literal where a number, bool or pointer is expected; <paramref name="field"/> names the field, if any.</summary>
+    private static CompileError LiteralForScalar(StructLiteralExpr lit, TernType type, string? field)
+    {
+        if (!type.IsPointer) return new CompileError(lit.Pos, $"Expected {type}, found a {lit.StructName} literal");
+        string what = field is null ? "This value" : $"'{field}'";
+        string write = field is null ? "addr(name)" : $"{field} = addr(name)";
+        return new CompileError(lit.Pos,
+            $"{what} is {type}, an address, not a {lit.StructName}. Declare the record as data and write '{write}'");
     }
 
     /// <summary>
@@ -816,6 +829,7 @@ public sealed partial class Checker
         }
         if (!type.IsArray)
         {
+            if (value is StructLiteralExpr lit) throw LiteralForScalar(lit, type, field.Name);
             ScalarInto(value, type, target, record, offset, type.Size == 2 ? offset + 1 : null, at);
             return;
         }
@@ -841,6 +855,7 @@ public sealed partial class Checker
     /// <summary>A number, bool or pointer into <paramref name="record"/>: the low byte at <paramref name="lo"/>, the high byte (if any) at <paramref name="hi"/>.</summary>
     private void ScalarInto(Expr e, TernType type, VariableSymbol target, byte[] record, int lo, int? hi, int at)
     {
+        if (e is StructLiteralExpr lit) throw LiteralForScalar(lit, type, null);
         if (UsesAddr(e))
         {
             AddressBytes(e, type, target, at + lo, hi is { } h ? at + h : null);

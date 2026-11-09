@@ -995,8 +995,12 @@ public sealed class Parser
                     {
                         SkipNewlines();
                         if (At(TokenKind.RBracket)) break; // a trailing ','
-                        elements.Add(ParseExpr());
+                        var element = ParseExpr();
+                        elements.Add(element);
                         SkipNewlines();
+                        if (!At(TokenKind.Comma) && !At(TokenKind.RBracket))
+                            throw new CompileError(Current.Pos, $"Expected ',' or ']' after this element, found {Describe(Current)}. "
+                                + (element is StructLiteralExpr ? "Write ',' after the '}'" : "Write ',' between the elements"));
                     } while (Accept(TokenKind.Comma));
                 }
                 Expect(TokenKind.RBracket, "']'");
