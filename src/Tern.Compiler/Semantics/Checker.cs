@@ -1560,7 +1560,11 @@ public sealed partial class Checker
         var u8 = TernType.U8;
         Expr index = ix.Index.ConstValue is long c
             ? new NumberExpr(ix.Index.Pos, 2 * c) { Type = u8, ConstValue = 2 * c }
-            : new BinaryExpr(ix.Index.Pos, TokenKind.Shl, ix.Index, new NumberExpr(ix.Index.Pos, 1) { Type = u8, ConstValue = 1 }) { Type = u8 };
+            : new BinaryExpr(ix.Index.Pos, TokenKind.Shl, ix.Index, new NumberExpr(ix.Index.Pos, 1) { Type = u8, ConstValue = 1 })
+            {
+                Type = u8,
+                ScalesIndexOf = ix.Target is NameExpr { Symbol: VariableSymbol v } ? (v.QualifiedName, v.Type.Length) : null,
+            };
         return new IndexExpr(ix.Pos, ix.Target, index) { Type = ix.Type };
     }
 

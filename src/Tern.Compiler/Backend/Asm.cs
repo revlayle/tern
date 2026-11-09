@@ -42,7 +42,8 @@ public sealed record ImmVarByte(VariableSymbol Variable, bool High, int Offset =
 /// <c>a-1,x</c>) and holds <see cref="Length"/> bytes: <see cref="Elements"/> elements, <see cref="Stride"/> bytes apart. For an
 /// <c>indexed match</c>, <see cref="MatchLow"/> is its lowest pattern value.
 /// </summary>
-public sealed record IndexCheck(string Name, int Shift, int Length, int Elements, int Stride = 1, int? MatchLow = null, bool Signed = false);
+/// With <see cref="InA"/> the check is on A before an instruction (the index before it is scaled), not on an address.
+public sealed record IndexCheck(string Name, int Shift, int Length, int Elements, int Stride = 1, int? MatchLow = null, bool Signed = false, bool InA = false);
 
 /// <summary>A byte of a variable: its address plus <see cref="Offset"/>.</summary>
 public sealed record VarOperand(VariableSymbol Variable, int Offset = 0) : Operand
@@ -79,7 +80,13 @@ public abstract record AsmItem;
 /// Set for instructions written in an asm block. The assembler never replaces them (an out-of-range
 /// branch is an error at this position instead of a branch over a <c>jmp</c>).
 /// </param>
-public sealed record Instr(Mnemonic Mnemonic, AddressingMode Mode = AddressingMode.Implied, Operand? Operand = null, SourcePos? AsmPos = null) : AsmItem;
+public sealed record Instr(Mnemonic Mnemonic, AddressingMode Mode = AddressingMode.Implied, Operand? Operand = null, SourcePos? AsmPos = null) : AsmItem
+{
+    /// <summary>Set on the shift that scales a linear array's index: A must be below the element count (M20). Not part of the identity.</summary>
+    public IndexCheck? Check { get; init; }
+    public bool Equals(Instr? other) => other is not null && Mnemonic == other.Mnemonic && Mode == other.Mode && Equals(Operand, other.Operand) && AsmPos == other.AsmPos;
+    public override int GetHashCode() => HashCode.Combine(Mnemonic, Mode, Operand, AsmPos);
+}
 
 public sealed record LabelDef(Label Label) : AsmItem;
 

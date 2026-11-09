@@ -239,7 +239,11 @@ public sealed partial class Checker
             int shift = size switch { 1 => 0, 2 => 1, 4 => 2, _ => 3 };
             offset = shift == 0
                 ? ix.Index
-                : new BinaryExpr(ix.Index.Pos, TokenKind.Shl, ix.Index, new NumberExpr(ix.Index.Pos, shift) { Type = u8, ConstValue = shift }) { Type = u8 };
+                : new BinaryExpr(ix.Index.Pos, TokenKind.Shl, ix.Index, new NumberExpr(ix.Index.Pos, shift) { Type = u8, ConstValue = shift })
+                {
+                    Type = u8,
+                    ScalesIndexOf = (arr.QualifiedName, arr.Type.Length),
+                };
         }
         else
         {

@@ -106,7 +106,7 @@ public sealed class CodeGen
         bool records = arr.AliasOf is { Type: { IsArray: true, Element.IsStruct: true } } s && (s.Type.Linear || s.IsIndexed);
         int stride = records ? storage.Type.Element!.Size : arr.Type.Linear ? 2 : 1;
         int length = records ? arr.Type.Length : arr.Type.Linear ? arr.Type.Size : arr.Type.Length;
-        string name = storage == arr ? arr.QualifiedName : arr.Name;
+        string name = storage == arr || records ? storage.QualifiedName : arr.Name;
         return Var(arr, table + shift) with { Check = new IndexCheck(name, shift, length, records ? storage.Type.Length : arr.Type.Length, stride) };
     }
 
@@ -1432,6 +1432,13 @@ public sealed class CodeGen
         if (b.Op is TokenKind.Shl or TokenKind.Shr)
         {
             GenA(b.Left);
+            if (b.ScalesIndexOf is var (array, elements))
+            {
+                // The index of a linear array, scaled: checked in A before it can wrap (M20).
+                _out.Add(new Instr(Asl, Accumulator) { Check = new IndexCheck(array, 0, elements, elements, InA: true) });
+                ShiftA(b.Op, b.Right.ConstValue!.Value - 1, signed: false);
+                return;
+            }
             ShiftA(b.Op, b.Right.ConstValue!.Value, b.Type.IsSigned);
             return;
         }

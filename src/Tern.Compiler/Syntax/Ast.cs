@@ -82,6 +82,12 @@ public sealed class BinaryExpr(SourcePos pos, TokenKind op, Expr left, Expr righ
     public TokenKind Op { get; } = op;
     public Expr Left { get; set; } = left;
     public Expr Right { get; set; } = right;
+    /// <summary>
+    /// Set by the checker on the shift that scales an index into a linear array (by 2, or by a
+    /// record's size): the array and its element count, so the emulator can check the index before
+    /// the shift, where it cannot have wrapped yet (M20).
+    /// </summary>
+    public (string Array, int Elements)? ScalesIndexOf { get; init; }
 }
 public sealed class CallExpr(SourcePos pos, string name, List<Expr> args) : Expr(pos)
 {

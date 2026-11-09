@@ -480,6 +480,7 @@ public static class Assembler
     /// <summary>The index check of a compiler-generated indexed instruction (never one from an asm block), or null.</summary>
     private static CheckedIndex? Checked(Instr i, AddressingMode mode)
     {
+        if (i.Check is { InA: true } inA && i.AsmPos is null) return new CheckedIndex(0, false, false, 0, inA);
         var check = i.Operand switch { VarOperand v => v.Check, LabelOperand l => l.Check, _ => null };
         if (check is null || i.AsmPos is not null
             || mode is not (AddressingMode.AbsoluteX or AddressingMode.AbsoluteY or AddressingMode.ZeroPageX or AddressingMode.ZeroPageY)) return null;

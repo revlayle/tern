@@ -75,13 +75,17 @@ public class IndexCheckTests
 
     [Theory]
     // Both tables of a split u16 array.
-    [InlineData("var w: [u16; 4]\nvar i: u8 = 4\nfn main() { w[i] = 1000 }", "Index 4 is outside 'w', which has 4 elements", 2)]
+    [InlineData("var w: [u16; 4]\nvar i: u8 = 4\nfn main() { w[i] = 1000 }", "Index 4 is outside 'w', which has 4 elements", 1)]
     // A struct array field: one table per field, so index 4 of hp is not x of the next table.
     [InlineData("struct E { x: u8, hp: u8 }\nvar e: [E; 4]\nvar i: u8 = 4\nfn main() { e[i].x = 1 }", "Index 4 is outside 'e.x', which has 4 elements", 1)]
     // A linear u16 array: the index is doubled.
-    [InlineData("linear var p: [u16; 4]\nvar i: u8 = 5\nvar w: u16\nfn main() { w = p[i] }", "Index 5 is outside 'p', which has 4 elements", 2)]
+    [InlineData("linear var p: [u16; 4]\nvar i: u8 = 5\nvar w: u16\nfn main() { w = p[i] }", "Index 5 is outside 'p', which has 4 elements", 1)]
+    // A scaled index that wraps is checked before the shift: 130 * 2 = 260 would land on p[2] (review M20, finding 1).
+    [InlineData("linear var pts: [u16; 10]\nvar j: u8 = 130\nvar out: u16\nfn main() { out = pts[j] }", "Index 130 is outside 'pts', which has 10 elements", 1)]
+    [InlineData("struct E { x: u8, y: u8, hp: u8, k: u8 }\nlinear var es: [E; 10]\nvar j: u8 = 66\nvar out: u8\nfn main() { out = es[j].hp }", "Index 66 is outside 'es', which has 10 elements", 1)]
+    [InlineData("linear var pts: [u16; 10]\nvar first: u8 = 125\nvar out: u16\nfn main() { for j in first..=255 using X { out = pts[j] } }", "Index 125 is outside 'pts', which has 10 elements", 1)]
     // A linear struct array of 4-byte records.
-    [InlineData("struct R { a: u8, b: u8, c: u8, d: u8 }\nlinear var r: [R; 3]\nvar i: u8 = 3\nfn main() { r[i].c = 1 }", "Index 3 is outside 'r.c', which has 3 elements", 1)]
+    [InlineData("struct R { a: u8, b: u8, c: u8, d: u8 }\nlinear var r: [R; 3]\nvar i: u8 = 3\nfn main() { r[i].c = 1 }", "Index 3 is outside 'r', which has 3 elements", 1)]
     // An indexed struct array: the offset table is checked first (the record access then uses whatever byte follows it).
     [InlineData("struct R { a: u8, b: u8, c: u8 }\nindexed var r: [R; 3]\nvar i: u8 = 3\nfn main() { r[i].b = 1 }", "Index 3 is outside 'r.offsets', which has 3 elements", 0)]
     // A local array.

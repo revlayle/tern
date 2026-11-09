@@ -25,7 +25,9 @@ public sealed class IndexChecker(CompileResult program, string mainFile)
 {
     private readonly Dictionary<int, PlacedInstruction> _checks =
         program.Instructions.Where(i => i.Index is not null).GroupBy(i => i.Address).ToDictionary(g => g.Key, g => g.First());
-    private readonly Dictionary<int, IndexError> _seen = [];
+    // One error per line and array (or match), counted at the instruction that first reported it: the two
+    // bytes of a 16-bit element, and the scaled index of a linear array, are one access.
+    private readonly Dictionary<(string File, int? Line, string Table), (IndexError Error, int At)> _seen = [];
 
     /// <summary>The errors seen so far, in the order they first happened.</summary>
     public List<IndexError> Errors { get; } = [];
@@ -38,13 +40,12 @@ public sealed class IndexChecker(CompileResult program, string mainFile)
     {
         if (!_checks.TryGetValue(cpu.PC, out var instruction)) return false;
         var c = instruction.Index!;
-        int register = c.UsesY ? cpu.Y : cpu.X;
-        int address = c.ZeroPage ? (c.Base + register) & 0xFF : (c.Base + register) & 0xFFFF;
-        int offset = address - c.First;
-        if (offset >= 0 && offset < c.Check.Length) return false;
-
-        if (_seen.TryGetValue(cpu.PC, out var seen)) { seen.Count++; return false; }
         var check = c.Check;
+        int register = check.InA ? cpu.A : c.UsesY ? cpu.Y : cpu.X;
+        int address = check.InA ? register : c.ZeroPage ? (c.Base + register) & 0xFF : (c.Base + register) & 0xFFFF;
+        int offset = address - c.First;
+        if (offset >= 0 && offset < check.Length) return false;
+
         string message;
         if (check.MatchLow is int low)
         {
@@ -58,8 +59,14 @@ public sealed class IndexChecker(CompileResult program, string mainFile)
             int index = (offset & 0xFF) / check.Stride;
             message = $"Index {index} is outside '{check.Name}', which has {check.Elements} elements";
         }
-        var error = new IndexError(instruction.File ?? mainFile, instruction.Line, instruction.Source ?? "", message, cpu.Cycles);
-        _seen[cpu.PC] = error;
+        string file = instruction.File ?? mainFile;
+        if (_seen.TryGetValue((file, instruction.Line, check.Name), out var seen))
+        {
+            if (seen.At == cpu.PC) seen.Error.Count++;
+            return check.MatchLow is not null;
+        }
+        var error = new IndexError(file, instruction.Line, instruction.Source ?? "", message, cpu.Cycles);
+        _seen[(file, instruction.Line, check.Name)] = (error, cpu.PC);
         Errors.Add(error);
         return check.MatchLow is not null;
     }
