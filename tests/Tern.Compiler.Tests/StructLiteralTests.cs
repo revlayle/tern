@@ -279,6 +279,10 @@ public class StructLiteralTests
     // No closing ']' (second review, suggestion 2).
     [InlineData("var a: [u8; 2] = [1, 2", "Expected ',' or ']' after this element, found end of file. Write ']' to end the list")]
     [InlineData("fn main() { f([1, 2) }", "Expected ',' or ']' after this element, found ')'. Write ']' to end the list")]
+    // ... or by the next declaration or statement (third review, suggestion 4).
+    [InlineData("var a: [u8; 2] = [1, 2\nfn main() { }", "Expected ',' or ']' after this element, found 'fn'. Write ']' to end the list")]
+    [InlineData("data a: [u8; 2] = [\n  1,\n  2\nvar b: u8\nfn main() { }", "found 'var'. Write ']' to end the list")]
+    [InlineData("var a: [bool; 2] = [true\nfalse]\nfn main() { }", "found 'false'. Write ',' between the elements")]
     // Question 86: inside [ ] a newline still does not separate elements.
     [InlineData("var a: [u8; 2] = [\n  1\n  2\n]\nfn main() { }", "Expected ',' or ']' after this element, found '2'. Write ',' between the elements")]
     public void Reports_errors(string source, string expected) => Assert.Contains(expected, Error(source));

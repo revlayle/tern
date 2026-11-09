@@ -5,10 +5,14 @@ Owned by the coding session. Updated at the end of every coding session.
 ## Current
 
 - **Milestone:** M20 follow-up 2 (roadmap). All six items are done, and the "done when" test passes. M20 follow-up was merged into `main` (`909489f`).
-- **Branch:** `m20-followup2`, with `main` merged in (both reviews). 2384 compiler tests pass plus 36 CPU tests. No benchmark changed (1254 / 350780); `SkillTests` pass. All examples and the Galaxy Stars port compile.
-- **Next step:** `/review` of the second review's fixes (finding 1 and suggestions 2, 3), then `/merge m20-followup2`. No questions are open.
+- **Branch:** `m20-followup2`, with `main` merged in (all three reviews). 2393 compiler tests pass plus 36 CPU tests. No benchmark changed (1254 / 350780); `SkillTests` pass. All examples and the Galaxy Stars port compile.
+- **Next step:** `/merge m20-followup2`. The third review says ready to merge; its suggestions 3 and 4 are done since (`/review` them first if wanted). No questions are open.
 
 ## Done
+
+- **M20 follow-up 2, third review suggestions** (2026-11-09, `docs/reviews/m20-followup2.md`, third review).
+  - Suggestion 3: the assembler checks the address of an asm-block operand `name + offset` once the program is placed: "The address B+65000 is $10402, outside memory. Use a smaller offset" (`Assembler`, the encoding pass; labels and variables, not branches, which have their own range check, and not `#(...).lo` / `.hi`, which take a byte of the sum). The checker's offset check stays as a guard for the `int` offset, now with "Use a smaller offset". `AsmTests.Reports_errors` and `A_byte_of_an_address_past_memory_is_allowed`.
+  - Suggestion 4: a list cut off by a keyword (`fn`, `var`, `return`, ... but not `true` / `false`) also says "Write ']' to end the list". `StructLiteralTests.Reports_errors`.
 
 - **M20 follow-up 2, second review** (2026-11-09, `docs/reviews/m20-followup2.md`, second review).
   - Finding 1 (must fix): a long byte array over 65536 elements is "An array of u8 has at most 65536 elements, all of memory, not N. Use a smaller length" (`Checker.ResolveType`), checked before the `(int)` cast that kept only the low 32 bits. `DataTests.A_long_byte_array_fits_in_memory` (2^32 + 2, 2^31, 65537).

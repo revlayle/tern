@@ -1000,7 +1000,8 @@ public sealed class Parser
                         SkipNewlines();
                         if (!At(TokenKind.Comma) && !At(TokenKind.RBracket))
                             throw new CompileError(Current.Pos, $"Expected ',' or ']' after this element, found {Describe(Current)}. "
-                                + (At(TokenKind.Eof) || At(TokenKind.RBrace) || At(TokenKind.RParen) ? "Write ']' to end the list"
+                                + (At(TokenKind.Eof) || At(TokenKind.RBrace) || At(TokenKind.RParen)
+                                   || Lexer.IsKeyword(Current.Kind) && !At(TokenKind.True) && !At(TokenKind.False) ? "Write ']' to end the list"
                                     : element is StructLiteralExpr ? "Write ',' after the '}'" : "Write ',' between the elements"));
                     } while (Accept(TokenKind.Comma));
                 }

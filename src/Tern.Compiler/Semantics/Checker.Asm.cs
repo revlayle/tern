@@ -123,9 +123,9 @@ public sealed partial class Checker
         var m = ins.Mnemonic;
         string name = m.ToString().ToLowerInvariant();
         bool Has(AddressingMode mode) => InstructionSet.TryGet(m, mode, out _);
-        // The code generator keeps the offset in an int and the assembler 16 bits of the sum.
+        // The code generator keeps the offset in an int. The assembler checks the address itself.
         if (v is { IsNumber: false, Number: < -0xFFFF or > 0xFFFF })
-            throw new CompileError(ins.Operand!.Pos, $"Offset {v.Number} from an address is outside memory. Use an offset from -65535 to 65535");
+            throw new CompileError(ins.Operand!.Pos, $"Offset {v.Number} from an address is outside memory. Use a smaller offset");
 
         switch (ins.Form)
         {
