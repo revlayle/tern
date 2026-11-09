@@ -201,7 +201,7 @@ e.pos.y = 5                        // ldy #1 / sta (e),y
 
 ### 3.4 Pointers
 
-- `ptr T` is a 16-bit address. `addr(name)` gives a pointer to a variable or array: `ptr T` for a variable of type `T`, a pointer to the first element for an array of one-byte elements, `ptr u8` to the low-byte table for a split array of 16-bit values, and `ptr u16` (or the element type) for a `linear` array of 16-bit values (3.2). A field of a struct variable or of a struct at a fixed address works too: `addr(player.name)` (no code beyond loading the constant address). Fields through a pointer and in an array of structs are errors. Use `as u16` for the address as a number. `addr(f)` of a function is a `u16` constant: its address, e.g. for a vector or a jump table (6.5).
+- `ptr T` is a 16-bit address. `addr(name)` gives a pointer to a variable or array: `ptr T` for a variable of type `T`, a pointer to the first element for an array of one-byte elements, `ptr u8` to the low-byte table for a split array of 16-bit values, and `ptr u16` (or the element type) for a `linear` array of 16-bit values (3.2). A field of a struct variable or of a struct at a fixed address works too: `addr(player.name)` (no code beyond loading the constant address). Fields through a pointer and in an array of structs are errors. A pointer converts to `u16` by itself where a `u16` is expected (3.5): `var a: u16 = addr(map)`. `addr(f)` of a function is a `u16` constant: its address, e.g. for a vector or a jump table (6.5).
 - A number literal, or any constant expression (3.1), converts to a pointer without `as`, since it takes its type from context: `var p: ptr u8 = $0400`, `p == 0`, `mem.copy(CHARSET + FIRST * 8, ...)`. A `u16` variable or other runtime value needs `as`.
 - `p[i]` with `i: u8` compiles to `(zp),Y` addressing. There is no separate dereference operator: use `p[0]`.
 - On a pointer to a 16-bit type, the index counts elements: `p[i]` reads the bytes at offsets `2*i` and `2*i+1`. The byte offset must fit in the 256 bytes `(zp),Y` reaches: a constant index above 127 is an error, and a variable index of 128 or more wraps within those 256 bytes.
@@ -210,11 +210,13 @@ e.pos.y = 5                        // ldy #1 / sta (e),y
 - A pointer that is dereferenced must be in zero page. The compiler puts it there automatically (section 8.2) and reports an error if zero page runs out.
 - Pointer arithmetic is in bytes: `p + 1` is the next byte. Use `p + sizeof(T)` to step by one element. Offsets are unsigned; use `p - n` to move back.
 - `p - q` of two pointers of the same type gives the distance in bytes as a `u16`. For different types, convert one with `as` (no code).
-- **Any pointer converts to any other pointer type with `as`**, with no restrictions and no generated code: `p as ptr Enemy` reads the same memory as an `Enemy`. Pointers also convert to and from `u16` with `as`. The element type only tells the compiler how to read the memory; it never limits what the memory can be used as.
+- **Any pointer converts to any other pointer type with `as`**, with no restrictions and no generated code: `p as ptr Enemy` reads the same memory as an `Enemy`. Pointers also convert to and from `u16` with `as`; to `u16` it is automatic where a `u16` is expected (3.5). The element type only tells the compiler how to read the memory; it never limits what the memory can be used as.
 
 ### 3.5 Conversions
 
 **Automatic:** widening to a larger type of the same signedness: `u8` to `u16`, `i8` to `i16`.
+
+**Automatic where a `u16` is expected:** a pointer to `u16`, the address as a number, with no code. "Expected" means the destination gives the type: an assignment, an initial value or table element, an argument, a return value: `var a: u16 = p`, `data t: [u16; 2] = [addr(a), addr(b)]`. Inside an operator a pointer still needs `as`: `w + p` and `p == w` are errors (write `p as u16`), since `p + w` is pointer arithmetic (3.4) and the order of the operands must not change the result's type. The other way, `u16` to a pointer, always needs `as` (a literal or constant converts by itself, 3.4).
 
 **Explicit, with `as`:**
 
@@ -225,7 +227,7 @@ e.pos.y = 5                        // ldy #1 / sta (e),y
 | `i8 as i16` (or automatic) | sign extend | a few instructions: high byte becomes `$FF` or `$00` |
 | `u8 as u16` (or automatic) | zero extend | high byte = 0 |
 | `bool as u8` | `0` or `1` | e.g. from the carry flag: `lda #0` / `rol` |
-| `ptr T as u16`, `u16 as ptr T` | address as a number and back | none |
+| `ptr T as u16` (or automatic, above), `u16 as ptr T` | address as a number and back | none |
 | `ptr T as ptr U` | same memory, read as another type (3.4) | none |
 
 - `as` binds tighter than every operator: `x as u16 << 5` is `(x as u16) << 5`.
@@ -287,7 +289,7 @@ data msg = "GAME OVER"
 
   All other memory is ordinary: its values may be kept in registers, and redundant reads and writes removed. That includes a fixed address outside the volatile areas: `var reg: u8 @ $C000` is ordinary memory, and the optimizer may remove a read of it whose value is not used, or a repeated read, though it need not. Hardware that the platform's table does not list, such as a cartridge register, is marked `volatile`. An asm block, and a call to a routine at a fixed address, make the optimizer forget the values it holds for ordinary memory. There is no way to mark memory inside a volatile area as ordinary; a memory layout declaration may add one later (14.12).
 - **A fixed-address variable must not overlap the program**, its data, or the variables the compiler places. That is a compile error that names the variable and both address ranges. Fixed-address variables are often graphics data that the VIC must find in a given 16 KB bank; move the data or make the program smaller. Fixed-address variables may overlap each other. The one exception is the memory an overlay loads (8.5): a fixed-address variable marked `volatile` may overlap an overlay's file.
-- **Addresses in initial values.** The initial value of a global or of `data` is known at compile time, with one exception: the address of anything the compiler places, filled in when the program is placed, at no runtime cost. `addr()` of a global variable, `data`, a field of a struct global or a function (6.5) may be an element of an initial value, alone, plus or minus a constant (`addr(screen) + 40`, `addr(handler) - 1` for an `rts` jump table), or as `.lo` / `.hi` of either (one-byte tables of address halves): `data rows: [ptr u8; 3] = [addr(map), addr(map) + 40, addr(map) + 80]`. Anything else built from an address, such as two addresses added or an address multiplied, is an error. Addresses in a sibling overlay are errors as everywhere (8.5).
+- **Addresses in initial values.** The initial value of a global or of `data` is known at compile time, with one exception: the address of anything the compiler places, filled in when the program is placed, at no runtime cost. `addr()` of a global variable, `data`, a field of a struct global or a function (6.5) may be an element of an initial value, alone, plus or minus a constant (`addr(screen) + 40`, `addr(handler) - 1` for an `rts` jump table), as `.lo` / `.hi` of either (one-byte tables of address halves), or converted with `as` to another pointer type (`addr(buf) as ptr Enemy`) or to `u16`: `data rows: [ptr u8; 3] = [addr(map), addr(map) + 40, addr(map) + 80]`. In a `[u16; n]` table the address converts by itself (3.5): `data t: [u16; 2] = [addr(a), addr(b)]`. Anything else built from an address, such as two addresses added or an address multiplied, is an error. Addresses in a sibling overlay are errors as everywhere (8.5).
 - Global variables without an initializer are zeroed at startup. Storing 0 into such a variable at the start of `main`, before any label, branch, call or asm block and before `main` has written it, therefore generates no code. A global variable can be marked `noinit` to skip that. It is a prefix like `linear`: `noinit var buf: [u8; 256]`. It is an error with an initial value, at a fixed address (never zeroed anyway), on `data` and on locals.
 - Local variables (other than arrays) must have an initial value. Their memory is shared with other functions (8.1), so it holds no useful value on entry.
 

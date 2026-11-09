@@ -193,7 +193,7 @@ var e: ptr Enemy @ zp
 e.hp -= 1                          // ldy #2 / lda (e),y / sec / sbc #1 / sta (e),y
 ```
 
-**Pointers**: `addr(x)` gives a pointer to a variable, array or field; `p[i]` reads through it with `(zp),Y` (there is no `*p`, write `p[0]`). Arithmetic is in bytes: `p + sizeof(Enemy)` steps one record. Any pointer converts to any other pointer type or to `u16` with `as`, at no cost. Pointers that are dereferenced are placed in zero page automatically.
+**Pointers**: `addr(x)` gives a pointer to a variable, array or field; `p[i]` reads through it with `(zp),Y` (there is no `*p`, write `p[0]`). Arithmetic is in bytes: `p + sizeof(Enemy)` steps one record. Any pointer converts to any other pointer type with `as`, at no cost. A pointer becomes a `u16` by itself where a `u16` is expected (`var a: u16 = addr(map)`, an argument, a `[u16; n]` table), but not inside an operator: write `p as u16 == w`. A `u16` variable needs `as` to become a pointer (`w as ptr u8`); a number or constant does not. Pointers that are dereferenced are placed in zero page automatically.
 
 ### 3.5 Control flow
 
