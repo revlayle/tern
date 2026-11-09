@@ -99,3 +99,33 @@ Before question 87 the lexer stopped at `$FFFFFFFF`, so only lengths 2^31 to 2^3
 - [x] Tests: the largest decimal and hex literals, one above each, `-9223372036854775807 - 1`
 - [x] Line breaks between struct literal fields stay as built; a test that a newline between list elements is still the missing-`,` error
 - [ ] No literal silently wraps where it is used: see finding 1
+
+## Third review (`d72bf1d`): second review fixes, 2026-11-09
+
+**Ready to merge.** The must fix is done, and both suggestions are in. 2420 tests pass (36 CPU, 2384 compiler). `BenchmarkTests` and `SkillTests` pass with no change.
+
+### Findings
+
+**1. Fixed (was must fix): array lengths above memory.** `Checker.cs:996`: a length above 65536 is "An array of u8 has at most 65536 elements, all of memory, not 4294967298. Use a smaller length", before the `(int)` cast. `DataTests.A_long_byte_array_fits_in_memory` covers 2^32 + 2 (`var` and `data`), 2^31 (`i8`) and 65537. A length of 65536 still gets the layout's "no program area has room" message.
+
+**2. Fixed (was suggestion): a list with no `]`** before the end of the file, a `}` or a `)` says "Write ']' to end the list" (two tests).
+
+**3. Suggestion: the assembly offset check catches the offset, not the address.** `Checker.Asm.cs:127` rejects an offset outside -65535..65535, so `lda B + 65536`, `jmp f + 70000` and `bne .x + 70000` are errors now. But the sum of a label and an allowed offset still wraps without an error: with `B` at `$081A`, `lda B + 65000` assembles as `lda $0600`, and `lda B + 65535` as `lda $0819` (`B-1`). The message "Use an offset from -65535 to 65535" suggests those are fine. The address is only known when the program is placed, so the full check belongs in the assembler: an absolute operand whose label plus offset is outside `$0000-$FFFF` is "The address B+65000 is $10402, outside memory" (and `.lo` / `.hi` of such a sum could stay allowed, as `lda #(v + 65536).hi` is rare). This is the code from before this branch; it can wait.
+
+**4. Suggestion: a missing `]` at the end of a multi-line table is followed by the next declaration, not the end of the file.**
+
+```tern
+var a: [u8; 2] = [1, 2
+fn main() { }
+```
+
+gives "Expected ',' or ']' after this element, found 'fn'. Write ',' between the elements". This is the common way to forget the `]`. A keyword that cannot start an expression (`fn`, `var`, `data`, `const`, `struct`, ...) could also get "Write ']' to end the list".
+
+### Checklist (roadmap, M20 follow-up 2, "after the review, before the merge")
+
+- [x] Number literals up to 2^63 - 1, with an accumulation that cannot overflow
+- [x] The error says "Use a value up to $7FFFFFFFFFFFFFFF (9223372036854775807)"
+- [x] `ConstantRangeTests` writes `MAX` and `MIN` as literals
+- [x] Tests: the largest decimal and hex literals, one above each, `-9223372036854775807 - 1`
+- [x] Line breaks between struct literal fields stay as built; a test that a newline between list elements is still the missing-`,` error
+- [x] No literal silently wraps where it is used (finding 1; finding 3 is a smaller gap from before this branch)
