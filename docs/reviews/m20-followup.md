@@ -119,3 +119,37 @@ A fix: in the compound-assignment branch (next to the typed-constant check at li
 - [x] `c64.sprite_xy` and `c64.set_kernal_irq`
 - [x] `BenchmarkTests` and `SkillTests` unchanged
 - [x] Done when: gaps 1, 3, 4, 5, 7, 8, 9 and 10 compile in their plain form (`GalaxyStarsGapTests`); the port still compiles
+
+## Third review (`0d861dd`), 2026-11-09
+
+**Ready to merge.** The second review's must-fix item is fixed and tested. Suggestion 2 is done, and suggestion 3 is under "Known limitations". The two points below are small wording issues in the new messages and do not block the merge.
+
+2158 tests pass (36 CPU, 2122 compiler). `BenchmarkTests` and `SkillTests` pass with no baseline change (1254 / 350780). The Galaxy Stars port (`main.tern`, `check_player.tern`) compiles with the branch's compiler.
+
+### Findings
+
+**1. Suggestion: `x += p` with a `u8` target now suggests `as u16`, which does not help.** `Checker.cs:1053` rejects any pointer value with "Convert with 'as u16'", whatever the target's type. For `x: u8`, `main` and the first branch build gave "Expected u8, found ptr u8. Convert with 'as u8'". Following the new advice, `x += p as u16` is still an error (`u16` into `u8`). Write the target's type in the fix, or apply the new check only when the target is `u16` and let `Coerce` report the rest.
+
+**2. Suggestion: `x += -1` on a `u8` says "Use a smaller value".** "-1 does not fit in u8 (0 to 255), the type of 'x', which it is combined with. Use a smaller value". A negative value is not too large, and the fix is `x -= 1`. When the value is negative and the target unsigned, suggest the opposite operator ("Write 'x -= 1'") for `+=` and `-=`. Before this change the message had no fix at all, so this is still an improvement.
+
+### Checked and correct
+
+- `w += p`, `w -= p`, `w &= p`, `w ^= p`, `w += addr(map)`: "Expected u16, found ptr u8. Convert with 'as u16'" (`AddressConversionTests`). `w += p as u16` and `w += addr(map) as u16` compile and add the address.
+- Pointer targets are unchanged: `p += 2` and `p += x` move the pointer, and `p += q` keeps "A pointer moves by a u8 or u16".
+- The new compound-assignment error names the target: `x += BOX * 30` and `s += 200` suggest the wider type ("Declare" is in `Diagnostic.FixVerbs`). `hp[x] += 300` and `w += 70000` say "Use a smaller value". The wide `~` pattern error (`x &= N` with `const N = ~$1FF`) is not caught by the new `catch` and keeps its own message.
+
+### Checklist (roadmap, M20 follow-up)
+
+- [x] Tools: `tern run --set` and `tern bench --set`; `tern bench` prints index errors and fails the variant
+- [x] `v += 2` / `v -= 2` on a variable held in X or Y
+- [x] `addr()` in initial values, with each form and error
+- [x] Constant expressions computed exactly, tested at the edges
+- [x] A typed constant next to a wider value (question 79), in expressions and compound assignments
+- [x] An untyped constant computed from typed ones is a plain number (question 81)
+- [x] `.lo` / `.hi` on `addr(...)` in code (question 83)
+- [x] `.lo` / `.hi` on `addr(...) ± constant` in code (question 84); the question 85 error names the operands as written
+- [x] A pointer converts to `u16` where a `u16` is expected, and still needs `as` in an operator, compound assignments included
+- [x] `[T; _]` with its errors
+- [x] `c64.sprite_xy` and `c64.set_kernal_irq`
+- [x] `BenchmarkTests` and `SkillTests` unchanged
+- [x] Done when: gaps 1, 3, 4, 5, 7, 8, 9 and 10 compile in their plain form (`GalaxyStarsGapTests`); the port still compiles
