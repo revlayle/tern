@@ -292,13 +292,17 @@ public sealed class ModuleTests : IDisposable
     }
 
     [Fact]
-    public void Constants_across_an_import_cycle_get_a_clear_error()
+    public void Constants_work_across_an_import_cycle()
     {
-        // Review M4, finding 3: b is declared before a, so b's declarations cannot use a's constants.
+        // b is declared before a; a's constant is worked out when b's declaration uses it (spec 2.2).
         Write(Src, "a.tern", "import b\nconst N = 4\nfn fa() { b.fb() }");
         Write(Src, "b.tern", "import a\nvar buf: [u8; a.N]\nfn fb() { buf[0] = 1 }");
+        Assert.Equal(4, CompileMain("import a\nfn main() { a.fa() }").Variables["b.buf"].Size);
+
+        // A function's address is known only after a is declared: the error says what to move.
+        Write(Src, "b.tern", "import a\nvar f: u16 = addr(a.fa)\nfn fb() { }");
         var e = Assert.Throws<CompileError>(() => CompileMain("import a\nfn main() { a.fa() }"));
-        Assert.Equal("'a.N' cannot be used in a declaration of b: a and b import each other, and a is declared after b. Move N to b, or to a module both import", e.Description);
+        Assert.Equal("'a.fa' cannot be used in a declaration of b: a and b import each other, and a is declared after b. Move fa to b, or to a module both import", e.Description);
 
         // Bodies may use names in both directions.
         Write(Src, "b.tern", "import a\nvar n: u8\nfn fb() { n = a.N }");
