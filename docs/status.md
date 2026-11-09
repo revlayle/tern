@@ -5,10 +5,15 @@ Owned by the coding session. Updated at the end of every coding session.
 ## Current
 
 - **Milestone:** M20 follow-up (roadmap). All items are done, the first review's findings are fixed, and the spec decisions of 2026-11-09 (questions 79-85, a pointer to `u16`) are built.
-- **Branch:** `m20-followup`, with `main` merged in at `93c52b5`. 2113 compiler tests pass plus 36 CPU tests. No benchmark changed (1254 / 350780); `SkillTests` pass.
-- **Next step:** second review (`/review`). No questions open.
+- **Branch:** `m20-followup`, with `main` merged in at `b8869df`. 2122 compiler tests pass plus 36 CPU tests. No benchmark changed (1254 / 350780); `SkillTests` pass.
+- **Next step:** third review (`/review`) of the second review's fixes. No questions open.
 
 ## Done
+
+- **M20 follow-up, second review fixes** (2026-11-09, `docs/reviews/m20-followup.md`, second review).
+  - Finding 1 (must fix): a pointer value in a compound assignment (`w += p`, `-=`, `&=`, `w += addr(map)`) is "Expected u16, found ptr u8. Convert with 'as u16'", as on `main`, since `w = w + p` is an error too (spec 3.1, 3.5). `AddressConversionTests.A_pointer_still_needs_as_in_an_operator`.
+  - Suggestion 2: a literal or constant that does not fit a compound assignment's target names it: "390 does not fit in u8 (0 to 255), the type of 'x', which it is combined with. Declare 'x' as u16, or use a smaller value" (a plain variable with a wider type to suggest; otherwise "Use a smaller value"). `ConstantExpressionTests.Reports_errors`.
+  - Suggestion 3 (an address plus a constant assigned whole is computed at run time) is under "Known limitations".
 
 - **Questions 84 and 85** (2026-11-09).
   - 84: `.lo` / `.hi` on `addr(...) ± constant` in code. The checker wraps such a target (a pointer `BinaryExpr` that `Placed` accepts) in a `u16` cast before the field lookup, so a struct field named `hi` does not interfere; a runtime offset keeps the pointer error. `CodeGen.AddressBytes` gives the two bytes of `addr(x)` plus or minus constants through two-byte casts (used by `Simple2`), so `(addr(map) + 299).hi` is `lda #(map+299).hi`.

@@ -161,5 +161,16 @@ public class ConstantExpressionTests
     [InlineData("const BIG: u16 = 100\nvar x: u8\nfn main() { x += BIG }", "Expected u8, found u16: 'BIG' is u16. Convert with 'as u8'")]
     [InlineData("const BOX: u8 = 13\nvar s: i8\nfn main() { s = s + BOX }", "Cannot mix signed and unsigned (i8 and u8)")]
     [InlineData("const BOX: u8 = 13\nvar s: i8\nfn main() { s += BOX }", "Cannot mix signed and unsigned (i8 and u8)")]
+    // Review 2, suggestion 2: a compound assignment names its target too, with a fix.
+    [InlineData("const BOX: u8 = 13\nvar x: u8\nfn main() { x += BOX * 30 }",
+        "390 does not fit in u8 (0 to 255), the type of 'x', which it is combined with. Declare 'x' as u16, or use a smaller value")]
+    [InlineData("var x: u8\nfn main() { x += 300 }",
+        "300 does not fit in u8 (0 to 255), the type of 'x', which it is combined with. Declare 'x' as u16, or use a smaller value")]
+    [InlineData("var s: i8\nfn main() { s -= 200 }",
+        "200 does not fit in i8 (-128 to 127), the type of 's', which it is combined with. Declare 's' as i16, or use a smaller value")]
+    [InlineData("var hp: [u8; 4]\nfn main() { hp[1] += 1000 }",
+        "1000 does not fit in u8 (0 to 255), the type of 'hp[1]', which it is combined with. Use a smaller value")]
+    [InlineData("var w: u16\nfn main() { w += 70000 }",
+        "70000 does not fit in u16 (0 to 65535), the type of 'w', which it is combined with. Use a smaller value")]
     public void Reports_errors(string source, string expected) => Assert.Contains(expected, Error(source));
 }

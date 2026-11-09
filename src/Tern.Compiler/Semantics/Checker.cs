@@ -1049,7 +1049,18 @@ public sealed partial class Checker
                 if (!operation.SameAs(target.Type))
                     throw new CompileError(a.Value.Pos, $"Expected {target.Type}, found {operation}: '{a.Value.ConstTypeFrom}' is {typed}. Convert with 'as {target.Type}'");
             }
-            Coerce(a.Value, target.Type);
+            // Inside an operator a pointer still needs 'as' (spec 3.5), as in w = w + p.
+            if (a.Value.Type.IsPointer)
+                throw new CompileError(a.Value.Pos, $"Expected {target.Type}, found {a.Value.Type}. Convert with 'as u16'");
+            try { Coerce(a.Value, target.Type); }
+            catch (CompileError error) when (a.Value.ConstValue is long v && error.Description.Contains(" does not fit in "))
+            {
+                var wider = WiderFor(v, target.Type);
+                var name = Describe(target) is { } d ? $"'{d}'" : "the left side";
+                throw new CompileError(a.Value.Pos,
+                    $"{v} does not fit in {target.Type} ({target.Type.MinValue} to {target.Type.MaxValue}), the type of {name}, which it is combined with. " +
+                    (wider is not null && Unwrap(target) is NameExpr ? $"Declare {name} as {wider}, or use a smaller value" : "Use a smaller value"));
+            }
         }
     }
 
