@@ -86,7 +86,7 @@ fn main()
 - All arithmetic **wraps**, and there is no integer promotion: `u8 + u8` is a `u8`.
 - `u8` mixed with `u16` widens to `u16`. Narrowing needs `as`: `x = big as u8` keeps the low byte.
 - Mixing signed and unsigned is an error; cast one side.
-- Constant expressions are computed exactly and checked only at the end: `const MAX_X: u16 = 320 - BOX` is fine with `BOX: u8`, and a constant sum converts to a pointer like a number (planned, M20 follow-up).
+- Constants follow their own rules: they are exact, and they take a type only where they are used (3.3, "Constants").
 - `*`, `/` and `%` work only on constants (`const SIZE = 40 * 25`). At runtime, use shifts or the `math` library:
 
 ```
@@ -126,6 +126,54 @@ data ship = include_bytes("ship.bin")
 - Locals (other than arrays) need an initial value: their memory is shared with other functions, so it holds leftovers on entry.
 - Volatile memory (I/O, `volatile` variables, anything shared with an interrupt, anything through a pointer) is read and written exactly as written; ordinary memory may be kept in registers by the optimizer.
 
+#### Constants
+
+A `const` is a number the compiler knows. It takes no memory and has no code of its own: wherever it is used, the compiler puts the number in, as if you had written it there. (Exact constant expressions and the rules below are planned for the M20 follow-up.)
+
+```
+const SCREEN = $0400            // no type: a plain number
+const BOX: u8 = 13              // a written type: checked to fit in u8
+const MAX_X: u16 = 320 - BOX    // 307
+const SECS: u8 = 400 / 50       // 8, though 400 does not fit in u8
+const AREA = BOX * 30           // 390, a plain number
+```
+
+**Between constants, arithmetic is exact.** Literals and constants are computed at compile time as whole numbers of any size, with no wrapping, whatever types the parts have. Only the final value is checked, where it is used:
+
+- `const B: u8 = BOX + 250` is an error: 263 does not fit in `u8`. Write `(BOX + 250) as u8` to keep the low byte on purpose.
+- `*`, `/` and `%` are allowed here, since the compiler does the work.
+- A constant built from typed constants is a plain number unless you write a type: `AREA` above is 390, not a `u8`.
+
+**A constant gets a runtime type only where code needs one:**
+
+1. **From where it goes**: a variable, an argument, an array element, a pointer. The value must fit there: `var s: u16 = AREA`, `p = SCREEN + 40` (no `as` needed for a pointer), `var t: i8 = BOX` (13 fits in `i8`).
+2. **From the operand next to it**: with `x: u8`, `x + 3` is a `u8` addition, and `x + AREA` is an error because 390 does not fit in `u8`. With `w: u16`, `w + AREA` adds 390.
+3. **With nothing to go by** (`var v = AREA`, a `for` bound): the smallest type that holds it, as for a literal: `u8` for 0 to 255, `u16` up to 65535, `i8` or `i16` for negative values. So `var v = AREA` is a `u16`.
+
+**What a written type adds.** `const BOX: u8 = 13` is checked to fit in `u8` where it is declared, and then counts as a `u8` wherever a variable's type would matter:
+
+- next to a runtime value, it takes part in choosing the operation's type: `x + BIG` with `x: u8` and `const BIG: u16 = 200` is a 16-bit addition, where `x + 200` would be an 8-bit one,
+- signed and unsigned do not mix: with `const N: i8 = 5`, `x + N` is an error for `x: u8`, as with a variable,
+- with nothing to go by, it is its type: `var v = BOX` is a `u8`, and an `i8` constant as a `for` bound makes an `i8` counter.
+
+A written type never cuts a constant down. Next to a wider value, the operation is wide, and the constant is computed at that width.
+
+**`~` and negative values take the width they are used at.** `~$0F` is "all bits except the low four", as wide as needed: `x & ~$0F` on a `u8` is `and #$F0`, and `w & ~$0F` on a `u16` clears the low four bits of both bytes. A typed constant behaves the same way, and a compound assignment is the operation it stands for:
+
+```
+const M: u8 = $0F
+var w: u16 = $1234
+var m: u8 = $0F
+
+fn main() {
+    w = w & ~M       // $1230: ~M is $FFF0 here, as ~$0F would be
+    w &= ~M          // the same: 'w &= e' is 'w = w & e'
+    w = w & ~m       // $0030: m is a variable, so ~m is the u8 $F0, widened to $00F0
+}
+```
+
+The last line is the one place where a constant and a variable of the same type differ: a runtime `~` works on its operand's 8 bits and then widens. To clear bits of a `u16` with a variable mask, widen the mask first: `w & ~(m as u16)`.
+
 ### 3.4 Arrays, structs and pointers
 
 **Arrays** are indexed with a `u8`, which compiles to `abs,X` or `abs,Y`. An array of 16-bit values is stored as two tables, low bytes and high bytes, so `a[i]` stays one `lda a_lo,x` / `lda a_hi,x`. Write `linear var` for the usual interleaved layout when hardware or assembly needs it.
@@ -145,7 +193,7 @@ var e: ptr Enemy @ zp
 e.hp -= 1                          // ldy #2 / lda (e),y / sec / sbc #1 / sta (e),y
 ```
 
-**Pointers**: `addr(x)` gives a pointer to a variable, array or field; `p[i]` reads through it with `(zp),Y` (there is no `*p`, write `p[0]`). Arithmetic is in bytes: `p + sizeof(Enemy)` steps one record. Any pointer converts to any other pointer type or to `u16` with `as`, at no cost. Pointers that are dereferenced are placed in zero page automatically.
+**Pointers**: `addr(x)` gives a pointer to a variable, array or field; `p[i]` reads through it with `(zp),Y` (there is no `*p`, write `p[0]`). Arithmetic is in bytes: `p + sizeof(Enemy)` steps one record. Any pointer converts to any other pointer type with `as`, at no cost. A pointer becomes a `u16` by itself where a `u16` is expected (`var a: u16 = addr(map)`, an argument, a `[u16; n]` table), but not inside an operator: write `p as u16 == w`. A `u16` variable needs `as` to become a pointer (`w as ptr u8`); a number or constant does not. Pointers that are dereferenced are placed in zero page automatically.
 
 ### 3.5 Control flow
 
@@ -666,7 +714,7 @@ tern bench old.tern new.tern --dump result        // whole programs; --fn f meas
 tern run game.tern --profile                      // the cycles of each function and source line
 ```
 
-`--dump` shows a value after each run, to check that the versions agree.
+`--dump` shows a value after each run, to check that the versions agree. `--set $DC00=$7B` writes a byte before the run starts, for inputs such as the joystick; it takes addresses only, since the program's startup sets its own globals after loading and would overwrite a variable set by name.
 
 `tern run` also checks every variable array index (the program itself never does, section 6). An index outside its array is printed with the source line, and the run goes on, so one run shows every bad access. An `indexed match` value outside its span is printed and stops the run. The exit code is 0 when `main` returned with no error, 3 when `main` returned but the check reported an error, and 2 when `main` did not return (the cycle limit, or a stop after a bad `indexed match` value). Pointer accesses and `asm` are not checked.
 
