@@ -128,7 +128,7 @@ data ship = include_bytes("ship.bin")
 
 #### Constants
 
-A `const` is a number the compiler knows. It takes no memory and has no code of its own: wherever it is used, the compiler puts the number in, as if you had written it there. (Exact constant expressions and the rules below are planned for the M20 follow-up.)
+A `const` is a number the compiler knows. It takes no memory and has no code of its own: wherever it is used, the compiler puts the number in, as if you had written it there. A `const` may also be declared inside a function; it is visible to the end of its block.
 
 ```
 const SCREEN = $0400            // no type: a plain number
@@ -191,6 +191,17 @@ enemies[i].x = 10                  // lda #10 / ldx i / sta enemies_x,x
 
 var e: ptr Enemy @ zp
 e.hp -= 1                          // ldy #2 / lda (e),y / sec / sbc #1 / sta (e),y
+```
+
+**Struct literals** give a global struct, a global array of structs or `data` its initial bytes: the struct's name, then `field = value` for the fields to set; the others are 0. The tables are built at compile time in the array's layout, so a list of records costs the same as parallel arrays. `[T; _]` takes the length from the list. In code, assign the fields one by one.
+
+```
+struct Line { row: u8, col: u8, text: ptr u8 }
+data TITLE = screen"TITLE"
+data lines: [Line; _] = [
+    Line { row = 1, col = 14, text = addr(TITLE) },
+    Line { row = 3 },                              // col and text are 0
+]
 ```
 
 **Pointers**: `addr(x)` gives a pointer to a variable, array or field; `p[i]` reads through it with `(zp),Y` (there is no `*p`, write `p[0]`). Arithmetic is in bytes: `p + sizeof(Enemy)` steps one record. Any pointer converts to any other pointer type with `as`, at no cost. A pointer becomes a `u16` by itself where a `u16` is expected (`var a: u16 = addr(map)`, an argument, a `[u16; n]` table), but not inside an operator: write `p as u16 == w`. A `u16` variable needs `as` to become a pointer (`w as ptr u8`); a number or constant does not. Pointers that are dereferenced are placed in zero page automatically.
@@ -273,7 +284,7 @@ if fire_pressed() { shoot() }      // lda #$10 / bit $DC00 / bne skip
 
 `interrupt fn` saves only the registers it changes and ends with `rti`. It is its own root: its memory never overlaps main's. A function called from both main and a handler is an error, unless it has no memory of its own (like `acknowledge` above). One `interrupt fn` called from another becomes a *part* (no saving, ends with `rts`), which is how the library's raster code is combined into one handler you install.
 
-The `c64` module installs handlers: `kernal_off()`, `set_irq(addr(handler))`, `interrupts_on()` (see example 4.3). With the KERNAL left in (needed by the `io` library), `set_kernal_irq(addr(handler))` installs the same kind of handler through `$0314` (planned, M20 follow-up); the KERNAL's keyboard scan then stops.
+The `c64` module installs handlers: `kernal_off()`, `set_irq(addr(handler))`, `interrupts_on()` (see example 4.3). With the KERNAL left in (needed by the `io` library), `set_kernal_irq(addr(handler))` installs the same kind of handler through `$0314`; the KERNAL's keyboard scan then stops.
 
 A handler starts with `cld` only when it can do decimal arithmetic: when its code or asm blocks have `adc` or `sbc`, or it calls anything (`jsr`). A handler without them leaves decimal mode alone, which is safe since nothing in it depends on it.
 
@@ -720,13 +731,12 @@ tern run game.tern --profile                      // the cycles of each function
 
 ## 8. Not supported yet
 
-`match` on 16-bit values (match on `.lo` / `.hi`); arrays of structs inside structs; a function with a body at a fixed address; fixed-address `data` inside an overlay (under discussion); bank switching. Each gives a clear error rather than a confusing one.
+`match` on 16-bit values (match on `.lo` / `.hi`); arrays of structs inside structs; a function with a body at a fixed address; bank switching. Each gives a clear error rather than a confusing one.
 
 ## 9. The future
 
 ### Next
 
-- **M20 follow-up 2**: struct literals in initial values (`data lines: [Line; _] = [Line { row = 1, col = 14 }, ...]`), `const` inside functions, constants checked to 64 bits, and 16-bit shifts by 8 or more as a byte move.
 - **M21**: plug-ins against a fixed interface: binaries built separately against one interface module, loaded in turn into one slot.
 
 ### Later highlights
