@@ -4,11 +4,20 @@ Owned by the coding session. Updated at the end of every coding session.
 
 ## Current
 
-- **Milestone:** M20, index checks in the emulator, and signed loop variables (roadmap). Reviewed three times (`docs/reviews/m20.md`): the second and third reviews say ready to merge; their suggestions are done too.
-- **Branch:** `m20-checks`, from `main` at `3bed098`, with `main` merged in for the review (`233b3c0`). 2011 compiler tests pass plus 36 CPU tests. No benchmark changed (1254 / 350780).
-- **Next step:** merge M20 (`/merge m20-checks`). Questions 76-78 ask the spec session about provisional choices.
+- **Milestone:** M20 follow-up (roadmap): the small items from M20 and the Galaxy Stars port. All eight items are done, with the "done when" check (`GalaxyStarsGapTests`).
+- **Branch:** `m20-followup`, from `main` at `2a76d0d` (M20 is merged). 2085 compiler tests pass plus 36 CPU tests. No benchmark changed (1254 / 350780); `SkillTests` pass.
+- **Next step:** review (`/review`). Questions 79-83 ask the spec session about provisional choices.
 
 ## Done
+
+- **M20 follow-up** (2026-11-09). One commit per item.
+  - *Tools* (`2acc844`): `tern run --set $DC00=$7B` (and `tern bench --set`; decimal or `$`, may be repeated) writes a byte after the program is loaded, before it starts (`RunOptions.Sets`, `MemorySet`). Addresses only (question 82). `tern bench` runs each variant with the index check and prints its errors (a snippet's on its own lines); a variant with any fails: exit code 1, `ok: false` and `indexErrors` in `--json`. `RunToolTests`, `BenchToolTests`; `SKILL.md`.
+  - *`v += 2` / `v -= 2` on a variable held in X or Y* (`1761b02`, spec 11): `inx / inx` (`dex`, `iny`, `dey`) in `GenAssign`; `HoldInRegister` counts `v += 2` as a use the register saves, like `v += 1`. `HeldVariableTests`.
+  - *`[T; _]`* (`e07767c`, spec 4): `ArrayTypeSyntax.Length` is null for `_`; `DeclareGlobal` passes the list's length (`_listLength`) to `ResolveType`, which checks it as a written length (long byte data too). Anywhere else (no list, a string, a local, a parameter, a field) "The length '_' is taken from a list initial value ... Write the length here". The "need a written type" errors suggest `[u8; _]`. `DataTests`.
+  - *`addr()` in initial values* (`8224346`, spec 4): `AddressFill` (function, or variable with a field's offset, plus an offset, word or `.lo` / `.hi`) replaces `FunctionAddresses` (now derived). `Checker.AddressBytes` / `Placed` accept `addr(x)`, `± constant` (either side of `+`), `as` to a two-byte type, and `.lo` / `.hi` into a `u8` (question 83); anything else is an error saying what is allowed. Initial values with `addr()` are worked out after the file's last global, so they may name later globals or themselves. An overlay cannot name a sibling's function or variable. A kept global keeps the globals (and their functions) it names (`GlobalsNamedBy`). Backend: `AddressByte` (one byte of a label's or variable's address plus an offset, listed as `lo: (name+off)`), and the zero-page startup loads `#ImmVarByte` / `#ImmLabelByte`. `AddressInitTests`, `OverlayTests`; three tests of the old error are gone.
+  - *Exact constant expressions* (`4c96d78`, spec 3.1, 3.4): an integer constant, typed or not, is an `IntLiteral` in expressions, computed exactly; a typed one carries `Expr.ConstType` / `ConstTypeFrom` (an untyped constant computed from typed ones inherits it, question 81). That type applies when mixed with a runtime value (`Unify`), with no context (`DefaultType`), and to a `for` bound; not to `as`, `.lo`, `.hi` (`LiteralType`), nor to an assignment or argument, where it fits like a literal (question 80). `~` of a constant is exact and a bit pattern (`IsBitPattern`, kept through `& | ^` and shifts), which takes the width of an unsigned type it is used as. A literal that does not fit next to a runtime operand names the operand (`CoerceNamed`, `Describe`): "300 does not fit in u8 (0 to 255), the type of 'x', which it is combined with. Convert 'x' with 'as u16'". A constant expression that wrapped is now an error. `ConstantExpressionTests`; `language.md`, `errors.md`.
+  - *`c64.sprite_xy` and `c64.set_kernal_irq`* (`f9eaef3`, spec 10.1): `sprite_xy: [u8; 16] @ $D000`; `set_kernal_irq` points `$0314` at a private stub (`kernal_entry`: `pla / tay / pla / tax / pla / jmp (kernal_handler)`). `examples/kernal_irq.tern` (raster split, drive status through `io`), checked in VICE from a disk image (commands in its header): blue above line 150, red below, "00, OK,00,00" printed. `C64LibraryTests` run a handler through the KERNAL's own IRQ entry bytes at `$FF48` (`KernalIrqEntry`). `language.md`: when a handler gets `cld`, `set_kernal_irq` and its limits.
+  - *Done when* (`34cc828`): `GalaxyStarsGapTests` runs gaps 1, 3, 4, 5, 7, 8, 9 and 10 in their plain form, from the port's code. The port (`galaxy-star/tern/src/main.tern`, `check_player.tern`) still compiles unchanged.
 
 - **M20, review fixes** (2026-11-08, `docs/reviews/m20.md`).
   - Finding 1 (must fix, `0af091c`): the index of a `linear` u16 array (doubled) or a linear struct array (times the record size) is checked before it is scaled, so an index whose scaled value wraps (`pts[130]` on 10 elements) is reported. The checker tags the shift it builds (`BinaryExpr.ScalesIndexOf`); its first `asl` carries `Instr.Check` (`IndexCheck.InA`: a check on A, not part of the instruction's identity), which `IndexChecker` tests before the shift. Code unchanged. `IndexCheckTests` has the review's two programs and a register counter from 125.
@@ -380,9 +389,7 @@ Including `jsr` and `rts`; from the tests.
 ## Known limitations and technical debt
 
 - `using X` with a call in the loop suggests removing `using X` but not why an `inline fn` does not help.
-- `tern bench` runs with the index check but does not print its errors (`RunResult.IndexErrors` has them); a wrong index in a variant gives misleading cycles (review M20, note 8).
-- `v += 2` on a variable held in X or Y for a loop is `txa / clc / adc #2 / tax`; `inx / inx` would be 2 bytes and 4 cycles (review M20, suggestion 7).
-- `tern run` cannot set an input before the run (the joystick at `$DC00` reads 0, every direction pressed). `sprite.md` works around it with logic that takes the joystick as a parameter; a `--set $DC00=$FF` option would let a whole game loop be checked.
+- `tern run` has no KERNAL, so a program using `c64.set_kernal_irq` can be checked only in VICE (the tests put the KERNAL's IRQ entry bytes at `$FF48`).
 - The skill's outputs include addresses and cycles, so a code generator or library change that moves code fails `SkillTests` until `TERN_UPDATE_SKILL=1 dotnet test --filter SkillTests` rewrites them (read the diff: a prose claim next to an output may need changing too). Listing excerpts (```` ```lst ````) are updated by hand. Question 74 asks for this as a CLAUDE.md convention.
 - `tern run` / `tern bench` (M19): memory is plain RAM, so the VIC-II, SID and CIAs are not emulated (a raster wait never ends; the cycle limit stops it). The KERNAL stand-ins (CHROUT, GETIN, PLOT) take no cycles; any other ROM call stops the run, so overlays (loaded with KERNAL LOAD) cannot be run. A dumped local may not hold its last value: the compiler may keep it in a register or remove stores nobody reads.
 - The source map gives an instruction to the last source line before it in the listing. Code the optimizer moves (a store sunk out of a loop) counts under the line it lands after.
@@ -401,7 +408,6 @@ Not bugs; things to improve, mostly in M7 (optimizer).
 - Evaluation order: in `a + b` where `b` needs a temporary, `b` is evaluated before `a`. Matters only if both call functions with side effects.
 - Only one zero-page range per platform is used (C64: `$02-$8F`; `$FB-$FE` is unused unless a variable is placed there with `@`).
 - When the value of `p[i] = v` changes Y (it reads through a pointer with another index, or calls a function), A is still saved to a temporary while Y is loaded.
-- `addr()` cannot be used in global or data initializers: addresses are known only at link time. Tables of pointers to data must be filled at runtime.
 - `VariableSymbol.AddressTaken` is set by `addr()` and by `#name.lo`/`#name.hi` in assembly. The M7 optimizer must not cache such variables in registers across pointer writes or asm blocks.
 - `AsmEffects` are unions over the whole block (a register "read" may be one the block set itself first, as in `clc` / `adc`). Good enough for the current checks; the optimizer may want "read before written".
 - Inside a `for ... using X` loop, only routines that declare `keeps X` may be called. An `asm fn` that never touches X is still rejected; `AsmEffects` would make allowing it easy (spec 6.1: the compiler may use each function's actual register use).
@@ -428,11 +434,17 @@ Not bugs; things to improve, mostly in M7 (optimizer).
 
 ## Questions for the spec session
 
-76. **The keyword error's wording** (M20). Spec 13 gives "'step' is a keyword; Use another name". As built, the message keeps what was expected: "Expected function name, found 'step', which is a keyword. Use another name" (the suggestion is "Use another name"). Provisional; fine?
+79. **`~` of a typed constant next to a wider value** (M20 follow-up). `w & ~M` with `const M: u8 = $0F` and `w: u16`: a typed constant mixed with a runtime value keeps its type (spec 3.1), so `~M` is the `u8` `$F0`, widened to `$00F0`, which clears `w`'s high byte (as before the change). With an untyped `M` it is `$FFF0`. As built; should `~` of a typed constant take the width of the other operand instead?
 
-77. **`x += 2` on an `i8`** (M20). Spec 11's row says "u8 in memory". The same two `inc`s are right for an `i8` (the bytes wrap the same way), so it is applied to any one-byte, non-volatile variable. Provisional; should the row say one-byte?
+80. **A typed constant alone takes its destination's type** (M20 follow-up). "Typed or not ... takes its type from where it is used, like a literal" (spec 3.1) is applied to a constant on its own too: with `const BOX: u8 = 13`, `var s: i8 = BOX` and `f(BOX)` for an `i16` parameter compile (they were type errors). The constant's type applies only next to a runtime value, with no context (`var v = BOX` is a `u8`), and to a `for` bound (an `i8` constant still makes an `i8` counter). Provisional; is this the intent?
 
-78. **What `tern run` does after an index error** (M20). Provisional: an array index outside its array is recorded and the run goes on (with a count per instruction); an `indexed match` value outside its span stops the run, since its jump goes to whatever bytes follow the tables. The exit code is 3 when main returned but the check reported, 2 when main did not return (also after such a stop). `Run.Program` in the tests fails on any error. Should the spec (14.4) say this?
+81. **An untyped constant computed from typed ones** (M20 follow-up). `const D = BOX * 2` keeps `BOX`'s type for the rules in 80 (`x16 + D` adds it as a `u8`, and `D` must fit one), as `D` was a `u8` before. Provisional; or should `D` be a plain number like `const D = 26`?
+
+82. **`--set` takes addresses only** (M20 follow-up). The startup code zeroes or sets the program's globals after the load, so `--set score=5` would be overwritten; only `$DC00=$FF` or `56320=255` forms are accepted. Fine?
+
+83. **Forms of an address in an initial value** (M20 follow-up). Besides spec 4's forms, `as` to another two-byte type is accepted (`addr(b) as u16` in a `[u16; n]` table, since a pointer does not convert to `u16` by itself), and `.lo` / `.hi` may be written straight on `addr()` of a variable (`addr(map).lo`), though `.lo` on a pointer is otherwise an error (3.4). Provisional; should the spec list these?
+
+Questions 76-78 were settled on 2026-11-08 (decisions.md), as built.
 
 Questions 1-63 and 65-75 are settled (decisions.md; 44, 45 and 59-63 on 2026-11-07, 65-75 on 2026-11-08). Question 64 was withdrawn.
 
