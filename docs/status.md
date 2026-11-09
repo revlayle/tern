@@ -4,11 +4,19 @@ Owned by the coding session. Updated at the end of every coding session.
 
 ## Current
 
-- **Milestone:** M20 follow-up (roadmap). All items are done, the first review's findings are fixed, and the spec decisions of 2026-11-09 (questions 79-85, a pointer to `u16`) are built.
-- **Branch:** `m20-followup`, with `main` merged in (third review). 2127 compiler tests pass plus 36 CPU tests. No benchmark changed (1254 / 350780); `SkillTests` pass.
-- **Next step:** merge (`/merge m20-followup`): the third review says ready to merge, and its two wording suggestions are done. No questions open.
+- **Milestone:** M20 follow-up 2 (roadmap). All six items are done, and the "done when" test passes. M20 follow-up was merged into `main` (`909489f`).
+- **Branch:** `m20-followup2`, from `main` at `bc5ea0e`. 2349 compiler tests pass plus 36 CPU tests. No benchmark changed (1254 / 350780); `SkillTests` pass. All examples and the Galaxy Stars port compile.
+- **Next step:** review (`/review m20-followup2`). Question 86 is a provisional choice (struct literal fields separated by line breaks).
 
 ## Done
+
+- **M20 follow-up 2** (2026-11-09). One commit per item.
+  - *String-literal error* (`e4276f6`, spec 2.1): "A string can only be the value of data or a global array. Declare it as data, e.g. 'data HI = "HI"', and pass addr(HI), len(HI)"; `tern --json` gives the second sentence as the suggestion. `DiagnosticTests`.
+  - *Constant arithmetic in signed 64 bits* (`482750c`, spec 3.1, 4.1): `Checker.ConstArithmetic` / `ConstNegate` check every step; leaving the range is "This constant expression goes outside the signed 64-bit range of constant arithmetic (...). Use smaller values", at the step's operator. A constant shift count is 0 to 63 (was 31). `MIN % -1` is 0. Assembly operands (`FoldAsm`) use the same arithmetic. `ConstantRangeTests` (edges, the rounding of `/`, `%`, `>>` on negatives, every overflow, the roadmap's example).
+  - *`const` inside a function* (`a81f2d9`, spec 4): `ConstDecl` is a `Stmt`; `CheckStmt` declares it in the block's scope (`DeclareConst`, so the clash rules are `Declare`'s). No code: `BlockStmt.Code` is the statements without constants, used by `GenBlock` (so a const is not "the statement before"), the F9 while shapes and `AlwaysReturns`. `LocalConstTests`; `language.md`.
+  - *16-bit shifts by 8 to 15* (`41403ca`, spec 11): `CodeGen.ShiftByBytes` (`lda v / sta w+1 / lda #0 / sta w`, `k - 8` `asl`; `>>`: `lsr`, or `cmp #$80 / ror` and the high byte from the sign with `ora #$7F / bmi / lda #0`). `ShiftedOperand16` (`x op (y >> k)`) moves a byte too. `ByteShiftTests` (every count at 12 edge values, signed and unsigned, in place, as an operand of `+` / `-`; the listings). The skill's ring example: 3905 -> 3217 cycles.
+  - *Spec 11 rows as built* (`1c68354`): `CompareShapeTests`, a listing test with results for the signed and 16-bit compares, `&&`, `||`, a compare stored in a `bool` and `i8 >> 1`. No compiler change.
+  - *Struct literals* (`344a66a`, spec 3.3, 8.5): `StructLiteralExpr` in the parser (not in `if` / `while` / `for` / `match` headers: `ParseHeaderExpr`); list literals skip line breaks and allow a trailing `,`. `Checker.StructBytes` / `FieldBytes` / `ScalarInto` build a record in its memory layout; an address in a 16-bit array field (split inside the record) is two half fills (`AddressBytes(..., highAt)`). `TernCompiler.ByteLayout` / `LayoutIndex`: a non-linear array of structs is one table per record byte. `data` may be a struct. A literal in code or as a local's initial value: "A struct literal is only the initial value of a global or of data ... Assign the fields one by one, e.g. 'p.x = 1'". `StructLiteralTests` (every layout against C#, addresses, array fields, the 8.5 example in an overlay, each error); `GalaxyStarsPagesTests` is the "done when" (the `how_row` / `how_col` / `how_text` group). Four `StructTests` / `DataTests` cases now expect the new messages. `language.md` section 5 has a checked example.
 
 - **M20 follow-up, third review suggestions** (2026-11-09).
   - Suggestion 1: the pointer check in a compound assignment applies only to a `u16` target; `x += p` with `x: u8` gets `Coerce`'s "Expected u8, found ptr u8" again.
@@ -456,7 +464,7 @@ Not bugs; things to improve, mostly in M7 (optimizer).
 
 ## Questions for the spec session
 
-None open.
+86. **Struct literal fields separated by line breaks** (provisional). Spec 3.3 shows fields separated by `,`. The compiler also accepts a line break in place of a `,`, as struct declarations do (`Rec {` / `a = 1` / `b = 2` / `}`), and a trailing `,`. Keep, or require commas?
 
 Questions 79-85 were settled on 2026-11-09 and are built. Questions 76-78 were settled on 2026-11-08 (decisions.md), as built.
 
