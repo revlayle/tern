@@ -930,6 +930,7 @@ public sealed partial class Checker
         switch (stmt)
         {
             case VarDecl v: CheckLocal(v); break;
+            case ConstDecl c: DeclareConst(c); break;
             case AssignStmt a: CheckAssign(a); break;
             case ExprStmt e:
                 if (e.Expr is not CallExpr)
@@ -1290,7 +1291,7 @@ public sealed partial class Checker
     private static bool AlwaysReturns(Stmt stmt) => stmt switch
     {
         ReturnStmt => true,
-        BlockStmt b => b.Statements.Count > 0 && AlwaysReturns(b.Statements[^1]),
+        BlockStmt { Code: [.., var last] } => AlwaysReturns(last),
         IfStmt i => i.Else is not null && AlwaysReturns(i.Then) && AlwaysReturns(i.Else),
         WhileStmt w => w.Condition.ConstValue == 1 && !ContainsBreak(w.Body),
         MatchStmt m => m.Arms.Count > 0 && m.Arms[^1].IsDefault && m.Arms.All(a => AlwaysReturns(a.Body)),

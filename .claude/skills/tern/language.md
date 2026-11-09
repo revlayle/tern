@@ -108,6 +108,8 @@ fn main() {
 - Globals with no initial value are zeroed at startup, so `x = 0` at the start of `main` costs nothing.
 - A local's memory is shared with functions that never run at the same time, so it holds leftovers on
   entry: scalars need an initial value. Local arrays do not, and hold leftovers.
+- A `const` may be declared inside a function too; it is visible to the end of its block. No local or
+  constant may reuse a name that is visible there (a parameter, an enclosing local, a top-level name).
 - `noinit` skips the zeroing (not on locals, `data` or fixed addresses).
 - `data` cannot be written. `include_bytes("ship.bin")` loads a file: `data ship = include_bytes("ship.bin")`.
 - `[u8; _]` takes the length from the list, for a global `var` or `data` with a list: `data script: [u8; _] = [3, 1, 4]`.

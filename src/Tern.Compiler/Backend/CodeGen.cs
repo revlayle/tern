@@ -465,10 +465,12 @@ public sealed class CodeGen
 
     private void GenBlock(BlockStmt block)
     {
-        for (int k = 0; k < block.Statements.Count; k++)
+        // A local const has no code, and is not "the statement before" the next one.
+        var statements = block.Code;
+        for (int k = 0; k < statements.Count; k++)
         {
-            _previous = (k > 0 ? block.Statements[k - 1] : null, block.Statements[k]);
-            GenStmt(block.Statements[k]);
+            _previous = (k > 0 ? statements[k - 1] : null, statements[k]);
+            GenStmt(statements[k]);
         }
         _previous = default;
     }
@@ -558,7 +560,7 @@ public sealed class CodeGen
             if (firstTrue) { }
             else if (decremented is not null) GenCond(w.Condition, end, false);
             else Jmp(test);
-            if (w.Body.Statements.FirstOrDefault() is ForStmt first && NonEmptyInside(w.Condition, first)) _nonEmpty.Add(first);
+            if (w.Body.Code.FirstOrDefault() is ForStmt first && NonEmptyInside(w.Condition, first)) _nonEmpty.Add(first);
             Place(top);
             _loops.Add((end, test));
             GenBlock(w.Body);
@@ -597,7 +599,7 @@ public sealed class CodeGen
             _ => (null, 0, 0L),
         };
         if (v is null || v.IsVolatile || v.AliasOf is not null) return null;
-        return w.Body.Statements.LastOrDefault() is AssignStmt { Op: TokenKind.MinusEq, Target: NameExpr { Symbol: var t } } a
+        return w.Body.Code.LastOrDefault() is AssignStmt { Op: TokenKind.MinusEq, Target: NameExpr { Symbol: var t } } a
             && t == v && a.Value.ConstValue == step ? new VarOperand(v, offset) : null;
     }
 

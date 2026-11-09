@@ -548,6 +548,7 @@ public sealed class Parser
         switch (Current.Kind)
         {
             case TokenKind.Var: return ParseVar();
+            case TokenKind.Const: return ParseConst();
             case TokenKind.Linear when PeekAt(1).Kind == TokenKind.Data:
                 throw new CompileError(PeekAt(1).Pos, "'data' must be declared outside functions");
             case TokenKind.Linear: return ParseLinearVar();
