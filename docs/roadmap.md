@@ -405,6 +405,7 @@ Spec: 2.1, 3, 3.1, 3.3, 4, 4.1, 8.5, 11, 12.2. Decisions 2026-11-09: "struct lit
 - **The string-literal error gets a fix sentence** (spec 2.1): "Declare it as data, e.g. 'data HI = "HI"', and pass addr(HI), len(HI)", with the suggestion in `tern --json`.
 - **16-bit shifts by 8 to 15 move a byte first** (spec 11 rows `w = v << 8`, `w = v >> 8`): today eight `asl`/`rol` pairs (32 bytes, 80 cycles for `<< 8`). Unsigned and signed, in place (`w <<= 8`) and into another variable; results against C# for every count 8 to 15 at edge values. `BenchmarkTests` and `SkillTests` rewritten if they move, with the totals.
 - The new spec 11 rows for compares, `&&`, `||`, a compare stored in a `bool` and `i8 >> 1` describe the code as built; a listing test for each.
+- **After the review, before the merge** (questions 86 and 87, decisions 2026-11-09): number literals up to 2^63 - 1 (spec 2.1), with an accumulation that cannot overflow, and "Use a value up to $7FFFFFFFFFFFFFFF (9223372036854775807)" in the error; `ConstantRangeTests` writes `MAX` and `MIN` as literals. Tests: the largest decimal and hex literals, one above each, `-9223372036854775807 - 1`. Line breaks between struct literal fields stay as built (spec 3.3); a test that a newline between list elements is still the missing-`,` error.
 
 Done when: every item has its end-to-end and error tests, and one of the port's parallel-table groups (`pages.p8`'s `how_row` / `how_col` / `how_text`) compiles as an array of struct literals and gives the same tables as the parallel arrays.
 
