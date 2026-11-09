@@ -30,7 +30,7 @@ Tern is a programming language for 6502-family processors. It aims to be easy to
 
 - UTF-8 files with the extension `.tern`.
 - Comments: `// to end of line` and `/* block */`.
-- Statements end at a newline or `;`. A `;` is optional at the end of a line, so `x = 1;` and `x = 1` are the same, and an empty statement (`;;`) is ignored. A newline inside `( )` or `[ ]` does not end a statement, so argument lists and tables can span lines. A `{` or `}` ends that rule.
+- Statements end at a newline or `;`. A `;` is optional at the end of a line, so `x = 1;` and `x = 1` are the same, and an empty statement (`;;`) is ignored. A newline inside `( )` or `[ ]` does not end a statement, so argument lists and tables can span lines; there, elements are separated by `,` only. A `{` or `}` ends that rule: inside braces a newline separates again, which is why struct fields, in a declaration (3.3) or a literal, may be separated by `,` or a newline.
 - Where a block must follow (after the header of `fn`, `asm fn`, `interrupt fn`, `if`, `else`, `while`, `for`, `match`, `struct`, `asm`, `memory`), newlines before the `{` are skipped, so a brace may go on its own line (C# style). An `else` may also start the line after the `}`.
 - Indentation has no meaning.
 - Identifiers: `[A-Za-z_][A-Za-z0-9_]*`. Case-sensitive.
@@ -46,6 +46,8 @@ Tern is a programming language for 6502-family processors. It aims to be easy to
 | Char | `'A'`, `screen'A'` | One byte in the target's default encoding, or in the named encoding |
 | String | `"HELLO"`, `screen"HELLO"` | Byte array in the target's default encoding, or in the named encoding. No terminator unless written: `"HI\0"` |
 | Bool | `true`, `false` | |
+
+A number literal is at most 2^63 - 1 (`$7FFF_FFFF_FFFF_FFFF`, 9223372036854775807), the top of the range of constant arithmetic (3.1). A literal has no sign; `-` is the unary operator, so the lowest value is written `-9223372036854775807 - 1`, and all 64 bits set is `~0`.
 
 **Escapes** in char and string literals: `\0` (zero byte), `\n` (the encoding's line break; PETSCII `$0D`; an error in an encoding that has none, such as `screen` and `screen_mixed`), `\\`, `\"`, `\'`, and `\$NN` (a raw byte, not converted by the encoding). A character the encoding has no code for is a compile error that suggests `\$NN`.
 
@@ -202,6 +204,7 @@ e.pos.y = 5                        // ldy #1 / sta (e),y
   data start = Point { x = 160, y = 140 }
   var player: Enemy = Enemy { hp = 3 }
   ```
+  - Fields are separated by `,` or a newline, with an optional trailing `,`, as in a struct declaration (spec 2: a newline separates inside braces). The literals of a list are separated by `,` only, as any list elements: inside `[ ]` a newline means nothing, so `[10` / `-5]` on two lines is `10 - 5`.
   - The name is always written, also where the destination gives the type, so a long table can be read line by line and a literal in the wrong table is an error. `field = value`, not `field: value`, since `:` means "has type" (as `import m(P = value)`, 2.2).
   - A value is what an initial value of the field's type allows (4): a constant, checked against the field's type; an address filled in when the program is placed (`addr(boss)`, `addr(map) + 40`, `.lo` / `.hi`); a list or string of exactly the field's length for an array field; a struct literal of the nested struct's type for a nested struct.
   - An unknown field, a field given twice, and a `_` padding field are errors.
