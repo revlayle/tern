@@ -481,3 +481,7 @@ From `galaxy-star/tern/gaps.md`, steps 1 and 2. All are in M21's "First, small" 
 - **`[T; _]` takes the length from the list** (gap 10; spec 4), for `data` and `var` globals with a list. Reason: tables and test scripts change length often. `_` already means "not given" (loop variables, `match`, struct gaps), so rule 3 holds. Rejected: `[u8]`, which reads as a slice type Tern does not have. A written length is still checked.
 - **Unrolling stays with M22's generators** (gap 2); `unroll` stays rejected (2026-11-07). The hand-written Tern copy compiles to the same 32 `lda` / `sta` pairs. Evidence for M22: this copy is Tern statements, and generators emit only asm.
 - **The guide says when a handler gets `cld`** (gap 6; guide 3.8); the skill follows the guide.
+
+## 2026-11-09: the small items become the M20 follow-up
+
+- **The "First, small" items scheduled at the start of M21 (decisions of 2026-11-08) are their own milestone, the M20 follow-up** (roadmap), built before M21. Reason: with eight items they are about one coding session, the Galaxy Stars port is waiting on them (the constant rule touches most of its remaining modules), and `/code` takes the next milestone whole, so a list inside M21 could start the plug-in work too.

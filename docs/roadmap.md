@@ -372,11 +372,24 @@ Spec: 14.4, 3.2, 5.1, 5.2.
 
 Tests: the check fires on an index past the end (also through a folded offset such as `a[i - 1]`) and on an `indexed match` value outside its span, and stays quiet on a correct program, including one whose arithmetic wraps; loops at edge values (-128, 127, 0, wrap) against C#, the listing shapes of spec 11, the signed empty check with variable bounds, a non-±1 step that overflows past 127 or -128, and the errors for mixed signedness and a variable step; each new C-habit error, and that `a++b` and `a--b` still parse.
 
+## M20 follow-up (before M21)
+
+Spec: 3.1, 3.4, 4, 10.1, 11. Decisions 2026-11-08: "M20 provisional choices", "addresses of variables and data in initial values" and "Galaxy Stars port, first gaps". Small items from M20 and from the Galaxy Stars port (`C:\game-dev\galaxy-star\tern\gaps.md`); done before M21 so the port can continue without workarounds.
+
+- **Tools** (from M20): `tern run --set $DC00=$FF` (and `tern bench`) sets a memory byte before the run, so a whole game loop can be checked with a joystick value; `tern bench` prints index errors (`RunResult.IndexErrors`) and fails a variant that has them.
+- **`v += 2` / `v -= 2` on a variable held in X or Y** is `inx` / `inx` (`dex`, `iny`, `dey`), the spec 11 row.
+- **`addr()` in initial values** (spec 4): of globals, `data`, struct-global fields and functions, alone, plus or minus a constant, or as `.lo` / `.hi`. Tested with split and `linear` 16-bit tables, one-byte `.lo` / `.hi` tables, fields, an overlay's data from resident code, and each remaining error.
+- **Constant expressions computed exactly** (spec 3.1, 3.4). Tested at the edges: `320 - BOX` in a `u16`, `400 / 50` in a `u8`, a constant sum as a pointer argument, `~$0F` on `u8` and `u16`, a constant that no longer fits, typed constants with runtime values unchanged. A type error in a runtime expression names the operand that set the type.
+- **`[T; _]`** (spec 4), with its errors.
+- **`c64.sprite_xy` and `c64.set_kernal_irq`** (spec 10.1), checked in VICE with the KERNAL in and an `io` call. The skill's interrupt notes are updated (`cld`, the KERNAL).
+
+`BenchmarkTests` and `SkillTests` are rewritten in the same commit as any change that moves them, with the old and new totals.
+
+Done when: every item above has its end-to-end and error tests, and the Galaxy Stars workarounds for gaps 1, 3, 4, 5, 7, 8, 9 and 10 compile in their plain form (checked by porting each into a test program).
+
 ## M21: Plug-ins against a fixed interface
 
 Spec: 12.3 (planned).
-
-- **First, small** (from M20; decision 2026-11-08): `tern run --set $DC00=$FF` (and `tern bench`) sets a memory byte before the run, so a whole game loop can be checked with a joystick value; `tern bench` prints index errors (`RunResult.IndexErrors`) and fails a variant that has them; `v += 2` / `v -= 2` on a variable held in X or Y is `inx` / `inx` (`dex`, `iny`, `dey`), a spec 11 row; `addr()` of globals, `data`, struct-global fields and functions in initial values, alone, plus or minus a constant, or as `.lo` / `.hi` (spec 4; decision 2026-11-08, from the Galaxy Stars port), tested with split and `linear` 16-bit tables, one-byte `.lo` / `.hi` tables, fields, an overlay's data from resident code, and each remaining error. From the Galaxy Stars port (decision 2026-11-08, "first gaps"): constant expressions computed exactly (spec 3.1, 3.4), tested at the edges (`320 - BOX` in a `u16`, `400 / 50` in a `u8`, a constant sum as a pointer argument, `~$0F` on `u8` and `u16`, a constant that no longer fits, typed constants with runtime values unchanged), and a type error naming the operand that set the type; `[T; _]` (spec 4) with its errors; `c64.sprite_xy` and `c64.set_kernal_irq` (spec 10.1), checked in VICE with the KERNAL in and an `io` call, and the skill's interrupt notes updated (`cld`, the KERNAL). `BenchmarkTests` and `SkillTests` are rewritten in the same commit if they move.
 
 `export module` in a binary (exports matched by name to the module's fixed-address routines, with checks on parameters, return, `keeps`, the interface's fixed variables defined as `data`, `setup` at entry 0) and `export f, g @ addr` in a program with `main` (a jump table at a fixed address, `name_api.tern` written). Tests: two level binaries built against one interface module, exported in different source orders, loaded in turn into one reserved slot and called by a host; a level calling the host's table; each error. Example: a game with levels on disk plus one built separately, checked in VICE
 
