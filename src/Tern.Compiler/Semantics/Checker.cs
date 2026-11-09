@@ -71,6 +71,9 @@ public sealed partial class Checker
             foreach (var s in program.Structs) LayOut((StructSymbol)module.Scope[s.Name]);
             foreach (var f in program.Functions) DeclareFunction(f);
             foreach (var g in program.Globals) DeclareGlobal(g);
+            // Initial values with addresses after all of the file's globals, so they can name globals declared below.
+            foreach (var (decl, v) in _addressInits) v.InitialBytes = ConstantBytes(decl.Init!, v.Type, v);
+            _addressInits.Clear();
             // After the globals, so that a variable named as an address gets the right error.
             foreach (var f in program.Functions.Where(f => f.Address is not null)) DeclareRoutine(f, f.Symbol!);
             foreach (var a in program.Asserts) CheckAssert(a, module);
@@ -146,7 +149,19 @@ public sealed partial class Checker
         CheckPrivateGlobalsPerRoot(modules, reachable);
         MarkGlobalsUsedFromTwoRoots(reachable);
         var used = reachable.SelectMany(f => f.UsedGlobals).Concat(mainModule.Scope.Values.OfType<VariableSymbol>()).ToHashSet();
+        // A kept global keeps the globals whose addresses are in its initial value.
+        foreach (var g in used.ToList()) used.UnionWith(GlobalsNamedBy(g.Storage));
         return new CheckedProgram(modules, _globals.Where(used.Contains).ToList(), reachable, main) { Layout = _layout, Exports = exports };
+    }
+
+    /// <summary>A global and the globals whose addresses are in its initial value, and in theirs (spec 4).</summary>
+    private static List<VariableSymbol> GlobalsNamedBy(VariableSymbol g)
+    {
+        var all = new List<VariableSymbol> { g };
+        for (int i = 0; i < all.Count; i++)
+            foreach (var fill in all[i].AddressFills)
+                if (fill.Variable is { } v && !all.Contains(v)) all.Add(v);
+        return all;
     }
 
     /// <summary>The name of the root that stands for a binary's entries (spec 12.3); it has no code.</summary>
@@ -281,8 +296,8 @@ public sealed partial class Checker
                 "Keep shared state in a resident module or the main file");
         if (_dead) return;
         _function.UsedGlobals.Add(v);
-        // A table of function addresses keeps those functions in the program.
-        foreach (var (_, f) in v.Storage.FunctionAddresses) _function.UsedAddresses.Add(f);
+        // A table of function addresses keeps those functions in the program, also through a table it names.
+        foreach (var f in GlobalsNamedBy(v.Storage).SelectMany(g => g.FunctionAddresses)) _function.UsedAddresses.Add(f);
     }
 
     /// <summary>The main file with the constants it can declare without any import, for evaluating module parameter values.</summary>
@@ -559,6 +574,8 @@ public sealed partial class Checker
     private bool _allowLongBytes;
     /// <summary>Set while a global's type is resolved: the length of its list initial value, for <c>[T; _]</c> (spec 4).</summary>
     private int? _listLength;
+    /// <summary>Globals of the file being declared whose initial values hold addresses (spec 4), worked out after its last global.</summary>
+    private readonly List<(VarDecl Decl, VariableSymbol Variable)> _addressInits = [];
 
     private void DeclareGlobal(VarDecl decl)
     {
@@ -604,6 +621,7 @@ public sealed partial class Checker
                     throw new CompileError(decl.Init.Pos, $"Expected {type.Length} bytes, found {bytes.Length}");
                 v.InitialBytes = bytes;
             }
+            else if (UsesAddr(decl.Init)) _addressInits.Add((decl, v));
             else
                 v.InitialBytes = ConstantBytes(decl.Init, type, v);
         }
@@ -743,40 +761,69 @@ public sealed partial class Checker
             return bytes.ToArray();
         }
 
+        if (UsesAddr(init)) return AddressBytes(init, type, target, at);
         CheckExpr(init);
         Coerce(init, type);
-        if (init is CallExpr { FunctionAddress: { } f })
-        {
-            // Filled in when the program is placed.
-            target.FunctionAddresses.Add((at, f));
-            return [0, 0];
-        }
         if (init.ConstValue is not long value)
-            throw new CompileError(init.Pos, UsesFunctionAddress(init)
-                ? "addr() of a function can be an initial value only on its own, not in a calculation"
-                : UsesAddr(init)
-                ? "addr() cannot be used in an initial value, since addresses are known only after compiling. Assign it at the start of main"
-                : "A global's initial value must be known at compile time");
+            throw new CompileError(init.Pos, "A global's initial value must be known at compile time");
         return type.Size == 1 ? [(byte)value] : [(byte)value, (byte)(value >> 8)];
     }
 
+    /// <summary>
+    /// An address in an initial value (spec 4): <c>addr()</c> of a function, global, data or field of a
+    /// struct global, alone, plus or minus a constant, or its <c>.lo</c> / <c>.hi</c>. Filled in when the
+    /// program is placed; the bytes are zeros until then.
+    /// </summary>
+    private byte[] AddressBytes(Expr init, TernType type, VariableSymbol target, int at)
+    {
+        var part = AddressPart.Word;
+        var e = init;
+        if (init is MemberExpr { Member: "lo" or "hi" } half)
+        {
+            part = half.Member == "lo" ? AddressPart.Low : AddressPart.High;
+            e = half.Target;
+            if (type.Kind != TypeKind.U8)
+                throw new CompileError(init.Pos, $"'.{half.Member}' of an address is one byte, a u8, but this value is a {type}. Use a [u8; n] table, or the whole address");
+        }
+        CheckExpr(e);
+        if (part == AddressPart.Word) Coerce(e, type);
+        if (Placed(e) is not var (function, variable, offset))
+            throw new CompileError(init.Pos,
+                "An address in an initial value is filled in when the program is placed, so it can only be used alone, plus or minus a constant, or as .lo / .hi. Assign other values at the start of main");
+        // Overlays in one area share their memory: the other one's code or data is not there while this one is loaded (spec 8.5).
+        var (otherArea, otherModule, name) = function is not null ? (function.OverlayArea, function.Module, function.Name) : (variable!.OverlayArea, variable.Module, variable.QualifiedName);
+        if (target.OverlayArea is { } area && otherArea == area && otherModule != target.Module && (variable is null || variable.FixedAddress is null || variable.IsData))
+            throw new CompileError(init.Pos,
+                $"'{name}' is in {otherModule!.Name}, which is in the same overlay area '{area}' as {target.Module!.Name}. They are never loaded together, so the address would point at the wrong memory. " +
+                "Take the address in resident code, or put one of them in another area");
+        target.AddressFills.Add(new AddressFill(at, function, variable?.AliasOf ?? variable, (int)offset + (variable?.AliasOffset ?? 0), part));
+        return new byte[part == AddressPart.Word ? 2 : 1];
+    }
+
+    /// <summary>What an address in an initial value names, with its constant offset; null for any other use of an address.</summary>
+    private static (FunctionSymbol? Function, VariableSymbol? Variable, long Offset)? Placed(Expr e)
+    {
+        switch (e)
+        {
+            case CallExpr { FunctionAddress: { } f }: return (f, null, 0);
+            case CallExpr { AddressOf: { } v }: return (null, v, 0);
+            case CastExpr { Type.Size: 2 } c: return Placed(c.Operand);
+            case BinaryExpr { Op: TokenKind.Plus } b when b.Right.ConstValue is long r && Placed(b.Left) is var (f1, v1, o1): return (f1, v1, o1 + r);
+            case BinaryExpr { Op: TokenKind.Plus } b when b.Left.ConstValue is long l && Placed(b.Right) is var (f2, v2, o2): return (f2, v2, o2 + l);
+            case BinaryExpr { Op: TokenKind.Minus } b when b.Right.ConstValue is long r && Placed(b.Left) is var (f3, v3, o3): return (f3, v3, o3 - r);
+            default: return null;
+        }
+    }
+
+    /// <summary>Whether the expression has an <c>addr()</c> in it, before it is checked.</summary>
     private static bool UsesAddr(Expr e) => e switch
     {
-        CallExpr c => c.AddressOf is not null,
+        CallExpr c => c.Name == "addr" || c.Args.Any(UsesAddr),
         UnaryExpr u => UsesAddr(u.Operand),
         BinaryExpr b => UsesAddr(b.Left) || UsesAddr(b.Right),
         CastExpr c => UsesAddr(c.Operand),
         MemberExpr m => UsesAddr(m.Target),
-        _ => false,
-    };
-
-    private static bool UsesFunctionAddress(Expr e) => e switch
-    {
-        CallExpr c => c.FunctionAddress is not null,
-        UnaryExpr u => UsesFunctionAddress(u.Operand),
-        BinaryExpr b => UsesFunctionAddress(b.Left) || UsesFunctionAddress(b.Right),
-        CastExpr c => UsesFunctionAddress(c.Operand),
-        MemberExpr m => UsesFunctionAddress(m.Target),
+        ArrayLiteralExpr a => a.Elements.Any(UsesAddr),
         _ => false,
     };
 
@@ -1899,7 +1946,7 @@ public sealed partial class Checker
         }
         // The main file's globals are all kept, so the functions in their initial values are too.
         foreach (var g in mainModule.Scope.Values.OfType<VariableSymbol>())
-            foreach (var (_, f) in g.FunctionAddresses) Named(f);
+            foreach (var f in GlobalsNamedBy(g).SelectMany(t => t.FunctionAddresses)) Named(f);
 
         void Add(FunctionSymbol root, bool isRoot)
         {
@@ -1946,7 +1993,7 @@ public sealed partial class Checker
         Visit(main);
         foreach (var f in mainModule.Scope.Values.OfType<FunctionSymbol>().Where(f => f.IsInterrupt)) Compiled(f);
         foreach (var g in mainModule.Scope.Values.OfType<VariableSymbol>())
-            foreach (var (_, f) in g.FunctionAddresses) Named(f);
+            foreach (var f in GlobalsNamedBy(g).SelectMany(t => t.FunctionAddresses)) Named(f);
     }
 
     /// <summary>A handler is entered by the CPU, with nothing to pass: only a part may have parameters or a return value.</summary>

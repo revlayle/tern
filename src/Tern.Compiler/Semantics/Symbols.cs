@@ -196,10 +196,12 @@ public sealed class VariableSymbol(string name, SourcePos pos, TernType type, Va
     /// </summary>
     public HashSet<int> JumpVectorOffsets { get; } = [];
     /// <summary>
-    /// Function addresses in the initial value (<c>data table: [u16; 2] = [addr(a), addr(b)]</c>): the
-    /// index of the low byte in <see cref="InitialBytes"/>, which hold zeros there until the program is placed.
+    /// Addresses in the initial value (<c>data table: [ptr u8; 2] = [addr(map), addr(map) + 40]</c>,
+    /// spec 4): filled in when the program is placed; <see cref="InitialBytes"/> hold zeros there.
     /// </summary>
-    public List<(int Index, FunctionSymbol Function)> FunctionAddresses { get; } = [];
+    public List<AddressFill> AddressFills { get; } = [];
+    /// <summary>The functions whose addresses are in the initial value.</summary>
+    public IEnumerable<FunctionSymbol> FunctionAddresses => AddressFills.Where(f => f.Function is not null).Select(f => f.Function!);
 
     /// <summary>Estimated access count, used to rank zero-page candidates.</summary>
     public long Weight { get; set; }
@@ -301,4 +303,18 @@ public sealed class FunctionSymbol(string name, SourcePos pos) : Symbol(name, po
     public string Label => Name;
 
     public override string ToString() => Name;
+}
+
+/// <summary>Which bytes of an address an initial value holds: both, or <c>.lo</c> / <c>.hi</c> alone.</summary>
+public enum AddressPart { Word, Low, High }
+
+/// <summary>
+/// An address in a global's initial value, filled in when the program is placed (spec 4): of a
+/// function, or of a variable or data (<see cref="Variable"/> is the variable that has the memory,
+/// with a field's offset in <see cref="Offset"/>), plus <see cref="Offset"/>. <see cref="Index"/> is
+/// the first byte in <see cref="VariableSymbol.InitialBytes"/>, which is two bytes for a word, one for a half.
+/// </summary>
+public sealed record AddressFill(int Index, FunctionSymbol? Function, VariableSymbol? Variable, int Offset, AddressPart Part)
+{
+    public string Name => Function?.Name ?? Variable!.QualifiedName;
 }

@@ -120,6 +120,7 @@ public static class Assembler
                     Instr => s.LongBranch ? 5 : InstructionSet.OperandSize(s.Mode) + 1,
                     DataBytes d => d.Bytes.Length,
                     LabelTable t => t.Labels.Count,
+                    AddressByte => 1,
                     Padding p => p.SizeAt(pc),
                     _ => 0,
                 };
@@ -360,6 +361,14 @@ public static class Assembler
                         listing.AppendLine($"${s.Address + k:X4}  {string.Join(" ", table.Skip(k).Take(8).Select(b => b.ToString("X2")))}"
                             + $"  ; {(t.High ? "hi" : "lo")}: {string.Join(", ", names)}");
                     }
+                    break;
+                }
+                case AddressByte a:
+                {
+                    int address = a.Label is { } label ? Resolve(label) : Address(new VarOperand(a.Variable!, 0));
+                    byte value = (byte)Byte(address + a.Offset, a.High);
+                    bytes.Add(value);
+                    listing.AppendLine($"${s.Address:X4}  {value:X2}  ; {(a.High ? "hi" : "lo")}: {ImmLabelByte.OffsetText(a.Name, a.Offset)}");
                     break;
                 }
                 case Padding p when s.Size > 0:

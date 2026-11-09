@@ -99,6 +99,12 @@ public sealed record DataBytes(byte[] Bytes) : AsmItem;
 /// <summary>One byte per label: the low or high byte of its address plus <see cref="Offset"/> (a jump table).</summary>
 public sealed record LabelTable(IReadOnlyList<Label> Labels, bool High, int Offset = 0) : AsmItem;
 
+/// <summary>
+/// One byte of an address in an initial value (spec 4): the low or high byte of a label's or a
+/// variable's address plus <see cref="Offset"/>, filled in when the program is placed.
+/// </summary>
+public sealed record AddressByte(Label? Label, VariableSymbol? Variable, int Offset, bool High, string Name) : AsmItem;
+
 /// <summary>Zero bytes whose count depends on the address where they start, worked out during layout.</summary>
 public sealed record Padding(Func<int, int> SizeAt, string Reason) : AsmItem;
 

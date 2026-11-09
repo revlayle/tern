@@ -240,7 +240,7 @@ public static class Optimizer
             {
                 switch (code[k])
                 {
-                    case LabelTable or DataBytes:
+                    case LabelTable or DataBytes or AddressByte:
                     case LabelDef d when unknown.Contains(d.Label):
                         followed = false;
                         break;
@@ -766,7 +766,7 @@ public static class Optimizer
     private static bool FallsThrough(AsmItem item) => item switch
     {
         Instr i => i.Mnemonic is not (Mnemonic.Jmp or Rts or Rti),
-        LabelTable or DataBytes => false,
+        LabelTable or DataBytes or AddressByte => false,
         _ => true,
     };
 

@@ -103,6 +103,9 @@ fn main() {
 - `noinit` skips the zeroing (not on locals, `data` or fixed addresses).
 - `data` cannot be written. `include_bytes("ship.bin")` loads a file: `data ship = include_bytes("ship.bin")`.
 - `[u8; _]` takes the length from the list, for a global `var` or `data` with a list: `data script: [u8; _] = [3, 1, 4]`.
+- An initial value may hold addresses, filled in when the program is placed: `addr()` of a global, data,
+  a field of a struct global or a function, alone, plus or minus a constant, or its `.lo` / `.hi`:
+  `data rows: [ptr u8; 2] = [addr(map), addr(map) + 40]`, `data jlo: [u8; 1] = [(addr(f) - 1).lo]`.
 
 ## 4. Arrays
 
