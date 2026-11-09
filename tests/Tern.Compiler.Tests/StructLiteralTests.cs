@@ -276,6 +276,8 @@ public class StructLiteralTests
     [InlineData(P + "var ps: [Point; 2] = [\n  Point { x = 1 }\n  Point { x = 2 }\n]\nfn main() { }",
         "Expected ',' or ']' after this element, found 'Point'. Write ',' after the '}'")]
     [InlineData("var a: [u8; 2] = [1 2]\nfn main() { }", "Expected ',' or ']' after this element, found '2'. Write ',' between the elements")]
+    // Question 86: inside [ ] a newline still does not separate elements.
+    [InlineData("var a: [u8; 2] = [\n  1\n  2\n]\nfn main() { }", "Expected ',' or ']' after this element, found '2'. Write ',' between the elements")]
     public void Reports_errors(string source, string expected) => Assert.Contains(expected, Error(source));
 
     [Fact]

@@ -12,8 +12,8 @@ public class ConstantRangeTests
     private static string Error(string source) => Assert.Throws<CompileError>(() => TernCompiler.Compile(source)).Description;
 
     private const string Edges = """
-        const MAX = (1 << 62) - 1 + (1 << 62)     // 9223372036854775807
-        const MIN = -(1 << 62) - (1 << 62)        // -9223372036854775808
+        const MAX = 9223372036854775807
+        const MIN = -9223372036854775807 - 1
         """;
 
     [Fact]
@@ -101,6 +101,42 @@ public class ConstantRangeTests
         Assert.Contains("goes outside the signed 64-bit range", e);
     }
 
+    [Theory]
+    [InlineData("9223372036854775807")]
+    [InlineData("$7FFFFFFFFFFFFFFF")]
+    [InlineData("$7FFF_FFFF_FFFF_FFFF")]
+    [InlineData("0b0111111111111111111111111111111111111111111111111111111111111111")]
+    [InlineData("(1 << 62) - 1 + (1 << 62)")]
+    public void The_largest_number_literal_is_2_to_the_63_minus_1(string literal)
+    {
+        // Spec 2.1. Shifted down so the result fits a u16: 2^63 - 1 >> 48 is $7FFF.
+        var r = Run.Program($"const V = {literal}\nvar a: u16\nvar b: u8\nfn main() {{ a = V >> 48; b = (V & $FF) as u8 }}");
+        Assert.Equal(0x7FFF, r.U16("a"));
+        Assert.Equal(0xFF, r.U8("b"));
+    }
+
+    [Fact]
+    public void The_lowest_value_is_written_with_a_subtraction()
+    {
+        var r = Run.Program("const V = -9223372036854775807 - 1\nvar a: i8\nvar b: u8\nfn main() { a = V >> 56; b = (V & $FF) as u8 }");
+        Assert.Equal(-128, (sbyte)r.U8("a"));
+        Assert.Equal(0, r.U8("b"));
+    }
+
+    [Theory]
+    [InlineData("9223372036854775808")]
+    [InlineData("$8000000000000000")]
+    [InlineData("0b1000000000000000000000000000000000000000000000000000000000000000")]
+    [InlineData("99999999999999999999")]
+    [InlineData("$FFFFFFFFFFFFFFFFFF")]
+    [InlineData("-9223372036854775808")] // the literal has no sign (spec 2.1)
+    public void A_number_literal_above_2_to_the_63_minus_1_is_an_error(string literal)
+    {
+        var e = Assert.Throws<CompileError>(() => TernCompiler.Compile($"const V = {literal}\nfn main() {{ }}"));
+        Assert.Equal("Number is too large. Use a value up to $7FFFFFFFFFFFFFFF (9223372036854775807)", e.Description);
+        Assert.Equal(new SourcePos(1, literal.StartsWith('-') ? 12 : 11), e.Pos);
+    }
+
     [Fact]
     public void The_error_points_at_the_step_that_leaves_the_range()
     {
@@ -115,7 +151,6 @@ public class ConstantRangeTests
     [InlineData("var x: u8\nfn main() { x = x << 8 }", "Shift count must be 0 to 7")]
     [InlineData("fn main() { asm { lda #1 << 64 } }", "Shift count must be 0 to 63")]
     [InlineData("fn main() { asm { lda #1 >> -1 } }", "Shift count must be 0 to 63")]
-    [InlineData("const V = 4294967296\nfn main() { }", "Number is too large. Use a value up to $FFFFFFFF (4294967295)")]
     [InlineData("var w: u16\nfn main() { w = w >> 16 }", "Shift count must be 0 to 15")]
     public void Shift_counts(string source, string expected) => Assert.Contains(expected, Error(source));
 

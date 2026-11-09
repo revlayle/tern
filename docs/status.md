@@ -5,13 +5,17 @@ Owned by the coding session. Updated at the end of every coding session.
 ## Current
 
 - **Milestone:** M20 follow-up 2 (roadmap). All six items are done, and the "done when" test passes. M20 follow-up was merged into `main` (`909489f`).
-- **Branch:** `m20-followup2`, with `main` merged in (the review). 2362 compiler tests pass plus 36 CPU tests. No benchmark changed (1254 / 350780); `SkillTests` pass. All examples and the Galaxy Stars port compile.
-- **Next step:** merge (`/merge m20-followup2`): the review says ready to merge, and its suggestions 2-4 are done (1 is question 87). Questions 86 and 87 are open for the spec session; neither blocks the merge.
+- **Branch:** `m20-followup2`, with `main` merged in (the review and the settling of questions 86 and 87). 2374 compiler tests pass plus 36 CPU tests. No benchmark changed (1254 / 350780); `SkillTests` pass. All examples and the Galaxy Stars port compile.
+- **Next step:** a short `/review` of the question 86/87 commit (the roadmap's "after the review, before the merge" item), then `/merge m20-followup2`. The review's suggestions 1-4 are done. No questions are open.
 
 ## Done
 
+- **Questions 86 and 87, after the review** (2026-11-09, decisions 2026-11-09, roadmap M20 follow-up 2 "after the review").
+  - 87: a number literal may be up to 2^63 - 1 (spec 2.1). `Lexer` checks `value > (long.MaxValue - digit) / radix` before each digit, so the accumulation never overflows; the error is "Number is too large. Use a value up to $7FFFFFFFFFFFFFFF (9223372036854775807)". `ConstantRangeTests` writes `MAX` as `9223372036854775807` and `MIN` as `-9223372036854775807 - 1`, and tests the largest decimal, hex (with and without `_`) and binary literals, one above each, larger ones, `-9223372036854775808` (an error: the literal has no sign), and the lowest value.
+  - 86: struct literal fields stay separated by `,` or a newline, as built. `StructLiteralTests.Reports_errors` checks that a newline between list elements (`[` / `1` / `2` / `]`) is still the missing-`,` error.
+
 - **M20 follow-up 2, review suggestions** (2026-11-09, `docs/reviews/m20-followup2.md`).
-  - Suggestion 1: the "Number is too large" error says "Use a value up to $FFFFFFFF (4294967295)". The limit itself is question 87.
+  - Suggestion 1: the "Number is too large" error got a fix sentence (the limit was then raised by question 87, above).
   - Suggestion 2: a struct literal in the wrong place inside an initial value gets its own message (`Checker.LiteralForScalar`): a pointer field, "'n' is ptr L, an address, not a L. Declare the record as data and write 'n = addr(name)'" ("This value is ..." with no field); another scalar, "Expected u8, found a Point literal"; a `const` (top level or local), "A constant cannot be a struct. Declare it as data: 'data K = Point { ... }'".
   - Suggestion 3: a missing `,` between list elements is "Expected ',' or ']' after this element, found 'Point'. Write ',' after the '}'" ("Write ',' between the elements" after any other element).
   - Suggestion 4: a shift count outside 0 to 63 in assembly is "Shift count must be 0 to 63".
@@ -471,10 +475,9 @@ Not bugs; things to improve, mostly in M7 (optimizer).
 
 ## Questions for the spec session
 
-86. **Struct literal fields separated by line breaks** (provisional). Spec 3.3 shows fields separated by `,`. The compiler also accepts a line break in place of a `,`, as struct declarations do (`Rec {` / `a = 1` / `b = 2` / `}`), and a trailing `,`. Keep, or require commas? The review notes that list elements still need a `,` (a missing one now has a clear error), so if line breaks are kept between fields, the same might be wanted between the literals of a list, so that both levels follow one rule.
-87. **How large may a number literal be?** (review M20 follow-up 2, suggestion 1). The lexer rejects a literal above `$FFFFFFFF`, while constant arithmetic is signed 64-bit (spec 3.1), so `const BIG = 5000000000` is an error and the 64-bit edges must be built with shifts. Spec 2.1 and 3.1 give no limit. Raise it to 2^63 - 1, or state the 32-bit limit in 2.1?
+None open.
 
-Questions 79-85 were settled on 2026-11-09 and are built. Questions 76-78 were settled on 2026-11-08 (decisions.md), as built.
+Questions 86 and 87 were settled on 2026-11-09 and are built. Questions 79-85 were settled on 2026-11-09 and are built. Questions 76-78 were settled on 2026-11-08 (decisions.md), as built.
 
 Questions 1-63 and 65-75 are settled (decisions.md; 44, 45 and 59-63 on 2026-11-07, 65-75 on 2026-11-08). Question 64 was withdrawn.
 
