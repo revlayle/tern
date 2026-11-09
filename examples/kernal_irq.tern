@@ -1,0 +1,52 @@
+// A raster split with the KERNAL left in: c64.set_kernal_irq installs the handler through $0314,
+// so the program can still call the KERNAL, here to read the disk drive's status with the io library.
+// The border is blue above line 150 and red below it, and the drive's message is printed.
+//
+// To try it in VICE (a disk image, so that drive 8 answers):
+//   dotnet run --project src/Tern.Cli -- examples/kernal_irq.tern
+//   c1541 -format irq,01 d64 examples/kernal_irq.d64 -write examples/kernal_irq.prg kernal_irq
+//   x64sc -default -warp -autostart examples/kernal_irq.d64
+//
+// Result: the border is blue at the top and red from line 150 down, and "00, OK,00,00" is printed.
+
+import c64
+import io
+
+const SPLIT = 150
+const TOP = 20
+
+var below: bool
+var frames: u8
+var status: [u8; 40]
+
+interrupt fn raster() {
+    c64.vic.irq_status = 1          // acknowledge the raster interrupt
+    if below {
+        c64.vic.border = 6
+        c64.vic.raster = SPLIT
+    } else {
+        c64.vic.border = 2
+        c64.vic.raster = TOP
+        frames += 1
+    }
+    below = !below
+}
+
+fn main() {
+    c64.interrupts_off()
+    c64.cia1.icr = $7F              // the KERNAL's timer interrupt would reach the handler too
+    c64.set_kernal_irq(addr(raster))
+    c64.vic.control1 &= $7F
+    c64.vic.raster = SPLIT
+    c64.vic.irq_enable = 1
+    c64.vic.irq_status = $FF
+    c64.interrupts_on()
+
+    var n: u8 = 0
+    if !io.command_open(8) {        // true means it failed
+        n = io.drive_status(addr(status), 40)
+        io.command_close()
+    }
+    c64.print(addr(status), n)
+    while true { }
+}

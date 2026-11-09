@@ -526,6 +526,14 @@ band $0002 u8 = 3 ($03)
 - An `interrupt fn` called from another one is a *part* (no saving, `rts`): this is how library
   raster code (`sprites.raster()`, `scroll.top()`) goes into your own handler.
 - `tern run --irq n` raises an IRQ every n cycles through `$FFFE`.
+- A handler starts with `cld` only when it can do decimal arithmetic: `adc` or `sbc` in its code or
+  asm blocks, or any call (`jsr`). Without them it leaves decimal mode alone, which is safe.
+- To keep the KERNAL in (needed by `io` and `chrout`), install the handler with
+  `c64.set_kernal_irq(addr(raster))` instead of `kernal_off` / `set_irq`: it goes through `$0314`,
+  and the same `interrupt fn` works. The KERNAL's keyboard scan stops (`getin` sees no keys), and its
+  CIA 1 timer interrupt still reaches the handler: turn it off with `c64.cia1.icr = $7F`.
+  `examples/kernal_irq.tern` reads the drive's status while a raster split runs. `tern run` has no
+  KERNAL, so check such a program in VICE.
 
 ## 12. Modules
 
@@ -579,7 +587,7 @@ a $0003 u8 = 21 ($15)
 | `bcd` | packed decimal counters of 1-4 bytes for scores |
 | `random` | `seed`, `next8`, `next16`, `below(n)` |
 | `cpu` | `carry()`, `zero()`, `negative()`, `overflow()` after an `asm` block |
-| `c64` | `SCREEN`, `COLOR`, the 16 colors (`c64.BLACK` ... `c64.LIGHT_GREY`), `chrout`, `print`, `getin`, `cursor`, `load`; registers `vic`, `sid`, `cia1`, `cia2`; `kernal_off`, `set_irq`, `set_nmi`, `interrupts_on`, `interrupts_off` |
+| `c64` | `SCREEN`, `COLOR`, the 16 colors (`c64.BLACK` ... `c64.LIGHT_GREY`), `chrout`, `print`, `getin`, `cursor`, `load`; registers `vic`, `sid`, `cia1`, `cia2`; `sprite_xy` (the sprite positions as an array: x of sprite n at `2n`, y at `2n + 1`); `kernal_off`, `set_irq`, `set_kernal_irq`, `set_nmi`, `interrupts_on`, `interrupts_off` |
 | `io` (C64) | disk files through the KERNAL: `load`, `save`, `open`, `read`, `write`, `close`, the command channel |
 | `sprites` (C64) | a sprite multiplexer, 8 to 64 sprites |
 | `scroll` (C64) | smooth eight-way character scrolling |

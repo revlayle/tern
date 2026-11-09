@@ -489,6 +489,88 @@ public class C64LibraryTests
         Assert.Equal(0x40, m[r.Address("c64.ignore_nmi")]);   // kernal_off's NMI handler: just rti
     }
 
+    /// <summary>The KERNAL's IRQ entry at $FF48 (pha / txa / pha / tya / pha, then through $0316 for brk or $0314), with $FFFE pointing to it.</summary>
+    private static void KernalIrqEntry(Ram ram)
+    {
+        byte[] entry = [0x48, 0x8A, 0x48, 0x98, 0x48, 0xBA, 0xBD, 0x04, 0x01, 0x29, 0x10, 0xF0, 0x03, 0x6C, 0x16, 0x03, 0x6C, 0x14, 0x03];
+        entry.CopyTo(ram.Bytes, 0xFF48);
+        ram.Bytes[0xFFFE] = 0x48;
+        ram.Bytes[0xFFFF] = 0xFF;
+        ram.Bytes[0x0314] = 0x31;   // the KERNAL's own handler at $EA31, which the emulator does not have
+        ram.Bytes[0x0315] = 0xEA;
+    }
+
+    [Fact]
+    public void An_interrupt_handler_is_installed_with_the_kernal_in()
+    {
+        // M20 follow-up, spec 10.1: through $0314 and a stub that pulls the KERNAL's pushes of A, X and Y.
+        var r = Run.Program("""
+            import c64
+            var ticks: u8
+            var seen: [u8; 4]
+            var table: [u8; 200]
+            var sum: u16
+            interrupt fn tick() {
+                seen[ticks & 3] = ticks
+                ticks += 1
+            }
+            fn main() {
+                c64.set_kernal_irq(addr(tick))
+                c64.interrupts_on()
+                for k in 0..20 {
+                    for i in 0..200 using Y { table[i] = i ^ k }
+                    for i in 0..200 using X { sum += table[i] as u16 }
+                }
+                c64.interrupts_off()
+            }
+            """, irqEvery: 700, setup: KernalIrqEntry);
+        byte[] m = r.Ram.Bytes;
+        Assert.Equal(r.Address("c64.kernal_entry"), m[0x0314] | m[0x0315] << 8);
+        Assert.Equal(r.Address("tick"), r.U16("c64.kernal_handler"));
+        Assert.True(r.Interrupts > 20);
+        Assert.Equal(r.Interrupts & 0xFF, r.U8("ticks"));
+        Assert.Equal([.. Enumerable.Range(0, 200).Select(i => (byte)(i ^ 19))], m.AsSpan(r.Address("table"), 200).ToArray());
+        int total = 0;
+        for (int k = 0; k < 20; k++) for (int i = 0; i < 200; i++) total += i ^ k;
+        Assert.Equal(total & 0xFFFF, r.U16("sum"));
+        Assert.Contains("jmp (c64.kernal_handler)", r.Result.Listing);
+        Assert.Equal(0xFF, r.Cpu.SP);   // every interrupt left the stack as it found it
+    }
+
+    [Fact]
+    public void Kernal_irq_example_installs_its_handler_through_0314()
+    {
+        // Checked in VICE (the commands are in its header): the split runs and the drive's status is printed.
+        var path = AsmTests.FindExample("kernal_irq.tern");
+        var result = TernCompiler.Compile(File.ReadAllText(path), sourcePath: path);
+        Assert.Contains("jsr c64.set_kernal_irq", result.Listing);
+        Assert.Contains("jsr io.drive_status", result.Listing);
+        Assert.Contains("jmp (c64.kernal_handler)", result.Listing);
+    }
+
+    [Fact]
+    public void Sprite_positions_are_an_array_over_the_vic_registers()
+    {
+        var r = Run.Program("""
+            import c64
+            var back: u8
+            fn main() {
+                for n in 0..8 {
+                    c64.sprite_xy[n << 1] = 24 + (n << 4)
+                    c64.sprite_xy[(n << 1) + 1] = 50 + n
+                }
+                back = c64.vic.sprite3_y
+            }
+            """);
+        for (int n = 0; n < 8; n++)
+        {
+            Assert.Equal(24 + 16 * n, r.Ram.Bytes[0xD000 + 2 * n]);
+            Assert.Equal(50 + n, r.Ram.Bytes[0xD001 + 2 * n]);
+        }
+        Assert.Equal(53, r.U8("back"));
+        Assert.Equal(0xD000, r.Address("c64.sprite_xy"));
+    }
+
     [Fact]
     public void Raster_example_cycles_the_border_colors_from_its_interrupt()
     {
