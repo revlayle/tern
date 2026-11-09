@@ -485,3 +485,9 @@ From `galaxy-star/tern/gaps.md`, steps 1 and 2. All are in M21's "First, small" 
 ## 2026-11-09: the small items become the M20 follow-up
 
 - **The "First, small" items scheduled at the start of M21 (decisions of 2026-11-08) are their own milestone, the M20 follow-up** (roadmap), built before M21. Reason: with eight items they are about one coding session, the Galaxy Stars port is waiting on them (the constant rule touches most of its remaining modules), and `/code` takes the next milestone whole, so a list inside M21 could start the plug-in work too.
+
+## 2026-11-09: a typed constant next to a wider value (question 79)
+
+- **Next to a runtime value, a typed constant helps choose the operation's type, as a variable of its type would; the constant part is then computed exactly at the operation's width** (spec 3.1, guide 3.2). With `const M: u8 = $0F` and `w: u16`, `w & ~M` is `w & $FFF0`, as `w & ~$0F` is; `w + BOX * 30` adds 390. A compound assignment is checked as the operation it stands for (`w &= ~M` is `w = w & ~M`). Reason: as built, the constant's own type was applied before widening, so `w & ~M` cleared `w`'s high byte (`$0030` from `$1234`) while `w &= ~M` and `w = ~M` used `$FFF0`, and writing `: u8` on a constant changed what an expression computed though the value was the same. A programmer reads `w & ~M` as "clear M's bits in w". The written type still matters where a variable's would: `x + BOX` with `x: u8` is `u8`, and signed and unsigned do not mix.
+- Differs from runtime on purpose: with `var m: u8`, `w & ~m` widens the `u8` result `$F0` to `$00F0`, since a runtime `~` has its operand's width. Constants already differ from runtime values by being exact (decision "Galaxy Stars port, first gaps").
+- Done in the M20 follow-up branch before its review (roadmap). The skill's `language.md` follows the guide.

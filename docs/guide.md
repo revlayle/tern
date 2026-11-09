@@ -87,6 +87,17 @@ fn main()
 - `u8` mixed with `u16` widens to `u16`. Narrowing needs `as`: `x = big as u8` keeps the low byte.
 - Mixing signed and unsigned is an error; cast one side.
 - Constant expressions are computed exactly and checked only at the end: `const MAX_X: u16 = 320 - BOX` is fine with `BOX: u8`, and a constant sum converts to a pointer like a number (planned, M20 follow-up).
+- A constant works like the number it stands for. A constant with a written type (`const M: u8 = $0F`) also counts as that type when it meets a runtime value, as a variable would: `x + BOX` with `x: u8` is a `u8`. Its type never cuts the constant down: next to a `u16` the operation is 16-bit, and the constant is computed at 16 bits, `~` included:
+
+```
+const M: u8 = $0F
+var w: u16 = $1234
+
+fn main() {
+    w = w & ~M       // $1230: ~M is $FFF0 here, as ~$0F would be
+    w &= ~M          // the same: 'w &= e' is 'w = w & e'
+}
+```
 - `*`, `/` and `%` work only on constants (`const SIZE = 40 * 25`). At runtime, use shifts or the `math` library:
 
 ```
