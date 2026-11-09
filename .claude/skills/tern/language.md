@@ -102,6 +102,7 @@ fn main() {
   entry: scalars need an initial value. Local arrays do not, and hold leftovers.
 - `noinit` skips the zeroing (not on locals, `data` or fixed addresses).
 - `data` cannot be written. `include_bytes("ship.bin")` loads a file: `data ship = include_bytes("ship.bin")`.
+- `[u8; _]` takes the length from the list, for a global `var` or `data` with a list: `data script: [u8; _] = [3, 1, 4]`.
 
 ## 4. Arrays
 

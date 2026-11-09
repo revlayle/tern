@@ -507,7 +507,9 @@ public sealed class Parser
             var start = Advance();
             var element = ParseType();
             Expect(TokenKind.Semicolon, "';'");
-            var length = ParseExpr();
+            Expr? length = null;
+            if (At(TokenKind.Identifier) && Current.Text == "_") Advance();
+            else length = ParseExpr();
             Expect(TokenKind.RBracket, "']'");
             return new ArrayTypeSyntax(start.Pos, element, length);
         }

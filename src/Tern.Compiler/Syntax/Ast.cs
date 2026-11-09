@@ -19,10 +19,11 @@ public sealed class PointerTypeSyntax(SourcePos pos, TypeSyntax target) : TypeSy
 {
     public TypeSyntax Target { get; } = target;
 }
-public sealed class ArrayTypeSyntax(SourcePos pos, TypeSyntax element, Expr length) : TypeSyntax(pos)
+public sealed class ArrayTypeSyntax(SourcePos pos, TypeSyntax element, Expr? length) : TypeSyntax(pos)
 {
     public TypeSyntax Element { get; } = element;
-    public Expr Length { get; } = length;
+    /// <summary>The length, or null for <c>[T; _]</c>: taken from the list initial value (spec 4).</summary>
+    public Expr? Length { get; } = length;
 }
 
 // ---------- Expressions ----------

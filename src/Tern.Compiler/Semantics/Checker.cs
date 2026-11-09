@@ -557,15 +557,18 @@ public sealed partial class Checker
 
     /// <summary>Set while a global's type is resolved: a byte array there may be longer than 256 (spec 3.2).</summary>
     private bool _allowLongBytes;
+    /// <summary>Set while a global's type is resolved: the length of its list initial value, for <c>[T; _]</c> (spec 4).</summary>
+    private int? _listLength;
 
     private void DeclareGlobal(VarDecl decl)
     {
         // A string or include_bytes() gives a [u8; N] array, which may be longer than 256 bytes.
         var bytes = decl.Init is null ? null : ByteSource(decl.Init);
         _allowLongBytes = !decl.IsLinear && !decl.IsIndexed;
+        _listLength = decl is { TypeSyntax: ArrayTypeSyntax { Length: null }, Init: ArrayLiteralExpr list } ? list.Elements.Count : null;
         TernType type;
         try { type = bytes is not null && decl.TypeSyntax is null ? TernType.ArrayOf(TernType.U8, bytes.Length) : DeclaredType(decl); }
-        finally { _allowLongBytes = false; }
+        finally { _allowLongBytes = false; _listLength = null; }
         if (!decl.IsData && decl.TypeSyntax is not null && decl.Init is not null && type.IsArray && type.Length > 256)
             throw new CompileError(decl.Init.Pos,
                 $"'{decl.Name}' is a long byte array ({type.Length} bytes), which is zeroed at startup and has no initial value. Fill it at run time, or declare it with 'data'");
@@ -690,8 +693,8 @@ public sealed partial class Checker
         if (decl.Init is null) throw new CompileError(decl.Pos, $"'{decl.Name}' needs a type or an initial value");
         if (decl.Init is ArrayLiteralExpr)
             throw new CompileError(decl.Pos, decl.IsData
-                ? $"Data arrays need a written type, e.g. data {decl.Name}: [u8; 4] = [...]"
-                : "Array variables need a written type, e.g. [u8; 4]");
+                ? $"Data arrays need a written type, e.g. data {decl.Name}: [u8; _] = [...], where '_' takes the length from the list"
+                : $"Array variables need a written type, e.g. var {decl.Name}: [u8; _] = [...], where '_' takes the length from the list");
         CheckExpr(decl.Init);
         if (decl.Init.Type.IsStruct) Coerce(decl.Init, decl.Init.Type); // "A struct cannot be used as a value"
         return DefaultType(decl.Init);
@@ -811,11 +814,20 @@ public sealed partial class Checker
             case ArrayTypeSyntax a:
                 var element = ResolveType(a.Element);
                 if (!element.IsScalar && !element.IsStruct) throw new CompileError(a.Pos, "Array elements must be numbers, bool, pointers or structs");
-                CheckExpr(a.Length);
-                if (a.Length.ConstValue is not long len)
-                    throw new CompileError(a.Length.Pos, "Array length must be known at compile time");
+                long len;
+                if (a.Length is null)
+                {
+                    len = _listLength ?? throw new CompileError(a.Pos,
+                        "The length '_' is taken from a list initial value, so it works only on a global var or data with a list, as in 'data t: [u8; _] = [1, 2, 3]'. Write the length here");
+                    _listLength = null;
+                }
+                else
+                {
+                    CheckExpr(a.Length);
+                    len = a.Length.ConstValue ?? throw new CompileError(a.Length.Pos, "Array length must be known at compile time");
+                }
                 if (len < 1 || len > 256 && !(_allowLongBytes && element.Size == 1 && element.IsInteger))
-                    throw new CompileError(a.Length.Pos, len > 256
+                    throw new CompileError(a.Length?.Pos ?? a.Pos, len > 256
                         ? $"An array of {element} has at most 256 elements. Only a global var or data of u8 or i8 may be longer (spec 3.2), and it is used through a pointer"
                         : $"Array length must be 1 to 256, not {len}");
                 return TernType.ArrayOf(element, (int)len);
