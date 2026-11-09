@@ -714,7 +714,7 @@ tern bench old.tern new.tern --dump result        // whole programs; --fn f meas
 tern run game.tern --profile                      // the cycles of each function and source line
 ```
 
-`--dump` shows a value after each run, to check that the versions agree.
+`--dump` shows a value after each run, to check that the versions agree. `--set $DC00=$7B` writes a byte before the run starts, for inputs such as the joystick; it takes addresses only, since the program's startup sets its own globals after loading and would overwrite a variable set by name.
 
 `tern run` also checks every variable array index (the program itself never does, section 6). An index outside its array is printed with the source line, and the run goes on, so one run shows every bad access. An `indexed match` value outside its span is printed and stops the run. The exit code is 0 when `main` returned with no error, 3 when `main` returned but the check reported an error, and 2 when `main` did not return (the cycle limit, or a stop after a bad `indexed match` value). Pointer accesses and `asm` are not checked.
 

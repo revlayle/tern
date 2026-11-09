@@ -205,7 +205,7 @@ e.pos.y = 5                        // ldy #1 / sta (e),y
 - A number literal, or any constant expression (3.1), converts to a pointer without `as`, since it takes its type from context: `var p: ptr u8 = $0400`, `p == 0`, `mem.copy(CHARSET + FIRST * 8, ...)`. A `u16` variable or other runtime value needs `as`.
 - `p[i]` with `i: u8` compiles to `(zp),Y` addressing. There is no separate dereference operator: use `p[0]`.
 - On a pointer to a 16-bit type, the index counts elements: `p[i]` reads the bytes at offsets `2*i` and `2*i+1`. The byte offset must fit in the 256 bytes `(zp),Y` reaches: a constant index above 127 is an error, and a variable index of 128 or more wraps within those 256 bytes.
-- `.lo` and `.hi` cannot be used on pointers, since `p.name` means a field of the struct `p` points to (3.3). Write `(p as u16).hi`.
+- `.lo` and `.hi` cannot be used on pointers, since `p.name` means a field of the struct `p` points to (3.3). Write `(p as u16).hi`. The exception is `addr(...)` itself: `addr(map).lo` and `addr(map).hi` are the bytes of the address, in code and in initial values (4), like the assembler's `#<map` / `#>map`. On `addr(...)` they always mean the address bytes, even when the struct has a field named `lo` or `hi`.
 - For a pointer to a struct, `p.field` accesses a field (3.3). `p[i]` is not allowed on struct pointers, since it would need a multiply by the struct size.
 - A pointer that is dereferenced must be in zero page. The compiler puts it there automatically (section 8.2) and reports an error if zero page runs out.
 - Pointer arithmetic is in bytes: `p + 1` is the next byte. Use `p + sizeof(T)` to step by one element. Offsets are unsigned; use `p - n` to move back.
