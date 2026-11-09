@@ -47,7 +47,9 @@ Tern is a programming language for 6502-family processors. It aims to be easy to
 | String | `"HELLO"`, `screen"HELLO"` | Byte array in the target's default encoding, or in the named encoding. No terminator unless written: `"HI\0"` |
 | Bool | `true`, `false` | |
 
-**Escapes** in char and string literals: `\0` (zero byte), `\n` (the encoding's line break; PETSCII `$0D`), `\\`, `\"`, `\'`, and `\$NN` (a raw byte, not converted by the encoding). A character the encoding has no code for is a compile error that suggests `\$NN`.
+**Escapes** in char and string literals: `\0` (zero byte), `\n` (the encoding's line break; PETSCII `$0D`; an error in an encoding that has none, such as `screen` and `screen_mixed`), `\\`, `\"`, `\'`, and `\$NN` (a raw byte, not converted by the encoding). A character the encoding has no code for is a compile error that suggests `\$NN`.
+
+A string literal is only an initial value, of `data` or of a global array. It is not an expression: `c64.print("HI", 2)` is an error that suggests declaring the text (`data HI = "HI"`) and passing `addr(HI), len(HI)`. An unnamed table would be memory the source does not show.
 
 **Encodings** are built into the compiler. The compilation target sets the default for literals without a prefix; a prefix names another encoding: `petscii_mixed"Hello"`. Any encoding may be used on any target, since an encoding is only a mapping from characters to bytes. A prefix has one meaning: the encoding of the literal right after it.
 
@@ -108,6 +110,8 @@ fn main() {
 | `[T; N]` | varies | Array, `1 ≤ N ≤ 256`; longer for one-byte elements, used through a pointer (3.2) |
 | `struct` | varies | See 3.3 |
 
+**`bool`** values are `true` and `false`. `==` and `!=` compare two bools; `&&`, `||` and `!` combine them (3.6). A `bool` in memory (a variable, an array element, a struct field) is one byte, 0 or 1. The condition of `if` and `while` must be a `bool`: a number is an error that suggests a compare such as `x != 0`.
+
 ### 3.1 Arithmetic rules
 
 - All integer arithmetic **wraps**. There is no integer promotion: `u8 + u8` is `u8`.
@@ -115,11 +119,12 @@ fn main() {
 - Narrowing must be explicit: `x = big as u8`. `as` on integers keeps the low bits.
 - Mixing signed and unsigned operands is a compile error. Cast one side.
 - **`*`, `/` and `%` are allowed only in constant expressions**, which are evaluated at compile time: `const SIZE = 40 * 25` is fine, `y * 40` with a variable `y` is a compile error. The 6502 has no multiply or divide instruction, so runtime multiplication and division use library functions (section 10.1), which makes their cost visible in the source.
-- `<<` and `>>` require a constant shift count and compile to `asl`/`lsr`/`rol`/`ror` sequences. Shifting by a variable amount uses the library functions `math.shl8`/`math.shr8` (section 10.1).
+- `<<` and `>>` require a constant shift count, less than the width of the type (0 to 7 for 8-bit, 0 to 15 for 16-bit; a larger count is an error), and compile to `asl`/`lsr`/`rol`/`ror` sequences; a 16-bit shift by 8 or more moves a byte first (section 11). Shifting by a variable amount uses the library functions `math.shl8`/`math.shr8` (section 10.1).
 - `>>` on unsigned types is a logical shift (`lsr`). On signed types it keeps the sign (`cmp #$80` / `ror` per shift), which rounds down, not toward zero: `-1 >> 1` is `-1`, and `-3 >> 1` is `-2`.
 - **A number literal takes its type from where it is used.** A literal that does not fit that type is a compile error: `300` or `-1` assigned to a `u8`. Where nothing gives a type (`var v = 390`, a `for` bound), it takes the smallest that holds it: `u8` for 0 to 255, `u16` up to 65535, `i8` or `i16` for a negative value.
 - **A constant has a type only when its declaration writes one.** `const AREA = BOX * 30` is the plain number 390 even with a typed `BOX`, and is used like the literal `390`: `w + AREA` adds 390 to a `u16`, and `var v = AREA` is a `u16`. Write `const AREA: u16 = BOX * 30` to give it a type.
 - **A constant expression is computed exactly.** An expression made only of literals and constants, typed or not, is evaluated at compile time as an `int` (4.1), with no wrapping, and takes its type from where it is used, like a literal: only the final value is checked against that type. With `const BOX: u8 = 13`, `const MAX_X: u16 = 320 - BOX` is 307, and `const SECS: u8 = 400 / 50` is 8 with no `as`; `const B: u8 = BOX + 250` is an error (263 does not fit), where `(BOX + 250) as u8` keeps the low byte on purpose. That includes a typed constant on its own: `var s: i8 = BOX`, and `BOX` as the argument of an `i16` parameter, are allowed, since 13 fits. `~` and a negative value take the width of that type: `x & ~$0F` on a `u8` is `and #$F0`. Next to a runtime value, a typed constant takes part in choosing the operation's type as a variable of its type would: with `x: u8`, `x + BOX` is `u8`; with `w: u16`, `w + BOX` is `u16`, since `u8` widens. The constant part is then computed exactly at the operation's type and checked against it: `x + BOX * 2` adds 26, `w + BOX * 30` adds 390, and `x + BOX * 30` is an error. A constant's type never narrows the constant part below the operation's width, so `~` takes that width too: with `const M: u8 = $0F`, `w & ~M` is `w & $FFF0`, the same as `w & ~$0F`. A compound assignment is checked as the operation it stands for: `w &= ~M` is `w = w & ~M`.
+- **Constant arithmetic uses signed 64-bit integers**; a value outside that range, at any step, is an error. `/` rounds toward zero and `%` has the sign of the left operand: `-7 / 2` is -3 and `-7 % 2` is -1, as `math.divs8` does at runtime. `>>` rounds down, as at runtime: `-7 >> 1` is -4. A shift count in a constant expression is 0 to 63.
 
 ### 3.2 Arrays
 
@@ -185,7 +190,24 @@ e.pos.y = 5                        // ldy #1 / sta (e),y
 - Through a pointer, a field's offset must be 0-255, since that is what `(p),Y` reaches. A larger offset is an error at the access, not at the declaration, since the struct may still be used as a variable or at a fixed address.
 - **Array fields** such as `name: [u8; 8]` work normally in a single struct (`player.name[i]` is `lda player+off,x`). Through a pointer, the index and the field offset are added: `lda i` / `clc` / `adc #off` / `tay` / `lda (e),y`. Array fields with 16-bit elements are split inside the record, as in 3.2: `pts: [u16; 2]` is two low bytes, then two high bytes.
 - Array fields whose elements are structs (`parts: [Point; 4]`) are not supported yet (14.11).
-- **No initial values.** There are no struct literals: struct variables and arrays of structs cannot have an initial value, and global ones are zeroed at startup. Local struct variables are allowed without one, like local arrays; their memory is shared (8.1), so it holds leftovers. `data` cannot hold structs.
+- **Struct literals in initial values.** A global struct variable, a global array of structs and `data` may have an initial value written as struct literals: the struct's name, then `field = value` for each field to set, in any order. Fields not listed are 0.
+  ```
+  struct Point { x: u8, y: u8 }
+  struct Line { row: u8, col: u8, text: ptr u8 }
+
+  data lines: [Line; _] = [
+      Line { row = 1, col = 14, text = addr(TITLE) },
+      Line { row = 3, col = 2, text = addr(HOW) },
+  ]
+  data start = Point { x = 160, y = 140 }
+  var player: Enemy = Enemy { hp = 3 }
+  ```
+  - The name is always written, also where the destination gives the type, so a long table can be read line by line and a literal in the wrong table is an error. `field = value`, not `field: value`, since `:` means "has type" (as `import m(P = value)`, 2.2).
+  - A value is what an initial value of the field's type allows (4): a constant, checked against the field's type; an address filled in when the program is placed (`addr(boss)`, `addr(map) + 40`, `.lo` / `.hi`); a list or string of exactly the field's length for an array field; a struct literal of the nested struct's type for a nested struct.
+  - An unknown field, a field given twice, and a `_` padding field are errors.
+  - An array of structs gets the layout its declaration gives (one table per byte, `linear` or `indexed`), filled in at compile time. No code is generated beyond what any initial value costs: none for `data`, the startup copy for a `var`.
+  - **Only initial values.** A struct literal is never a runtime value: in code, or as a local's initial value, it is an error that suggests assigning the fields one by one, since structs are never copied (above).
+  - Global struct variables without an initial value are zeroed at startup. Local struct variables are allowed without one, like local arrays; their memory is shared (8.1), so it holds leftovers.
 - `addr(player)` gives a `ptr Enemy`. `addr(player.name)` gives the address of a field of a struct variable, or of a struct at a fixed address (3.4).
 
 **Indexing small linear struct arrays.** `list[i].field` with a variable index works on an array of structs stored as whole records whose whole size is at most 256 bytes, so every byte is reachable from one base address with an 8-bit offset in a register. The developer chooses how the record offset is found:
@@ -295,6 +317,8 @@ data msg = "GAME OVER"
 - **Addresses in initial values.** The initial value of a global or of `data` is known at compile time, with one exception: the address of anything the compiler places, filled in when the program is placed, at no runtime cost. `addr()` of a global variable, `data`, a field of a struct global or a function (6.5) may be an element of an initial value, alone, plus or minus a constant (`addr(screen) + 40`, `addr(handler) - 1` for an `rts` jump table), as `.lo` / `.hi` of either (one-byte tables of address halves), or converted with `as` to another pointer type (`addr(buf) as ptr Enemy`) or to `u16`: `data rows: [ptr u8; 3] = [addr(map), addr(map) + 40, addr(map) + 80]`. In a `[u16; n]` table the address converts by itself (3.5): `data t: [u16; 2] = [addr(a), addr(b)]`. Anything else built from an address, such as two addresses added or an address multiplied, is an error. Addresses in a sibling overlay are errors as everywhere (8.5).
 - Global variables without an initializer are zeroed at startup. Storing 0 into such a variable at the start of `main`, before any label, branch, call or asm block and before `main` has written it, therefore generates no code. A global variable can be marked `noinit` to skip that. It is a prefix like `linear`: `noinit var buf: [u8; 256]`. It is an error with an initial value, at a fixed address (never zeroed anyway), on `data` and on locals.
 - Local variables (other than arrays and structs) must have an initial value. Their memory is shared with other functions (8.1), so it holds no useful value on entry.
+- A `const` may also be declared inside a function body. It follows the rules of a top-level `const` and takes no memory.
+- **Scope.** A local variable or constant can be used from its declaration to the end of the block that contains it. Blocks that do not contain each other may use the same name. A name is never declared again where it is already visible: a local cannot take the name of a parameter, of a local in an enclosing block, or of a top-level declaration of its module (names from other modules are qualified, 2.2, so they never clash). Top-level declarations may be used before the line that declares them, in any order, with one exception: a struct field's `@` offset uses only constants declared above the struct.
 
 ### 4.1 Compile-time evaluation
 
@@ -312,7 +336,7 @@ data rows: [u16; 25] = [row_addr(i) for i in 0..25]
 - Allowed: all statements, integer math including `*`, `/`, `%`, local arrays, and calls to other `const fn`.
 - Not allowed: program variables, `@` addresses, running assembly, and calls to normal functions. A `const fn` may *emit* assembly (below).
 - Callable only at compile time: from `const` declarations, `data` initializers and other `const fn`. Calling one from runtime code is an error.
-- Compile time has its own number types: `int` (whole numbers with no size limit) and `real` (decimal numbers, with `sin`, `cos`, `sqrt`, `round` and similar). Neither exists at runtime. When a value leaves compile time into a `u8`, `u16` or `data` table, the compiler checks that it fits and reports an error if not.
+- Compile time has its own number types: `int` (signed 64-bit whole numbers; leaving that range is an error, as in constant expressions, 3.1) and `real` (decimal numbers, with `sin`, `cos`, `sqrt`, `round` and similar). Neither exists at runtime. When a value leaves compile time into a `u8`, `u16` or `data` table, the compiler checks that it fits and reports an error if not.
 - Array-building syntax: `[expr for i in range]`.
 - A step limit stops a `const fn` that never finishes, with an error.
 - A `const fn` can live in an imported module (2.2), so table generators can be shared between programs as Tern scripts: `import tables` … `data sine = tables.sine(256)`. Reading files from compile-time code (e.g. converting an image into sprite data) is a possible later extension.
@@ -657,7 +681,7 @@ import level2 @ levels
 - **Fixed data in an overlay.** An overlay module may place `data` at a fixed address inside its own area, e.g. a level's header and tables at the addresses the resident code expects:
   ```
   // level1.tern, imported with `import level1 @ levels`
-  data header: [u8; _] @ $6000 = [3, 40, 12]    // the bytes of a LevelHeader (no struct literals, 3.3)
+  data header: LevelHeader @ $6000 = LevelHeader { width = 40, height = 12 }
   ```
   - The bytes are part of that module's file. Its code, other `data` and variables go around them, as in a program area (8.4); a gap between them is zero-filled, and the file still starts at the area's start.
   - Overlays of the same area may put data at the same address, since they are never loaded together.
@@ -941,6 +965,15 @@ These are the intended translations. The optimizer may produce something shorter
 | `(w << 5) + (w << 3)` (w: u16, i.e. w × 40) | shifts and one 16-bit add, inline |
 | `math.mul8(a, b)` | `ldx b` / `lda a` / `jsr math.mul8` (A is loaded last; result in A/X) |
 | `i & 7` (i.e. i mod 8) | `lda i` / `and #7` |
+| `if a < b { }` signed (`i8`) | `lda a` / `sec` / `sbc b` / `bvc +` / `eor #$80` / `+ bpl skip` |
+| `if w < v { }` (u16) | `lda w` / `cmp v` / `lda w+1` / `sbc v+1` / `bcs skip` |
+| `if w == v { }` (u16) | `lda w` / `cmp v` / `bne skip` / `lda w+1` / `cmp v+1` / `bne skip` |
+| `if x < 10 && y != 0 { }` | `lda x` / `cmp #10` / `bcs skip` / `lda y` / `beq skip` |
+| `if x < 10 \|\| y != 0 { }` | `lda x` / `cmp #10` / `bcc body` / `lda y` / `beq skip` / `body:` |
+| `t = x < y` (t: `bool` in memory) | `lda x` / `cmp y` / `bcs +` / `lda #1` / `bne ++` / `+ lda #0` / `++ sta t` |
+| `s = a >> 1` (`i8`) | `lda a` / `cmp #$80` / `ror` / `sta s` |
+| `w = v << 8` (u16) | `lda v` / `sta w+1` / `lda #0` / `sta w`; `<< k` for k from 9 to 15 adds `k - 8` `asl` on the high byte before its store |
+| `w = v >> 8` (u16) | `lda v+1` / `sta w` / `lda #0` / `sta w+1`; `>> k` for k from 9 to 15 adds `k - 8` `lsr` on the low byte before its store (signed: the high byte is `$00` or `$FF` from the sign, and the shifts are `cmp #$80` / `ror`) |
 
 ## 12. Targets
 
@@ -961,6 +994,7 @@ A platform description gives: CPU variant, free zero-page ranges, RAM ranges for
 
 - CPU: `nmos6502`. Output: `.prg` with load address `$0801`.
 - Startup: a BASIC line `10 SYS 2061`, then the startup code (zero globals, copy initialized data, call `main`).
+- When `main` returns, the program stops in an endless loop (`jmp` to itself); interrupt handlers keep running. It does not return to BASIC, whose zero page the program has used.
 - Free zero page: `$02–$8F` (BASIC's work area; the program does not return to BASIC) and `$FB–$FE`.
 - Variables: RAM after the program up to `$9FFF`. KERNAL and I/O stay mapped in v0.
 - Volatile areas (4): memory the hardware or the KERNAL's interrupt changes. Fixed-address variables here are volatile with no keyword.

@@ -360,6 +360,9 @@ Decision 2026-11-07, scheduled 2026-11-08. User documentation that explains how 
 - a fixed address outside the platform's volatile areas is ordinary memory: unlisted hardware needs `volatile` (4)
 - a function shared by main and a handler may have loop counters only in registers; only `using X` / `using Y` guarantees one (8.1)
 - `indexed match` does not check its value: outside the span it jumps through whatever follows the tables; a plain `match` skips values it does not list (5.2)
+- on negative constants `/` rounds toward zero and `%` takes the left operand's sign, while `>>` rounds down (3.1)
+- when `main` returns, the program stops in an endless loop and interrupt handlers keep running; there is no return to BASIC (12.2)
+- fields left out of a struct literal are 0 (3.3)
 
 ## M20: Index checks in the emulator, and signed loop variables
 
@@ -391,6 +394,19 @@ Spec: 3.1, 3.4, 4, 10.1, 11. Decisions 2026-11-08: "M20 provisional choices", "a
 `BenchmarkTests` and `SkillTests` are rewritten in the same commit as any change that moves them, with the old and new totals.
 
 Done when: every item above has its end-to-end and error tests, and the Galaxy Stars workarounds for gaps 1, 3, 4, 5, 7, 8, 9 and 10 compile in their plain form (checked by porting each into a test program).
+
+## M20 follow-up 2 (before M21)
+
+Spec: 2.1, 3, 3.1, 3.3, 4, 4.1, 8.5, 11, 12.2. Decisions 2026-11-09: "struct literals in initial values" and "open points from the consistency review". Small; the Galaxy Stars port would use struct literals for its parallel tables (`pages`, `title`, `score`) before it reaches them.
+
+- **Struct literals in initial values** (spec 3.3): `Name { field = value, ... }` as the initial value of a global struct, the elements of a global array of structs, and `data` (also at a fixed address, also in an overlay module, 8.5). Fields not listed are 0. Values as for any initial value of the field's type, including `addr()` forms filled in at placement, lists and strings for array fields, and nested literals. Every array layout (tables, `linear`, `indexed`). Errors: an unknown field, a field given twice, a `_` field, a literal of another struct type, a value that does not fit, a struct literal in code or as a local's initial value (suggesting field assignments). Tests: each layout against C# (every byte of the tables), nested structs, 16-bit and pointer fields with `addr()`, array fields from a list and a string, `[T; _]`, fixed-address `data` in an overlay module, each error. The 8.5 example compiles.
+- **Constant arithmetic in signed 64 bits** (spec 3.1, 4.1): a result outside the range at any step is an error (today it wraps silently: `4000000000 * 4000000000 * 4 / 1000000000 / 1000000000` gives 8, not 64); a constant shift count 0 to 63 (today 0 to 31). Tests at the edges, and the rounding of `/`, `%` and `>>` on negative constants as stated in 3.1.
+- **`const` inside a function** (spec 4), scoped to its block, under the scope rules of spec 4. Tests: use, scope, a name clash, a local `const` as a `for` bound and an array length.
+- **The string-literal error gets a fix sentence** (spec 2.1): "Declare it as data, e.g. 'data HI = "HI"', and pass addr(HI), len(HI)", with the suggestion in `tern --json`.
+- **16-bit shifts by 8 to 15 move a byte first** (spec 11 rows `w = v << 8`, `w = v >> 8`): today eight `asl`/`rol` pairs (32 bytes, 80 cycles for `<< 8`). Unsigned and signed, in place (`w <<= 8`) and into another variable; results against C# for every count 8 to 15 at edge values. `BenchmarkTests` and `SkillTests` rewritten if they move, with the totals.
+- The new spec 11 rows for compares, `&&`, `||`, a compare stored in a `bool` and `i8 >> 1` describe the code as built; a listing test for each.
+
+Done when: every item has its end-to-end and error tests, and one of the port's parallel-table groups (`pages.p8`'s `how_row` / `how_col` / `how_text`) compiles as an array of struct literals and gives the same tables as the parallel arrays.
 
 ## M21: Plug-ins against a fixed interface
 
