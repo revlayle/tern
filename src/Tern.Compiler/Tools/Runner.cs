@@ -12,6 +12,34 @@ public sealed record RunOptions
     public long IrqEvery { get; init; }
     /// <summary>The main file's name, for the source lines of index check errors.</summary>
     public string MainFile { get; init; } = "program.tern";
+    /// <summary>Bytes written into memory after the program is loaded, before it starts (<c>--set</c>).</summary>
+    public IReadOnlyList<MemorySet> Sets { get; init; } = [];
+}
+
+/// <summary>
+/// A byte to write before a run, as <c>--set $DC00=$FF</c> gives it: an address and a value, each
+/// decimal or starting with <c>$</c>. Used for inputs such as the joystick, which the emulator does not have.
+/// </summary>
+public sealed record MemorySet(int Address, byte Value)
+{
+    public static MemorySet Parse(string text)
+    {
+        int equals = text.IndexOf('=');
+        if (equals < 0)
+            throw new FormatException($"'{text}': write an address and a byte, as $DC00=$FF");
+        int address = Number(text[..equals].Trim(), 0xFFFF, "an address");
+        int value = Number(text[(equals + 1)..].Trim(), 0xFF, "a byte (0 to 255)");
+        return new MemorySet(address, (byte)value);
+
+        int Number(string s, int max, string what)
+        {
+            bool ok = s.StartsWith('$')
+                ? int.TryParse(s[1..], System.Globalization.NumberStyles.HexNumber, System.Globalization.CultureInfo.InvariantCulture, out int n)
+                : int.TryParse(s, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out n);
+            if (!ok || n > max) throw new FormatException($"'{text}': '{s}' is not {what}; write $DC00=$FF or 56320=255");
+            return n;
+        }
+    }
 }
 
 /// <summary>Cycles spent inside one function, callees included, over a run.</summary>
@@ -52,6 +80,7 @@ public static class Runner
         ram.Bytes.AsSpan(Screen, Columns * Rows).Fill(32);
         ram.Bytes.AsSpan(0xD800, Columns * Rows).Fill(14);
         ram.Load((ushort)program.LoadAddress, program.Image);
+        foreach (var set in options.Sets) ram.Bytes[set.Address] = set.Value;
         var cpu = new Cpu6502(ram) { PC = (ushort)program.Entry, SP = 0xFF, I = true };
 
         var inProgram = program.Sections.Select(s => (s.Address, End: s.Address + s.Size)).ToList();

@@ -37,6 +37,8 @@ public static class Cli
         code: 0 when main returned, 2 when it did not, 3 when it did but an index was outside.
           --cycles <n>    stop after n cycles (default 20000000)
           --irq <n>        raise an IRQ every n cycles, through the vector at $FFFE
+          --set <a>=<v>    write the byte v at address a before the run, e.g. a joystick
+                           value: --set $DC00=$7B; may be given more than once
           --dump <what>    show memory after the run: a variable (score, main.count), a
                            variable with a byte count (table:4), $C000-$C0FF or $C000:16;
                            may be given more than once
@@ -46,7 +48,8 @@ public static class Cli
 
         tern bench compiles and runs each variant (as tern run does) and compares them:
         program bytes, the measured function's bytes, its calls and cycles (with what it
-        calls), and the memory chosen for its variables and the program's globals.
+        calls), and the memory chosen for its variables and the program's globals. A variant
+        whose run finds an array index outside its array fails, and the errors are printed.
           <file.tern>      a variant: a whole program
           --code <stmts>   a variant: statements run as the body of main (';' or newlines
                            between statements); may be given more than once
@@ -55,7 +58,7 @@ public static class Cli
           --fn <name>      measure this function instead of main
           --dump <what>    show a value after each run, to check the variants agree (as for
                            tern run)
-          --cycles <n>, --irq <n>, --json  as for tern run
+          --cycles <n>, --irq <n>, --set <a>=<v>, --json  as for tern run
         """;
 
     /// <summary>Runs one <c>tern</c> command; returns the process exit code.</summary>
@@ -126,11 +129,17 @@ public static class Cli
             string? input = null;
             long cycles = new RunOptions().MaxCycles, irq = 0;
             var dumps = new List<string>();
+            var sets = new List<MemorySet>();
             for (int i = 0; i < arguments.Length; i++)
             {
                 string a = arguments[i];
                 bool hasValue = i + 1 < arguments.Length;
                 if (a == "--json") json = true;
+                else if (a == "--set" && hasValue)
+                {
+                    try { sets.Add(MemorySet.Parse(arguments[++i])); }
+                    catch (FormatException e) { return Usage1("--set " + e.Message); }
+                }
                 else if (a == "--screen") screen = true;
                 else if (a == "--profile") profile = true;
                 else if (a == "--dump" && hasValue) dumps.Add(arguments[++i]);
@@ -147,7 +156,7 @@ public static class Cli
             try { parsed = dumps.Select(d => MemoryDump.Parse(d, program)).ToList(); }
             catch (FormatException e) { return Fail(json, new Diagnostic(input, 0, 0, "error", "--dump " + e.Message, null), "--dump " + e.Message); }
             RunResult run;
-            try { run = Runner.Run(program, new RunOptions { MaxCycles = cycles, IrqEvery = irq, MainFile = Path.GetFileName(input) }); }
+            try { run = Runner.Run(program, new RunOptions { MaxCycles = cycles, IrqEvery = irq, MainFile = Path.GetFileName(input), Sets = sets }); }
             catch (InvalidOperationException e) { return Fail(json, new Diagnostic(input, 0, 0, "error", e.Message, null), e.Message); }
             var lines = profile ? LineTable.Rows(program, Path.GetFileName(input), run.Profile) : null;
             output.Write(json ? RunReport.Json(run, parsed, screen, lines) + Environment.NewLine : RunReport.Text(run, parsed, screen, lines));
@@ -164,11 +173,17 @@ public static class Cli
             var declarations = new List<string>();
             var dumps = new List<string>();
             var variants = new List<(string? Path, string? Code)>();
+            var sets = new List<MemorySet>();
             for (int i = 0; i < arguments.Length; i++)
             {
                 string a = arguments[i];
                 bool hasValue = i + 1 < arguments.Length;
                 if (a == "--json") json = true;
+                else if (a == "--set" && hasValue)
+                {
+                    try { sets.Add(MemorySet.Parse(arguments[++i])); }
+                    catch (FormatException e) { return Usage1("--set " + e.Message); }
+                }
                 else if (a == "--code" && hasValue) variants.Add((null, arguments[++i]));
                 else if (a == "--decl" && hasValue) declarations.Add(arguments[++i]);
                 else if (a == "--fn" && hasValue) function = arguments[++i];
@@ -195,10 +210,10 @@ public static class Cli
                     try { variant = new BenchVariant(name, File.ReadAllText(path!), path); }
                     catch (IOException e) { return Fail(json, new Diagnostic(path!, 0, 0, "error", $"Cannot read {path}: {e.Message}", null), $"Cannot read {path}: {e.Message}"); }
                 }
-                results.Add(Bench.Measure(variant, function, dumps, new RunOptions { MaxCycles = cycles, IrqEvery = irq }));
+                results.Add(Bench.Measure(variant, function, dumps, new RunOptions { MaxCycles = cycles, IrqEvery = irq, Sets = sets }));
             }
             output.Write(json ? Bench.Json(results) + Environment.NewLine : Bench.Text(results));
-            return results.All(r => r.Error is null && r.Returned) ? 0 : 1;
+            return results.All(r => r.Error is null && r.Returned && r.IndexErrors.Count == 0) ? 0 : 1;
         }
 
         // ---------- shared ----------

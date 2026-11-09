@@ -303,4 +303,54 @@ public class RunToolTests
         Assert.Equal(10, line.GetProperty("line").GetInt32());
         Assert.Equal(1, line.GetProperty("runs").GetInt64());
     }
+
+    [Fact]
+    public void Set_writes_bytes_before_the_run()
+    {
+        // M20 follow-up: a joystick value for a game loop.
+        const string source = """
+            var joy: u8 @ $DC00
+            var seen: u8
+            var other: u8
+            fn main() { seen = joy; other = joy ^ $FF }
+            """;
+        var (program, run) = RunSource(source, new RunOptions { Sets = [MemorySet.Parse("$DC00=$7B")] });
+        Assert.Equal(0x7B, run.Ram.Bytes[program.Symbols["seen"]]);
+        Assert.Equal(0x84, run.Ram.Bytes[program.Symbols["other"]]);
+        Assert.Equal(new MemorySet(56320, 255), MemorySet.Parse("56320=255"));
+        Assert.Equal(new MemorySet(0xC000, 1), MemorySet.Parse(" $C000 = 1 "));
+    }
+
+    [Theory]
+    [InlineData("$DC00", "write an address and a byte, as $DC00=$FF")]
+    [InlineData("$DC00=256", "'256' is not a byte (0 to 255)")]
+    [InlineData("$10000=1", "'$10000' is not an address")]
+    [InlineData("joy=1", "'joy' is not an address")]
+    [InlineData("$DC00=", "'' is not a byte")]
+    public void A_bad_set_says_what_is_wrong(string text, string message)
+    {
+        var e = Assert.Throws<FormatException>(() => MemorySet.Parse(text));
+        Assert.Contains(message, e.Message);
+    }
+
+    [Fact]
+    public void Set_on_the_command_line()
+    {
+        string dir = Path.Combine(Path.GetTempPath(), "tern-run-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        try
+        {
+            string file = Path.Combine(dir, "joy.tern");
+            File.WriteAllText(file, "var joy: u8 @ $DC00\nvar seen: u8\nfn main() { seen = joy }\n");
+            var output = new StringWriter();
+            Assert.Equal(0, Cli.Run(["run", file, "--set", "$DC00=$7B", "--set", "$C000=1", "--dump", "seen", "--dump", "$C000"], output, output));
+            Assert.Contains("seen $", output.ToString());
+            Assert.Contains("u8 = 123 ($7B)", output.ToString());
+            Assert.Contains("$C000 (1 bytes):\n  $C000  01", output.ToString().Replace("\r", ""));
+            var error = new StringWriter();
+            Assert.Equal(1, Cli.Run(["run", file, "--set", "$DC00"], output, error));
+            Assert.Equal("--set '$DC00': write an address and a byte, as $DC00=$FF. Run 'tern --help' for the options.", error.ToString().Trim());
+        }
+        finally { Directory.Delete(dir, recursive: true); }
+    }
 }

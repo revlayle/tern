@@ -41,11 +41,13 @@ public sealed record BenchVariant(string Name, string Source, string? Path, IRea
 /// The measurement of one variant. <see cref="Function"/> is what was measured (main, or the
 /// function given with <c>--fn</c>): its code bytes, and the cycles of all its calls with what they
 /// call (<see cref="Cycles"/>) and per call. <see cref="Memory"/> lists its variables and the
-/// program's own globals with the addresses the compiler chose.
+/// program's own globals with the addresses the compiler chose. <see cref="IndexErrors"/> are the
+/// index check's errors (a snippet's lines are its own); a variant with any fails.
 /// </summary>
 public sealed record BenchResult(
     string Variant, Diagnostic? Error, string Function, int ProgramBytes, int FunctionBytes, long Calls, long Cycles,
-    bool Returned, string Stop, IReadOnlyList<VariableInfo> Memory, IReadOnlyList<(string What, string Value)> Results)
+    bool Returned, string Stop, IReadOnlyList<VariableInfo> Memory, IReadOnlyList<(string What, string Value)> Results,
+    IReadOnlyList<IndexError> IndexErrors)
 {
     public long CyclesPerCall => Calls == 0 ? 0 : Cycles / Calls;
     public int ZeroPageBytes => Memory.Where(v => v.Address < 0x100).Sum(v => v.Size);
@@ -87,7 +89,13 @@ public static class Bench
                 inModule.Count == 0 ? null : "Use " + string.Join(" or ", inModule.Select(f => $"'{f}'")) + ": a module's function is named with its module"));
         }
 
-        var run = Runner.Run(program, options);
+        var run = Runner.Run(program, (options ?? new RunOptions()) with { MainFile = variant.Name });
+        var indexErrors = run.IndexErrors.Select(e =>
+        {
+            if (variant.DeclarationLines is null || e.File != variant.Name || e.Line is not int line) return e;
+            var (file, place) = variant.Place(line);
+            return new IndexError(file, place, e.Source, e.Message, e.Cycle) { Count = e.Count };
+        }).ToList();
         var time = run.Functions.FirstOrDefault(f => f.Name == measured);
         var memory = program.Variables.Values
             .Where(v => v.Function == measured || (v.Function is null && !v.IsData && !v.Name.Contains('.')))
@@ -105,9 +113,9 @@ public static class Bench
             results.Add((text, value));
         }
         return new BenchResult(variant.Name, null, measured, program.Image.Length, section.Size, time?.Calls ?? 0, time?.Cycles ?? 0,
-            run.Returned, run.Stop, memory, results);
+            run.Returned, run.Stop, memory, results, indexErrors);
 
-        BenchResult Failed(Diagnostic d) => new(variant.Name, d, measured, 0, 0, 0, 0, false, d.Message, [], []);
+        BenchResult Failed(Diagnostic d) => new(variant.Name, d, measured, 0, 0, 0, 0, false, d.Message, [], [], []);
     }
 
     public static string Text(IReadOnlyList<BenchResult> results)
@@ -126,6 +134,15 @@ public static class Bench
             }
             sb.AppendLine($"{r.Variant.PadRight(width)}  {r.ProgramBytes,7}  {r.FunctionBytes,10}  {r.Calls,6}  {r.Cycles,9}  {r.CyclesPerCall,8}  {r.ZeroPageBytes,4}  {r.OtherBytes,5}"
                 + (r.Returned ? "" : $"  ({r.Stop})"));
+        }
+        if (results.Any(r => r.IndexErrors.Count > 0))
+        {
+            sb.AppendLine("Index check (these variants fail; the emulator found these):");
+            foreach (var r in results.Where(r => r.IndexErrors.Count > 0))
+            {
+                sb.AppendLine($"  {r.Variant}:");
+                foreach (var e in r.IndexErrors) foreach (var line in e.ToString().Split('\n')) sb.AppendLine("    " + line);
+            }
         }
         sb.AppendLine("Memory (zp: zero page bytes, other: the rest; the measured function's variables and the program's globals):");
         foreach (var r in results.Where(r => r.Error is null))
@@ -151,7 +168,7 @@ public static class Bench
     public static string Json(IReadOnlyList<BenchResult> results) =>
         JsonSerializer.Serialize(new
         {
-            ok = results.All(r => r.Error is null),
+            ok = results.All(r => r.Error is null && r.IndexErrors.Count == 0),
             variants = results.Select(r => new
             {
                 variant = r.Variant,
@@ -168,6 +185,7 @@ public static class Bench
                 otherBytes = r.OtherBytes,
                 memory = r.Memory.Select(v => new { name = v.Name, address = v.Address, size = v.Size, type = v.Type }),
                 results = r.Results.Select(x => new { what = x.What, value = x.Value }),
+                indexErrors = r.IndexErrors.Select(e => new { file = e.File, line = e.Line, source = e.Source, message = e.Message, cycle = e.Cycle, count = e.Count }),
             }),
         }, Options);
 }

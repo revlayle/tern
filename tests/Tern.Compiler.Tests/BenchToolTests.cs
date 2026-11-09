@@ -221,4 +221,35 @@ public class BenchToolTests
         Assert.Equal(1, error.GetProperty("line").GetInt32());
         Assert.Contains("'q' is not declared", error.GetProperty("message").GetString());
     }
+
+    [Fact]
+    public void A_variant_with_an_index_error_fails_and_prints_it()
+    {
+        // M20 follow-up: a wrong index gives misleading cycles, so the variant fails.
+        var good = Bench.Measure(BenchVariant.Snippet("code 1", Decl, "for i in 0..16 { a[i] = i }"), null, []);
+        var bad = Bench.Measure(BenchVariant.Snippet("code 2", Decl, "var n: u8 = 17\nfor i in 0..n {\n  a[i] = i\n}"), null, []);
+        Assert.Empty(good.IndexErrors);
+        var e = Assert.Single(bad.IndexErrors);
+        Assert.Equal("code 2", e.File);
+        Assert.Equal(3, e.Line);
+        Assert.Equal("Index 16 is outside 'a', which has 16 elements", e.Message);
+        string text = Bench.Text([good, bad]);
+        Assert.Contains("Index check (these variants fail; the emulator found these):\n  code 2:\n    code 2:3: Index 16 is outside 'a', which has 16 elements\n        a[i] = i", text.Replace("\r", ""));
+        using var doc = JsonDocument.Parse(Bench.Json([good, bad]));
+        Assert.False(doc.RootElement.GetProperty("ok").GetBoolean());
+        Assert.Equal(3, doc.RootElement.GetProperty("variants")[1].GetProperty("indexErrors")[0].GetProperty("line").GetInt32());
+
+        var output = new StringWriter();
+        Assert.Equal(1, Cli.Run(["bench", "--decl", Decl[0], "--code", "for i in 0..16 { a[i] = i }", "--code", "var n: u8 = 17; for i in 0..n { a[i] = i }"], output, output));
+        Assert.Equal(0, Cli.Run(["bench", "--decl", Decl[0], "--code", "for i in 0..16 { a[i] = i }"], output, output));
+    }
+
+    [Fact]
+    public void Set_writes_bytes_before_each_variant_runs()
+    {
+        var output = new StringWriter();
+        Assert.Equal(0, Cli.Run(["bench", "--decl", "var joy: u8 @ $DC00\nvar seen: u8", "--code", "seen = joy", "--code", "seen = joy & $FF", "--set", "$DC00=$7B", "--dump", "seen"], output, output));
+        Assert.Contains("code 1: seen = 123", output.ToString());
+        Assert.Contains("code 2: seen = 123", output.ToString());
+    }
 }
