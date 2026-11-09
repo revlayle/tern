@@ -30,14 +30,18 @@ Each example is a whole program that compiles. The full rules are in the Tern re
   is `w << 8`: write `(w << 5) + 3`. Compares do not chain (`a < b < c` is an error).
 - Everything wraps; `u8 + u8` is a `u8`. `u8` mixed with `u16` widens to `u16`.
 - `as` converts: `w as u8` (low byte), `b as u16`, `x as i8` (same bits), `p as u16`, `p as ptr Enemy`.
-  `as` binds tighter than any operator. There is no `u8 as bool`: write `x != 0`.
+  A pointer becomes a `u16` by itself where a `u16` is expected (`var a: u16 = p`, an argument, a
+  return value), but not inside an operator (`w + p` is an error). `as` binds tighter than any operator. There is no `u8 as bool`: write `x != 0`.
 - Signed and unsigned operands cannot be mixed: cast one side.
 - `>>` on a signed value keeps the sign and rounds down (`-3 >> 1` is `-2`).
 - `*`, `/`, `%` only in constant expressions. Shift counts are constants.
 - A constant expression (literals and constants, typed or not) is computed exactly and checked only
   where it is used: with `const BOX: u8 = 13`, `const MAX_X: u16 = 320 - BOX` is 307, and
-  `CHARSET + FIRST * 8` converts to a pointer. Mixed with a runtime value, a typed constant keeps its
-  type (`x + BOX` is a `u8`). `~$0F` is as wide as what it is used with: `x & ~$0F` is `and #$F0`.
+  `CHARSET + FIRST * 8` converts to a pointer. Next to a runtime value, a typed constant helps choose
+  the operation's type like a variable of its type (`x + BOX` is a `u8`, `w + BOX` a `u16`), and the
+  constant part is computed at that width (`w + BOX * 30` adds 390; `x + BOX * 30` is an error).
+  `~$0F` is as wide as what it is used with: `x & ~$0F` is `and #$F0`, `w & ~$0F` keeps `$FFF0`.
+  A constant has a type only if its declaration writes one: `const AREA = BOX * 30` is plain 390.
 
 ```tern
 // arith.tern
@@ -213,6 +217,7 @@ player $0918 Enemy (3 bytes):
   the index counts elements.
 - Arithmetic is in bytes: `p + 1`, `p += 256` (`inc p+1`), `p - q` gives a `u16`.
 - `.lo` and `.hi` are not allowed on pointers (`p.name` is a struct field): write `(p as u16).hi`.
+  On `addr(...)` itself they are the address bytes: `addr(map).lo` is `lda #<map`.
 - A pointer that is dereferenced is placed in zero page automatically.
 
 ```tern

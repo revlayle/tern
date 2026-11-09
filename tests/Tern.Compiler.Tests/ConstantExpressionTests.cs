@@ -146,13 +146,20 @@ public class ConstantExpressionTests
     [InlineData("const BOX: u8 = 13\nvar v: u8 = BOX * 20\nfn main() { }", "260 does not fit in u8 (0 to 255)")]
     [InlineData("var x: u8\nfn main() { x = -1 }", "-1 does not fit in u8 (0 to 255)")]
     [InlineData("const A: u16 = 40000\nconst B: u16 = A * 2\nfn main() { }", "80000 does not fit in u16 (0 to 65535)")]
-    [InlineData("var x: u8\nfn main() { x = x & ~$1FF }", "-512 does not fit in u8 (0 to 255), the type of 'x', which it is combined with. Use a smaller value")]
+    [InlineData("var x: u8\nfn main() { x = x & ~$1FF }", "'~' gives -512 here, a pattern wider than u8: the value before '~' has bits above u8. Use a value that fits in u8 before '~'")]
+    [InlineData("const M = ~$1FF\nvar x: u8\nfn main() { x = x & M }", "'~' gives -512 here, a pattern wider than u8")]
     [InlineData("var x: u8\nvar w: u16\nfn main() { w = x + 300 }",
         "300 does not fit in u8 (0 to 255), the type of 'x', which it is combined with. Convert 'x' with 'as u16'")]
     [InlineData("var hp: [u8; 4]\nvar w: u16\nfn main() { w = hp[1] + 1000 }", "the type of 'hp[1]', which it is combined with. Convert 'hp[1]' with 'as u16'")]
     [InlineData("var s: i8\nfn main() { s = s - 200 }", "200 does not fit in i8 (-128 to 127), the type of 's', which it is combined with. Convert 's' with 'as i16'")]
-    [InlineData("const BOX: u8 = 13\nvar w: u16\nfn main() { w = w + BOX * 100 }",
-        "1300 does not fit in u8 (0 to 255), the type of the constant 'BOX' in it: combined with a runtime value, a typed constant keeps its type. Write the constant part as (BOX * 100) as u16, or give 'BOX' the type u16")]
+    [InlineData("const BOX: u8 = 13\nvar x: u8\nfn main() { x = x + BOX * 30 }",
+        "390 does not fit in u8 (0 to 255), the type of 'x', which it is combined with. Convert 'x' with 'as u16'")]
+    [InlineData("const BOX: u8 = 13\nconst AREA = BOX * 30\nvar x: u8\nfn main() { x = x + AREA }",
+        "390 does not fit in u8 (0 to 255), the type of 'x', which it is combined with. Convert 'x' with 'as u16'")]
+    [InlineData("const BIG: u16 = 100\nvar x: u8\nvar w: u16\nfn main() { w = x + BIG * 1000 }",
+        "100000 does not fit in u16 (0 to 65535), the type of the constant 'BIG' in it, which sets the operation's type. Use a smaller value")]
+    [InlineData("const BIG: u16 = 100\nvar x: u8\nfn main() { x += BIG }", "Expected u8, found u16: 'BIG' is u16. Convert with 'as u8'")]
     [InlineData("const BOX: u8 = 13\nvar s: i8\nfn main() { s = s + BOX }", "Cannot mix signed and unsigned (i8 and u8)")]
+    [InlineData("const BOX: u8 = 13\nvar s: i8\nfn main() { s += BOX }", "Cannot mix signed and unsigned (i8 and u8)")]
     public void Reports_errors(string source, string expected) => Assert.Contains(expected, Error(source));
 }

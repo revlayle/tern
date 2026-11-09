@@ -434,8 +434,8 @@ public sealed partial class Checker
         CollectNames(decl.Value, names);
         Declare(new ConstSymbol(decl.Name, decl.Pos, type, decl.Value.ConstValue!.Value)
         {
-            ConstType = type.Kind == TypeKind.IntLiteral ? decl.Value.ConstType : null,
-            ConstTypeFrom = type.Kind == TypeKind.IntLiteral ? decl.Value.ConstTypeFrom : null,
+            // A constant has a type only when its declaration writes one (spec 3.1).
+            IsBitPattern = type.Kind == TypeKind.IntLiteral && decl.Value.IsBitPattern,
             UsedParameters = names.SelectMany(n => _module.Scope.GetValueOrDefault(n) is ConstSymbol c ? c.UsedParameters : []).ToHashSet(),
         });
     }
@@ -785,7 +785,7 @@ public sealed partial class Checker
             part = half.Member == "lo" ? AddressPart.Low : AddressPart.High;
             e = half.Target;
             if (type.Kind != TypeKind.U8)
-                throw new CompileError(init.Pos, $"'.{half.Member}' of an address is one byte, a u8, but this value is a {type}. Use a [u8; n] table, or the whole address");
+                throw new CompileError(init.Pos, $"'.{half.Member}' of an address is one byte, a u8, but this value is {type}. Use a [u8; n] table, or the whole address");
         }
         CheckExpr(e);
         if (part == AddressPart.Word) Coerce(e, type);
@@ -1041,7 +1041,16 @@ public sealed partial class Checker
         if (a.Op is TokenKind.ShlEq or TokenKind.ShrEq)
             CheckShiftCount(a.Value, target.Type);
         else
+        {
+            // Checked as the operation it stands for (spec 3.1): x op= e is x = x op e.
+            if (a.Value is { Type.Kind: TypeKind.IntLiteral, ConstType: { } typed })
+            {
+                var operation = TypedOperationType(target.Type, typed, a.Pos);
+                if (!operation.SameAs(target.Type))
+                    throw new CompileError(a.Value.Pos, $"Expected {target.Type}, found {operation}: '{a.Value.ConstTypeFrom}' is {typed}. Convert with 'as {target.Type}'");
+            }
             Coerce(a.Value, target.Type);
+        }
     }
 
     private bool IsAssignable(Expr e)
@@ -1324,7 +1333,7 @@ public sealed partial class Checker
                         // An integer constant, typed or not, is computed exactly in constant expressions (spec 3.1).
                         e.ConstValue = c.Value;
                         if (c.Type.IsInteger) { e.Type = TernType.IntLiteral; e.ConstType = c.Type; e.ConstTypeFrom = c.Name; }
-                        else { e.Type = c.Type; e.ConstType = c.ConstType; e.ConstTypeFrom = c.ConstTypeFrom; }
+                        else { e.Type = c.Type; e.IsBitPattern = c.IsBitPattern; }
                         break;
                     case VariableSymbol v:
                         n.Symbol = v;
@@ -1383,6 +1392,9 @@ public sealed partial class Checker
             }
 
             case MemberExpr m:
+                // addr(x).lo / .hi are the bytes of the address, even for a struct with a field named lo (spec 3.4).
+                if (m.Member is "lo" or "hi" && m.Target is CallExpr { Name: "addr" } address)
+                    m.Target = new CastExpr(address.Pos, address, new NamedTypeSyntax(address.Pos, "u16"));
                 CheckMemberTarget(m);
                 CheckExpr(m.Target);
                 if (m.Target.Type.IsStruct || m.Target.Type is { IsPointer: true, Element.IsStruct: true })
@@ -1392,7 +1404,8 @@ public sealed partial class Checker
                 }
                 if (m.Member is not ("lo" or "hi"))
                     throw new CompileError(m.Pos, $"Unknown member '.{m.Member}'");
-                if (m.Target.Type.Kind == TypeKind.IntLiteral) Coerce(m.Target, LiteralType(m.Target));
+                // A typed 16-bit constant keeps its size (LINE.hi with LINE: u16 = 250 is 0); otherwise the size of the value.
+                if (m.Target.Type.Kind == TypeKind.IntLiteral) Coerce(m.Target, m.Target.ConstType is { Size: 2 } wide ? wide : LiteralType(m.Target));
                 if (m.Target.Type.IsPointer)
                     throw new CompileError(m.Pos, $".{m.Member} needs a number; convert the pointer first: (p as u16).{m.Member}");
                 if (m.Target.Type.Size != 2 || !m.Target.Type.IsInteger)
@@ -1623,6 +1636,10 @@ public sealed partial class Checker
         }
         if (!leftPtr && b.Op == TokenKind.Minus)
             throw new CompileError(b.Pos, "A pointer cannot be subtracted from a number");
+        // w + p would be a pointer while w + (p as u16) is a number: only a constant may come first (spec 3.5).
+        if (!leftPtr && b.Left.ConstValue is null)
+            throw new CompileError(b.Pos,
+                $"A number before a pointer is not pointer arithmetic. Write '{Describe(b.Right) ?? "p"} + {Describe(b.Left) ?? "n"}' to move the pointer, or convert the pointer with 'as u16' for a number");
         CheckPointerOffset(leftPtr ? b.Right : b.Left);
         b.Type = leftPtr ? b.Left.Type : b.Right.Type;
     }
@@ -1903,13 +1920,27 @@ public sealed partial class Checker
     private TernType Unify(Expr left, Expr right, SourcePos pos)
     {
         if (left.Type.Kind == TypeKind.IntLiteral && right.Type.Kind == TypeKind.IntLiteral) return left.Type;
-        // A typed constant mixed with a runtime value is a value of its type (spec 3.1).
-        foreach (var side in new[] { left, right })
-            if (side.Type.Kind == TypeKind.IntLiteral && side.ConstType is { } typed) CoerceNamed(side, typed, side.ConstTypeFrom!, isConstant: true);
-        var lt = left.Type;
-        var rt = right.Type;
-        if (lt.Kind == TypeKind.IntLiteral) { CoerceNamed(left, rt, Describe(right), isConstant: false); return rt; }
-        if (rt.Kind == TypeKind.IntLiteral) { CoerceNamed(right, lt, Describe(left), isConstant: false); return lt; }
+        if (left.Type.Kind == TypeKind.IntLiteral || right.Type.Kind == TypeKind.IntLiteral)
+        {
+            // A constant next to a runtime value: the operation's type is chosen as if the constant were a
+            // variable of its written type, then the constant is computed exactly at that width (spec 3.1).
+            var (constant, value) = left.Type.Kind == TypeKind.IntLiteral ? (left, right) : (right, left);
+            var operation = value.Type;
+            bool constantSetIt = false;
+            if (constant.ConstType is { } typed && value.Type.IsInteger)
+            {
+                operation = TypedOperationType(value.Type, typed, pos);
+                constantSetIt = !operation.SameAs(value.Type);
+            }
+            CoerceNamed(constant, operation, constantSetIt ? constant.ConstTypeFrom : Describe(value), constantSetIt);
+            return operation;
+        }
+        return TypedOperationType(left.Type, right.Type, pos);
+    }
+
+    /// <summary>The type of an operation on two runtime types: the wider one; signed and unsigned do not mix.</summary>
+    private static TernType TypedOperationType(TernType lt, TernType rt, SourcePos pos)
+    {
         if (!lt.IsInteger || !rt.IsInteger)
             throw new CompileError(pos, $"Cannot combine {lt} and {rt}");
         if (lt.IsSigned != rt.IsSigned)
@@ -1935,12 +1966,16 @@ public sealed partial class Checker
             // ~$0F is the bit pattern ...1111_0000, as wide as the type it is used as.
             if (e.IsBitPattern && v < 0 && !target.IsSigned && v >= -(1L << (8 * target.Size)))
                 e.ConstValue = v = Normalize(v, target);
+            if (e.IsBitPattern && v < 0 && !target.IsSigned)
+                throw new CompileError(e.Pos, $"'~' gives {v} here, a pattern wider than {target}: the value before '~' has bits above {target}. Use a value that fits in {target} before '~'");
             if (v < target.MinValue || v > target.MaxValue)
                 throw new CompileError(e.Pos, $"{v} does not fit in {target} ({target.MinValue} to {target.MaxValue})");
             e.Type = target;
             return;
         }
         if (source.SameAs(target)) return;
+        // The address as a number, where a u16 is expected (spec 3.5): no code.
+        if (source.IsPointer && target.Kind == TypeKind.U16) return;
         if (target.IsPointer && source.IsPointer)
             throw new CompileError(e.Pos, $"Expected {target}, found {source}. Convert with 'as {target}'");
         if (source.IsInteger && target.IsInteger && source.IsSigned == target.IsSigned && source.Size < target.Size)
@@ -1961,8 +1996,8 @@ public sealed partial class Checker
             long v = e.ConstValue!.Value;
             var wider = WiderFor(v, target);
             throw new CompileError(e.Pos, isConstant
-                ? $"{v} does not fit in {target} ({target.MinValue} to {target.MaxValue}), the type of the constant '{setBy}' in it: combined with a runtime value, a typed constant keeps its type. " +
-                  (wider is null ? "Use a smaller value" : $"Write the constant part as ({DescribeConstant(e)}) as {wider}, or give '{setBy}' the type {wider}")
+                ? $"{v} does not fit in {target} ({target.MinValue} to {target.MaxValue}), the type of the constant '{setBy}' in it, which sets the operation's type. " +
+                  (wider is null ? "Use a smaller value" : $"Give '{setBy}' the type {wider}")
                 : $"{v} does not fit in {target} ({target.MinValue} to {target.MaxValue}), the type of '{setBy}', which it is combined with. " +
                   (wider is null ? "Use a smaller value" : $"Convert '{setBy}' with 'as {wider}'"));
         }
@@ -1974,8 +2009,6 @@ public sealed partial class Checker
         var wide = t.IsSigned ? TernType.I16 : TernType.U16;
         return t.Size < 2 && v >= wide.MinValue && v <= wide.MaxValue ? wide : null;
     }
-
-    private static string DescribeConstant(Expr e) => Describe(e) ?? "...";
 
     /// <summary>Source text for a simple operand, to name it in an error; null for anything else.</summary>
     private static string? Describe(Expr e) => e switch

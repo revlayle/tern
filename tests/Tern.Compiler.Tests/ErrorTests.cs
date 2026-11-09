@@ -38,7 +38,7 @@ public class ErrorTests
     [InlineData("var p: ptr u8\nfn main() { p = p + -1 }", "use '-' to move back")]
     [InlineData("var p: ptr u8\nvar q: ptr u8\nfn main() { q = 1 - p }", "cannot be subtracted from a number")]
     [InlineData("var p: ptr u8\nvar w: u16\nfn main() { p = w }", "Expected ptr u8, found u16. Convert with 'as ptr u8'")]
-    [InlineData("var p: ptr u8\nvar w: u16\nfn main() { w = p }", "Expected u16, found ptr u8. Convert with 'as u16'")]
+    [InlineData("var p: ptr u8\nvar w: u16\nfn main() { w = w + p }", "A number before a pointer is not pointer arithmetic. Write 'p + w' to move the pointer, or convert the pointer with 'as u16' for a number")]
     [InlineData("var p: ptr u8\nvar q: ptr u16\nfn main() { q = p }", "Convert with 'as ptr u16'")]
     [InlineData("var p: ptr u8\nvar b: u8\nfn main() { b = p as u8 }", "a pointer converts only to u16 or another pointer")]
     [InlineData("var p: ptr u8\nvar b: u8\nfn main() { p = b as ptr u8 }", "only u16 and pointers convert to a pointer")]
