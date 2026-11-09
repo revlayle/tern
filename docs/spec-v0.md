@@ -31,6 +31,7 @@ Tern is a programming language for 6502-family processors. It aims to be easy to
 - UTF-8 files with the extension `.tern`.
 - Comments: `// to end of line` and `/* block */`.
 - Statements end at a newline or `;`. A `;` is optional at the end of a line, so `x = 1;` and `x = 1` are the same, and an empty statement (`;;`) is ignored. A newline inside `( )` or `[ ]` does not end a statement, so argument lists and tables can span lines; there, elements are separated by `,` only. A `{` or `}` ends that rule: inside braces a newline separates again, which is why struct fields, in a declaration (3.3) or a literal, may be separated by `,` or a newline.
+- A line that ends with a binary operator (`&&`, `||`, `+`, `==`, ...) continues on the next line, since nothing can end there: a long condition is split after `&&`. A line cannot start with a binary operator; that is an error that says to move the operator to the end of the line before. Reason: `-` and `+` are also unary, so `-1 => ...` on the next line of a `match` is a new arm, not a continuation.
 - Where a block must follow (after the header of `fn`, `asm fn`, `interrupt fn`, `if`, `else`, `while`, `for`, `match`, `struct`, `asm`, `memory`), newlines before the `{` are skipped, so a brace may go on its own line (C# style). An `else` may also start the line after the `}`.
 - Indentation has no meaning.
 - Identifiers: `[A-Za-z_][A-Za-z0-9_]*`. Case-sensitive.
@@ -84,8 +85,8 @@ fn main() {
 - `import name` goes at the top of a file, before other declarations. It loads `name.tern` from, in order: the compiler's `lib/<platform>/` folder (e.g. `lib/c64/`), the compiler's `lib/` folder (the standard library, 10.1), then the folder of the importing file. The same mechanism splits your own program into files. A module name must match its file name exactly, including case.
 - Everything declared at the top level of a module is used with the module name: `text.put`, `c64.SCREEN`. `.` still means "member of", as for fields and `.lo`/`.hi`. Names in different modules never clash.
 - **`private`** before a declaration (`private var w0: u8`, `private data TABLE ...`, `private fn helper()`, `private const`, `private struct`) makes it usable only inside its own module, including from assembly. Without it, a top-level declaration is public.
-- A module is loaded once, however many files import it. Modules may import each other.
-- Only the program's main file has `fn main()`. A main file with `export` and no `main` builds a binary that another program calls (12.3).
+- A module is loaded once, however many files import it. Modules may import each other, in a ring too, and their declarations may use each other's names in any order, constants included (`const COLOR: u8 = video.MC` in a module that `video` imports through another). Only a real cycle, a constant whose value depends on itself, is an error.
+- Only the program's main file has `fn main()`. A main file with `export` and no `main` builds a binary that another program calls (12.3). The main file cannot be imported; that is an error that says to move what the other module needs into a module both import.
 - Only functions reachable from `main` (or from the exports, 12.3) are compiled. A module's global variables and `data` are kept only if a compiled function names them (in Tern code or as an assembly operand). An imported module costs nothing for the parts that are not used. The main file's globals are always kept, since an unused one may reserve memory on purpose (e.g. `@ zp`).
 - **Module parameters** are constants the program sets when it imports a module. The module declares them once, in a header that is the first line of the file (before its imports):
   ```
@@ -304,7 +305,7 @@ data msg = "GAME OVER"
 
 - `const` always means "known at compile time": `const` values take no memory, and `const fn` functions (4.1) run only during compilation.
 - `data` declares read-only arrays and strings stored in memory.
-- **`[T; _]` takes the length from the list**: `data script: [u8; _] = [1, 2, 3]` has length 3, as has a `var` global with a list initial value. A written length is still checked against the list. `_` is allowed only there, with a list literal.
+- **`[T; _]` takes the length from the list**: `data script: [u8; _] = [1, 2, 3]` has length 3, as has a `var` global with a list initial value. A string initial value works the same way: `var text: [u8; _] = screen"GALAXY 00\0"` has length 10. A written length is still checked against the list or string. `_` is allowed only there, with a list or string literal.
 - **`@` gives a location**, and that is its only meaning. In a struct field it is the offset from the start of the struct (3.3). Elsewhere it is followed by one of:
   - a constant expression: a fixed address, e.g. `@ $D020` or `@ VIC + $20`,
   - `zp`: anywhere in zero page, chosen by the compiler. This is a guarantee: if zero page is full, compilation fails (8.2),
@@ -321,7 +322,7 @@ data msg = "GAME OVER"
 - Global variables without an initializer are zeroed at startup. Storing 0 into such a variable at the start of `main`, before any label, branch, call or asm block and before `main` has written it, therefore generates no code. A global variable can be marked `noinit` to skip that. It is a prefix like `linear`: `noinit var buf: [u8; 256]`. It is an error with an initial value, at a fixed address (never zeroed anyway), on `data` and on locals.
 - Local variables (other than arrays and structs) must have an initial value. Their memory is shared with other functions (8.1), so it holds no useful value on entry.
 - A `const` may also be declared inside a function body. It follows the rules of a top-level `const` and takes no memory.
-- **Scope.** A local variable or constant can be used from its declaration to the end of the block that contains it. Blocks that do not contain each other may use the same name. A name is never declared again where it is already visible: a local cannot take the name of a parameter, of a local in an enclosing block, or of a top-level declaration of its module (names from other modules are qualified, 2.2, so they never clash). Top-level declarations may be used before the line that declares them, in any order, with one exception: a struct field's `@` offset uses only constants declared above the struct.
+- **Scope.** A local variable or constant can be used from its declaration to the end of the block that contains it. Blocks that do not contain each other may use the same name. A name is never declared again where it is already visible: a local cannot take the name of a parameter, of a local in an enclosing block, or of a top-level declaration of its module (names from other modules are qualified, 2.2, so they never clash). Top-level declarations may be used before the line that declares them, in any order, with one exception: a struct field's `@` offset uses only constants declared above the struct. That includes a constant computed from them, such as `const KINDS: u8 = len(star_char)` with `star_char` declared as `data` anywhere in the program (2.2).
 
 ### 4.1 Compile-time evaluation
 
@@ -415,7 +416,7 @@ break; continue; return value
 ```
 
 - There is one endless loop form, `while true`. There is no C-style `for (init; cond; step)`.
-- **Evaluation order.** In an assignment to an indexed place (`a[i] = v`, `a[i] op= v`, also with a record or pointer index), the index is evaluated before the value. When the index contains a function call, the order is unspecified. Otherwise the order in which the parts of an expression are evaluated is unspecified. It matters only when a part reads a `volatile` variable or calls a function with side effects; write such a part into a local first when the order matters.
+- **Evaluation order.** Function calls and reads of `volatile` memory in one statement happen in source order, left to right: in `(rand() + 1) << 2 | rand()` the left `rand()` runs first, in `f(g(), h())` `g` runs before `h`, and in `a[f()] = g()` the index's call runs first. In an assignment to an indexed place (`a[i] = v`, `a[i] op= v`, also with a record or pointer index), the index is evaluated before the value. The order of the other parts is unspecified, since it cannot be seen, with one exception: a variable that a call in the same statement changes. In `x = seed + next()` where `next` changes `seed`, whether the old or new `seed` is added is unspecified; write the call or the variable into a local first.
 
 ### 5.1 `for` loops
 
@@ -736,7 +737,8 @@ asm fn fill(value: u8 using A, count: u8 using X) {
   .done:
   }
   ```
-  `var` lines come before the first instruction, have no initial value (the assembly sets it; an initial value would add code the block does not show) and no `@` (a fixed address would make the copies share it). Each of these is an error, as is a `var` line in a plain `asm fn` or in an `asm { }` statement.
+  `var` lines come before the first instruction, have no initial value (the assembly sets it; an initial value would add code the block does not show) and no `@` (a fixed address would make the copies share it). Each of these is an error, as is a `var` line in an `asm { }` statement (declare the variable before the block).
+- A plain `asm fn` body may start with `var` lines too, under the same rules. They are the function's locals, in its frame (8.1), shared with functions that never run at the same time; their names are local to the function. A pointer used as `(p),y` is placed in zero page, as for any pointer that is dereferenced (3.4).
 
 ## 10. Built-ins
 
@@ -882,6 +884,7 @@ Each is an empty-body `inline asm fn` (section 7), so a call adds no instruction
 | `set_irq(handler: u16 using XY)` | Install an `interrupt fn` at `$FFFE`, after `kernal_off()` |
 | `set_nmi(handler: u16 using XY)` | Install an `interrupt fn` at `$FFFA`, after `kernal_off()` |
 | `interrupts_on()`, `interrupts_off()` | `cli`, `sei` (`inline asm fn`, no `jsr`) |
+| `cia_irqs_off()` | Turn off the interrupts of both CIAs (`icr = $7F`) and read each `icr` to clear any that are pending, e.g. before `set_kernal_irq` with a raster interrupt; the KERNAL's timer interrupt stops |
 | `vic: Vic @ $D000` | VIC-II registers: `sprite0_x`, `sprite0_y` ... `sprite7_y`, `sprite_x_msb`, `control1`, `raster`, `light_pen_x`, `light_pen_y`, `sprite_enable`, `control2`, `sprite_expand_y`, `memory`, `irq_status`, `irq_enable`, `sprite_priority`, `sprite_multicolor`, `sprite_expand_x`, `sprite_collision`, `sprite_bg_collision`, `border`, `background`, `background1`-`background3`, `sprite_mc0`, `sprite_mc1`, `sprite_color: [u8; 8]` |
 | `sprite_xy: [u8; 16] @ $D000` | The sprite position registers as an array: x of sprite n at `2n`, y at `2n + 1` (the same memory as `vic.sprite0_x` ... `vic.sprite7_y`) |
 | `set_kernal_irq(handler: u16)` | Install an `interrupt fn` with the KERNAL left in: `$0314` points to a library stub that pulls the A, X and Y the KERNAL's entry pushed (`pla` / `tay` / `pla` / `tax` / `pla`) and jumps to the handler, which then runs as if called through `$FFFE` (about 20 cycles more than the KERNAL entry alone). The KERNAL's own IRQ work (keyboard scan, clock) no longer runs, so `getin()` sees no new keys; the handler acknowledges its interrupt source, and a CIA timer interrupt that is left on reaches it too |
@@ -935,6 +938,7 @@ These are the intended translations. The optimizer may produce something shorter
 | `x += 2`, `x -= 2` (one-byte variable in memory, `u8` or `i8`, not `volatile`) | `inc x` / `inc x`, `dec x` / `dec x` (4 bytes against 7, the same cycles, A unchanged; a `volatile` variable gets the add, since two `inc`s write the value in between) |
 | `w += 1` (u16) | `inc w` / `bne +` / `inc w+1` |
 | `w += b as u16` (b: u8) | `lda b` / `clc` / `adc w` / `sta w` / `bcc +` / `inc w+1` |
+| `p = q + e` (`q` a pointer or `u16`, `e` a `u8` expression such as `col << 1`) | `e` in A / `clc` / `adc q` / `sta p` / `lda q+1` / `adc #0` / `sta p+1`: an 8-bit add with the carry into the high byte, never a 16-bit temporary |
 | `v += 2`, `v -= 2` (one-byte variable held in X or Y, e.g. a loop counter) | `inx` / `inx`, `dex` / `dex` (`iny`, `dey` for Y) |
 | `p += 256`, `w -= 256` | `inc p+1`, `dec w+1` |
 | `b = a[i + 1]` in `for i in 0..last` (last: u8) | `lda a+1,x` / `sta b` (3.2) |
@@ -969,6 +973,7 @@ These are the intended translations. The optimizer may produce something shorter
 | `math.mul8(a, b)` | `ldx b` / `lda a` / `jsr math.mul8` (A is loaded last; result in A/X) |
 | `i & 7` (i.e. i mod 8) | `lda i` / `and #7` |
 | `if a < b { }` signed (`i8`) | `lda a` / `sec` / `sbc b` / `bvc +` / `eor #$80` / `+ bpl skip` |
+| `if s < 0 { }`, `if s >= 0 { }` (`i8`, also `(d as i8) < 0`) | `lda s` / `bpl skip`, `lda s` / `bmi skip` (`i16`: the same on `s+1`) |
 | `if w < v { }` (u16) | `lda w` / `cmp v` / `lda w+1` / `sbc v+1` / `bcs skip` |
 | `if w == v { }` (u16) | `lda w` / `cmp v` / `bne skip` / `lda w+1` / `cmp v+1` / `bne skip` |
 | `if x < 10 && y != 0 { }` | `lda x` / `cmp #10` / `bcs skip` / `lda y` / `beq skip` |
@@ -1054,7 +1059,8 @@ source → lexer → parser → AST
 ```
 
 - **Built-in assembler.** There is no text assembly step. The compiler works on typed instruction objects, which the encoder turns into bytes. The instruction table includes sizes and cycle counts, so layout can pick short branches, avoid page-crossing penalties in marked loops, and report cycles.
-- **Errors for habits from other languages.** Where a C habit does not parse, the error names the habit and gives the Tern spelling, instead of a generic parse error at a later token: `n++` / `n--` at the end of a statement or before a closing bracket ("Write 'n += 1'"; `a++b` stays `a + (+b)`), a `*` dereference such as `*p = 1` ("Write 'p[0]'"), `%0000_1111` where a value is expected ("Write binary numbers as 0b0000_1111"), and a keyword used as a name, such as `fn step()`: the error says what was expected and names the keyword ("Expected function name, found 'step', which is a keyword. Use another name").
+- **Errors for habits from other languages.** Where a C habit does not parse, the error names the habit and gives the Tern spelling, instead of a generic parse error at a later token: `n++` / `n--` at the end of a statement or before a closing bracket ("Write 'n += 1'"; `a++b` stays `a + (+b)`), a `*` dereference such as `*p = 1` ("Write 'p[0]'"), `%0000_1111` where a value is expected ("Write binary numbers as 0b0000_1111"), and a keyword used as a name, such as `fn match()`: the error says what was expected and names the keyword ("Expected function name, found 'match', which is a keyword. Use another name").
+- **`step` is a keyword only right after the range of a `for`** (5.1). Elsewhere it is an ordinary name: `fn step()`, `var step: u8`, and `for i in 0..step step 2` all work. This is unambiguous, since a name cannot continue an expression that is already complete. Other keywords stay reserved everywhere.
 - **Branch range fixing.** A conditional branch reaches only −128 to +127 bytes. Layout repeats until every branch fits. Branches that do not fit become an inverted branch over a `jmp`.
 - **Outputs:**
   - the program file (`.prg` for C64),

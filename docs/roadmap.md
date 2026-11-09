@@ -409,6 +409,23 @@ Spec: 2.1, 3, 3.1, 3.3, 4, 4.1, 8.5, 11, 12.2. Decisions 2026-11-09: "struct lit
 
 Done when: every item has its end-to-end and error tests, and one of the port's parallel-table groups (`pages.p8`'s `how_row` / `how_col` / `how_text`) compiles as an array of struct literals and gives the same tables as the parallel arrays.
 
+## M20 follow-up 3 (before M21)
+
+Spec: 2, 2.2, 4, 5, 9, 10.1, 11, 13. Decisions 2026-11-09: "Galaxy Stars port, remaining gaps". The open gaps from the finished port (`C:\game-dev\galaxy-star\tern\gaps.md`, gaps 11 to 24).
+
+- **Calls and `volatile` reads in one statement run left to right** (spec 5): operands, arguments, a call in an index. Tests: a function that logs its calls, in `|`, `+`, `-`, a compare, nested arguments, `a[f()] = g()`, `a[i] op= f()`; two `volatile` reads; the port's `(rand_below(K) + 1) << 2 | rand_below(4)` gives Prog8's order. `BenchmarkTests` should not move (no benchmark has two calls in one statement); say so if one does.
+- **Constants resolved on demand across modules** (spec 2.2, 4): `len()` / `sizeof()` of a global or `data` in a `const`, in the same module and another; a constant used across an import ring of three modules; the error for a constant that depends on itself (directly and through another module), naming the chain.
+- **`var` lines in a plain `asm fn`** (spec 9): in the frame (shared with a function that never runs at the same time; checked in the report), local names (the same name in two functions), a pointer used as `(p),y` placed in zero page; the errors as for `inline asm fn` (initial value, `@`, after an instruction).
+- **`[u8; _]` from a string** (spec 4), with an encoding prefix and `\0`; a written length checked against the string.
+- **`step` a keyword only after a `for` range** (spec 13): `fn step()`, a local and a field named `step`, `for i in 0..step step 2`. The keyword-name error's example moves to another keyword (`SkillTests`, `errors.md`).
+- **A line starting with a binary operator** (spec 2): the error "Move '&&' to the end of the line before"; a test that a line ending with `&&` continues, and that `-1 =>` in a `match` is still an arm.
+- **Spec 11 rows:** `p = q + (col << 1)` as an 8-bit add with a carry into the high byte; `s < 0` / `s >= 0` on `i8` and `i16`, and `(d as i8) < 0`, as `bpl` / `bmi`. Listing tests; results against C# at edge values. `BenchmarkTests` and `SkillTests` rewritten if they move, with the totals.
+- **Importing the main file** is an error that says the main file cannot be imported and to move the shared code to a module (spec 2.2).
+- **`c64.cia_irqs_off()`** (spec 10.1), checked in VICE with `set_kernal_irq` and a raster interrupt.
+- The skill: the evaluation-order rule and its one exception (a variable a call changes) in `language.md` near the operators; `var` lines in `asm fn`; line continuation.
+
+Done when: every item has its end-to-end and error tests, and the port's workarounds for gaps 11, 12, 15, 17, 18, 19, 23 (the error only) and 24 compile in their plain form (ported into a test program, as `GalaxyStarsGapTests`).
+
 ## M21: Plug-ins against a fixed interface
 
 Spec: 12.3 (planned).
@@ -483,6 +500,8 @@ Each has a reason to wait; the spec session schedules one when that reason chang
 - **The `nmos6502+undoc` CPU variant** (spec 12.1, opt-in undocumented opcodes).
 - **Calls through pointers** (spec 6.5, planned): `var handler: fn() targets [idle, walk] = idle`, then `handler()`, a `jsr` to a `jmp (handler)` stub; the `targets` list keeps the call graph, and so frame sharing, correct. The Tern way to write what an asm `jmp (v)` does today. Wanted by the developer (2026-11-09), not urgent; scope and syntax are checked in a spec session before it is scheduled.
 - **Alignment as a placement, `@ align(n)`** (decision 2026-11-09): place a `var` or `data` at the next multiple of `n` (64 for sprites, 1 KB for screens, 2 KB for character sets, 256 for page-aligned tables); `@` keeps its one meaning, a location. No code; the padding shows in the report. Today a fixed address in a `reserved` area does the same. Build it when a program needs alignment that a fixed address handles badly, such as a library module whose tables must be aligned wherever the program places them.
+
+- **The Galaxy Stars routines kept in assembly, as a measurement set** (decision 2026-11-09, gaps 16, 21, 25): `stars.draw_tile`, `explode.hits` with `hostiles.explosion_hit`, `hostiles.draw` and `title.sweep_all`, in plain Tern and as the asm port, measured and classified as in M17 (optimizer, code shape, or needs assembly). Candidates from the port: a carry known clear after an `adc` that cannot overflow, repeated reloads, the absolute value of a 16-bit difference. After M21; scheduled by a spec session.
 
 After the compiler is complete (far off, not planned):
 

@@ -56,7 +56,7 @@ The standard library sits in `lib/` next to the compiler (source in `src/lib/`).
 ### 3.1 Source text
 
 - Files are UTF-8 with the extension `.tern`. Comments are `//` and `/* */`.
-- A statement ends at a newline; `;` is optional. A newline inside `( )` or `[ ]` does not end a statement, so argument lists and tables can span lines.
+- A statement ends at a newline; `;` is optional. A newline inside `( )` or `[ ]` does not end a statement, so argument lists and tables can span lines. A line that ends with a binary operator continues on the next one, so split a long condition after `&&` or `||`, not before.
 - Indentation has no meaning. A block's `{` may go on the same line as its header or on the next line, so both brace styles work:
 
 ```
