@@ -1060,7 +1060,8 @@ public sealed partial class Checker
             if (reg is not (Register.X or Register.Y))
                 throw new CompileError(f.Pos, "A loop variable can only use X or Y");
             if (type.Size != 1)
-                throw new CompileError(f.Pos, $"A {type} loop variable does not fit in {reg}");
+                throw new CompileError(f.Pos,
+                    $"{(type.IsSigned ? "An" : "A")} {type} loop variable does not fit in {reg}. Remove 'using {reg}', or use bounds that fit in {(type.IsSigned ? "an i8" : "a u8")}");
             if (!_loopRegisters.Add(reg))
                 throw new CompileError(f.Pos, $"{reg} is already used by an enclosing loop");
             if (ContainsCall(f.Body, reg))

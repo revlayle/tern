@@ -91,10 +91,6 @@ public sealed class CodeGen
         v.AliasOf is { } storage ? new(storage, v.AliasOffset + offset) : new(v, offset);
 
     /// <summary>
-    /// The distance from the low-byte table of a split array to its high-byte table; 1 for a linear
-    /// array, whose index the checker has already doubled.
-    /// </summary>
-    /// <summary>
     /// An indexed operand into one table of an array (its low bytes, or the high bytes at
     /// <paramref name="table"/>), with a folded offset <paramref name="shift"/>. It names the table,
     /// so the emulator can report an index outside it (M20, spec 3.2); the code is the same.
@@ -113,6 +109,10 @@ public sealed class CodeGen
     /// <summary>The check of an indexed match's jump table: values from <paramref name="low"/> to low + span - 1.</summary>
     private static IndexCheck MatchCheck(int span, int low, bool signed) => new("", 0, span, span, MatchLow: low, Signed: signed);
 
+    /// <summary>
+    /// The distance from the low-byte table of a split array to its high-byte table; 1 for a linear
+    /// array, whose index the checker has already doubled.
+    /// </summary>
     private static int HighTable(VariableSymbol arr) => arr.HighTable ?? (arr.Type.Linear ? 1 : arr.Type.Length);
     private static Imm Byte(long v) => new((int)(v & 0xFF));
 

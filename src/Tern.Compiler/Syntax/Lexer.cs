@@ -122,6 +122,33 @@ public static class Lexer
             Add(quote == '"' ? TokenKind.String : TokenKind.Char, text, 0, start, encoding);
         }
 
+        // The source text of the operand before i on this line, such as n, a[i] or p.x: names joined by
+        // dots, each with any [ ] after it. Null if there is none.
+        string? OperandText()
+        {
+            int k = tokens.Count - 1, start = -1;
+            while (k >= 0)
+            {
+                if (tokens[k].Kind == TokenKind.RBracket)
+                {
+                    int depth = 0;
+                    for (; k >= 0; k--)
+                    {
+                        if (tokens[k].Kind == TokenKind.RBracket) depth++;
+                        else if (tokens[k].Kind == TokenKind.LBracket && --depth == 0) break;
+                    }
+                    k--;
+                    continue;
+                }
+                if (k < 0 || tokens[k].Kind != TokenKind.Identifier) break;
+                start = k--;
+                if (k >= 0 && tokens[k].Kind == TokenKind.Dot) { k--; continue; }
+                break;
+            }
+            if (start < 0 || tokens[start].Pos.Line != line) return null;
+            return source[(lineStart + tokens[start].Pos.Column - 1)..i].Trim();
+        }
+
         while (i < source.Length)
         {
             char c = source[i];
@@ -206,9 +233,10 @@ public static class Lexer
             // they stay two operators: a++b is a + (+b).
             if (c is '+' or '-' && Peek(source, i + 1) == c && EndsAfter(source, i + 2))
             {
-                string name = tokens.Count > 0 && tokens[^1].Kind == TokenKind.Identifier ? tokens[^1].Text : "x";
                 string op = c == '+' ? "+=" : "-=";
-                throw new CompileError(Pos(i), $"Tern has no '{c}{c}'. Write '{name} {op} 1'");
+                throw new CompileError(Pos(i), OperandText() is { } target
+                    ? $"Tern has no '{c}{c}'. Write '{target} {op} 1'"
+                    : $"Tern has no '{c}{c}'. Write '{op} 1' instead");
             }
 
             bool matched = false;

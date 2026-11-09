@@ -269,7 +269,8 @@ public class SignedLoopTests
     [InlineData("var n: u16\nfn main() { for i in n..=-5 { } }", "Convert it with 'as i16'")]
     [InlineData("var s: i8\nvar n: u8\nfn main() { for i in s..n { } }", "Cannot mix signed and unsigned")]
     [InlineData("var s: i8\nvar k: u8\nfn main() { for i in s..10 step k { } }", "A variable step needs a u8 loop counter, but the bounds are i8")]
-    [InlineData("fn main() { for i in -300..300 using X { } }", "A i16 loop variable does not fit in X")]
+    [InlineData("fn main() { for i in -300..300 using X { } }", "An i16 loop variable does not fit in X. Remove 'using X', or use bounds that fit in an i8")]
+    [InlineData("fn main() { for i in 0..300 using Y { } }", "A u16 loop variable does not fit in Y. Remove 'using Y', or use bounds that fit in a u8")]
     public void Reports_errors(string source, string expected)
     {
         var e = Assert.Throws<CompileError>(() => TernCompiler.Compile(source));

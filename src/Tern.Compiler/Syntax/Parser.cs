@@ -967,7 +967,10 @@ public sealed class Parser
                 string p = PeekAt(1).Kind == TokenKind.Identifier ? PeekAt(1).Text : "p";
                 throw new CompileError(t.Pos, $"Tern has no '*' to read through a pointer. Write '{p}[0]' for the value {p} points to");
             }
-            case TokenKind.Percent when PeekAt(1).Kind == TokenKind.Number && PeekAt(1).Pos.Column == t.Pos.Column + 1:
+            case TokenKind.Percent when PeekAt(1) is { Kind: TokenKind.Number } bits && bits.Pos.Column == t.Pos.Column + 1
+                && bits.Text.All(ch => ch is '0' or '1' or '_')
+                && !(PeekAt(2).Kind is TokenKind.Identifier or TokenKind.Number
+                     && PeekAt(2).Pos.Line == bits.Pos.Line && PeekAt(2).Pos.Column == bits.Pos.Column + bits.Text.Length):
                 throw new CompileError(t.Pos, $"'%' does not start a binary number. Write binary numbers as 0b{PeekAt(1).Text}");
             default:
                 throw new CompileError(t.Pos, $"Expected an expression, found {Describe(t)}");

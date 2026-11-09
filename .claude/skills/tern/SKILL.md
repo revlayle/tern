@@ -49,7 +49,8 @@ in VICE: `x64sc -autostart game.prg`.
 
 The program never checks an array index, but `tern run` does: an index outside its array, and an
 `indexed match` value outside its patterns (which also stops the run), are printed with the source
-line, and the exit code is 3. Pointer accesses and `asm` are not checked.
+line, and the exit code is 3 (2 when an `indexed match` value stopped the run). Pointer accesses and
+`asm` are not checked.
 
 ```tern
 // bad.tern
