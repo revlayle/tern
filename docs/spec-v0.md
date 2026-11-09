@@ -105,7 +105,7 @@ fn main() {
 | `u16`, `i16` | 2 | Little endian. `.lo` and `.hi` give the bytes as `u8` |
 | `bool` | 1 | `0` or `1` in memory. Can live in a CPU flag (section 7) |
 | `ptr T` | 2 | Pointer to `T` |
-| `[T; N]` | varies | Array, `1 ≤ N ≤ 256` |
+| `[T; N]` | varies | Array, `1 ≤ N ≤ 256`; longer for one-byte elements, used through a pointer (3.2) |
 | `struct` | varies | See 3.3 |
 
 ### 3.1 Arithmetic rules
@@ -124,7 +124,7 @@ fn main() {
 ### 3.2 Arrays
 
 - Array length is at most 256, so any index fits in the X or Y register.
-- **Long byte arrays.** An array of one-byte elements (`u8`, `i8`) may be longer than 256: a `var` buffer (`var map: [u8; 2048]`, zeroed at startup or `noinit`, with no initial value), or `data` from any initializer: a string literal, `include_bytes` (e.g. a 2 KB character set) or a list literal (e.g. a table printed by a tool). It cannot be indexed; indexing it is an error that says to use a pointer. `addr(name)` gives a `ptr u8` (or `ptr i8`) to its first byte and `len(name)` its length as a `u16`. To reach byte 300, step the pointer: `var p: ptr u8 = addr(map) + 256`, then `p[44]`. A long array can be placed like any variable or data (`@ addr`, `@ region`). Arrays with multi-byte elements stay at most 256 elements.
+- **Long byte arrays.** An array of one-byte elements (`u8`, `i8`) may be longer than 256: a `var` buffer (`var map: [u8; 2048]`, zeroed at startup or `noinit`, with no initial value), or `data` from any initializer: a string literal, `include_bytes` (e.g. a 2 KB character set) or a list literal (e.g. a table printed by a tool). It cannot be indexed; indexing it is an error that says to use a pointer. `addr(name)` gives a `ptr u8` (or `ptr i8`) to its first byte and `len(name)` its length, a constant with no type (3.1), so it fits a `u16` and not a `u8`. To reach byte 300, step the pointer: `var p: ptr u8 = addr(map) + 256`, then `p[44]`. A long array can be placed like any variable or data (`@ addr`, `@ region`). Arrays with multi-byte elements stay at most 256 elements.
 - Array indexes are always `u8` and produce `abs,X`/`abs,Y` addressing. For memory larger than 256 bytes, use a `ptr`.
 - **An index expression wraps like all arithmetic** (3.1): with `i = 255`, `a[i + 1]` is `a[0]`, so a 256-element ring buffer can use `buf[head + 1]`. The optimizer folds a constant offset into the address (`a[i - 1]` as `lda a-1,x`) only where the result is the same: when a wrapped index would be outside the array anyway, or when the bounds of a `for` loop counter prove the sum does not wrap: constant bounds, or a variable end of the counter's type (`for i in 0..last` with `last: u8` gives `i <= 254`, so `a[i + 1]` is `lda a+1,x`). The proof comes from the loop header only, not from other accesses in the body, so the cost of an access can be read from the loop it is in. Otherwise `a[i + c]` computes the index first (`lda i` / `clc` / `adc #c` / `tax`).
 - **An index outside the array is not supported.** The compiler may assume it never happens: the optimizer treats `a[i] = v` as changing only `a`. There is never a check in the program. A constant index past the end is a compile error, and so is a `for` loop with constant bounds that indexes past the end (`for i in 0..20 { a[i] }` on a `[u8; 10]`). A variable index is checked by the built-in emulator in test runs (14.4). Code that writes across variables on purpose uses a pointer, whose writes the optimizer treats as changing any memory (4).
@@ -147,7 +147,7 @@ struct Voice {                     // one field per line also works
 }
 ```
 
-A struct describes a **memory layout**: field names, types and offsets. It works as an overlay on memory and is always used in place. **Structs are never copied:** there is no struct assignment, comparison, struct parameter or struct return value. To pass a struct to a function, pass a `ptr` or an array index. To copy one, call `copy()`.
+A struct describes a **memory layout**: field names, types and offsets. It works as an overlay on memory and is always used in place. **Structs are never copied:** there is no struct assignment, comparison, struct parameter or struct return value. To pass a struct to a function, pass a `ptr` or an array index. To copy one, call `mem.copy(addr(dst), addr(src), sizeof(T))` (10.1).
 
 A struct can be used in three ways:
 
@@ -232,7 +232,7 @@ e.pos.y = 5                        // ldy #1 / sta (e),y
 
 - `as` binds tighter than every operator: `x as u16 << 5` is `(x as u16) << 5`.
 - Converting between sizes and signedness extends according to the source type, then reinterprets: `i8 as u16` sign extends.
-- Runtime `as` never checks a value; it keeps the low bits. (Compile-time values are checked, see 4.1.)
+- `as` never checks a value; it keeps the low bits, on a constant as at runtime: `(BOX + 250) as u8` keeps the low byte on purpose (3.1). Without `as`, a constant must fit where it is used (3.1), and so must a value computed by a `const fn` (4.1).
 - **Not allowed:** narrowing without `as`; mixing signed and unsigned in one operation; `u8 as bool` (write `x != 0`).
 
 ### 3.6 Operator precedence
@@ -257,6 +257,9 @@ Tightest first. Binary operators on one line are left associative.
 - As in C, `<<` and `>>` bind looser than `+`: `w << 5 + 3` is `w << 8`; write `(w << 5) + 3`.
 - `as` is postfix, so it binds tighter than a unary operator: `-x as i16` is `-(x as i16)`. For an `i8` holding -128 that is 128, while `(-x) as i16` is -128.
 - Compares do not chain: `a < b < c` is a compile error. Write `a < b && b < c`.
+- Unary `-x` negates (two's complement, wrapping like all arithmetic). Unary `+x` has no effect.
+- `&&`, `||` and `!` are logical operators on `bool`, with short-circuit evaluation. `&`, `|`, `^`, `~` are bitwise operators on integers. Each is a separate operator with one meaning (`!` and `!=` are different tokens).
+- Assignment operators: `=`, `+=`, `-=`, `&=`, `|=`, `^=`, `<<=`, `>>=`. `x += 1` on memory compiles to `inc`. Assignment is a statement, not an expression.
 
 ## 4. Declarations
 
@@ -291,7 +294,7 @@ data msg = "GAME OVER"
 - **A fixed-address variable must not overlap the program**, its data, or the variables the compiler places. That is a compile error that names the variable and both address ranges. Fixed-address variables are often graphics data that the VIC must find in a given 16 KB bank; move the data or make the program smaller. Fixed-address variables may overlap each other. The one exception is the memory an overlay loads (8.5): a fixed-address variable marked `volatile` may overlap an overlay's file.
 - **Addresses in initial values.** The initial value of a global or of `data` is known at compile time, with one exception: the address of anything the compiler places, filled in when the program is placed, at no runtime cost. `addr()` of a global variable, `data`, a field of a struct global or a function (6.5) may be an element of an initial value, alone, plus or minus a constant (`addr(screen) + 40`, `addr(handler) - 1` for an `rts` jump table), as `.lo` / `.hi` of either (one-byte tables of address halves), or converted with `as` to another pointer type (`addr(buf) as ptr Enemy`) or to `u16`: `data rows: [ptr u8; 3] = [addr(map), addr(map) + 40, addr(map) + 80]`. In a `[u16; n]` table the address converts by itself (3.5): `data t: [u16; 2] = [addr(a), addr(b)]`. Anything else built from an address, such as two addresses added or an address multiplied, is an error. Addresses in a sibling overlay are errors as everywhere (8.5).
 - Global variables without an initializer are zeroed at startup. Storing 0 into such a variable at the start of `main`, before any label, branch, call or asm block and before `main` has written it, therefore generates no code. A global variable can be marked `noinit` to skip that. It is a prefix like `linear`: `noinit var buf: [u8; 256]`. It is an error with an initial value, at a fixed address (never zeroed anyway), on `data` and on locals.
-- Local variables (other than arrays) must have an initial value. Their memory is shared with other functions (8.1), so it holds no useful value on entry.
+- Local variables (other than arrays and structs) must have an initial value. Their memory is shared with other functions (8.1), so it holds no useful value on entry.
 
 ### 4.1 Compile-time evaluation
 
@@ -419,10 +422,7 @@ break; continue; return value
 - `_` matches every other value. It must be alone in the last arm. Without `_`, a value that matches no pattern skips the match.
 - A value in two patterns, or an empty range, is an error. There is no fall-through.
 - Code shapes: section 11.
-- **`indexed match`.** A plain `match` is always a chain of compares; `indexed match` is always a jump table: the value, minus the lowest pattern value, indexes a table of arm addresses, 2 bytes per value from the lowest pattern value to the highest (the span; the report shows the tables). A value inside the span that no pattern lists goes to `_`, or skips the match without `_`. A value outside the span is not checked, as an array index is not (3.2): it jumps through whatever bytes follow the tables. In test runs the emulator will report it, with the source line (14.4, M20). A value that cannot leave the span needs no care: `indexed match op & 15` with patterns 0 to 15. `indexed` is the word of 3.3, meaning a table the compiler generates; it is a word only before `var` and `match`.
-- Unary `-x` negates (two's complement, wrapping like all arithmetic). Unary `+x` has no effect.
-- `&&`, `||` and `!` are logical operators on `bool`, with short-circuit evaluation. `&`, `|`, `^`, `~` are bitwise operators on integers. Each is a separate operator with one meaning (`!` and `!=` are different tokens).
-- Assignment operators: `=`, `+=`, `-=`, `&=`, `|=`, `^=`, `<<=`, `>>=`. `x += 1` on memory compiles to `inc`.
+- **`indexed match`.** A plain `match` is always a chain of compares; `indexed match` is always a jump table: the value, minus the lowest pattern value, indexes a table of arm addresses, 2 bytes per value from the lowest pattern value to the highest (the span; the report shows the tables). A value inside the span that no pattern lists goes to `_`, or skips the match without `_`. A value outside the span is not checked, as an array index is not (3.2): it jumps through whatever bytes follow the tables. In test runs the emulator reports it, with the source line, and stops the run (14.4). A value that cannot leave the span needs no care: `indexed match op & 15` with patterns 0 to 15. `indexed` is the word of 3.3, meaning a table the compiler generates; it is a word only before `var` and `match`.
 
 ## 6. Functions
 
@@ -441,7 +441,7 @@ inline fn wait_frame() { ... }
 - Tern code cannot read a function's parameters from outside the function. After the call, their memory may already be in use by another function.
 - `using` always means "kept in this register or flag". A parameter written `using A`, `using X` or `using Y` is passed in that register. A `u16` parameter can use a register pair: `using AX`, `using AY` or `using XY` (low byte first).
 - **Return values:** `u8`/`i8` in A; `u16`/`i16` in A (low) and X (high); `bool` in the carry flag. Other placements can be written out: `-> u8 using Y`, `-> u16 using XY` (any register pair `AX`, `AY`, `XY`, low byte first), `-> bool using zero` (the Z flag), `-> bool using negative` (the N flag).
-- **Planned: `-> bool using overflow`** (the V flag), for testing what `bit` copies from bit 6 of memory, or the signed overflow of an `adc`/`sbc`. Allowed on an `inline asm fn`, an `asm fn` and a routine at a fixed address (6.6), where the instructions that set V are visible or documented; not on a plain `fn`, since the 6502 has no instruction that sets V (`clv` only clears it), so `return true` would need a trick such as `bit` on a byte with bit 6 set. A return value only, never a fixed input (6.6). `if f()` is `bvc skip`; an empty body reads the V flag left by the `asm` block before it, under the rules of section 7.
+- **`-> bool using overflow`** (the V flag), for testing what `bit` copies from bit 6 of memory, or the signed overflow of an `adc`/`sbc`. Allowed on an `inline asm fn`, an `asm fn` and a routine at a fixed address (6.6), where the instructions that set V are visible or documented; not on a plain `fn`, since the 6502 has no instruction that sets V (`clv` only clears it), so `return true` would need a trick such as `bit` on a byte with bit 6 set. A return value only, never a fixed input (6.6). `if f()` is `bvc skip`; an empty body reads the V flag left by the `asm` block before it, under the rules of section 7.
 - Registers not used for return values may be changed by any call. The compiler knows each function's actual register use and uses that instead where it can.
 
 ### 6.2 Inline functions
@@ -475,6 +475,8 @@ inline fn wait_frame() { ... }
 
 The compiler builds the full call graph. A cycle in the call graph (recursion) is a compile error. This is a permanent design decision, not a v0 limit: it is what allows every local variable to have a fixed address (section 8.1). Supporting recursion would need a software stack, which makes every local variable access slower, in every function.
 
+Algorithms that are naturally recursive (flood fill, tree walks) use an explicit stack: an array plus an index, in a loop. The cost is then visible in the code.
+
 ### 6.5 Function addresses
 
 `addr(f)` is the address of function `f`, a `u16` constant that costs nothing: `irq_vector = addr(raster)`, or a jump table in `data` (with a constant offset or `.lo` / `.hi`, as for any address in an initial value, 4).
@@ -485,11 +487,7 @@ The compiler builds the full call graph. A cycle in the call graph (recursion) i
 - In assembly, `#f.lo` / `#f.hi` take the address of `f` like `addr(f)`; `jsr f` and `jmp f` are calls. Assembly may take the address of a function with memory parameters, since it can set them itself.
 - A function reached only through its address has no known root, so the two-roots check (8.1) cannot see it. Calling it through its address from two roots (main and a handler) is the program's responsibility, like `keeps` (6.6). Globals it uses count as used from an unknown root, so any it shares with other code are volatile.
 
-Algorithms that are naturally recursive (flood fill, tree walks) use an explicit stack: an array plus an index, in a loop. The cost is then visible in the code.
-
-### 6.5 Calls through pointers
-
-A variable can hold a function address and be called like a function. The compiler cannot see which function runs, so the variable's type lists every possible target, which keeps the call graph complete:
+**Planned: calls through pointers** (not built, not scheduled). A variable can hold a function address and be called like a function. The compiler cannot see which function runs, so the variable's type lists every possible target, which keeps the call graph complete:
 
 ```
 var handler: fn() targets [idle, walk, attack] = idle
@@ -659,7 +657,7 @@ import level2 @ levels
 - **Fixed data in an overlay.** An overlay module may place `data` at a fixed address inside its own area, e.g. a level's header and tables at the addresses the resident code expects:
   ```
   // level1.tern, imported with `import level1 @ levels`
-  data header: LevelHeader @ $6000 = LevelHeader { ... }
+  data header: [u8; _] @ $6000 = [3, 40, 12]    // the bytes of a LevelHeader (no struct literals, 3.3)
   ```
   - The bytes are part of that module's file. Its code, other `data` and variables go around them, as in a program area (8.4); a gap between them is zero-filled, and the file still starts at the area's start.
   - Overlays of the same area may put data at the same address, since they are never loaded together.
@@ -719,7 +717,8 @@ asm fn fill(value: u8 using A, count: u8 using X) {
 |---|---|
 | `addr(name)` | Pointer to a variable, array, or field of a struct variable; address of a function (3.4) |
 | `sizeof(T)` | Size of a type in bytes |
-| `len(a)` | Number of elements in an array (compile-time) |
+| `len(a)` | Number of elements in an array or string, a constant with no type (3.1) |
+| `include_bytes("file")` | The bytes of a file, as the initial value of `data`; the path is relative to the source file (4.1) |
 
 ### 10.1 Standard library
 
@@ -727,7 +726,7 @@ The standard library is ordinary Tern and `asm fn` source in the compiler's `lib
 
 **Strings and memory blocks are passed as a pointer plus a length**, matching `len()` on literals. The library has no zero-terminated variants.
 
-The tables below describe the library as written in M4, M5, M10, M11 and M14. Work variables and tables that callers should not use are `private` (2.2).
+The tables below describe the library as built (M4, M5, M10, M11, M14, M19 and the M20 follow-up). Work variables and tables that callers should not use are `private` (2.2).
 
 **`math`**: cycle-heavy arithmetic (the operators only work on constants, 3.1)
 
@@ -829,14 +828,14 @@ Values wrap modulo 10^(2n). The routines use `sed` and always leave decimal mode
 
 The state is private and starts at 1, so using `random` from main and a handler is an error (8.1); a handler that needs random numbers uses its own generator.
 
-**Planned: `cpu`**: the CPU flags after an `asm` block, platform independent
+**`cpu`**: the CPU flags after an `asm` block, platform independent
 
 | Function | Signature | `if f()` compiles to |
 |---|---|---|
 | `carry` | `() -> bool using carry` | `bcc skip` |
 | `zero` | `() -> bool using zero` | `bne skip` |
 | `negative` | `() -> bool using negative` | `bpl skip` |
-| `overflow` | `() -> bool using overflow` | `bvc skip`; added with `using overflow` (6.1) |
+| `overflow` | `() -> bool using overflow` | `bvc skip` |
 
 Each is an empty-body `inline asm fn` (section 7), so a call adds no instructions: the test branches on the flag that the instructions before it left. It is defined only directly after an `asm` block, under the rules of section 7: `asm { jsr read_byte }` then `if cpu.carry() { ... }`. After compiled Tern code the result is unspecified.
 
@@ -851,6 +850,11 @@ Each is an empty-body `inline asm fn` (section 7), so a call adds no instruction
 | `getin() -> u8 using A` | Read a key from the keyboard buffer; 0 if none (KERNAL `$FFE4`) |
 | `cursor(row: u8 using X, col: u8 using Y)` | Move the text cursor (KERNAL `PLOT`, `$FFF0`, fixed carry clear) |
 | `get_cursor() -> u16 using XY` | Read the cursor position: row in the low byte, column in the high byte (KERNAL `PLOT`, fixed carry set) |
+| `load(name: ptr u8, n: u8, device: u8) -> bool` | Load a file to its own address through the KERNAL, e.g. an overlay (8.5); true on failure |
+| `kernal_off()` | Switch the KERNAL and BASIC ROMs off (`$01 = $35`, I/O stays), turn off the CIA interrupts, ignore NMIs (RESTORE); leaves interrupts disabled. KERNAL routines cannot be called afterwards |
+| `set_irq(handler: u16 using XY)` | Install an `interrupt fn` at `$FFFE`, after `kernal_off()` |
+| `set_nmi(handler: u16 using XY)` | Install an `interrupt fn` at `$FFFA`, after `kernal_off()` |
+| `interrupts_on()`, `interrupts_off()` | `cli`, `sei` (`inline asm fn`, no `jsr`) |
 | `vic: Vic @ $D000` | VIC-II registers: `sprite0_x`, `sprite0_y` ... `sprite7_y`, `sprite_x_msb`, `control1`, `raster`, `light_pen_x`, `light_pen_y`, `sprite_enable`, `control2`, `sprite_expand_y`, `memory`, `irq_status`, `irq_enable`, `sprite_priority`, `sprite_multicolor`, `sprite_expand_x`, `sprite_collision`, `sprite_bg_collision`, `border`, `background`, `background1`-`background3`, `sprite_mc0`, `sprite_mc1`, `sprite_color: [u8; 8]` |
 | `sprite_xy: [u8; 16] @ $D000` | The sprite position registers as an array: x of sprite n at `2n`, y at `2n + 1` (the same memory as `vic.sprite0_x` ... `vic.sprite7_y`) |
 | `set_kernal_irq(handler: u16)` | Install an `interrupt fn` with the KERNAL left in: `$0314` points to a library stub that pulls the A, X and Y the KERNAL's entry pushed (`pla` / `tay` / `pla` / `tax` / `pla`) and jumps to the handler, which then runs as if called through `$FFFE` (about 20 cycles more than the KERNAL entry alone). The KERNAL's own IRQ work (keyboard scan, clock) no longer runs, so `getin()` sees no new keys; the handler acknowledges its interrupt source, and a CIA timer interrupt that is left on reaches it too |
@@ -1026,7 +1030,7 @@ source → lexer → parser → AST
 | Project | Contents |
 |---|---|
 | `Tern.Cpu` | Instruction set table, encoder, 6502 emulator with cycle counting |
-| `Tern.Compiler` | Front end, allocation, code generation, layout (optimizer planned) |
+| `Tern.Compiler` | Front end, allocation, code generation, optimizer, layout, agent tools (`tern --json`, `tern run`, `tern bench`) |
 | `Tern.Cli` | Command-line tool: `tern file.tern` writes `.prg`, `.lst` and a VICE label file |
 | `Tern.Cpu.Tests` | Encoder and emulator tests, including Klaus Dormann's functional test |
 
