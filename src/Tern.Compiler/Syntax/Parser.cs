@@ -33,7 +33,9 @@ public sealed class Parser
     {
         if (!At(kind))
         {
-            if (kind == TokenKind.Identifier && Lexer.IsKeyword(Current.Kind))
+            // A keyword where a name is meant (fn step(), var data: u8), told by the token after it.
+            if (kind == TokenKind.Identifier && Lexer.IsKeyword(Current.Kind) && PeekAt(1).Kind is
+                    TokenKind.LParen or TokenKind.RParen or TokenKind.Colon or TokenKind.Eq or TokenKind.LBrace or TokenKind.Comma or TokenKind.In)
                 throw new CompileError(Current.Pos, $"Expected {what}, found '{Current.Text}', which is a keyword. Use another name");
             throw new CompileError(Current.Pos, $"Expected {what}, found {Describe(Current)}");
         }
@@ -175,6 +177,10 @@ public sealed class Parser
                 case TokenKind.Export:
                 {
                     Advance();
+                    // export fn f() { } (Rust's pub fn, JavaScript's export function): export only lists names.
+                    if (At(TokenKind.Fn))
+                        throw new CompileError(Current.Pos,
+                            "'export' lists functions declared elsewhere, so it is not followed by 'fn'. Remove 'fn' here and declare the function on its own: 'export get' and 'fn get() { }'");
                     do
                     {
                         var f = Expect(TokenKind.Identifier, "a function name after 'export'");

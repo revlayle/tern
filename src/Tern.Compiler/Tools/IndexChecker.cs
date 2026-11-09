@@ -25,9 +25,9 @@ public sealed class IndexChecker(CompileResult program, string mainFile)
 {
     private readonly Dictionary<int, PlacedInstruction> _checks =
         program.Instructions.Where(i => i.Index is not null).GroupBy(i => i.Address).ToDictionary(g => g.Key, g => g.First());
-    // One error per line and array (or match), counted at the instruction that first reported it: the two
+    // One error per access (line, array or match, and where its index is), counted at the instruction that first reported it: the two
     // bytes of a 16-bit element, and the scaled index of a linear array, are one access.
-    private readonly Dictionary<(string File, int? Line, string Table), (IndexError Error, int At)> _seen = [];
+    private readonly Dictionary<(string File, int? Line, string Table, int Column), (IndexError Error, int At)> _seen = [];
 
     /// <summary>The errors seen so far, in the order they first happened.</summary>
     public List<IndexError> Errors { get; } = [];
@@ -60,13 +60,14 @@ public sealed class IndexChecker(CompileResult program, string mainFile)
             message = $"Index {index} is outside '{check.Name}', which has {check.Elements} elements";
         }
         string file = instruction.File ?? mainFile;
-        if (_seen.TryGetValue((file, instruction.Line, check.Name), out var seen))
+        var key = (file, instruction.Line, check.Name, check.At?.Column ?? 0);
+        if (_seen.TryGetValue(key, out var seen))
         {
             if (seen.At == cpu.PC) seen.Error.Count++;
             return check.MatchLow is not null;
         }
         var error = new IndexError(file, instruction.Line, instruction.Source ?? "", message, cpu.Cycles);
-        _seen[(file, instruction.Line, check.Name)] = (error, cpu.PC);
+        _seen[key] = (error, cpu.PC);
         Errors.Add(error);
         return check.MatchLow is not null;
     }

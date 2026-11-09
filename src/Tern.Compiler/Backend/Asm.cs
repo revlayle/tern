@@ -43,7 +43,11 @@ public sealed record ImmVarByte(VariableSymbol Variable, bool High, int Offset =
 /// <c>indexed match</c>, <see cref="MatchLow"/> is its lowest pattern value.
 /// </summary>
 /// With <see cref="InA"/> the check is on A before an instruction (the index before it is scaled), not on an address.
-public sealed record IndexCheck(string Name, int Shift, int Length, int Elements, int Stride = 1, int? MatchLow = null, bool Signed = false, bool InA = false);
+public sealed record IndexCheck(string Name, int Shift, int Length, int Elements, int Stride = 1, int? MatchLow = null, bool Signed = false, bool InA = false)
+{
+    /// <summary>The index expression's position: the checks of one access (both bytes, the scaled index) share it.</summary>
+    public SourcePos? At { get; init; }
+}
 
 /// <summary>A byte of a variable: its address plus <see cref="Offset"/>.</summary>
 public sealed record VarOperand(VariableSymbol Variable, int Offset = 0) : Operand

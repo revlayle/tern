@@ -59,6 +59,15 @@ public class IndexCheckTests
     }
 
     [Fact]
+    public void Two_accesses_on_one_line_are_two_errors()
+    {
+        // One error per access, not per line and array (review M20, second review, suggestion 5).
+        var run = Run.Program("var a: [u8; 4]\nvar i: u8 = 9\nvar k: u8 = 6\nfn main() { a[i] = a[k] }", checkIndexes: false);
+        Assert.Equal(["Index 6 is outside 'a', which has 4 elements", "Index 9 is outside 'a', which has 4 elements"],
+            run.IndexErrors.Select(e => e.Message));
+    }
+
+    [Fact]
     public void Each_instruction_is_reported_once_with_a_count()
     {
         var e = Single("""

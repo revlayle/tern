@@ -84,11 +84,22 @@ public class ErrorTests
     [InlineData("var data: u8\nfn main() { }", 1, 5, "'data', which is a keyword")]
     [InlineData("fn f(in: u8) { }\nfn main() { }", 1, 6, "'in', which is a keyword")]
     [InlineData("fn main() { for step in 0..3 { } }", 1, 17, "'step', which is a keyword")]
+    [InlineData("export fn get() { }", 1, 8, "'export' lists functions declared elsewhere, so it is not followed by 'fn'. Remove 'fn' here")]
     public void Names_habits_from_c(string source, int line, int column, string expected)
     {
         var e = Assert.Throws<CompileError>(() => TernCompiler.Compile(source));
         Assert.Contains(expected, e.Description);
         Assert.Equal((line, column), (e.Pos.Line, e.Pos.Column));
+    }
+
+    [Fact]
+    public void A_keyword_where_no_name_was_meant_gets_no_rename_hint()
+    {
+        // The name is missing, not a keyword in its place (review M20, second review, suggestion 4).
+        var e = Assert.Throws<CompileError>(() => TernCompiler.Compile("fn main() { for in 0..3 { } }"));
+        Assert.Equal("Expected loop variable name or '_', found 'in'", e.Description);
+        e = Assert.Throws<CompileError>(() => TernCompiler.Compile("fn main() { }\nexport return"));
+        Assert.Equal("Expected a function name after 'export', found 'return'", e.Description);
     }
 
     [Fact]

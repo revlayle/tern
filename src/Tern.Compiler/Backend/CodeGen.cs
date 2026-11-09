@@ -92,10 +92,10 @@ public sealed class CodeGen
 
     /// <summary>
     /// An indexed operand into one table of an array (its low bytes, or the high bytes at
-    /// <paramref name="table"/>), with a folded offset <paramref name="shift"/>. It names the table,
+    /// <paramref name="table"/>), with a folded offset <paramref name="shift"/>, indexed by <paramref name="index"/>. It names the table,
     /// so the emulator can report an index outside it (M20, spec 3.2); the code is the same.
     /// </summary>
-    private static VarOperand Indexed(VariableSymbol arr, int table, int shift)
+    private static VarOperand Indexed(VariableSymbol arr, int table, int shift, Expr index)
     {
         var storage = arr.AliasOf ?? arr;
         // Whole records (linear or indexed struct arrays): the index is the record's offset.
@@ -103,7 +103,7 @@ public sealed class CodeGen
         int stride = records ? storage.Type.Element!.Size : arr.Type.Linear ? 2 : 1;
         int length = records ? arr.Type.Length : arr.Type.Linear ? arr.Type.Size : arr.Type.Length;
         string name = storage == arr || records ? storage.QualifiedName : arr.Name;
-        return Var(arr, table + shift) with { Check = new IndexCheck(name, shift, length, records ? storage.Type.Length : arr.Type.Length, stride) };
+        return Var(arr, table + shift) with { Check = new IndexCheck(name, shift, length, records ? storage.Type.Length : arr.Type.Length, stride) { At = index.Pos } };
     }
 
     /// <summary>The check of an indexed match's jump table: values from <paramref name="low"/> to low + span - 1.</summary>
@@ -953,7 +953,7 @@ public sealed class CodeGen
             && (incIndex is NameExpr { Symbol.Register: Register.X } || (incIndex is not NameExpr { Symbol.Register: not null } && !_reserved.Contains(Register.X))))
         {
             LoadIndex(incIndex);   // X, by the condition above
-            Emit(a.Op == TokenKind.PlusEq ? Inc : Dec, AbsoluteX, Indexed(ArrayOf(incx), 0, incShift));
+            Emit(a.Op == TokenKind.PlusEq ? Inc : Dec, AbsoluteX, Indexed(ArrayOf(incx), 0, incShift, incIndex));
             return;
         }
 
@@ -988,9 +988,9 @@ public sealed class CodeGen
         {
             var reg = LoadIndex(index);
             var mode = reg == Register.X ? AbsoluteX : AbsoluteY;
-            Emit(Lda, mode, Indexed(ArrayOf(aix), 0, shift));
+            Emit(Lda, mode, Indexed(ArrayOf(aix), 0, shift, index));
             ApplyCompound(a, aix.Type);
-            Emit(Sta, mode, Indexed(ArrayOf(aix), 0, shift));
+            Emit(Sta, mode, Indexed(ArrayOf(aix), 0, shift, index));
             return;
         }
 
@@ -1031,7 +1031,7 @@ public sealed class CodeGen
             {
                 var reg = LoadIndex(index);
                 Op(Lda, simple);
-                Emit(Sta, reg == Register.X ? AbsoluteX : AbsoluteY, Indexed(ArrayOf(aix), 0, shift));
+                Emit(Sta, reg == Register.X ? AbsoluteX : AbsoluteY, Indexed(ArrayOf(aix), 0, shift, index));
                 return;
             }
             GenA(value);
@@ -1073,8 +1073,8 @@ public sealed class CodeGen
                     var (index, shift) = FoldIndexOffset(ix.Index, arr);
                     var reg = LoadIndex(index);
                     var mode = reg == Register.X ? AbsoluteX : AbsoluteY;
-                    Op(Lda, lo); Emit(Sta, mode, Indexed(arr, 0, shift));
-                    Op(Lda, hi); Emit(Sta, mode, Indexed(arr, HighTable(arr), shift));
+                    Op(Lda, lo); Emit(Sta, mode, Indexed(arr, 0, shift, index));
+                    Op(Lda, hi); Emit(Sta, mode, Indexed(arr, HighTable(arr), shift, index));
                 }
                 if (temp is not null) Release(temp);
                 break;
@@ -1136,7 +1136,7 @@ public sealed class CodeGen
             Op(Lda, Var(saved));
             Release(saved);
         }
-        Emit(Sta, reg == Register.X ? AbsoluteX : AbsoluteY, Indexed(arr, table, shift));
+        Emit(Sta, reg == Register.X ? AbsoluteX : AbsoluteY, Indexed(arr, table, shift, index));
     }
 
     // ---------- 8-bit expressions: result in A ----------
@@ -1192,7 +1192,7 @@ public sealed class CodeGen
         return (m, b) =>
         {
             var reg = LoadIndex(index);
-            Emit(m, reg == Register.X ? AbsoluteX : AbsoluteY, Indexed(arr, b == 0 ? 0 : HighTable(arr), shift));
+            Emit(m, reg == Register.X ? AbsoluteX : AbsoluteY, Indexed(arr, b == 0 ? 0 : HighTable(arr), shift, index));
         };
     }
 
@@ -1242,14 +1242,14 @@ public sealed class CodeGen
         {
             if (tix.Index is NameExpr { Symbol.Register: Register.X })
             {
-                Emit(Ldy, AbsoluteX, Indexed(table, 0, 0));
+                Emit(Ldy, AbsoluteX, Indexed(table, 0, 0, tix));
                 return Register.Y;
             }
             if (!_reserved.Contains(Register.X))
             {
                 if (Simple1(tix.Index) is { } inner) Op(Ldx, inner);
                 else { GenA(tix.Index); Emit(Tax); }
-                Emit(Ldy, AbsoluteX, Indexed(table, 0, 0));
+                Emit(Ldy, AbsoluteX, Indexed(table, 0, 0, tix));
                 return Register.Y;
             }
         }
@@ -1275,7 +1275,7 @@ public sealed class CodeGen
         }
         var (index, shift) = FoldIndexOffset(ix.Index, arr);
         var reg = LoadIndex(index);
-        Emit(Lda, reg == Register.X ? AbsoluteX : AbsoluteY, Indexed(arr, table, shift));
+        Emit(Lda, reg == Register.X ? AbsoluteX : AbsoluteY, Indexed(arr, table, shift, index));
     }
 
     private void GenA(Expr e)
@@ -1435,7 +1435,7 @@ public sealed class CodeGen
             if (b.ScalesIndexOf is var (array, elements))
             {
                 // The index of a linear array, scaled: checked in A before it can wrap (M20).
-                _out.Add(new Instr(Asl, Accumulator) { Check = new IndexCheck(array, 0, elements, elements, InA: true) });
+                _out.Add(new Instr(Asl, Accumulator) { Check = new IndexCheck(array, 0, elements, elements, InA: true) { At = b.Pos } });
                 ShiftA(b.Op, b.Right.ConstValue!.Value - 1, signed: false);
                 return;
             }
@@ -1670,8 +1670,8 @@ public sealed class CodeGen
                 var (index, shift) = FoldIndexOffset(ix.Index, arr);
                 var reg = LoadIndex(index);
                 var mode = reg == Register.X ? AbsoluteX : AbsoluteY;
-                Emit(Lda, mode, Indexed(arr, 0, shift)); Op(Sta, d.Lo);
-                Emit(Lda, mode, Indexed(arr, HighTable(arr), shift)); Op(Sta, d.Hi);
+                Emit(Lda, mode, Indexed(arr, 0, shift, index)); Op(Sta, d.Lo);
+                Emit(Lda, mode, Indexed(arr, HighTable(arr), shift, index)); Op(Sta, d.Hi);
                 return;
             }
 
