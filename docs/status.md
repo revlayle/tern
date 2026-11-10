@@ -5,10 +5,16 @@ Owned by the coding session. Updated at the end of every coding session.
 ## Current
 
 - **Milestone:** M20 follow-up 3 (roadmap). All ten items are done, and the "done when" test passes. M20 follow-up 2 was merged into `main` (`799a0e3`).
-- **Branch:** `m20-followup3`, from `main` at `3510dbe`. 2475 compiler tests pass plus 36 CPU tests. No benchmark changed (1254 / 350780); `SkillTests` pass. All examples and the Galaxy Stars port (`main`, `check_player`, `check_stars`) compile unchanged.
-- **Next step:** `/review` of `m20-followup3`. Question 88 is open (small; nothing waits on it).
+- **Branch:** `m20-followup3`, with `main` merged in (first review, `2332854`). 2480 compiler tests pass plus 36 CPU tests. No benchmark changed (1254 / 350780); `SkillTests` pass. All examples and the Galaxy Stars port (`main`, `check_player`, `check_stars`) compile unchanged.
+- **Next step:** `/review` of the review fixes (`527af9b`). Question 88 is open (small; nothing waits on it).
 
 ## Done
+
+- **M20 follow-up 3, first review** (2026-11-09, `docs/reviews/m20-followup3.md`, `527af9b`).
+  - Finding 1 (must fix): the main-file import check compares the main file with the file `Find` returns (library first), so a main file `random.tern` imports `lib/random.tern` again; if `Find` fails, the importer-folder path is compared (a main file not saved yet). `ModuleTests.A_main_file_named_like_a_library_module_imports_the_library_module`.
+  - Finding 2 (must fix): `Checker.EnsureMemoryLayout` evaluates the main file's memory block the first time a main-file global is placed `@ name` (or at the main file's turn), so `const N = len(map)` with `map` in a region works in either order. A memory block that needs itself through such a constant gets its own error. `ConstantOrderTests.Len_of_a_global_in_a_region_in_a_constant`.
+  - Finding 3 (must fix): `_addressInits` entries are worked out at their own module's turn; a global declared early for another module's constant keeps its entry until then. `ConstantOrderTests.A_global_used_early_by_another_module_keeps_its_address_initial_value` (both variants; they fail without the fix).
+  - Suggestion 4: a signed `0 > w` / `0 <= w` is swapped at any size, so an `i16` gets `lda w+1 / bpl`. Suggestion 5: `import main` in the main file says "'main' is this file, the program's main file, which cannot be imported. Remove this import". `SignAndByteAddTests`, `ModuleTests`.
 
 - **M20 follow-up 3** (2026-11-09, decisions "Galaxy Stars port, remaining gaps"). One commit per item.
   - *Evaluation order* (`ff61757`, spec 5, gap 12): `CodeGen.InSourceOrder` computes the first of two parts that both call a function or read volatile memory (`HasEffect`) into a temporary first: the two sides of a binary operator (`GenBinaryA`, `Gen16`, `GenCompare`, `Assign`), an index before the assigned value. `GenCall` computes an argument with an effect early when a later argument has one too. A commutative 16-bit operator with a simple left operand computes the right side straight into the destination, so `fib16`'s `mul(...) + mul(...)` (two calls in one statement, which the roadmap thought no benchmark had) costs the same. `dst[i] = src[i]` with a volatile `i` reads `i` for the destination first, into a temporary (4 bytes more); the volatile tests count every read. `EvaluationOrderTests` (31 of its 47 cases fail without the change).
