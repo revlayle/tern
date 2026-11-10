@@ -193,7 +193,7 @@ var e: ptr Enemy @ zp
 e.hp -= 1                          // ldy #2 / lda (e),y / sec / sbc #1 / sta (e),y
 ```
 
-**Struct literals** give a global struct, a global array of structs or `data` its initial bytes: the struct's name, then `field = value` for the fields to set; the others are 0. The tables are built at compile time in the array's layout, so a list of records costs the same as parallel arrays. `[T; _]` takes the length from the list, and `[u8; _]` from a string (`var text: [u8; _] = screen"GALAXY 00 "` has 10 bytes). In code, assign the fields one by one.
+**Struct literals** give a global struct, a global array of structs or `data` its initial bytes: the struct's name, then `field = value` for the fields to set; the others are 0. The tables are built at compile time in the array's layout, so a list of records costs the same as parallel arrays. `[T; _]` takes the length from the list, and `[u8; _]` from a string (`var text: [u8; _] = screen"GALAXY 00\0"` has 10 bytes). In code, assign the fields one by one.
 
 ```
 struct Line { row: u8, col: u8, text: ptr u8 }
