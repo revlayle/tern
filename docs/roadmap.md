@@ -442,6 +442,7 @@ First, a small item (question 92, decision 2026-11-10): `level_api.header` in a 
 
 - Part 1: `const fn` with compile-time `int`, `real` (literals, math functions, the four roundings), `bool`, arrays and their return into `[T; _]` tables, reading constants and `data`, the step limit, `const fn` in modules, array-building syntax (decision 2026-11-10). Tests include each error of spec 4.1 and the tables against C# `Math`.
 - Part 2: `emit` fragments in asm blocks, `label()`, the listing naming the `emit` line and the call for each generated instruction.
+- Implementation (suggested; the coding session decides): a tree-walking interpreter, not code compiled to .NET, since errors, the step limit and `emit` need its state (position, call chain, locals, emitted lines). In `Tern.Compiler`, in its own folder and namespace (`CompileTime/`), called by the checker to evaluate initializers and run generators; a separate project would need the AST and symbols moved out first. The spec session adds the folder to the layout in `CLAUDE.md` once it exists.
 
 Done when: (part 1) a sine table and a screen-row address table are built by `const fn`s from a module and match C#; (part 2) an unrolled screen copy that skips given rows is generated, runs correctly in the emulator and its listing shows the source of each instruction.
 
