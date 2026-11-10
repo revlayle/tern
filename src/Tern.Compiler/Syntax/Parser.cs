@@ -37,9 +37,30 @@ public sealed class Parser
             if (kind == TokenKind.Identifier && Lexer.IsKeyword(Current.Kind) && PeekAt(1).Kind is
                     TokenKind.LParen or TokenKind.RParen or TokenKind.Colon or TokenKind.Eq or TokenKind.LBrace or TokenKind.Comma or TokenKind.In)
                 throw new CompileError(Current.Pos, $"Expected {what}, found '{Current.Text}', which is a keyword. Use another name");
+            if (LeadingOperator() is { } lead) throw lead;
             throw new CompileError(Current.Pos, $"Expected {what}, found {Describe(Current)}");
         }
         return Advance();
+    }
+
+    /// <summary>
+    /// The error for a line that starts with a binary operator (spec 2), at the current token or at the
+    /// first one after the current line break: the break ended the expression before it. Not for
+    /// <c>+</c> and <c>-</c>, which also start a value (<c>-1 =&gt;</c> in a match), nor <c>*</c>, which has its
+    /// own error (<c>*p = 1</c>). Null otherwise.
+    /// </summary>
+    private CompileError? LeadingOperator()
+    {
+        int at = _pos;
+        bool afterBreak = at > 0 && _tokens[at - 1].Kind == TokenKind.Newline;
+        while (at < _tokens.Count - 1 && _tokens[at].Kind == TokenKind.Newline) { at++; afterBreak = true; }
+        var t = _tokens[at];
+        if (!afterBreak || t.Kind is not (TokenKind.AmpAmp or TokenKind.PipePipe or TokenKind.Amp or TokenKind.Pipe or TokenKind.Caret
+                or TokenKind.Shl or TokenKind.Shr or TokenKind.Slash or TokenKind.Percent or TokenKind.EqEq or TokenKind.NotEq
+                or TokenKind.Less or TokenKind.LessEq or TokenKind.Greater or TokenKind.GreaterEq))
+            return null;
+        return new CompileError(t.Pos,
+            $"A line cannot start with '{t.Text}': the line break before it ends the expression. Move '{t.Text}' to the end of the line before, where the expression then continues");
     }
 
     private static string Describe(Token t) => t.Kind switch
@@ -265,6 +286,7 @@ public sealed class Parser
                     throw new CompileError(Current.Pos,
                         "An asm block must be inside a function. Use 'asm fn name() { ... }' for a whole function in assembly");
                 default:
+                    if (LeadingOperator() is { } lead) throw lead;
                     throw new CompileError(Current.Pos, $"Expected 'const', 'var', 'data', 'struct' or 'fn', found {Describe(Current)}");
             }
         }
@@ -1056,6 +1078,7 @@ public sealed class Parser
                      && PeekAt(2).Pos.Line == bits.Pos.Line && PeekAt(2).Pos.Column == bits.Pos.Column + bits.Text.Length):
                 throw new CompileError(t.Pos, $"'%' does not start a binary number. Write binary numbers as 0b{PeekAt(1).Text}");
             default:
+                if (LeadingOperator() is { } lead) throw lead;
                 throw new CompileError(t.Pos, $"Expected an expression, found {Describe(t)}");
         }
     }

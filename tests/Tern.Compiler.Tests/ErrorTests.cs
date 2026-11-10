@@ -172,4 +172,65 @@ public class ErrorTests
     [InlineData("[u8; 10]", "for i in 0..=18 step 2 { a[i >> 1] = 1 }")]   // not the counter itself: unchecked
     public void A_loop_that_stays_inside_the_array_is_accepted(string type, string loop) =>
         TernCompiler.Compile($"var a: {type}\nfn main() {{ {loop} }}");
+
+    // ---------- Line breaks in expressions (spec 2) ----------
+
+    [Theory]
+    [InlineData("var a: u8\nvar b: u8\nfn main() {\n    if a == 1\n        && b == 2 { a = 3 }\n}", 5, 9, "&&")]
+    [InlineData("var a: u8\nvar b: u8\nfn main() {\n    while a < 3\n        || b > 4 { a += 1 }\n}", 5, 9, "||")]
+    [InlineData("var a: u8\nvar b: u8\nfn main() {\n    a = b\n        | 4\n}", 5, 9, "|")]
+    [InlineData("var a: u8\nvar b: u8\nfn main() {\n    a = b\n\n        << 1\n}", 6, 9, "<<")]
+    [InlineData("var a: bool\nvar b: u8\nfn main() {\n    a = b\n        == 4\n}", 5, 9, "==")]
+    [InlineData("const K = 10\n    / 2\nfn main() { }", 2, 5, "/")]
+    public void A_line_starting_with_a_binary_operator_says_to_move_it(string source, int line, int column, string op)
+    {
+        var e = Assert.Throws<CompileError>(() => TernCompiler.Compile(source));
+        Assert.Equal($"A line cannot start with '{op}': the line break before it ends the expression. Move '{op}' to the end of the line before, where the expression then continues", e.Description);
+        Assert.Equal((line, column), (e.Pos.Line, e.Pos.Column));
+        Assert.Equal($"Move '{op}' to the end of the line before, where the expression then continues", Tools.Diagnostic.Split(e.Description).Suggestion);
+    }
+
+    [Fact]
+    public void A_line_ending_with_a_binary_operator_continues()
+    {
+        var r = Run.Program("""
+            var a: u8 = 1
+            var b: u8 = 2
+            var c: u8
+            var d: u8
+            fn main() {
+                if a == 1 &&
+                        b == 2 {
+                    c = a +
+                        b |
+                        8
+                }
+                d = (a
+                    + b)
+            }
+            """);
+        Assert.Equal(11, r.U8("c"));
+        Assert.Equal(3, r.U8("d"));
+    }
+
+    [Fact]
+    public void A_minus_at_the_start_of_a_line_is_still_a_value()
+    {
+        var r = Run.Program("""
+            var s: i8 = -1
+            var r: u8
+            fn main() {
+                match s {
+                    1 => r = 1
+                    -1 => r = 2
+                    _ => r = 3
+                }
+            }
+            """);
+        Assert.Equal(2, r.U8("r"));
+        // A line starting with '-' is a new statement, not a continuation.
+        var e = Assert.Throws<CompileError>(() => TernCompiler.Compile("var s: i8\nvar t: i8\nfn main() {\n    t = s\n    -2\n}"));
+        Assert.StartsWith("Only a function call can be used as a statement", e.Description);
+        Assert.Equal(5, e.Pos.Line);
+    }
 }
