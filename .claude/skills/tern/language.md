@@ -8,6 +8,9 @@ Each example is a whole program that compiles. The full rules are in the Tern re
 - Files are UTF-8, extension `.tern`. Comments `//` and `/* */`.
 - A statement ends at a newline; `;` is optional and separates statements on one line. A newline
   inside `( )` or `[ ]` does not end a statement. A `{` may be on the header's line or the next.
+- A line that ends with a binary operator continues: split a long condition after `&&`, not
+  before it. A line that starts with one (`&& y < 8`) is an error that says to move the operator up.
+  `-` and `+` at the start of a line begin a new value (`-1 =>` in a `match`).
 - Literals: `200`, `$C000`, `0b1010_0101`, `'A'` (PETSCII), `"TEXT"`, `true`, `false`. A literal
   takes its type from where it is used; one that does not fit is an error (`300` into a `u8`).
 - Strings are PETSCII; `screen"HI"` gives screen codes, `petscii_mixed"Hi"` the lower-case set. No
@@ -28,6 +31,11 @@ Each example is a whole program that compiles. The full rules are in the Tern re
 - Precedence, tightest first: `as`; unary `- ~ !`; `* / %`; `+ -`; `<< >>`; `&`; `^`; `|`; the
   compares; `&&`; `||`. Unlike C, `flags & 4 != 0` is `(flags & 4) != 0`. As in C, `w << 5 + 3`
   is `w << 8`: write `(w << 5) + 3`. Compares do not chain (`a < b < c` is an error).
+- Calls and reads of `volatile` memory in one statement run left to right: in
+  `(rand_below(4) + 1) << 2 | rand_below(4)` the left call runs first, in `f(g(), h())` `g` runs
+  before `h`, and in `a[f()] = g()` `f` runs first. The exception: a plain variable that a call in
+  the same statement changes. In `x = seed + next()` where `next` changes `seed`, the old or the
+  new `seed` may be added; write the call into a local first (`var n: u8 = next()`).
 - Everything wraps; `u8 + u8` is a `u8`. `u8` mixed with `u16` widens to `u16`.
 - `as` converts: `w as u8` (low byte), `b as u16`, `x as i8` (same bits), `p as u16`, `p as ptr Enemy`.
   A pointer becomes a `u16` by itself where a `u16` is expected (`var a: u16 = p`, an argument, a
@@ -525,6 +533,10 @@ buffer $0850 [u8; 16] (2 bytes):
 - `asm { }` is a statement; `asm fn` is a whole function in assembly with a typed signature (an
   `rts` is added unless it ends in `rts`, `rti` or `jmp`); `inline asm fn` is copied in place of the
   `jsr`, with register parameters only.
+- An `asm fn` or `inline asm fn` may start with `var` lines (no initial value, no `@`): its work
+  variables. In an `asm fn` they are its locals, in its frame and shared with functions that never
+  run at the same time; in an `inline asm fn` they go in each caller's frame. A pointer used as
+  `(p),y` is placed in zero page. An `asm { }` statement has none: declare the variable before it.
 - Operands may name Tern variables, constants, arrays, functions and struct fields (`sta c64.vic.border`).
   A name is its address: `score+1` is the high byte. `#name.lo` / `#name.hi` take an address's bytes
   (not `<` / `>`). An immediate is -128 to 255 or a byte of an address.
