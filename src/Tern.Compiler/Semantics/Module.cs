@@ -58,12 +58,20 @@ public static class ModuleLoader
                         $"Only the program's main file can set the parameters of '{import.Name}', since a module is loaded once. Import it plainly here and set {import.Args[0].Name} in the main file");
                 if (!loaded.TryGetValue(import.Name, out var module))
                 {
-                    // The main file has rules no module has (spec 2.2), so it is not a module too.
-                    if (sourcePath is not null && string.Equals(System.IO.Path.GetFullPath(System.IO.Path.Combine(m.Directory, import.Name + ".tern")),
-                            System.IO.Path.GetFullPath(sourcePath), StringComparison.OrdinalIgnoreCase))
-                        throw new CompileError(import.Pos,
-                            $"'{import.Name}' is the program's main file, which cannot be imported. Move what {(m.IsMain ? "it" : m.Name)} needs from it into a module that both import");
-                    var path = Find(import, m, platform, libraryDirectory);
+                    // The main file has rules no module has (spec 2.2), so it is not a module too. Checked on
+                    // the file the import would load: a library module of the same name comes first.
+                    string? mainPath = sourcePath is null ? null : System.IO.Path.GetFullPath(sourcePath);
+                    bool IsMainFile(string p) => mainPath is not null && string.Equals(p, mainPath, StringComparison.OrdinalIgnoreCase);
+                    CompileError MainImported() => new(import.Pos, m.IsMain
+                        ? $"'{import.Name}' is this file, the program's main file, which cannot be imported. Remove this import"
+                        : $"'{import.Name}' is the program's main file, which cannot be imported. Move what {m.Name} needs from it into a module that both import");
+                    string path;
+                    try { path = Find(import, m, platform, libraryDirectory); }
+                    catch (CompileError) when (IsMainFile(System.IO.Path.GetFullPath(System.IO.Path.Combine(m.Directory, import.Name + ".tern"))))
+                    {
+                        throw MainImported();   // the main file has not been saved yet
+                    }
+                    if (IsMainFile(path)) throw MainImported();
                     var text = File.ReadAllText(path);
                     module = new Module
                     {

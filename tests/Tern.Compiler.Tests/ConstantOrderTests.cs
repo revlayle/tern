@@ -122,6 +122,37 @@ public sealed class ConstantOrderTests : IDisposable
         Assert.Equal(240, r.Result.Variables["explode.cover"].Size);
     }
 
+    [Theory]
+    [InlineData("const N = len(map)\nvar map: [u8; 2048] @ buffers")]
+    [InlineData("var map: [u8; 2048] @ buffers\nconst N = len(map)")]
+    public void Len_of_a_global_in_a_region_in_a_constant(string declarations)
+    {
+        // Review M20 follow-up 3, finding 2: the memory block is evaluated when the constant needs it.
+        var r = Run.Program($$"""
+            memory { $C000..=$CFFF region buffers }
+            {{declarations}}
+            var r: u16
+            fn main() { r = N }
+            """);
+        Assert.Equal(2048, r.U16("r"));
+        Assert.InRange(r.Address("map"), 0xC000, 0xC800);
+    }
+
+    [Theory]
+    [InlineData("var tbl: [u16; 2] = [addr(fb), addr(fb)]\nfn fb() { }")]
+    [InlineData("var tbl: [u16; 2] = [addr(v), addr(v)]\nvar v: u8")]
+    public void A_global_used_early_by_another_module_keeps_its_address_initial_value(string xbDeclarations)
+    {
+        // Review M20 follow-up 3, finding 3: xa is checked first and needs xb's tbl; tbl's addresses
+        // are worked out at xb's turn, when fb and v are declared.
+        Write("xa.tern", "import xb\nconst K = xb.N");
+        Write("xb.tern", "import xa\nconst N = len(tbl)\n" + xbDeclarations);
+        var r = RunMain("import xb\nimport xa\nvar r: u8\nvar t: u16\nfn main() { r = xa.K\n t = xb.tbl[1] }");
+        Assert.Equal(2, r.U8("r"));
+        string named = xbDeclarations.Contains("fb") ? "xb.fb" : "xb.v";
+        Assert.Equal(r.Result.Symbols[named], r.U16At("xb.tbl", 1, 2));
+    }
+
     [Fact]
     public void A_constant_that_depends_on_itself_names_the_chain()
     {

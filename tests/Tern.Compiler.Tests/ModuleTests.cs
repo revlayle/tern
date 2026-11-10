@@ -303,7 +303,23 @@ public sealed class ModuleTests : IDisposable
 
         // Also from the main file itself.
         e = Assert.Throws<CompileError>(() => CompileMain("import main\nfn main() { }"));
-        Assert.StartsWith("'main' is the program's main file, which cannot be imported. Move what it needs", e.Description);
+        Assert.Equal("'main' is this file, the program's main file, which cannot be imported. Remove this import", e.Description);
+
+        // Also when the main file is on disk, where the import would find it.
+        Write(Src, "main.tern", "import demo\nfn play() { }\nfn main() { demo.steer() }");
+        e = Assert.Throws<CompileError>(() => CompileMain("import demo\nfn play() { }\nfn main() { demo.steer() }"));
+        Assert.StartsWith("'main' is the program's main file, which cannot be imported. Move what demo needs", e.Description);
+    }
+
+    [Fact]
+    public void A_main_file_named_like_a_library_module_imports_the_library_module()
+    {
+        // Review M20 follow-up 3, finding 1: the library comes first, so the import is not the main file.
+        Write(Lib, "random.tern", "var last: u8\nfn seed(s: u8) { last = s }");
+        var source = "import random\nfn main() { random.seed(5) }";
+        Write(Src, "random.tern", source);
+        var r = Run.Program(source, sourcePath: Path.Combine(Src, "random.tern"), libraryDirectory: Lib);
+        Assert.Equal(5, r.U8("random.last"));
     }
 
     [Fact]

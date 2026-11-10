@@ -75,13 +75,15 @@ public sealed partial class Checker
                 throw new CompileError(wrongMemory.Pos, $"Only the program's main file may have a memory block, since it describes the whole program; '{module.Name}' is a module");
             if (!module.IsMain && program.Exports.Count > 0)
                 throw new CompileError(program.Exports[0].Pos, $"Only the program's main file may export functions; '{module.Name}' is a module");
-            if (module.IsMain && program.Memory is { } memory) _layout = EvaluateMemory(memory);
+            if (module.IsMain) EnsureMemoryLayout();
             foreach (var s in program.Structs) LayOut((StructSymbol)module.Scope[s.Name]);
             foreach (var f in program.Functions) DeclareFunction(f);
             foreach (var g in program.Globals.Where(g => g.Symbol is null)) DeclareGlobal(g);
             // Initial values with addresses after all of the file's globals, so they can name globals declared below.
-            foreach (var (decl, v, m) in _addressInits) InModule(m, () => v.InitialBytes = ConstantBytes(decl.Init!, v.Type, v));
-            _addressInits.Clear();
+            // Only this file's: a global declared early for another module's constant waits for its own
+            // module's turn, when the functions and globals it names are declared.
+            foreach (var (decl, v, _) in _addressInits.Where(a => a.Module == module).ToList()) v.InitialBytes = ConstantBytes(decl.Init!, v.Type, v);
+            _addressInits.RemoveAll(a => a.Module == module);
             // After the globals, so that a variable named as an address gets the right error.
             foreach (var f in program.Functions.Where(f => f.Address is not null)) DeclareRoutine(f, f.Symbol!);
             foreach (var a in program.Asserts) CheckAssert(a, module);
@@ -202,6 +204,23 @@ public sealed partial class Checker
     }
 
     // ---------- Declarations ----------
+
+    /// <summary>0: the main file's memory block is not evaluated yet, 1: being evaluated, 2: done.</summary>
+    private int _memoryState;
+
+    /// <summary>
+    /// Evaluates the main file's memory block, once: at the main file's turn, or before, when a constant
+    /// worked out early names a main-file global placed in a region (<c>len(map)</c>, spec 4).
+    /// </summary>
+    private void EnsureMemoryLayout()
+    {
+        if (_memoryState == 2 || !_module.IsMain) return;
+        if (_memoryState == 1)
+            throw new CompileError(_module.Syntax.Memory!.Pos, "The memory block depends on itself: a constant it uses needs a variable placed in one of its regions. Give that constant a value that does not use the variable");
+        _memoryState = 1;
+        if (_module.Syntax.Memory is { } memory) _layout = EvaluateMemory(memory);
+        _memoryState = 2;
+    }
 
     private MemoryLayout EvaluateMemory(MemoryDecl memory)
     {
@@ -820,6 +839,7 @@ public sealed partial class Checker
             case PlacementKind.Address:
                 if (!allowAddress) throw new CompileError(decl.Pos, "Only global variables can have a fixed address");
                 var addr = decl.Placement.Address!;
+                if (addr is NameExpr) EnsureMemoryLayout();
                 if (addr is NameExpr region && _layout.Regions.ContainsKey(region.Name) && Lookup(region.Name) is null)
                 {
                     v.Region = region.Name;

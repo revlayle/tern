@@ -84,13 +84,15 @@ public class SignAndByteAddTests
             fn c() { if (d as i8) < 0 { n = 3 } }
             fn e() { if s >= 0 { n = 4 } }
             fn f() { if w < 0 { n = 5 } }
-            fn main() { a(); b(); c(); e(); f() }
+            fn g() { if 0 > w { n = 6 } }
+            fn main() { a(); b(); c(); e(); f(); g() }
             """).Listing;
         Assert.Equal("lda s|bpl a.endif|lda #$01|sta n", Body(listing, "a"));
         Assert.Equal("lda w+1|bmi b.endif|lda #$02|sta n", Body(listing, "b"));
         Assert.Equal("lda d|bpl c.endif|lda #$03|sta n", Body(listing, "c"));
         Assert.Equal("lda s|bmi e.endif|lda #$04|sta n", Body(listing, "e"));
         Assert.Equal("lda w+1|bpl f.endif|lda #$05|sta n", Body(listing, "f"));
+        Assert.Equal("lda w+1|bpl g.endif|lda #$06|sta n", Body(listing, "g"));   // 0 > w is w < 0
     }
 
     [Fact]
@@ -119,6 +121,8 @@ public class SignAndByteAddTests
                         if (d as i8) < 0 { g |= 1 }
                         if 0 > s { g |= 2 }
                         if neg() >= 0 { g |= 4 }
+                        if 0 > w { g |= 8 }
+                        if 0 <= w { g |= 16 }
                         while s < 0 { s += 64 }
                     }
                     """);
@@ -126,7 +130,7 @@ public class SignAndByteAddTests
                 Assert.Equal(s >= 0, r.U8("b") != 0);
                 Assert.Equal(w < 0, r.U8("c") != 0);
                 Assert.Equal(w >= 0, r.U8("e") != 0);
-                int g = (s < 0 ? 1 : 0) | (0 > s ? 2 : 0) | ((short)-w >= 0 ? 4 : 0);
+                int g = (s < 0 ? 1 : 0) | (0 > s ? 2 : 0) | ((short)-w >= 0 ? 4 : 0) | (0 > w ? 8 : 0) | (0 <= w ? 16 : 0);
                 Assert.Equal(g, r.U8("g"));
                 int after = s;
                 while (after < 0) after += 64;

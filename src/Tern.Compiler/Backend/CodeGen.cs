@@ -2001,7 +2001,8 @@ public sealed class CodeGen
 
         // A one-byte value against a constant keeps the value in A: c < x is x > c, and x > c is
         // x >= c + 1 (cmp #c+1), x <= c is x < c + 1. Not when c + 1 does not fit (x > 255).
-        if (type.Size == 1 && left.ConstValue is not null && right.ConstValue is null)
+        // A signed 0 > w is w < 0 at any size, the sign test below.
+        if ((type.Size == 1 || (signed && left.ConstValue == 0)) && left.ConstValue is not null && right.ConstValue is null)
         {
             (left, right) = (right, left);
             op = op switch
