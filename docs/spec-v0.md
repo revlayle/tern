@@ -100,7 +100,8 @@ fn main() {
   - Each parameter has a type (an integer type or `bool`) and a default. A value is a constant expression using literals and the main file's constants that do not depend on imported modules; it is checked against the type. An unknown name, a name given twice, or a value that does not fit is an error.
   - Inside the module a parameter is an ordinary constant; outside it is `sprites.COUNT`. Parameters cost nothing at runtime. An `if` on a constant condition compiles only the branch taken, and a function called only from the other branch is not compiled and has no memory, so an option that is off costs nothing.
   - The name in the header must match the file name. A main file has no header; a module needs one only if it has parameters.
-- Platform modules live in `lib/<platform>/` and can only be imported when compiling for that platform; importing one for another platform is an error naming the platform. A platform folder can also provide its own version of a general module.
+- Platform modules live in `lib/<platform>/` and can only be imported when compiling for that platform; importing one for another platform is an error naming the platform. A platform folder can also provide its own version of a general module. **The build's target decides which library modules exist**: every build names its platform, so `import io` is the C64's `io` in a C64 build and the Apple II's in an Apple II build, and the import line needs no platform name.
+- **A module of your own may not have a library module's name.** When `import name` finds both a library module (of the target's folder or `lib/`) and `name.tern` in the importing file's folder, it is an error that names both files and says to rename yours. So each import has one meaning, never a library module that silently hides your file. A main file may still have a library module's name, since it is never imported.
 
 ## 3. Types
 

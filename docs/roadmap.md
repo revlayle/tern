@@ -428,7 +428,9 @@ Done when: every item has its end-to-end and error tests, and the port's workaro
 
 ## M21: Plug-ins against a fixed interface
 
-Spec: 12.3 (planned).
+Spec: 12.3 (planned); 2.2 for the first item.
+
+First, a small item (decision 2026-11-09, "the build's target decides the library"): `import name` that finds both a library module and `name.tern` in the importing file's folder is an error naming both files, saying to rename the program's own. Tests: a program `io.tern` next to `lib/c64/io.tern`, a program `random.tern` next to `lib/random.tern`, a main file named `random.tern` importing `random` (still allowed), the suggestion in `tern --json`.
 
 `export module` in a binary (exports matched by name to the module's fixed-address routines, with checks on parameters, return, `keeps`, the interface's fixed variables defined as `data`, `setup` at entry 0) and `export f, g @ addr` in a program with `main` (a jump table at a fixed address, `name_api.tern` written). Tests: two level binaries built against one interface module, exported in different source orders, loaded in turn into one reserved slot and called by a host; a level calling the host's table; each error. Example: a game with levels on disk plus one built separately, checked in VICE
 
