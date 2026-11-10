@@ -216,7 +216,7 @@ public sealed class Parser
                     {
                         var at = Advance();
                         if (exportTable is not null)
-                            throw new CompileError(at.Pos, "A program has one export table. List all its functions on the 'export' line with the '@'");
+                            throw new CompileError(at.Pos, "A program has one export table. Write all its functions on the 'export' line with the '@'");
                         exportTable = new ExportTable(at.Pos, ParseExpr());
                     }
                     ExpectEndOfStatement();

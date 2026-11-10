@@ -177,11 +177,20 @@ public sealed class PluginTests : IDisposable
     }
 
     [Fact]
+    public void Tern_json_gives_the_fix_as_the_suggestion()
+    {
+        var e = Error(Level.Replace("fn leave() { n = 0 }\n", ""));
+        var d = Tern.Compiler.Tools.Diagnostic.From(e, "level1.tern");
+        Assert.Equal("'level_api.leave' has no function in this binary.", d.Message);
+        Assert.Equal("Write 'fn leave()' in the main file", d.Suggestion);
+    }
+
+    [Fact]
     public void A_program_with_main_cannot_export_a_module()
     {
         Write("level_api.tern", LevelApi);
         var e = Assert.Throws<CompileError>(() => TernCompiler.Compile("import level_api\nfn main() { }\nexport level_api @ $0900", sourcePath: PathOf("host.tern")));
-        Assert.Equal("'export level_api' builds a binary that plugs into level_api's jump table, which a program with 'main' does not. List the program's own functions: 'export f, g @ address'", e.Description);
+        Assert.Equal("'export level_api' builds a binary that plugs into level_api's jump table, which a program with 'main' does not. Write the program's own functions instead: 'export f, g @ address'", e.Description);
     }
 
     // ---------- Done when (roadmap M21): the example ----------
@@ -300,7 +309,7 @@ public sealed class PluginTests : IDisposable
     [InlineData("export add_score, beep @ $0900", "export add_score, beep @ score", "The address of the export table must be known at compile time")]
     [InlineData("export add_score, beep @ $0900", "export add_score, main @ $0900", "'main' is where the program starts; plug-ins cannot call it. Remove it from the export line")]
     [InlineData("export add_score, beep @ $0900", "export add_score, add_score @ $0900", "'add_score' is exported twice")]
-    [InlineData("export add_score, beep @ $0900", "export add_score\nexport beep @ $0900\nexport helper @ $0A00", "A program has one export table. List all its functions on the 'export' line with the '@'")]
+    [InlineData("export add_score, beep @ $0900", "export add_score\nexport beep @ $0900\nexport helper @ $0A00", "A program has one export table. Write all its functions on the 'export' line with the '@'")]
     [InlineData("fn add_score(n: u8 using A) {", "fn add_score(n: u8) {", "'add_score' takes 'n' in memory, which a plug-in cannot set. Pass it in a register (n: u8 using A)")]
     [InlineData("export add_score, beep @ $0900", "export add_score, beep",
         "A program with 'main' cannot export functions without an address: 'export' alone builds a binary for another program to call, which has no 'main'. Give the table an address for plug-ins to call ('export f @ $0900'), or remove 'main'")]

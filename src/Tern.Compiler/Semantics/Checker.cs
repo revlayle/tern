@@ -165,7 +165,7 @@ public sealed partial class Checker
             {
                 if (ExportedModule(mainModule) is { } api)
                     throw new CompileError(mainModule.Syntax.Exports[0].Pos,
-                        $"'export {api.Name}' builds a binary that plugs into {api.Name}'s jump table, which a program with 'main' does not. List the program's own functions: 'export f, g @ address'");
+                        $"'export {api.Name}' builds a binary that plugs into {api.Name}'s jump table, which a program with 'main' does not. Write the program's own functions instead: 'export f, g @ address'");
                 // Plug-ins call the entries, so their callers are unknown, as for functions whose address is taken (6.5).
                 exports = ResolveExports(mainModule, inProgram: true);
                 foreach (var e in exports)
@@ -252,7 +252,7 @@ public sealed partial class Checker
         _module = mainModule;
         CheckExpr(table.Address);
         if (table.Address.ConstValue is not long a)
-            throw new CompileError(table.Address.Pos, "The address of the export table must be known at compile time");
+            throw new CompileError(table.Address.Pos, "The address of the export table must be known at compile time. Use a constant, such as $0900");
         int size = 3 * mainModule.Syntax.Exports.Count;
         if (a < 0 || a + size - 1 > 0xFFFF)
             throw new CompileError(table.Address.Pos, $"The export table ({size} bytes) at ${a:X} does not fit in memory. Use a lower address");
