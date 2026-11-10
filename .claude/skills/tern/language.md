@@ -578,7 +578,7 @@ band $0002 u8 = 3 ($03)
 - To keep the KERNAL in (needed by `io` and `chrout`), install the handler with
   `c64.set_kernal_irq(addr(raster))` instead of `kernal_off` / `set_irq`: it goes through `$0314`,
   and the same `interrupt fn` works. The KERNAL's keyboard scan stops (`getin` sees no keys), and its
-  CIA 1 timer interrupt still reaches the handler: turn it off with `c64.cia1.icr = $7F`.
+  CIA 1 timer interrupt still reaches the handler: turn it off with `c64.cia_irqs_off()` first.
   `examples/kernal_irq.tern` reads the drive's status while a raster split runs. `tern run` has no
   KERNAL, so check such a program in VICE.
 
