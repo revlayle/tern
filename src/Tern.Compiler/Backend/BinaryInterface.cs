@@ -34,6 +34,26 @@ public static class BinaryInterface
             sb.AppendLine($"const {prefix}_LAST = ${range.Last.ToString(format)}");
         }
         sb.AppendLine();
+        AppendEntries(sb, entries);
+        return sb.ToString();
+    }
+
+    /// <summary>
+    /// The interface module of a program's export table (<c>export f, g @ $0900</c>): the entries only,
+    /// for plug-ins to call. The program's memory is not theirs to reserve.
+    /// </summary>
+    public static string GenerateTable(string programFile, string moduleName, IReadOnlyList<(string Name, FunctionSymbol? Function, int Address, CpuState Changed)> entries)
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine($"// The export table of {programFile}, written by the Tern compiler. Import it as '{moduleName}'.");
+        sb.AppendLine("// The program is running and has set itself up: call these from a plug-in it has loaded.");
+        sb.AppendLine();
+        AppendEntries(sb, entries);
+        return sb.ToString();
+    }
+
+    private static void AppendEntries(StringBuilder sb, IReadOnlyList<(string Name, FunctionSymbol? Function, int Address, CpuState Changed)> entries)
+    {
         foreach (var (name, function, address, changed) in entries)
         {
             var kept = new List<string>();
@@ -41,22 +61,11 @@ public static class BinaryInterface
                 if (!changed.HasFlag(flag) && !(function?.ReturnRegister is { } r && r.Uses(register))) kept.Add(register.ToString());
             sb.AppendLine($"fn {name}({Parameters(function)}){Return(function)} @ ${address:X4}" + (kept.Count > 0 ? $" keeps {string.Join(", ", kept)}" : ""));
         }
-        return sb.ToString();
     }
 
-    private static string Parameters(FunctionSymbol? f) =>
-        f is null ? "" : string.Join(", ", f.Parameters.Select(p => $"{p.Name}: {TypeText(p.Type)} using {p.PassedIn}"));
+    private static string Parameters(FunctionSymbol? f) => f is null ? "" : Signature.Parameters(f, TypeText);
 
-    private static string Return(FunctionSymbol? f)
-    {
-        if (f is null || f.ReturnType.Kind == TypeKind.Void) return "";
-        string register = f.ReturnRegister!.Value switch
-        {
-            Register.Carry => "carry", Register.Zero => "zero", Register.Negative => "negative", Register.Overflow => "overflow",
-            var other => other.ToString(),
-        };
-        return $" -> {TypeText(f.ReturnType)} using {register}";
-    }
+    private static string Return(FunctionSymbol? f) => f is null ? "" : Signature.Return(f, TypeText);
 
     /// <summary>A pointer to a struct is a plain 16-bit value to the host, which does not know the struct.</summary>
     private static string TypeText(TernType t) => t.IsPointer && t.Element!.IsStruct ? "u16" : t.ToString();

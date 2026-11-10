@@ -26,7 +26,7 @@ public class BinaryTests
         """;
 
     /// <summary>Loads a binary and calls its entries one at a time, as a host does.</summary>
-    private sealed class Binary
+    internal sealed class Binary
     {
         private const int Stop = 0x03F0;   // where an entry returns to
         public CompileResult Result { get; }

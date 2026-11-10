@@ -1,0 +1,25 @@
+// A level of the plug-in example (game.tern): a binary built against level_api.
+// It calls the game through game_api, which the compiler writes when it builds game.tern.
+import game_api
+import level_api
+
+memory {
+    level_api.SLOT_FIRST..=level_api.SLOT_LAST  program
+    level_api.ZP_FIRST..=level_api.ZP_LAST      zeropage
+}
+
+export level_api
+
+data header: level_api.LevelHeader @ level_api.HEADER = level_api.LevelHeader { border = 5, goal = 3 }
+data NAME = "FOREST "
+var steps: u8
+
+fn enter() {
+    for i in 0..len(NAME) { game_api.show(NAME[i]) }
+}
+
+fn update() -> bool using carry {
+    steps += 1
+    game_api.add_score(10)
+    return steps == header.goal
+}

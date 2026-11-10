@@ -16,7 +16,12 @@ public sealed class CheckedProgram(
     public MemoryLayout Layout { get; init; } = null!;
     /// <summary>The exported functions of a binary without <c>main</c> (spec 12.3), in jump table order; empty for a program.</summary>
     public List<FunctionSymbol> Exports { get; init; } = [];
-    public bool IsBinary => Exports.Count > 0;
+    /// <summary>For <c>export level_api</c>: each export's routine in the interface module, which gives its address.</summary>
+    public Dictionary<FunctionSymbol, FunctionSymbol> ExportedAs { get; init; } = [];
+    /// <summary>The address of a program's export table (<c>export f, g @ $0900</c>), or null.</summary>
+    public int? ExportTableAddress { get; init; }
+    /// <summary>A binary without <c>main</c>, which starts with its jump table.</summary>
+    public bool IsBinary => Exports.Count > 0 && ExportTableAddress is null;
 }
 
 /// <summary>
@@ -114,14 +119,31 @@ public sealed partial class Checker
 
         var mainModule = modules[^1];
         var exports = new List<FunctionSymbol>();
+        var exportedAs = new Dictionary<FunctionSymbol, FunctionSymbol>();
+        int? exportTable = null;
         FunctionSymbol main;
-        if (mainModule.Syntax.Exports.Count > 0)
+        bool hasMain = mainModule.Scope.TryGetValue("main", out var mainSymbol) && mainSymbol is FunctionSymbol;
+        if (mainModule.Syntax.ExportTable is { } table)
+        {
+            // export f, g @ $0900 in a program with main (spec 12.3).
+            if (!hasMain)
+                throw new CompileError(table.Pos,
+                    "A binary's jump table is at the start of its first program area, so its 'export' line has no address. Remove the '@' and the address, or add 'fn main()' for a program whose table plug-ins call");
+            exportTable = ExportTableAddress(table, mainModule);
+        }
+        if (mainModule.Syntax.Exports.Count > 0 && exportTable is null)
         {
             // A binary for another program to call (spec 12.3): its entries are one root.
-            if (mainModule.Scope.TryGetValue("main", out var hasMain) && hasMain is FunctionSymbol)
+            if (hasMain)
                 throw new CompileError(mainModule.Syntax.Exports[0].Pos,
-                    "A program with 'main' cannot export functions: 'export' builds a binary for another program to call, which has no 'main'. Remove one of them");
-            exports = ResolveExports(mainModule);
+                    "A program with 'main' cannot export functions without an address: 'export' alone builds a binary for another program to call, which has no 'main'. Give the table an address for plug-ins to call ('export f @ $0900'), or remove 'main'");
+            if (ExportedModule(mainModule) is { } api)
+            {
+                exportedAs = MatchInterface(mainModule, api);
+                exports = exportedAs.Keys.OrderBy(f => exportedAs[f].FixedAddress).ToList();
+            }
+            else
+                exports = ResolveExports(mainModule);
             main = new FunctionSymbol(EntriesRoot, mainModule.Syntax.Exports[0].Pos);
             foreach (var e in exports) main.Callees.Add(e);
         }
@@ -139,6 +161,19 @@ public sealed partial class Checker
                 throw new CompileError(main.Pos, "'main' cannot be an interrupt handler; give the handler another name");
             if (main.IsInline)
                 throw new CompileError(main.Pos, "'main' cannot be inline: nothing calls it");
+            if (exportTable is not null)
+            {
+                if (ExportedModule(mainModule) is { } api)
+                    throw new CompileError(mainModule.Syntax.Exports[0].Pos,
+                        $"'export {api.Name}' builds a binary that plugs into {api.Name}'s jump table, which a program with 'main' does not. Write the program's own functions instead: 'export f, g @ address'");
+                // Plug-ins call the entries, so their callers are unknown, as for functions whose address is taken (6.5).
+                exports = ResolveExports(mainModule, inProgram: true);
+                foreach (var e in exports)
+                {
+                    e.AddressTaken = true;
+                    main.UsedAddresses.Add(e);
+                }
+            }
         }
 
         foreach (var module in modules)
@@ -155,13 +190,13 @@ public sealed partial class Checker
         // of a module cost nothing. The main file's globals are all kept.
         MarkParts(main, mainModule);
         var reachable = OrderRoots(main, mainModule);
-        if (exports.Count > 0) reachable.Remove(main);   // the root of a binary's entries has no code
+        if (exports.Count > 0 && exportTable is null) reachable.Remove(main);   // the root of a binary's entries has no code
         CheckPrivateGlobalsPerRoot(modules, reachable);
         MarkGlobalsUsedFromTwoRoots(reachable);
         var used = reachable.SelectMany(f => f.UsedGlobals).Concat(mainModule.Scope.Values.OfType<VariableSymbol>()).ToHashSet();
         // A kept global keeps the globals whose addresses are in its initial value.
         foreach (var g in used.ToList()) used.UnionWith(GlobalsNamedBy(g.Storage));
-        return new CheckedProgram(modules, _globals.Where(used.Contains).ToList(), reachable, main) { Layout = _layout, Exports = exports };
+        return new CheckedProgram(modules, _globals.Where(used.Contains).ToList(), reachable, main) { Layout = _layout, Exports = exports, ExportedAs = exportedAs, ExportTableAddress = exportTable };
     }
 
     /// <summary>A global and the globals whose addresses are in its initial value, and in theirs (spec 4).</summary>
@@ -178,27 +213,127 @@ public sealed partial class Checker
     private const string EntriesRoot = "(entries)";
 
     /// <summary>The functions named by <c>export</c> lines, in order. Each must be callable with registers alone.</summary>
-    private static List<FunctionSymbol> ResolveExports(Module mainModule)
+    private static List<FunctionSymbol> ResolveExports(Module mainModule, bool inProgram = false)
     {
         var result = new List<FunctionSymbol>();
         foreach (var e in mainModule.Syntax.Exports)
         {
             if (!mainModule.Scope.TryGetValue(e.Name, out var symbol) || symbol is not FunctionSymbol f)
                 throw new CompileError(e.Pos, mainModule.Scope.ContainsKey(e.Name) ? $"'{e.Name}' is not a function, so it cannot be exported" : $"'{e.Name}' is not declared; 'export' names functions of the main file");
-            if (e.Name == "setup")
+            if (e.Name == "setup" && !inProgram)
                 throw new CompileError(e.Pos, "'setup' is the name of the binary's startup entry (entry 0 of the jump table). Rename the function");
+            if (e.Name == "main")
+                throw new CompileError(e.Pos, "'main' is where the program starts; plug-ins cannot call it. Remove it from the export line");
             if (result.Contains(f))
                 throw new CompileError(e.Pos, $"'{e.Name}' is exported twice");
-            if (f.IsInterrupt)
-                throw new CompileError(e.Pos, $"'{e.Name}' is an interrupt handler, which the CPU calls through a vector; it cannot be an entry of the jump table. Export a plain function that does the work");
-            if (f.IsInline)
-                throw new CompileError(e.Pos, $"'{e.Name}' is inline: it has no code of its own to put in the jump table. Remove 'inline'");
-            if (f.FixedAddress is not null)
-                throw new CompileError(e.Pos, $"'{e.Name}' is a routine at a fixed address, not part of this binary");
-            if (f.Parameters.FirstOrDefault(p => p.PassedIn is null) is { } memoryParam)
-                throw new CompileError(e.Pos,
-                    $"'{e.Name}' takes '{memoryParam.Name}' in memory, which the caller of a binary cannot set. Pass it in a register ({memoryParam.Name}: {memoryParam.Type} using A)");
+            CheckExportable(f, e.Name, e.Pos, inProgram ? "a plug-in" : "the caller of a binary");
             result.Add(f);
+        }
+        return result;
+    }
+
+    /// <summary>An entry of a jump table is called with registers alone, and has code of its own (spec 12.3).</summary>
+    private static void CheckExportable(FunctionSymbol f, string name, SourcePos pos, string caller)
+    {
+        if (f.IsInterrupt)
+            throw new CompileError(pos, $"'{name}' is an interrupt handler, which the CPU calls through a vector; it cannot be an entry of the jump table. Export a plain function that does the work");
+        if (f.IsInline)
+            throw new CompileError(pos, $"'{name}' is inline: it has no code of its own to put in the jump table. Remove 'inline'");
+        if (f.FixedAddress is not null)
+            throw new CompileError(pos, $"'{name}' is a routine at a fixed address, not part of this binary");
+        if (f.Parameters.FirstOrDefault(p => p.PassedIn is null) is { } memoryParam)
+            throw new CompileError(pos,
+                $"'{name}' takes '{memoryParam.Name}' in memory, which {caller} cannot set. Pass it in a register ({memoryParam.Name}: {memoryParam.Type} using A)");
+    }
+
+    /// <summary>The address of a program's export table, a constant (spec 12.3).</summary>
+    private int ExportTableAddress(ExportTable table, Module mainModule)
+    {
+        _module = mainModule;
+        CheckExpr(table.Address);
+        if (table.Address.ConstValue is not long a)
+            throw new CompileError(table.Address.Pos, "The address of the export table must be known at compile time. Use a constant, such as $0900");
+        int size = 3 * mainModule.Syntax.Exports.Count;
+        if (a < 0 || a + size - 1 > 0xFFFF)
+            throw new CompileError(table.Address.Pos, $"The export table ({size} bytes) at ${a:X} does not fit in memory. Use a lower address");
+        return (int)a;
+    }
+
+    /// <summary><c>export level_api</c>: a name on the export line that is a module the main file imports (spec 12.3).</summary>
+    private static Module? ExportedModule(Module mainModule)
+    {
+        var names = mainModule.Syntax.Exports;
+        var module = names.Select(e => mainModule.Scope.ContainsKey(e.Name) ? null : mainModule.Imports.GetValueOrDefault(e.Name)).FirstOrDefault(m => m is not null);
+        if (module is null) return null;
+        if (names.Count > 1)
+        {
+            var other = names.Skip(names.FindIndex(e => e.Name == module.Name) == 0 ? 1 : 0).First();
+            throw new CompileError(other.Pos,
+                $"'export {module.Name}' takes the entries and their addresses from {module.Name}, so the export line names nothing else. " +
+                (other.Name == module.Name ? $"Remove the second '{module.Name}'" : $"Declare a routine for '{other.Name}' in {module.Name} instead"));
+        }
+        return module;
+    }
+
+    /// <summary>
+    /// <c>export level_api</c> (spec 12.3): one function of the main file for each routine of the interface
+    /// module, by name, with the same registers; <c>setup</c> at entry 0; each fixed variable of the module
+    /// defined as <c>data</c> of the same name, type and address. Returns each function's routine.
+    /// </summary>
+    private Dictionary<FunctionSymbol, FunctionSymbol> MatchInterface(Module mainModule, Module api)
+    {
+        var pos = mainModule.Syntax.Exports[0].Pos;
+        int start = _layout.Program[0].First;
+        // By the names they have inside the module: the symbols' names are qualified (level_api.enter).
+        var routines = api.Scope.Where(e => e.Value is FunctionSymbol { FixedAddress: not null })
+            .Select(e => (Name: e.Key, Routine: (FunctionSymbol)e.Value)).OrderBy(e => e.Routine.FixedAddress).ToList();
+
+        if (routines.FirstOrDefault(r => r.Name == "setup").Routine is not { } setup)
+            throw new CompileError(pos,
+                $"{api.Name} has no 'setup' routine. The host calls setup first, at entry 0 of the jump table: declare 'fn setup() @ ${start:X4}' in {api.Name}");
+        if (setup.FixedAddress != start)
+            throw new CompileError(pos,
+                $"'{api.Name}.setup' is at ${setup.FixedAddress:X4}, but setup is entry 0 of the jump table, at the start of the binary's first program area (${start:X4}). " +
+                $"Move setup to ${start:X4} in {api.Name}, or start the first program area at ${setup.FixedAddress:X4}");
+        if (setup.Parameters.Count > 0 || setup.FixedInputs.Count > 0 || setup.ReturnType.Kind != TypeKind.Void)
+            throw new CompileError(setup.Pos, $"'{api.Name}.setup' must take nothing and return nothing: it is the binary's startup code. Remove its parameters and return value");
+        if (mainModule.Scope.TryGetValue("setup", out var ownSetup))
+            throw new CompileError(ownSetup.Pos, "'setup' is the name of the binary's startup entry (entry 0 of the jump table). Rename the function");
+
+        var result = new Dictionary<FunctionSymbol, FunctionSymbol>();
+        int next = start + 3;
+        foreach (var (name, r) in routines.Where(r => r.Routine != setup))
+        {
+            if (r.FixedAddress < next)
+                throw new CompileError(r.Pos,
+                    $"'{api.Name}.{name}' at ${r.FixedAddress:X4} overlaps the entry before it: each entry of the jump table is a 3-byte jmp, from ${start:X4}. Move it to ${next:X4} or later");
+            next = r.FixedAddress!.Value + 3;
+            if (next - 1 > _layout.Program[0].Last)
+                throw new CompileError(r.Pos,
+                    $"'{api.Name}.{name}' at ${r.FixedAddress:X4} is outside the binary's first program area {_layout.Program[0]}, where the jump table is. Move it in {api.Name} to the table, after the entry before it");
+            if (r.FixedInputs.Count > 0)
+                throw new CompileError(r.Pos,
+                    $"'{api.Name}.{name}' has fixed inputs, which a function of the binary cannot receive. Declare them as parameters in registers");
+            if (!mainModule.Scope.TryGetValue(name, out var symbol) || symbol is not FunctionSymbol f)
+                throw new CompileError(pos,
+                    $"'{api.Name}.{name}' has no function in this binary. Write 'fn {name}({Signature.Parameters(r)}){Signature.Return(r)}' in the main file");
+            CheckExportable(f, name, f.Pos, "the caller of a binary");
+            if (!Signature.Matches(f, r))
+                throw new CompileError(f.Pos,
+                    $"'{name}' does not match '{api.Name}.{name}': it is 'fn {name}({Signature.Parameters(f)}){Signature.Return(f)}', the interface says 'fn {name}({Signature.Parameters(r)}){Signature.Return(r)}'. Change the function to match");
+            result[f] = r;
+        }
+
+        // Data every binary provides at a fixed address, such as a level's header: the interface's
+        // volatile variables. A plain fixed variable is memory of the host, which levels may use.
+        foreach (var (name, v) in api.Scope.Where(e => e.Value is VariableSymbol { FixedAddress: not null, IsData: false, DeclaredVolatile: true })
+                     .Select(e => (e.Key, (VariableSymbol)e.Value)).OrderBy(e => e.Item2.FixedAddress))
+        {
+            string want = $"data {name}: {v.Type} @ ${v.FixedAddress:X4}";
+            if (!mainModule.Scope.TryGetValue(name, out var symbol) || symbol is not VariableSymbol d)
+                throw new CompileError(pos, $"'{api.Name}.{name}' is data every binary of {api.Name} provides. Declare '{want} = ...' in the main file");
+            if (!d.IsData || !d.Type.SameAs(v.Type) || d.FixedAddress != v.FixedAddress)
+                throw new CompileError(d.Pos, $"'{name}' does not match '{api.Name}.{name}'. Declare it as '{want} = ...'");
         }
         return result;
     }

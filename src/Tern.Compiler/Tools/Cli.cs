@@ -22,7 +22,8 @@ public static class Cli
           <output>.lines bytes, cycles and addresses of each source line
 
         A program with 'export' lines and no main is a binary for another program to call;
-        it also writes <name>_api.tern, the module a Tern program imports to call it.
+        it also writes <name>_api.tern, the module a Tern program imports to call it. A program
+        with main and 'export f, g @ address' writes <name>_api.tern for its plug-ins.
 
           --json           print the result as JSON: ok, the files written, the report's
                            lines, and diagnostics (file, line, column, severity, message,

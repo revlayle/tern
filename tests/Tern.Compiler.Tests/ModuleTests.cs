@@ -149,10 +149,10 @@ public sealed class ModuleTests : IDisposable
     }
 
     [Fact]
-    public void The_library_comes_before_the_source_folder()
+    public void Modules_come_from_the_library_and_the_source_folder()
     {
+        // A file in both is an error (A_program_module_with_a_library_module_name_is_an_error).
         Write(Lib, "pick.tern", "const WHO = 1");
-        Write(Src, "pick.tern", "const WHO = 2");
         Write(Src, "mine.tern", "const WHO = 3");
         var r = RunMain("""
             import pick
@@ -320,6 +320,42 @@ public sealed class ModuleTests : IDisposable
         Write(Src, "random.tern", source);
         var r = Run.Program(source, sourcePath: Path.Combine(Src, "random.tern"), libraryDirectory: Lib);
         Assert.Equal(5, r.U8("random.last"));
+    }
+
+    [Fact]
+    public void A_program_module_with_a_library_module_name_is_an_error()
+    {
+        // Spec 2.2: the library would silently hide the program's own file.
+        Write(Path.Combine(Lib, "c64"), "io.tern", "fn open() { }");
+        Write(Src, "io.tern", "fn open() { }");
+        var e = Assert.Throws<CompileError>(() => CompileMain("import io\nfn main() { io.open() }"));
+        Assert.Equal($"'io' is both a library module ({Path.Combine(Lib, "c64", "io.tern")}) and your file {Path.Combine(Src, "io.tern")}. Rename your file, e.g. to my_io.tern, and import it by its new name", e.Description);
+        Assert.Equal((1, 8), (e.Pos.Line, e.Pos.Column));
+
+        Write(Lib, "random.tern", "fn seed(s: u8) { }");
+        Write(Src, "random.tern", "fn seed(s: u8) { }");
+        e = Assert.Throws<CompileError>(() => CompileMain("import random\nfn main() { random.seed(1) }"));
+        Assert.Equal($"'random' is both a library module ({Path.Combine(Lib, "random.tern")}) and your file {Path.Combine(Src, "random.tern")}. Rename your file, e.g. to my_random.tern, and import it by its new name", e.Description);
+
+        // Also from another of the program's modules.
+        Write(Src, "game.tern", "import random\nfn go() { random.seed(1) }");
+        e = Assert.Throws<CompileError>(() => CompileMain("import game\nfn main() { game.go() }"));
+        Assert.StartsWith("'random' is both a library module", e.Description);
+
+        // tern --json gives the fix as the suggestion.
+        var d = Tern.Compiler.Tools.Diagnostic.From(e, "main.tern");
+        Assert.Equal("Rename your file, e.g. to my_random.tern, and import it by its new name", d.Suggestion);
+    }
+
+    [Fact]
+    public void Library_modules_import_each_other_whatever_is_in_their_folders()
+    {
+        // A library module importing another finds it in the library, even when a platform folder
+        // has its own version: its own folder is the library, not a program's.
+        Write(Lib, "mem.tern", "import text\nfn go() { text.put() }");
+        Write(Lib, "text.tern", "var n: u8\nfn put() { n = 1 }");
+        Write(Path.Combine(Lib, "c64"), "text.tern", "var n: u8\nfn put() { n = 2 }");
+        Assert.Equal(2, RunMain("import mem\nfn main() { mem.go() }").U8("text.n"));
     }
 
     [Fact]
