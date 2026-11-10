@@ -183,4 +183,91 @@ public sealed class PluginTests : IDisposable
         var e = Assert.Throws<CompileError>(() => TernCompiler.Compile("import level_api\nfn main() { }\nexport level_api @ $0900", sourcePath: PathOf("host.tern")));
         Assert.Equal("'export level_api' builds a binary that plugs into level_api's jump table, which a program with 'main' does not. List the program's own functions: 'export f, g @ address'", e.Description);
     }
+
+    // ---------- export f, g @ addr in a program with main ----------
+
+    private const string Host = """
+        var score: u8
+        var sound: u8
+        var calls: u8
+        fn add_score(n: u8 using A) {
+            var twice: u8 = n << 1
+            score += twice
+        }
+        fn beep() -> u8 using A {
+            sound += 1
+            return sound
+        }
+        fn helper() {
+            var mine: u8 = calls
+            calls = mine + 1
+        }
+        fn main() {
+            helper()
+            asm {
+                lda #3
+                jsr $0900
+                jsr $0903
+                jsr $0903
+                sta calls
+            }
+        }
+        export add_score, beep @ $0900
+        """;
+
+    [Fact]
+    public void A_program_puts_its_export_table_at_the_address()
+    {
+        var run = Run.Program(Host, sourcePath: PathOf("host.tern"));
+        Assert.Equal(new[] { ("add_score", 0x0900), ("beep", 0x0903) }, run.Result.Entries);
+        Assert.Equal(0x4C, run.Ram.Bytes[0x0900]);
+        Assert.Equal(run.Result.Symbols["add_score"], run.Ram.Bytes[0x0901] | (run.Ram.Bytes[0x0902] << 8));
+        Assert.Equal(run.Result.Symbols["beep"], run.Ram.Bytes[0x0904] | (run.Ram.Bytes[0x0905] << 8));
+        Assert.Equal(6, run.U8("score"));
+        Assert.Equal(2, run.U8("calls"));                 // beep's second value
+        Assert.Contains("Export table at $0900:", run.Result.Report);
+        Assert.Contains(run.Result.Sections, s => s.Name == "export table" && s.Address == 0x0900 && s.Size == 6);
+    }
+
+    [Fact]
+    public void The_entries_are_compiled_though_main_does_not_call_them_and_their_frames_overlap_no_other()
+    {
+        var r = TernCompiler.Compile(Host, sourcePath: PathOf("host.tern"));
+        // Plug-ins may call an entry while main is in any function (spec 6.5).
+        Assert.NotEqual(r.Symbols["add_score.twice"], r.Symbols["helper.mine"]);
+    }
+
+    [Fact]
+    public void The_program_writes_an_interface_module_for_plug_ins()
+    {
+        var r = TernCompiler.Compile(Host, sourcePath: PathOf("host.tern"));
+        Assert.Equal("host_api", r.ApiModuleName);
+        Assert.Contains("// The export table of host.prg", r.ApiModule);
+        Assert.Contains("fn add_score(n: u8 using A) @ $0900 keeps X, Y", r.ApiModule);
+        Assert.Contains("fn beep() -> u8 using A @ $0903 keeps X, Y", r.ApiModule);
+        Assert.DoesNotContain("setup", r.ApiModule);
+        Assert.DoesNotContain("CODE_FIRST", r.ApiModule);
+        Assert.Equal(0x0801, r.LoadAddress);            // still a program, with its BASIC line
+    }
+
+    [Theory]
+    [InlineData("export add_score, beep @ $0900", "export add_score, beep @ $A000",
+        "The export table at $A000-$A005 is not in a program or reserved area. Program areas: $0801-$9FFF; reserved: none. Give it an address in one of them")]
+    [InlineData("export add_score, beep @ $0900", "export add_score, beep @ $0801", "overlaps the BASIC line and startup code")]
+    [InlineData("export add_score, beep @ $0900", "export add_score, beep @ $FFFE", "The export table (6 bytes) at $FFFE does not fit in memory. Use a lower address")]
+    [InlineData("export add_score, beep @ $0900", "export add_score, beep @ score", "The address of the export table must be known at compile time")]
+    [InlineData("export add_score, beep @ $0900", "export add_score, main @ $0900", "'main' is where the program starts; plug-ins cannot call it. Remove it from the export line")]
+    [InlineData("export add_score, beep @ $0900", "export add_score, add_score @ $0900", "'add_score' is exported twice")]
+    [InlineData("export add_score, beep @ $0900", "export add_score\nexport beep @ $0900\nexport helper @ $0A00", "A program has one export table. List all its functions on the 'export' line with the '@'")]
+    [InlineData("fn add_score(n: u8 using A) {", "fn add_score(n: u8) {", "'add_score' takes 'n' in memory, which a plug-in cannot set. Pass it in a register (n: u8 using A)")]
+    [InlineData("export add_score, beep @ $0900", "export add_score, beep",
+        "A program with 'main' cannot export functions without an address: 'export' alone builds a binary for another program to call, which has no 'main'. Give the table an address for plug-ins to call ('export f @ $0900'), or remove 'main'")]
+    [InlineData("fn main() {", "fn main_gone() {",
+        "A binary's jump table is at the start of its first program area, so its 'export' line has no address. Remove the '@' and the address, or add 'fn main()' for a program whose table plug-ins call")]
+    public void Reports_errors_in_a_program_export(string replace, string with, string expected)
+    {
+        Assert.Contains(replace, Host);
+        var e = Assert.Throws<CompileError>(() => TernCompiler.Compile(Host.Replace(replace, with), sourcePath: PathOf("host.tern")));
+        Assert.Contains(expected, e.Description);
+    }
 }

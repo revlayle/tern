@@ -190,7 +190,7 @@ public sealed partial class Checker
         // of a module cost nothing. The main file's globals are all kept.
         MarkParts(main, mainModule);
         var reachable = OrderRoots(main, mainModule);
-        if (exports.Count > 0) reachable.Remove(main);   // the root of a binary's entries has no code
+        if (exports.Count > 0 && exportTable is null) reachable.Remove(main);   // the root of a binary's entries has no code
         CheckPrivateGlobalsPerRoot(modules, reachable);
         MarkGlobalsUsedFromTwoRoots(reachable);
         var used = reachable.SelectMany(f => f.UsedGlobals).Concat(mainModule.Scope.Values.OfType<VariableSymbol>()).ToHashSet();
