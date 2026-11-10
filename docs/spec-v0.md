@@ -102,6 +102,7 @@ fn main() {
   - The name in the header must match the file name. A main file has no header; a module needs one only if it has parameters.
 - Platform modules live in `lib/<platform>/` and can only be imported when compiling for that platform; importing one for another platform is an error naming the platform. A platform folder can also provide its own version of a general module. **The build's target decides which library modules exist**: every build names its platform, so `import io` is the C64's `io` in a C64 build and the Apple II's in an Apple II build, and the import line needs no platform name.
 - **A module of your own may not have a library module's name.** When `import name` finds both a library module (of the target's folder or `lib/`) and `name.tern` in the importing file's folder, it is an error that names both files and says to rename yours. So each import has one meaning, never a library module that silently hides your file. A main file may still have a library module's name, since it is never imported.
+- **Planned (not scheduled): quoted paths and aliases for your own modules.** `import "levels/level1.tern"` loads a file by its path, relative to the importing file and written with `/` on every system (no absolute paths, so a project can move), which allows subfolders. `import my_io = "./io.tern"` gives the module another name for use in code (`my_io.read`), so it can sit next to a library module of the same name. Not `as`, which already means a conversion (rule 3).
 
 ## 3. Types
 
