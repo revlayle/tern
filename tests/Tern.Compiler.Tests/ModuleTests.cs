@@ -292,13 +292,48 @@ public sealed class ModuleTests : IDisposable
     }
 
     [Fact]
-    public void Constants_across_an_import_cycle_get_a_clear_error()
+    public void The_main_file_cannot_be_imported()
     {
-        // Review M4, finding 3: b is declared before a, so b's declarations cannot use a's constants.
+        // Gap 23: demo imports main for its game flow.
+        Write(Src, "demo.tern", "import main\nfn steer() { main.play() }");
+        var e = Assert.Throws<CompileError>(() => CompileMain("import demo\nfn play() { }\nfn main() { demo.steer() }"));
+        Assert.Equal("'main' is the program's main file, which cannot be imported. Move what demo needs from it into a module that both import", e.Description);
+        Assert.Equal(Path.Combine(Src, "demo.tern"), e.Pos.File);
+        Assert.Equal((1, 8), (e.Pos.Line, e.Pos.Column));   // at the module name
+
+        // Also from the main file itself.
+        e = Assert.Throws<CompileError>(() => CompileMain("import main\nfn main() { }"));
+        Assert.Equal("'main' is this file, the program's main file, which cannot be imported. Remove this import", e.Description);
+
+        // Also when the main file is on disk, where the import would find it.
+        Write(Src, "main.tern", "import demo\nfn play() { }\nfn main() { demo.steer() }");
+        e = Assert.Throws<CompileError>(() => CompileMain("import demo\nfn play() { }\nfn main() { demo.steer() }"));
+        Assert.StartsWith("'main' is the program's main file, which cannot be imported. Move what demo needs", e.Description);
+    }
+
+    [Fact]
+    public void A_main_file_named_like_a_library_module_imports_the_library_module()
+    {
+        // Review M20 follow-up 3, finding 1: the library comes first, so the import is not the main file.
+        Write(Lib, "random.tern", "var last: u8\nfn seed(s: u8) { last = s }");
+        var source = "import random\nfn main() { random.seed(5) }";
+        Write(Src, "random.tern", source);
+        var r = Run.Program(source, sourcePath: Path.Combine(Src, "random.tern"), libraryDirectory: Lib);
+        Assert.Equal(5, r.U8("random.last"));
+    }
+
+    [Fact]
+    public void Constants_work_across_an_import_cycle()
+    {
+        // b is declared before a; a's constant is worked out when b's declaration uses it (spec 2.2).
         Write(Src, "a.tern", "import b\nconst N = 4\nfn fa() { b.fb() }");
         Write(Src, "b.tern", "import a\nvar buf: [u8; a.N]\nfn fb() { buf[0] = 1 }");
+        Assert.Equal(4, CompileMain("import a\nfn main() { a.fa() }").Variables["b.buf"].Size);
+
+        // A function's address is known only after a is declared: the error says what to move.
+        Write(Src, "b.tern", "import a\nvar f: u16 = addr(a.fa)\nfn fb() { }");
         var e = Assert.Throws<CompileError>(() => CompileMain("import a\nfn main() { a.fa() }"));
-        Assert.Equal("'a.N' cannot be used in a declaration of b: a and b import each other, and a is declared after b. Move N to b, or to a module both import", e.Description);
+        Assert.Equal("'a.fa' cannot be used in a declaration of b: a and b import each other, and a is declared after b. Move fa to b, or to a module both import", e.Description);
 
         // Bodies may use names in both directions.
         Write(Src, "b.tern", "import a\nvar n: u8\nfn fb() { n = a.N }");

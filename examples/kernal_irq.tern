@@ -34,7 +34,7 @@ interrupt fn raster() {
 
 fn main() {
     c64.interrupts_off()
-    c64.cia1.icr = $7F              // the KERNAL's timer interrupt would reach the handler too
+    c64.cia_irqs_off()              // the KERNAL's timer interrupt would reach the handler too
     c64.set_kernal_irq(addr(raster))
     c64.vic.control1 &= $7F
     c64.vic.raster = SPLIT

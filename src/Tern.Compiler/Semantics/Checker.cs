@@ -52,28 +52,38 @@ public sealed partial class Checker
 
     private CheckedProgram Run(List<Module> modules)
     {
-        // Declarations file by file, so that a file can use the constants of the modules it imports.
+        // Struct names and module parameters of every file first, so that a constant can be worked out
+        // when it is first used, in any module, also across an import ring (spec 2.2, 4).
         foreach (var module in modules)
         {
             _module = module;
             var program = module.Syntax;
             if (!module.IsMain && program.Functions.FirstOrDefault(f => f.Name == "main") is { } wrongMain)
                 throw new CompileError(wrongMain.Pos, $"Only the program's main file has 'fn main()'; '{module.Name}' is a module");
-            // Struct names first, so that types can name structs declared further down.
             foreach (var s in program.Structs) DeclareStruct(s);
             DeclareParameters(module, modules[^1]);
+        }
+
+        // Declarations file by file. A constant (or, for len(), a global) that another declaration
+        // uses before its turn is declared then (Demand).
+        foreach (var module in modules)
+        {
+            _module = module;
+            var program = module.Syntax;
             foreach (var c in program.Consts) DeclareConst(c);
             if (!module.IsMain && program.Memory is { } wrongMemory)
                 throw new CompileError(wrongMemory.Pos, $"Only the program's main file may have a memory block, since it describes the whole program; '{module.Name}' is a module");
             if (!module.IsMain && program.Exports.Count > 0)
                 throw new CompileError(program.Exports[0].Pos, $"Only the program's main file may export functions; '{module.Name}' is a module");
-            if (module.IsMain && program.Memory is { } memory) _layout = EvaluateMemory(memory);
+            if (module.IsMain) EnsureMemoryLayout();
             foreach (var s in program.Structs) LayOut((StructSymbol)module.Scope[s.Name]);
             foreach (var f in program.Functions) DeclareFunction(f);
-            foreach (var g in program.Globals) DeclareGlobal(g);
+            foreach (var g in program.Globals.Where(g => g.Symbol is null)) DeclareGlobal(g);
             // Initial values with addresses after all of the file's globals, so they can name globals declared below.
-            foreach (var (decl, v) in _addressInits) v.InitialBytes = ConstantBytes(decl.Init!, v.Type, v);
-            _addressInits.Clear();
+            // Only this file's: a global declared early for another module's constant waits for its own
+            // module's turn, when the functions and globals it names are declared.
+            foreach (var (decl, v, _) in _addressInits.Where(a => a.Module == module).ToList()) v.InitialBytes = ConstantBytes(decl.Init!, v.Type, v);
+            _addressInits.RemoveAll(a => a.Module == module);
             // After the globals, so that a variable named as an address gets the right error.
             foreach (var f in program.Functions.Where(f => f.Address is not null)) DeclareRoutine(f, f.Symbol!);
             foreach (var a in program.Asserts) CheckAssert(a, module);
@@ -195,6 +205,23 @@ public sealed partial class Checker
 
     // ---------- Declarations ----------
 
+    /// <summary>0: the main file's memory block is not evaluated yet, 1: being evaluated, 2: done.</summary>
+    private int _memoryState;
+
+    /// <summary>
+    /// Evaluates the main file's memory block, once: at the main file's turn, or before, when a constant
+    /// worked out early names a main-file global placed in a region (<c>len(map)</c>, spec 4).
+    /// </summary>
+    private void EnsureMemoryLayout()
+    {
+        if (_memoryState == 2 || !_module.IsMain) return;
+        if (_memoryState == 1)
+            throw new CompileError(_module.Syntax.Memory!.Pos, "The memory block depends on itself: a constant it uses needs a variable placed in one of its regions. Give that constant a value that does not use the variable");
+        _memoryState = 1;
+        if (_module.Syntax.Memory is { } memory) _layout = EvaluateMemory(memory);
+        _memoryState = 2;
+    }
+
     private MemoryLayout EvaluateMemory(MemoryDecl memory)
     {
         long Value(Expr e)
@@ -212,7 +239,7 @@ public sealed partial class Checker
         var scope = _scopes.Count > 0 ? _scopes[^1] : _module.Scope;
         if (_module.Imports.ContainsKey(name))
             throw new CompileError(symbol.Pos, $"'{name}' is the name of an imported module; choose another name");
-        if (Lookup(name) is { } existing)
+        if (Lookup(name, demand: false) is { } existing)
             throw new CompileError(symbol.Pos, $"'{name}' is already declared at {existing.Pos}");
         scope[name] = symbol;
     }
@@ -221,18 +248,78 @@ public sealed partial class Checker
     /// Finds a name in the enclosing scopes and the current file, or <c>module.name</c> in an imported module.
     /// A <c>private</c> name of another module is not found.
     /// </summary>
-    private Symbol? Lookup(string name)
+    /// <param name="demand">Declare a constant that is not declared yet (<see cref="Demand"/>).</param>
+    private Symbol? Lookup(string name, bool demand = true)
     {
         int dot = name.IndexOf('.');
         if (dot > 0)
         {
             if (!_module.Imports.TryGetValue(name[..dot], out var module)) return null;
             string member = name[(dot + 1)..];
-            return module.Syntax.PrivateNames.Contains(member) ? null : module.Scope.GetValueOrDefault(member);
+            if (module.Syntax.PrivateNames.Contains(member)) return null;
+            return module.Scope.GetValueOrDefault(member) ?? (demand ? Demand(module, member) : null);
         }
         for (int i = _scopes.Count - 1; i >= 0; i--)
             if (_scopes[i].TryGetValue(name, out var s)) return s;
-        return _module.Scope.GetValueOrDefault(name);
+        return _module.Scope.GetValueOrDefault(name) ?? (demand ? Demand(_module, name) : null);
+    }
+
+    /// <summary>The constants and globals being declared, innermost last, to find a value that depends on itself.</summary>
+    private readonly List<(Module Module, string Name, Node Decl)> _declaring = [];
+    private readonly HashSet<ConstDecl> _constsDone = [];
+
+    /// <summary>
+    /// A top-level name of <paramref name="module"/> used before its declaration's turn (spec 2.2, 4):
+    /// a constant is declared now, in its own module. So is a global used while a constant or a global's
+    /// type is worked out (<c>len(t)</c>); it is returned as soon as its type is known. Null if there is
+    /// no such declaration.
+    /// </summary>
+    private Symbol? Demand(Module module, string name)
+    {
+        // A constant of the main file that a parameter value cannot use was tried already (ParameterScope).
+        if (module == _parameterScope && _unusableConstants.ContainsKey(name)) return null;
+        if (module.Syntax.Consts.FirstOrDefault(c => c.Name == name) is { } c)
+        {
+            InModule(module, () => DeclareConst(c));
+            return module.Scope.GetValueOrDefault(name);
+        }
+        // Not in the copy of the main file that parameter values are checked in: its globals are not the program's.
+        if (_declaring.Count > 0 && module != _parameterScope && module.Syntax.Globals.FirstOrDefault(g => g.Name == name) is { } g)
+        {
+            if (g.Symbol is { } partly) return partly;
+            InModule(module, () => DeclareGlobal(g));
+            return g.Symbol;
+        }
+        return null;
+    }
+
+    /// <summary>Runs <paramref name="work"/> as a top-level declaration of <paramref name="module"/>, then restores the state.</summary>
+    private void InModule(Module module, Action work)
+    {
+        var (saved, function, longBytes, listLength) = (_module, _function, _allowLongBytes, _listLength);
+        var scopes = _scopes.ToList();
+        _scopes.Clear();
+        (_module, _function, _allowLongBytes, _listLength) = (module, null, false, null);
+        try { work(); }
+        finally
+        {
+            (_module, _function, _allowLongBytes, _listLength) = (saved, function, longBytes, listLength);
+            _scopes.Clear();
+            _scopes.AddRange(scopes);
+        }
+    }
+
+    /// <summary>Marks a constant or global as being declared; a second start is a value that depends on itself.</summary>
+    private void StartDeclaring(string name, Node decl)
+    {
+        int first = _declaring.FindIndex(d => d.Decl == decl);
+        if (first >= 0)
+        {
+            var chain = _declaring.Skip(first).Select(d => d.Module.Qualify(d.Name)).Append(_module.Qualify(name));
+            throw new CompileError(decl.Pos,
+                $"'{name}' depends on itself: {string.Join(" -> ", chain)}. Give one of them a value that does not use the others");
+        }
+        _declaring.Add((_module, name, decl));
     }
 
     /// <summary>The error for a name that is not declared. A module name on its own gets a hint.</summary>
@@ -368,6 +455,7 @@ public sealed partial class Checker
             Name = "", Path = main.Path, Directory = main.Directory, Source = main.Source,
             Syntax = Parser.Parse(main.Source, main.Path),
         };
+        _parameterScope = scope;
         var saved = _module;
         _module = scope;
         // Structs first, so that sizeof works. One that needs an import is left out.
@@ -419,6 +507,15 @@ public sealed partial class Checker
     }
 
     private void DeclareConst(ConstDecl decl)
+    {
+        if (_constsDone.Contains(decl)) return;
+        StartDeclaring(decl.Name, decl);
+        try { DeclareConstValue(decl); }
+        finally { _declaring.RemoveAt(_declaring.Count - 1); }
+        _constsDone.Add(decl);
+    }
+
+    private void DeclareConstValue(ConstDecl decl)
     {
         if (decl.Value is StructLiteralExpr lit)
             throw new CompileError(lit.Pos, $"A constant cannot be a struct. Declare it as data: 'data {decl.Name} = {lit.StructName} {{ ... }}'");
@@ -579,14 +676,27 @@ public sealed partial class Checker
     /// <summary>Set while a global's type is resolved: the length of its list initial value, for <c>[T; _]</c> (spec 4).</summary>
     private int? _listLength;
     /// <summary>Globals of the file being declared whose initial values hold addresses (spec 4), worked out after its last global.</summary>
-    private readonly List<(VarDecl Decl, VariableSymbol Variable)> _addressInits = [];
+    private readonly List<(VarDecl Decl, VariableSymbol Variable, Module Module)> _addressInits = [];
 
     private void DeclareGlobal(VarDecl decl)
+    {
+        StartDeclaring(decl.Name, decl);
+        try { DeclareGlobalValue(decl); }
+        finally { _declaring.RemoveAt(_declaring.Count - 1); }
+    }
+
+    private void DeclareGlobalValue(VarDecl decl)
     {
         // A string or include_bytes() gives a [u8; N] array, which may be longer than 256 bytes.
         var bytes = decl.Init is null ? null : ByteSource(decl.Init);
         _allowLongBytes = !decl.IsLinear && !decl.IsIndexed;
-        _listLength = decl is { TypeSyntax: ArrayTypeSyntax { Length: null }, Init: ArrayLiteralExpr list } ? list.Elements.Count : null;
+        // [T; _] takes its length from a list or a string (spec 4).
+        _listLength = decl is { TypeSyntax: ArrayTypeSyntax { Length: null } } ? decl.Init switch
+        {
+            ArrayLiteralExpr list => list.Elements.Count,
+            StringExpr => bytes!.Length,
+            _ => null,
+        } : null;
         TernType type;
         try { type = bytes is not null && decl.TypeSyntax is null ? TernType.ArrayOf(TernType.U8, bytes.Length) : DeclaredType(decl); }
         finally { _allowLongBytes = false; _listLength = null; }
@@ -621,7 +731,7 @@ public sealed partial class Checker
                     throw new CompileError(decl.Init.Pos, $"Expected {type.Length} bytes, found {bytes.Length}");
                 v.InitialBytes = bytes;
             }
-            else if (UsesAddr(decl.Init)) _addressInits.Add((decl, v));
+            else if (UsesAddr(decl.Init)) _addressInits.Add((decl, v, _module));
             else
                 v.InitialBytes = ConstantBytes(decl.Init, type, v);
         }
@@ -729,6 +839,9 @@ public sealed partial class Checker
             case PlacementKind.Address:
                 if (!allowAddress) throw new CompileError(decl.Pos, "Only global variables can have a fixed address");
                 var addr = decl.Placement.Address!;
+                // Only a region name needs the memory block; a constant address does not.
+                if (addr is NameExpr placed && _module.Syntax.Memory?.Lines.Any(l => l.Kind == "region" && l.Name == placed.Name) == true)
+                    EnsureMemoryLayout();
                 if (addr is NameExpr region && _layout.Regions.ContainsKey(region.Name) && Lookup(region.Name) is null)
                 {
                     v.Region = region.Name;
@@ -981,7 +1094,7 @@ public sealed partial class Checker
                 if (a.Length is null)
                 {
                     len = _listLength ?? throw new CompileError(a.Pos,
-                        "The length '_' is taken from a list initial value, so it works only on a global var or data with a list, as in 'data t: [u8; _] = [1, 2, 3]'. Write the length here");
+                        "The length '_' is taken from a list or string initial value, so it works only on a global var or data with one, as in 'data t: [u8; _] = [1, 2, 3]'. Write the length here");
                     _listLength = null;
                 }
                 else
@@ -1009,14 +1122,9 @@ public sealed partial class Checker
         _scopes.Add(new Dictionary<string, Symbol>());
         foreach (var p in _function.Parameters) Declare(p);
 
-        // The var lines of an inline asm fn: locals that live in each caller's frame (spec 6.2).
+        // The var lines of an asm fn: locals in its frame, or in each caller's for an inline asm fn (spec 9).
         if (decl.IsAsm && ((AsmStmt)decl.Body.Statements[0]).Locals is { Count: > 0 } asmLocals)
-        {
-            if (!decl.IsInline)
-                throw new CompileError(asmLocals[0].Pos,
-                    $"An asm fn has no variables of its own. Use 'inline asm fn', whose 'var' lines live in each caller's frame, or a private global variable");
             foreach (var local in asmLocals) CheckLocal(local, inAsmFn: true);
-        }
 
         CheckBlock(decl.Body, newScope: false);
 
@@ -1110,7 +1218,7 @@ public sealed partial class Checker
         ApplyPlacement(decl, v, allowAddress: false);
 
         if (inAsmFn && decl.Init is not null)
-            throw new CompileError(decl.Init.Pos, $"'{decl.Name}' in an inline asm fn has no initial value: the assembly sets it");
+            throw new CompileError(decl.Init.Pos, $"'{decl.Name}' in an asm fn has no initial value: the assembly sets it. Remove the value and store it in the assembly");
         if (decl.Init is null)
         {
             if (!type.IsArray && !type.IsStruct && !inAsmFn)

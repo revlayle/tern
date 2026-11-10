@@ -546,6 +546,32 @@ public class C64LibraryTests
         Assert.Contains("jsr c64.set_kernal_irq", result.Listing);
         Assert.Contains("jsr io.drive_status", result.Listing);
         Assert.Contains("jmp (c64.kernal_handler)", result.Listing);
+        Assert.Contains("jsr c64.cia_irqs_off", result.Listing);
+    }
+
+    [Fact]
+    public void Cia_irqs_off_turns_off_both_cias_and_clears_what_is_pending()
+    {
+        // M20 follow-up 3, spec 10.1: $7F into each icr, then a read of each (in the emulator, plain RAM).
+        var r = Run.Program("""
+            import c64
+            fn main() {
+                c64.cia1.icr = $81
+                c64.cia2.icr = $82
+                c64.interrupts_on()
+                c64.cia_irqs_off()
+            }
+            """);
+        Assert.Equal(0x7F, r.Ram.Bytes[0xDC0D]);
+        Assert.Equal(0x7F, r.Ram.Bytes[0xDD0D]);
+        Assert.False(r.Cpu.I);   // leaves the I flag alone
+        var lines = r.Result.Listing.Split('\n');
+        int start = Array.FindIndex(lines, l => l.StartsWith("c64.cia_irqs_off:"));
+        var body = string.Join("\n", lines.Skip(start).TakeWhile(l => !l.Contains("rts")));
+        Assert.Contains("sta c64.cia1+13 ", body);
+        Assert.Contains("sta c64.cia2+13 ", body);
+        Assert.Contains("lda c64.cia1+13 ", body);
+        Assert.Contains("lda c64.cia2+13 ", body);
     }
 
     [Fact]

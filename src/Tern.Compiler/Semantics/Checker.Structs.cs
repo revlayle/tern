@@ -20,13 +20,19 @@ public sealed partial class Checker
     {
         if (decl.Name is "u8" or "i8" or "u16" or "i16" or "bool" or "ptr")
             throw new CompileError(decl.Pos, $"'{decl.Name}' is a built-in type; choose another name");
-        Declare(new StructSymbol(_module.Qualify(decl.Name), decl.Pos, decl), decl.Name);
+        Declare(new StructSymbol(_module.Qualify(decl.Name), decl.Pos, decl) { Module = _module }, decl.Name);
     }
 
     /// <summary>Works out the field offsets and the size, once. Nested structs are laid out first.</summary>
     private void LayOut(StructSymbol s)
     {
         if (s.LayoutState == 2) return;
+        // Its field types and offsets are names of its own module, also when another one uses it first.
+        if (s.Module is { } home && home != _module && s.LayoutState == 0)
+        {
+            InModule(home, () => LayOut(s));
+            return;
+        }
         if (s.LayoutState == 1)
             throw new CompileError(s.Pos, $"Struct '{s.Name}' contains itself, so its size would be endless. Use a pointer: ptr {s.Name}");
         s.LayoutState = 1;

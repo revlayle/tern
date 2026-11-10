@@ -322,7 +322,7 @@ public class MemoryTests
             fn main() { dst[i] = src[i] }
             """);
         var main = r.Listing[r.Listing.IndexOf("\nmain:", StringComparison.Ordinal)..];
-        return main.Split('\n').Count(l => l.StartsWith('$') && l.Contains("ldy i "));
+        return main.Split('\n').Count(l => l.StartsWith('$') && (l.Contains("ldy i ") || l.Contains("lda i ")));
     }
 
     [Theory]

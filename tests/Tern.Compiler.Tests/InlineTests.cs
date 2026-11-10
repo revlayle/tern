@@ -239,9 +239,8 @@ public class InlineTests
     [InlineData("inline fn f() @ $1000\nfn main() { }", "An inline function needs a body")]
     [InlineData("inline fn f() { }\nfn main() { asm {\n jsr f\n } }", "'f' is inline: it is copied into each Tern caller and has no address of its own")]
     [InlineData("inline fn f() { g() }\ninline fn g() { f() }\nfn main() { f() }", "Recursion is not allowed: f -> g -> f")]
-    [InlineData("inline asm fn f() {\n var t: u8\n lda t\n var u: u8\n}\nfn main() { f() }", "'var' lines go at the start of an inline asm fn, before the first instruction")]
-    [InlineData("inline asm fn f() {\n var t: u8 = 3\n lda t\n}\nfn main() { f() }", "'t' in an inline asm fn has no initial value: the assembly sets it")]
-    [InlineData("asm fn f() {\n var t: u8\n lda t\n}\nfn main() { f() }", "An asm fn has no variables of its own")]
+    [InlineData("inline asm fn f() {\n var t: u8\n lda t\n var u: u8\n}\nfn main() { f() }", "'var' lines go at the start of an asm fn, before the first instruction. Move this line up")]
+    [InlineData("inline asm fn f() {\n var t: u8 = 3\n lda t\n}\nfn main() { f() }", "'t' in an asm fn has no initial value: the assembly sets it. Remove the value and store it in the assembly")]
     [InlineData("fn main() {\n asm {\n var t: u8\n lda t\n }\n}", "'var' is not allowed inside an asm block")]
     public void Reports_errors(string source, string expected)
     {

@@ -366,12 +366,37 @@ public class DataTests
         Assert.Equal(299 & 0xFF, r.U8("at"));
     }
 
+    [Fact]
+    public void Underscore_length_from_a_string()
+    {
+        // Gap 24: the port's galaxy_text, changed at run time, so a var.
+        var r = Run.Program("""
+            var galaxy_text: [u8; _] = screen"GALAXY 00\0"
+            data plain: [u8; _] = "AB"
+            var written: [u8; 3] = "XYZ"
+            var n: u8
+            var m: u8
+            fn main() {
+                n = len(galaxy_text)
+                m = len(plain)
+                galaxy_text[7] = galaxy_text[7] + 1
+            }
+            """);
+        Assert.Equal(10, r.U8("n"));
+        Assert.Equal(2, r.U8("m"));
+        // Screen codes: G = 7, A = 1, space = 32, digits 48..57, \0 = 0; the '0' at 7 became '1'.
+        Assert.Equal(new byte[] { 7, 1, 12, 1, 24, 25, 32, 49, 48, 0 }, Enumerable.Range(0, 10).Select(i => r.U8("galaxy_text", i)).ToArray());
+        Assert.Equal((byte)'Y', r.U8("written", 1));
+    }
+
     [Theory]
-    [InlineData("data d: [u8; _] = \"AB\"\nfn main() { }", "The length '_' is taken from a list initial value, so it works only on a global var or data with a list, as in 'data t: [u8; _] = [1, 2, 3]'. Write the length here")]
-    [InlineData("var d: [u8; _]\nfn main() { }", "The length '_' is taken from a list initial value")]
-    [InlineData("fn main() { var d: [u8; _] }", "The length '_' is taken from a list initial value")]
-    [InlineData("fn f(p: ptr [u8; _]) { }\nfn main() { }", "The length '_' is taken from a list initial value")]
-    [InlineData("struct S { a: [u8; _] }\nvar s: S\nfn main() { }", "The length '_' is taken from a list initial value")]
+    [InlineData("data d: [u8; _] = 5\nfn main() { }", "The length '_' is taken from a list or string initial value, so it works only on a global var or data with one, as in 'data t: [u8; _] = [1, 2, 3]'. Write the length here")]
+    [InlineData("var d: [u8; _]\nfn main() { }", "The length '_' is taken from a list or string initial value")]
+    [InlineData("fn main() { var d: [u8; _] }", "The length '_' is taken from a list or string initial value")]
+    [InlineData("fn f(p: ptr [u8; _]) { }\nfn main() { }", "The length '_' is taken from a list or string initial value")]
+    [InlineData("struct S { a: [u8; _] }\nvar s: S\nfn main() { }", "The length '_' is taken from a list or string initial value")]
+    [InlineData("var t: [u8; 9] = screen\"GALAXY 00\\0\"\nfn main() { }", "Expected 9 bytes, found 10")]
+    [InlineData("var t: [u16; _] = \"AB\"\nfn main() { }", "This value is a [u8; 2] array, but 't' is [u16; 2]")]
     [InlineData("data d: [u8; _] = []\nfn main() { }", "Array length must be 1 to 256, not 0")]
     [InlineData("var d: [u8; _] = [1, 2, 300]\nfn main() { }", "300 does not fit in u8")]
     [InlineData("data d = [1, 2, 3]\nfn main() { }", "Data arrays need a written type, e.g. data d: [u8; _] = [...], where '_' takes the length from the list")]

@@ -10,7 +10,8 @@ public class VolatileTests
 {
     /// <summary>
     /// <c>dst[i] = src[i]</c> loads Y once when <c>i</c> is ordinary memory, and reads <c>i</c> twice
-    /// when it is volatile: the number of <c>ldy i</c> shows which.
+    /// when it is volatile: the number of reads of <c>i</c> shows which. A volatile <c>i</c> is read
+    /// for the destination first (spec 5), into a temporary.
     /// </summary>
     private static int IndexReads(string declaration, string extra = "")
     {
@@ -22,7 +23,7 @@ public class VolatileTests
             fn main() { dst[i] = src[i] }
             """);
         var main = r.Listing[r.Listing.IndexOf("\nmain:", StringComparison.Ordinal)..];
-        return Count(main, "ldy i ");
+        return Count(main, "ldy i ") + Count(main, "lda i ");
     }
 
     private static int Count(string listing, string instruction) =>
@@ -58,7 +59,7 @@ public class VolatileTests
             var dst: ptr u8 @ zp
             fn main() { dst[s.i] = src[s.i] }
             """);
-        Assert.Equal(2, Count(r.Listing, "ldy s+1 "));
+        Assert.Equal(2, Count(r.Listing, "ldy s+1 ") + Count(r.Listing, "lda s+1 "));
     }
 
     [Fact]
@@ -80,7 +81,7 @@ public class VolatileTests
             fn main() { }
             """);
         var h1 = r.Listing[r.Listing.IndexOf("\nh1:", StringComparison.Ordinal)..r.Listing.IndexOf("\nh2:", StringComparison.Ordinal)];
-        Assert.Equal(2, Count(h1, "ldy i "));
+        Assert.Equal(2, Count(h1, "ldy i ") + Count(h1, "lda i "));
     }
 
     [Fact]

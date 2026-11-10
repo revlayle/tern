@@ -169,19 +169,19 @@ fn main() {
 example.tern:2:5: error: Local variable 'count' needs an initial value
 ```
 
-`step` is a keyword (of `for ... step`), and so are words like `data`, `match`, `using`, `indexed`
-in some places:
+Words like `data`, `match`, `using` and `in` are keywords, and `indexed` is one in some places
+(`step` is a keyword only right after a `for` range, so it can be a name):
 
 ```tern error
-fn step() { }
+fn match() { }
 
 fn main() {
-    step()
+    match()
 }
 ```
 
 ```text
-example.tern:1:4: error: Expected function name, found 'step', which is a keyword. Use another name
+example.tern:1:4: error: Expected function name, found 'match', which is a keyword. Use another name
 ```
 
 A name from a module without the module name, or without the import:

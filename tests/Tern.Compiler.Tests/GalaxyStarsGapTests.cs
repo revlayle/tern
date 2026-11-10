@@ -85,6 +85,187 @@ public class GalaxyStarsGapTests
         finally { dir.Delete(recursive: true); }
     }
 
+    // M20 follow-up 3, "done when": the workarounds for gaps 11, 12, 15, 17, 18, 19 and 24 in their
+    // plain form, in the shape of the port's video, stars and explode modules (an import ring).
+
+    private const string Video = """
+        import stars
+        const MC: u8 = 8
+        const MAP_W: u8 = 20
+        const MAP_H: u8 = 12
+        const SCREEN = $C000
+        const SPECK_KINDS: u8 = 5
+        data star_char: [u8; _] = [70, 74, 78, 82, 86, 90, 94, 98]
+        const STAR_KINDS: u8 = len(star_char)           // gap 11: len() of data in a constant
+        var specks: [u8; 16]
+        data tile_row_addr: [ptr u8; _] = [SCREEN + 40, SCREEN + 120]
+
+        // Gap 15: the work variables are the asm fn's own, and 'scr' is also a local of fill.
+        asm fn draw_tile(col: u8 using A, row: u8 using Y) {
+            var scr: ptr u8
+            var co: u8
+            asl
+            clc
+            adc tile_row_addr,y
+            sta scr
+            lda tile_row_addr+2,y
+            adc #0
+            sta scr+1
+            lda stars.shown
+            sta co
+            ldy #0
+            sta (scr),y
+        }
+        fn fill(n: u8) {
+            var scr: ptr u8 = SCREEN
+            scr[n] = n
+        }
+        """;
+
+    private const string Stars = """
+        import video
+        import explode
+        var shown: u8 = explode.COLOR
+        var rnd_x: u8
+        var rnd_c: u8 = $C2
+        var rnd_a: u8 = $11
+        var rnd_b: u8 = $37
+
+        asm fn rnd() -> u8 {
+            inc rnd_x
+            clc
+            lda rnd_x
+            eor rnd_c
+            eor rnd_a
+            sta rnd_a
+            adc rnd_b
+            sta rnd_b
+            lsr
+            eor rnd_a
+            adc rnd_c
+            sta rnd_c
+        }
+        fn rand_below(n: u8) -> u8 {
+            var mask: u8 = 255
+            if n <= 2 { mask = 1 } else if n <= 4 { mask = 3 } else if n <= 8 { mask = 7 }
+            while true {
+                var r: u8 = rnd() & mask
+                if r < n { return r }
+            }
+        }
+        fn place_specks() {
+            for i in 0..len(video.specks) {
+                // Gap 12: two calls in one expression, the left one first, as in Prog8.
+                video.specks[i] = (rand_below(video.SPECK_KINDS) + 1) << 2 | rand_below(4)
+            }
+        }
+        """;
+
+    private const string Explode = """
+        import video
+        const COLOR: u8 = 2 | video.MC                          // gap 17: across the import ring
+        var cover: [u8; video.MAP_W * video.MAP_H] @ $C600
+        var frame: u8
+        fn step(s: u8) { frame += s }                           // gap 18: 'step' as a name
+        """;
+
+    private const string RingMain = """
+        import video
+        import stars
+        import explode
+
+        const BOX: u8 = 12
+        var galaxy_text: [u8; _] = screen"GALAXY 00\0"         // gap 24
+        var px: u8 = 100
+        var py: u8 = 50
+        var hx: [u8; 2] = [95, 200]
+        var hy: [u8; 2] = [45, 50]
+        var hits: u8
+        var kinds: u8
+        var total: u8
+        var cover_size: u8
+
+        fn check_player() {
+            for i in 0..2 {
+                // Gap 19: the condition continues after '&&' at the end of a line.
+                if px < hx[i] + BOX && hx[i] < px + BOX &&
+                        py < hy[i] + BOX && hy[i] < py + BOX {
+                    hits += 1
+                }
+            }
+        }
+
+        fn main() {
+            stars.place_specks()
+            video.draw_tile(3, 1)
+            video.fill(5)
+            explode.step(2)
+            explode.step(3)
+            var step: u8 = 4
+            total = step
+            check_player()
+            kinds = video.STAR_KINDS
+            cover_size = len(explode.cover)
+            galaxy_text[8] = galaxy_text[8] + 1
+        }
+        """;
+
+    /// <summary>The port's random generator (Prog8's x-abc) and rand_below, for the specks.</summary>
+    private static byte[] Specks(int count)
+    {
+        int x = 0, c = 0xC2, a = 0x11, b = 0x37;
+        int Rnd()
+        {
+            x = (x + 1) & 0xFF;
+            a = x ^ c ^ a;
+            b = (a + b) & 0xFF;
+            int carry = b & 1;
+            c = (((b >> 1) ^ a) + c + carry) & 0xFF;
+            return c;
+        }
+        int RandBelow(int n)
+        {
+            int mask = n <= 2 ? 1 : n <= 4 ? 3 : n <= 8 ? 7 : 255;
+            while (true) { int r = Rnd() & mask; if (r < n) return r; }
+        }
+        var result = new byte[count];
+        for (int i = 0; i < count; i++)
+        {
+            int kind = RandBelow(5) + 1;
+            result[i] = (byte)((kind << 2) | RandBelow(4));
+        }
+        return result;
+    }
+
+    [Fact]
+    public void The_workarounds_for_gaps_11_to_24_are_written_plainly()
+    {
+        var dir = Directory.CreateTempSubdirectory("tern");
+        try
+        {
+            File.WriteAllText(Path.Combine(dir.FullName, "video.tern"), Video);
+            File.WriteAllText(Path.Combine(dir.FullName, "stars.tern"), Stars);
+            File.WriteAllText(Path.Combine(dir.FullName, "explode.tern"), Explode);
+            var r = Run.Program(RingMain, sourcePath: Path.Combine(dir.FullName, "main.tern"));
+            Assert.Equal(Specks(16), r.Ram.Bytes.AsSpan(r.Address("video.specks"), 16).ToArray());
+            Assert.Equal(10, r.Ram.Bytes[0xC000 + 120 + 6]);          // draw_tile(3, 1) wrote shown = COLOR
+            Assert.Equal(5, r.Ram.Bytes[0xC005]);
+            Assert.Equal(5, r.U8("explode.frame"));
+            Assert.Equal(4, r.U8("total"));
+            Assert.Equal(1, r.U8("hits"));
+            Assert.Equal(8, r.U8("kinds"));
+            Assert.Equal(240, r.U8("cover_size"));
+            Assert.Equal(10, r.Result.Variables["galaxy_text"].Size);
+            Assert.Equal(49, r.U8("galaxy_text", 8));                   // screen code '0' + 1
+
+            // Gap 23: importing the main file is an error that says what to do.
+            File.WriteAllText(Path.Combine(dir.FullName, "demo.tern"), "import main\nfn steer() { main.check_player() }");
+            var e = Assert.Throws<Tern.Compiler.Syntax.CompileError>(() => TernCompiler.Compile("import demo\n" + RingMain, null, Path.Combine(dir.FullName, "main.tern")));
+            Assert.Equal("'main' is the program's main file, which cannot be imported. Move what demo needs from it into a module that both import", e.Description);
+        }
+        finally { dir.Delete(recursive: true); }
+    }
+
     [Fact]
     public void Gap_1_the_frame_interrupt_with_the_kernal_left_in()
     {

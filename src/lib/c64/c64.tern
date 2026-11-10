@@ -165,6 +165,18 @@ asm fn kernal_off() {
 
 private interrupt fn ignore_nmi() { }
 
+// Turn off the interrupts of both CIAs ($7F into each icr) and read each icr, which clears any that
+// are pending: before set_kernal_irq with a raster interrupt, since the KERNAL's CIA 1 timer interrupt
+// would reach the handler too. The KERNAL's timer interrupt stops. Leaves the I flag alone.
+asm fn cia_irqs_off() {
+    lda #$7F
+    sta cia1.icr
+    sta cia2.icr
+    lda cia1.icr
+    lda cia2.icr
+    rts
+}
+
 // Install an IRQ handler: c64.set_irq(addr(handler)). The handler must be an 'interrupt fn' (it
 // ends with rti); addr() is a plain u16, so this is not checked. Needs kernal_off first.
 // Interrupts are held off while the vector changes.
@@ -183,7 +195,7 @@ asm fn set_irq(handler: u16 using XY) {
 // so the handler runs as if called through $FFFE (about 20 cycles more than the KERNAL entry alone).
 // The KERNAL's own IRQ work (keyboard scan, clock) no longer runs, so getin() sees no new keys. The
 // handler acknowledges its interrupt source; the KERNAL's CIA 1 timer interrupt is still on and
-// reaches it too, so turn it off for a raster interrupt alone: c64.cia1.icr = $7F.
+// reaches it too, so turn it off for a raster interrupt alone: c64.cia_irqs_off().
 // Interrupts are held off while the vector changes.
 asm fn set_kernal_irq(handler: u16 using XY) {
     php
