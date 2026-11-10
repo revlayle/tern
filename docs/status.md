@@ -4,11 +4,24 @@ Owned by the coding session. Updated at the end of every coding session.
 
 ## Current
 
-- **Milestone:** M20 follow-up 2 (roadmap). All six items are done, and the "done when" test passes. M20 follow-up was merged into `main` (`909489f`).
-- **Branch:** `m20-followup2`, with `main` merged in (all three reviews). 2393 compiler tests pass plus 36 CPU tests. No benchmark changed (1254 / 350780); `SkillTests` pass. All examples and the Galaxy Stars port compile.
-- **Next step:** `/merge m20-followup2`. The third review says ready to merge; its suggestions 3 and 4 are done since (`/review` them first if wanted). No questions are open.
+- **Milestone:** M20 follow-up 3 (roadmap). All ten items are done, and the "done when" test passes. M20 follow-up 2 was merged into `main` (`799a0e3`).
+- **Branch:** `m20-followup3`, from `main` at `3510dbe`. 2475 compiler tests pass plus 36 CPU tests. No benchmark changed (1254 / 350780); `SkillTests` pass. All examples and the Galaxy Stars port (`main`, `check_player`, `check_stars`) compile unchanged.
+- **Next step:** `/review` of `m20-followup3`. Question 88 is open (small; nothing waits on it).
 
 ## Done
+
+- **M20 follow-up 3** (2026-11-09, decisions "Galaxy Stars port, remaining gaps"). One commit per item.
+  - *Evaluation order* (`ff61757`, spec 5, gap 12): `CodeGen.InSourceOrder` computes the first of two parts that both call a function or read volatile memory (`HasEffect`) into a temporary first: the two sides of a binary operator (`GenBinaryA`, `Gen16`, `GenCompare`, `Assign`), an index before the assigned value. `GenCall` computes an argument with an effect early when a later argument has one too. A commutative 16-bit operator with a simple left operand computes the right side straight into the destination, so `fib16`'s `mul(...) + mul(...)` (two calls in one statement, which the roadmap thought no benchmark had) costs the same. `dst[i] = src[i]` with a volatile `i` reads `i` for the destination first, into a temporary (4 bytes more); the volatile tests count every read. `EvaluationOrderTests` (31 of its 47 cases fail without the change).
+  - *Constants on demand* (`5e02c8a`, spec 2.2, 4, gaps 11 and 17): `Checker.Lookup` declares a top-level constant that is not declared yet when a name needs it (`Demand`, in its own module through `InModule`, which saves and restores the checker's state); while a constant or a global's type is worked out, a global is declared the same way, so `len(t)` works in a constant. Struct names and module parameters of all files are declared before any constant; a struct is laid out in its own module. A cycle is "'X' depends on itself: a.X -> b.Y -> a.X. Give one of them a value that does not use the others" (`StartDeclaring`, also through a global's length). The copy of the main file for parameter values declares no globals. The "import each other" error remains for what is not a constant, such as `addr(a.fa)` in a global of b. `ConstantOrderTests`; `ModuleTests`' cycle test.
+  - *`var` lines in a plain `asm fn`* (`fc47695`, spec 9, gap 15): the locals are in its frame (`AsmFnLocalsTests`: frame sharing, the same name in two functions, a `(p),y` pointer in zero page, the errors). The messages say "an asm fn" and give a fix.
+  - *`[u8; _]` from a string* (`f724899`, spec 4, gap 24), encoding prefix and `\0` included; the `_` error says "a list or string initial value". `DataTests`.
+  - *`step`* (`8cc8c25`, spec 13, gap 18): no longer in the lexer's keywords; `ParseFor` takes the name `step` after the range. The keyword-name example is `fn match()` (`ErrorTests`, `errors.md`). `StepNameTests`.
+  - *A line starting with a binary operator* (`8123417`, spec 2, gap 19): `Parser.LeadingOperator` ("A line cannot start with '&&': ... Move '&&' to the end of the line before, ..."), in a statement, a header and at the top level; not for `+` / `-` (values) nor `*` (its C-habit error). `ErrorTests`.
+  - *Importing the main file* (`337d0c2`, spec 2.2, gap 23): `ModuleLoader` reports it at the import, before looking for the file: "'main' is the program's main file, which cannot be imported. Move what demo needs from it into a module that both import". `ModuleTests`.
+  - *`c64.cia_irqs_off()`* (`130334d`, spec 10.1): a plain `asm fn` (`lda #$7F`, both `sta icr`, both `lda icr`). `examples/kernal_irq.tern` and `language.md` use it. Checked in VICE from a disk image: blue border above line 150, red below, "00, OK,00,00" printed. `LibraryTests`.
+  - *Spec 11 rows* (`fa23167`, gaps 13 and 14): `p = q + e` with `e` an unsigned byte that needs code and `q` used in place (a variable or an element) is `e / clc / adc q / sta p / lda q+1 / adc #0 / sta p+1` (`CodeGen.ByteAddend`); the port's `tile_row_addr[row] + (col << 1)` is 18 bytes before the `rts`. A signed `s < 0` / `s >= 0` is `lda s` (`s+1` for an `i16`) and `bmi` / `bpl` (`GenCompare`). `SignAndByteAddTests`. No benchmark and no skill output moved.
+  - *Skill* (`f6070d6`): `language.md` has the evaluation-order rule and its exception near the operators, line continuation in section 1, and `var` lines in `asm fn` in section 10.
+  - *Done when* (`a1529e1`): `GalaxyStarsGapTests.The_workarounds_for_gaps_11_to_24_are_written_plainly` (video, stars and explode as an import ring in the port's shape; the specks against a C# model of the port's generator).
 
 - **M20 follow-up 2, third review suggestions** (2026-11-09, `docs/reviews/m20-followup2.md`, third review).
   - Suggestion 3: the assembler checks the address of an asm-block operand `name + offset` once the program is placed: "The address B+65000 is $10402, outside memory. Use a smaller offset" (`Assembler`, the encoding pass; labels and variables, not branches, which have their own range check, and not `#(...).lo` / `.hi`, which take a byte of the sum). The checker's offset check stays as a guard for the `int` offset, now with "Use a smaller offset". `AsmTests.Reports_errors` and `A_byte_of_an_address_past_memory_is_allowed`.
@@ -454,7 +467,8 @@ Not bugs; things to improve, mostly in M7 (optimizer).
 - Loop counters get a register automatically for innermost loops and (M18 F13) for a loop with one level of `for` loops inside; deeper nesting, a `while` inside, or a call keeps the outer counter in memory. A variable other than the counter is held in a register (F7/F11) only in a loop with no loop, call, asm or `return` inside, and only a `u8`.
 - The optimizer forgets everything at labels reached from a jump table or by address and at every `jsr` or `brk` (an asm instruction only forgets what it changes); it does not track values across calls to functions it could see into.
 - The register analysis tracks only equality with immediates and memory bytes; it does not fold constants (`lda #3` / `clc` / `adc #1` stays).
-- Evaluation order: in `a + b` where `b` needs a temporary, `b` is evaluated before `a`. Matters only if both call functions with side effects.
+>>>
+
 - Only one zero-page range per platform is used (C64: `$02-$8F`; `$FB-$FE` is unused unless a variable is placed there with `@`).
 - When the value of `p[i] = v` changes Y (it reads through a pointer with another index, or calls a function), A is still saved to a temporary while Y is loaded.
 - `VariableSymbol.AddressTaken` is set by `addr()` and by `#name.lo`/`#name.hi` in assembly. The M7 optimizer must not cache such variables in registers across pointer writes or asm blocks.
@@ -462,13 +476,13 @@ Not bugs; things to improve, mostly in M7 (optimizer).
 - Inside a `for ... using X` loop, only routines that declare `keeps X` may be called. An `asm fn` that never touches X is still rejected; `AsmEffects` would make allowing it easy (spec 6.1: the compiler may use each function's actual register use).
 - `mem.fill` reloads `value` on every byte (`lda value` / `sta (dst),y`): 13 cycles per byte instead of 11. Loop-invariant loads are for the optimizer.
 - A `for` bound such as `count.hi` is used in place only when `count` is a local or parameter the body does not change; a global's byte is copied to a temporary before the loop.
-- Evaluation order (spec 5, review M18 suggestion 6, pre-existing): in a 16-bit assignment to an element with a simple index (`k[vi] = k[j] + w`), the index is loaded after the value is computed, although spec 5 says the index is evaluated first. Observable only with a volatile index or value.
+- Evaluation order (spec 5): parts with no call and no volatile read may still be computed in any order, e.g. an index after the value (`k[i] = k[j] + w`); that cannot be seen. A compound assignment to an element whose index calls a function (`a[f()] += 1`) is still "not supported".
 - Layout changes move code across page boundaries: M18 part 1 made `math.mul16`'s `beq` cross a page. F12 places zeroed and noinit global arrays in RAM; arrays with initial values (in the file, such as `interp`'s `code`), local arrays in frames, and branches inside routines are not placed.
-- Import cycles: declarations are processed module by module, so in a cycle (a imports b, b imports a) a constant of the later module cannot be used in a declaration of the earlier one. The error says so and suggests moving the constant. Function bodies are not affected.
+- Import cycles: constants (and globals, for `len()` in a constant) are declared when first needed, in any module, but other declarations are still processed module by module: in a cycle, a declaration of the earlier module cannot name a function of the later one (`var f: u16 = addr(a.fa)`). The error says so and suggests moving it. Function bodies are not affected.
 - A pointer that is a field of a struct variable (`player.next.hp`) is always copied to a zero-page temporary, even when the struct is in zero page and could be used as `(player+3),y` directly.
 - A field used as a `for` bound (`for i in 0..s.count`) is copied to a temporary, like any bound that is not a plain local or parameter.
 - Structs are not put in zero page by usage (step 3 of 8.2), only with `@ zp`, like arrays.
-- Struct field offsets use a constant expression; a constant declared later in the same file than the struct cannot be used, since structs are laid out right after the file's constants. Globals cannot be used at all (an offset must be a constant anyway).
+- Struct field offsets use a constant expression; since M20 follow-up 3 a constant declared below the struct works too (question 88). Globals cannot be used at all (an offset must be a constant anyway).
 - A struct with `@` gaps in an array of structs costs one table (n bytes) per gap byte.
 - A `match` jump table always checks the bounds (`cmp #span` / `bcs`), even when the value cannot be out of range (e.g. `band` in the raster example, which is always 0-7).
 - A `match` on a value already in a register (a `using X` loop variable) copies it to A first (`txa`).
@@ -484,7 +498,7 @@ Not bugs; things to improve, mostly in M7 (optimizer).
 
 ## Questions for the spec session
 
-None open.
+- **88** (M20 follow-up 3): spec 4 says a struct field's `@` offset "uses only constants declared above the struct". With constants resolved on demand, `struct S { a: u8, b: u8 @ OFF }` with `const OFF = 4` below it compiles (provisional: allowed, since the rule's reason, the order of declaration, is gone). Drop the exception from the spec, or should the compiler enforce it?
 
 Questions 86 and 87 were settled on 2026-11-09 and are built. Questions 79-85 were settled on 2026-11-09 and are built. Questions 76-78 were settled on 2026-11-08 (decisions.md), as built.
 
