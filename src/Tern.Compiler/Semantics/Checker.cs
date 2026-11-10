@@ -308,6 +308,9 @@ public sealed partial class Checker
                 throw new CompileError(r.Pos,
                     $"'{api.Name}.{name}' at ${r.FixedAddress:X4} overlaps the entry before it: each entry of the jump table is a 3-byte jmp, from ${start:X4}. Move it to ${next:X4} or later");
             next = r.FixedAddress!.Value + 3;
+            if (next - 1 > _layout.Program[0].Last)
+                throw new CompileError(r.Pos,
+                    $"'{api.Name}.{name}' at ${r.FixedAddress:X4} is outside the binary's first program area {_layout.Program[0]}, where the jump table is. Move it in {api.Name} to the table, after the entry before it");
             if (r.FixedInputs.Count > 0)
                 throw new CompileError(r.Pos,
                     $"'{api.Name}.{name}' has fixed inputs, which a function of the binary cannot receive. Declare them as parameters in registers");
@@ -321,8 +324,9 @@ public sealed partial class Checker
             result[f] = r;
         }
 
-        // Data every binary provides at a fixed address, such as a level's header.
-        foreach (var (name, v) in api.Scope.Where(e => e.Value is VariableSymbol { FixedAddress: not null, IsData: false })
+        // Data every binary provides at a fixed address, such as a level's header: the interface's
+        // volatile variables. A plain fixed variable is memory of the host, which levels may use.
+        foreach (var (name, v) in api.Scope.Where(e => e.Value is VariableSymbol { FixedAddress: not null, IsData: false, DeclaredVolatile: true })
                      .Select(e => (e.Key, (VariableSymbol)e.Value)).OrderBy(e => e.Item2.FixedAddress))
         {
             string want = $"data {name}: {v.Type} @ ${v.FixedAddress:X4}";

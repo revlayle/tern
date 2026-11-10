@@ -168,7 +168,8 @@ public static class Assembler
                         if (end > at && head.Overlaps(new AddressRange(at, end - 1)))
                             throw new CompileError(new SourcePos(1, 1),
                                 $"'{section.Info.Name}' at {new AddressRange(at, end - 1)} overlaps the {(firstSection.Info.Name == "jump table" ? "jump table" : "BASIC line and startup code")} at {head}, " +
-                                "which must be at the start of the first program area. Move the data, or start the program area lower");
+                                "which must be at the start of the first program area. " +
+                                (section.Info.Name == "export table" ? $"Give the export table an address after ${head.Last:X4}" : "Move the data, or start the program area lower"));
                     }
                 }
             }

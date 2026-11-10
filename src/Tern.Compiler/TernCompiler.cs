@@ -379,10 +379,6 @@ public static class TernCompiler
         };
     }
 
-    /// <summary>
-    /// Data placed with <c>@ address</c> must lie in a program or reserved area (spec 8.4): anywhere
-    /// else is memory the program was not given.
-    /// </summary>
     /// <summary>A program's export table is placed like fixed data: in a program or reserved area (spec 12.3).</summary>
     private static void CheckExportTable(CheckedProgram program, AddressRange range)
     {
@@ -394,6 +390,10 @@ public static class TernCompiler
             "Give it an address in one of them");
     }
 
+    /// <summary>
+    /// Data placed with <c>@ address</c> must lie in a program or reserved area (spec 8.4): anywhere
+    /// else is memory the program was not given.
+    /// </summary>
     private static void CheckFixedData(CheckedProgram program, RamPlan plan)
     {
         var layout = program.Layout;

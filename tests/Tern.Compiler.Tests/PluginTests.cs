@@ -153,6 +153,7 @@ public sealed class PluginTests : IDisposable
         "'header' does not match 'level_api.header'")]
     [InlineData("export level_api", "export level_api, leave", "'export level_api' takes the entries and their addresses from level_api, so the export line names nothing else. Declare a routine for 'leave' in level_api instead")]
     [InlineData("export level_api", "export leave, level_api", "names nothing else. Declare a routine for 'leave' in level_api instead")]
+    [InlineData("export level_api", "export level_api, level_api", "names nothing else. Remove the second 'level_api'")]
     [InlineData("level_api.SLOT_FIRST..=", "$5000..=", "'level_api.setup' is at $6000, but setup is entry 0 of the jump table, at the start of the binary's first program area ($5000). Move setup to $5000 in level_api, or start the first program area at $6000")]
     [InlineData("fn leave() { n = 0 }", "fn leave() { n = 0\n    for i in 0..3 using X { n += 1 } }", "'leave' changes X, which 'level_api.leave' promises to keep. Change the function so that it leaves X alone, or remove X from the routine's 'keeps' list")]
     public void Reports_errors_in_the_binary(string replace, string with, string expected)
@@ -168,12 +169,27 @@ public sealed class PluginTests : IDisposable
     [InlineData("fn setup() @ $6000", "fn setup(n: u8 using A) @ $6000", "'level_api.setup' must take nothing and return nothing")]
     [InlineData("@ $6006\n", "@ $6004\n", "'level_api.update' at $6004 overlaps the entry before it: each entry of the jump table is a 3-byte jmp, from $6000. Move it to $6006 or later")]
     [InlineData("fn leave() @ $6009 keeps X, Y", "fn leave(true using carry) @ $6009", "'level_api.leave' has fixed inputs, which a function of the binary cannot receive")]
+    [InlineData("fn leave() @ $6009", "fn leave() @ $7000",
+        "'level_api.leave' at $7000 is outside the binary's first program area $6000-$6FFF, where the jump table is. Move it in level_api to the table, after the entry before it")]
     [InlineData("fn setup() @ $6000", "fn setup() @ $6000 keeps A", "'level_api.setup' promises to keep A, but the binary's startup code changes it. Remove A from its 'keeps' list")]
     public void Reports_errors_in_the_interface(string replace, string with, string expected)
     {
         Assert.Contains(replace, LevelApi);
         var e = Error(Level, LevelApi.Replace(replace, with));
         Assert.Contains(expected, e.Description);
+    }
+
+    [Fact]
+    public void A_plain_fixed_variable_of_the_interface_is_the_hosts_and_needs_no_data()
+    {
+        // Review M21, finding 1: only the volatile variables are data every level provides.
+        var api = LevelApi + "\nvar lives: u8 @ $0340\nvar border: u8 @ $D020\n";
+        var b = Build(Level.Replace("fn leave() { n = 0 }", "fn leave() { n = level_api.lives\n    level_api.border = 2 }"), api);
+        b.Ram.Bytes[0x0340] = 7;
+        b.Call("setup");
+        b.Call("leave");
+        Assert.Equal(7, b.Ram.Bytes[b.Result.Symbols["n"]]);
+        Assert.Equal(2, b.Ram.Bytes[0xD020]);
     }
 
     [Fact]
@@ -267,6 +283,28 @@ public sealed class PluginTests : IDisposable
         """;
 
     [Fact]
+    public void Several_export_lines_form_one_table_in_order()
+    {
+        // Review M21, suggestion 5 (question 91b).
+        var run = Run.Program(Host.Replace("export add_score, beep @ $0900", "export add_score\nexport beep @ $0900"), sourcePath: PathOf("host.tern"));
+        Assert.Equal(new[] { ("add_score", 0x0900), ("beep", 0x0903) }, run.Result.Entries);
+        Assert.Equal(6, run.U8("score"));
+    }
+
+    [Fact]
+    public void An_export_table_may_be_in_a_reserved_area()
+    {
+        // Review M21, suggestion 5 (question 91a). The program file covers the gap up to the table.
+        var source = "memory {\n    $0801..=$9FFF program\n    $C000..=$C0FF reserved\n}\n"
+            + Host.Replace("$0900", "$C000").Replace("$0903", "$C003");
+        var run = Run.Program(source, sourcePath: PathOf("host.tern"));
+        Assert.Equal(new[] { ("add_score", 0xC000), ("beep", 0xC003) }, run.Result.Entries);
+        Assert.Equal(6, run.U8("score"));
+        Assert.Equal(2, run.U8("calls"));
+        Assert.Equal(0xC006 - 0x0801, run.Result.Image.Length);
+    }
+
+    [Fact]
     public void A_program_puts_its_export_table_at_the_address()
     {
         var run = Run.Program(Host, sourcePath: PathOf("host.tern"));
@@ -304,7 +342,8 @@ public sealed class PluginTests : IDisposable
     [Theory]
     [InlineData("export add_score, beep @ $0900", "export add_score, beep @ $A000",
         "The export table at $A000-$A005 is not in a program or reserved area. Program areas: $0801-$9FFF; reserved: none. Give it an address in one of them")]
-    [InlineData("export add_score, beep @ $0900", "export add_score, beep @ $0801", "overlaps the BASIC line and startup code")]
+    [InlineData("export add_score, beep @ $0900", "export add_score, beep @ $0801", "overlaps the BASIC line and startup code at $0801-")]
+    [InlineData("export add_score, beep @ $0900", "export add_score, beep @ $0810", "which must be at the start of the first program area. Give the export table an address after $")]
     [InlineData("export add_score, beep @ $0900", "export add_score, beep @ $FFFE", "The export table (6 bytes) at $FFFE does not fit in memory. Use a lower address")]
     [InlineData("export add_score, beep @ $0900", "export add_score, beep @ score", "The address of the export table must be known at compile time")]
     [InlineData("export add_score, beep @ $0900", "export add_score, main @ $0900", "'main' is where the program starts; plug-ins cannot call it. Remove it from the export line")]
