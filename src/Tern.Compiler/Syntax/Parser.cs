@@ -732,8 +732,8 @@ public sealed class Parser
             {
                 if (!isFn || lines.Count > 0)
                     throw new CompileError(Current.Pos, isFn
-                        ? "'var' lines go at the start of an inline asm fn, before the first instruction"
-                        : "'var' is not allowed inside an asm block. Declare the variable before the block, or use 'var' lines at the start of an inline asm fn");
+                        ? "'var' lines go at the start of an asm fn, before the first instruction. Move this line up"
+                        : "'var' is not allowed inside an asm block. Declare the variable before the block, or use 'var' lines at the start of an asm fn");
                 locals.Add(ParseVar());
                 continue;
             }

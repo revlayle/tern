@@ -1100,14 +1100,9 @@ public sealed partial class Checker
         _scopes.Add(new Dictionary<string, Symbol>());
         foreach (var p in _function.Parameters) Declare(p);
 
-        // The var lines of an inline asm fn: locals that live in each caller's frame (spec 6.2).
+        // The var lines of an asm fn: locals in its frame, or in each caller's for an inline asm fn (spec 9).
         if (decl.IsAsm && ((AsmStmt)decl.Body.Statements[0]).Locals is { Count: > 0 } asmLocals)
-        {
-            if (!decl.IsInline)
-                throw new CompileError(asmLocals[0].Pos,
-                    $"An asm fn has no variables of its own. Use 'inline asm fn', whose 'var' lines live in each caller's frame, or a private global variable");
             foreach (var local in asmLocals) CheckLocal(local, inAsmFn: true);
-        }
 
         CheckBlock(decl.Body, newScope: false);
 
@@ -1201,7 +1196,7 @@ public sealed partial class Checker
         ApplyPlacement(decl, v, allowAddress: false);
 
         if (inAsmFn && decl.Init is not null)
-            throw new CompileError(decl.Init.Pos, $"'{decl.Name}' in an inline asm fn has no initial value: the assembly sets it");
+            throw new CompileError(decl.Init.Pos, $"'{decl.Name}' in an asm fn has no initial value: the assembly sets it. Remove the value and store it in the assembly");
         if (decl.Init is null)
         {
             if (!type.IsArray && !type.IsStruct && !inAsmFn)
