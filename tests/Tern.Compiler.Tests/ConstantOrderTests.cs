@@ -138,6 +138,38 @@ public sealed class ConstantOrderTests : IDisposable
         Assert.InRange(r.Address("map"), 0xC000, 0xC800);
     }
 
+    [Fact]
+    public void A_constant_address_does_not_need_the_memory_block()
+    {
+        // Review M20 follow-up 3, second review, suggestion 1: buf @ SCREEN is no region, so SZ is no cycle.
+        var r = Run.Program("""
+            const SCREEN = $0400
+            const SZ = len(buf)
+            memory { $C000..=$C000 + SZ reserved }
+            var buf: [u8; 16] @ SCREEN
+            var r: u8
+            fn main() { r = SZ }
+            """);
+        Assert.Equal(16, r.U8("r"));
+    }
+
+    [Fact]
+    public void A_memory_block_that_needs_itself_is_an_error()
+    {
+        // Second review, suggestion 2: A needs map, map's region needs the block, the block needs SZ = len(buf), buf's region the block.
+        var e = Assert.Throws<CompileError>(() => TernCompiler.Compile("""
+            const A = len(map)
+            memory { $C000..=$C000 + SZ region buffers }
+            var map: [u8; 16] @ buffers
+            var buf: [u8; 16] @ buffers
+            const SZ = len(buf)
+            var r: u8
+            fn main() { r = A }
+            """));
+        Assert.Equal("The memory block depends on itself: a constant it uses needs a variable placed in one of its regions. Give that constant a value that does not use the variable", e.Description);
+        Assert.Equal(2, e.Pos.Line);
+    }
+
     [Theory]
     [InlineData("var tbl: [u16; 2] = [addr(fb), addr(fb)]\nfn fb() { }")]
     [InlineData("var tbl: [u16; 2] = [addr(v), addr(v)]\nvar v: u8")]

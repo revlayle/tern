@@ -839,7 +839,9 @@ public sealed partial class Checker
             case PlacementKind.Address:
                 if (!allowAddress) throw new CompileError(decl.Pos, "Only global variables can have a fixed address");
                 var addr = decl.Placement.Address!;
-                if (addr is NameExpr) EnsureMemoryLayout();
+                // Only a region name needs the memory block; a constant address does not.
+                if (addr is NameExpr placed && _module.Syntax.Memory?.Lines.Any(l => l.Kind == "region" && l.Name == placed.Name) == true)
+                    EnsureMemoryLayout();
                 if (addr is NameExpr region && _layout.Regions.ContainsKey(region.Name) && Lookup(region.Name) is null)
                 {
                     v.Region = region.Name;

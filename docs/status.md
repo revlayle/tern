@@ -5,10 +5,12 @@ Owned by the coding session. Updated at the end of every coding session.
 ## Current
 
 - **Milestone:** M20 follow-up 3 (roadmap). All ten items are done, and the "done when" test passes. M20 follow-up 2 was merged into `main` (`799a0e3`).
-- **Branch:** `m20-followup3`, with `main` merged in (first review, `2332854`). 2480 compiler tests pass plus 36 CPU tests. No benchmark changed (1254 / 350780); `SkillTests` pass. All examples and the Galaxy Stars port (`main`, `check_player`, `check_stars`) compile unchanged.
-- **Next step:** `/review` of the review fixes (`527af9b`). Question 88 is open (small; nothing waits on it).
+- **Branch:** `m20-followup3`, with `main` merged in (second review, `9c3ec7b`: ready to merge). 2482 compiler tests pass plus 36 CPU tests. No benchmark changed (1254 / 350780); `SkillTests` pass. All examples and the Galaxy Stars port (`main`, `check_player`, `check_stars`) compile unchanged.
+- **Next step:** `/merge m20-followup3`. The second review says ready to merge; its two suggestions are done since (`/review` them first if wanted). Question 88 is open (small; nothing waits on it).
 
 ## Done
+
+- **M20 follow-up 3, second review suggestions** (2026-11-09). Suggestion 1: the memory block is evaluated early only for a placement `@ name` where `name` is one of its regions, so a constant address (`@ SCREEN`) no longer makes a false cycle. Suggestion 2: the "memory block depends on itself" error has a test. `ConstantOrderTests`.
 
 - **M20 follow-up 3, first review** (2026-11-09, `docs/reviews/m20-followup3.md`, `527af9b`).
   - Finding 1 (must fix): the main-file import check compares the main file with the file `Find` returns (library first), so a main file `random.tern` imports `lib/random.tern` again; if `Find` fails, the importer-folder path is compared (a main file not saved yet). `ModuleTests.A_main_file_named_like_a_library_module_imports_the_library_module`.
