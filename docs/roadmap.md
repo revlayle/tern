@@ -356,6 +356,8 @@ Decision 2026-11-07, scheduled 2026-11-08. User documentation that explains how 
 - an overlay's zero-page bytes at a fixed address hold whatever was there before it loaded; the overlay sets them (8.5)
 - a `volatile` fixed-address variable over an overlay reads whatever overlay is loaded; addresses inside an overlay's file move when the overlay changes (8.5)
 - a binary's entries are one root: the host must not call one from an interrupt while another runs (12.3)
+- a plug-in's memory is checked only against its own `memory` block, not against the game or other slots; gaps in an interface's jump table are zeros (`brk`) (12.3)
+- a game's exported functions are an unknown root: globals they share are always read from memory, and the two-roots check cannot see a plug-in calling them from an interrupt (12.3, 6.5)
 - evaluation order: in `a[i] = v` the index is evaluated first; with a call in the index, and inside expressions, the order is unspecified (5)
 - a fixed address outside the platform's volatile areas is ordinary memory: unlisted hardware needs `volatile` (4)
 - a function shared by main and a handler may have loop counters only in registers; only `using X` / `using Y` guarantees one (8.1)

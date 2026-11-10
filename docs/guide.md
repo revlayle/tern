@@ -341,6 +341,7 @@ fn main() {
 ```
 
 - `import name` loads `name.tern` from the platform library (`lib/c64/`), the standard library (`lib/`), then your program's folder. Names are always used with the module name: `text.put`.
+- Your own module may not have a library module's name: a `random.tern` or `io.tern` next to your program is an error when you import it, naming both files. Rename yours. (A main file may have any name, since it is never imported.)
 - `private` before a declaration hides it from other modules.
 - Modules may import each other, and declarations may be used in any order, also across modules: `const KINDS: u8 = len(star_char)` works wherever `star_char` is declared. Only a constant that depends on itself is an error.
 - The main file cannot be imported. Put what other modules need from it in a module that both import.
@@ -389,6 +390,10 @@ Other kinds are `program`, `zeropage`, `volatile` and `overlay` (3.12). `program
 A main file with `export` and no `main` builds a **binary** for another program to call, such as a music player. It starts with a jump table (`setup`, then the exports in order), and the compiler also writes `name_api.tern` for the host to import (example 4.4).
 
 An export table, like `data` at a fixed address, is part of the program file, so the file covers everything between the code and the table: `export add @ $C000` in a program that starts at `$0801` writes a 47 KB `.prg`. Put the table next to the code, or in its own small `program` area.
+
+**Plug-ins.** A game that loads levels built separately, perhaps later or by someone else, describes them in a hand-written **interface module**: routines at fixed addresses (`fn update() -> bool using carry @ $6006`), `volatile` fixed variables for data every level provides, and constants for the slot. The game imports it and calls the routines; each level is a binary with `export level_api`, and the compiler checks the level against the module: a function for every routine, with the same registers, return and `keeps`, and a `data` for every `volatile` variable. The interface must declare `setup` at its first address (the level's startup code goes there), routines at least 3 bytes apart, and no fixed inputs. A level implements one interface; a game may import as many as it has slots.
+
+The other direction: `export add_score, show @ $0900` in a program with `main` puts a jump table at `$0900` and writes `game_api.tern`, which plug-ins import to call the game. Example 4.6 has both.
 
 ### 3.12 Overlays
 
@@ -606,7 +611,94 @@ fn main() {
 
 Compiling writes `levels.prg`, `level1.prg` and `level2.prg`. Put them on a disk image to run it; the commands are in the header of `examples/levels.tern`.
 
-More in `examples/`: `library.tern` (KERNAL printing, numbers), `structs.tern`, `arcade.tern` (32-bit and BCD scores, `sin8`, random sound), `scroller.tern` (eight-way scrolling under 24 multiplexed sprites), `sprite_data.tern`, `player.tern` with `player_host.tern`, `levels.tern` (overlays).
+### 4.6 Levels as plug-ins
+
+The interface, `level_api.tern`, written by hand:
+
+```
+struct LevelHeader {
+    border: u8          // the border color while the level runs
+    goal: u8            // how many updates the level takes
+}
+
+const SLOT_FIRST = $6000
+const SLOT_LAST = $6FFF
+const ZP_FIRST = $FB    // zero page a level may use: the game leaves it alone
+const ZP_LAST = $FE
+const HEADER = $6009
+
+fn setup() @ $6000                              // first, after loading
+fn enter() @ $6003                              // the level starts
+fn update() -> bool using carry @ $6006         // one step; true when the level is finished
+
+volatile var header: LevelHeader @ HEADER       // every level's data at a fixed address
+```
+
+A level, `forest.tern`, built on its own. Its functions may be in any order: each goes where `level_api` puts it.
+
+```
+import game_api
+import level_api
+
+memory {
+    level_api.SLOT_FIRST..=level_api.SLOT_LAST  program
+    level_api.ZP_FIRST..=level_api.ZP_LAST      zeropage
+}
+
+export level_api
+
+data header: level_api.LevelHeader @ level_api.HEADER = level_api.LevelHeader { border = 5, goal = 3 }
+data NAME = "FOREST "
+var steps: u8
+
+fn enter() {
+    for i in 0..len(NAME) { game_api.show(NAME[i]) }
+}
+
+fn update() -> bool using carry {
+    steps += 1
+    game_api.add_score(10)
+    return steps == header.goal
+}
+```
+
+The game reserves the slot, offers two services to its levels, and plays each level it loads:
+
+```
+import c64
+import level_api
+
+memory {
+    $0801..=$5FFF                               program
+    level_api.SLOT_FIRST..=level_api.SLOT_LAST  reserved
+}
+
+export add_score, show @ $0900
+
+var score: u16
+
+fn add_score(points: u8 using A) { score += points as u16 }
+fn show(ch: u8 using A) { c64.chrout(ch) }
+
+fn play(name: ptr u8, n: u8) {
+    if c64.load(name, n, 8) { ... }          // load the level into the slot
+    level_api.setup()
+    c64.vic.border = level_api.header.border
+    level_api.enter()
+    while !level_api.update() { }
+}
+```
+
+Building the game writes `game_api.tern`, so build it before the levels:
+
+```
+fn add_score(points: u8 using A) @ $0900 keeps X, Y
+fn show(ch: u8 using A) @ $0903 keeps X, Y
+```
+
+The full example, with a second level and the commands for a disk image, is in `examples/plugins/`.
+
+More in `examples/`: `library.tern` (KERNAL printing, numbers), `structs.tern`, `arcade.tern` (32-bit and BCD scores, `sin8`, random sound), `scroller.tern` (eight-way scrolling under 24 multiplexed sprites), `sprite_data.tern`, `player.tern` with `player_host.tern`, `levels.tern` (overlays), `plugins/` (levels as plug-ins).
 
 ## 5. Standard library
 
@@ -639,6 +731,9 @@ Tern trusts you and does not add hidden checks. These are deliberate and often u
 - **A call into an overlay that is not loaded** runs whatever is in the area.
 - **Loading an overlay resets its variables** to their initial values; keep anything that must survive in resident memory.
 - **A binary's entries are one root.** The host must not call one entry from an interrupt while another is running.
+- **A plug-in's memory is checked only against its own `memory` block**, not against the game's or another slot's. Keep each slot, and each slot's zero page, apart in the interface modules, and reserve them in the game.
+- **A game's export table has gaps of zeros** when its routines are not packed: a call into a gap stops at a `brk`.
+- **The game's exported functions are called from outside**, so the compiler cannot see when they run (an unknown root, as for `addr()`). Globals they share with the rest of the game are always read from memory, and a plug-in must not call them from an interrupt while the game is in one of them.
 - **Division by zero** in the library gives an unspecified result.
 - **`indexed match` does not check its value.** Outside the span of its patterns it jumps through whatever bytes follow its tables; `_` catches only values inside the span. A plain `match` skips values it does not list.
 
@@ -758,11 +853,10 @@ tern run game.tern --profile                      // the cycles of each function
 
 ### Next
 
-- **M21**: plug-ins against a fixed interface: binaries built separately against one interface module, loaded in turn into one slot.
+- **`const fn` and code generators** (M22). Functions that run at compile time to build lookup tables, with 64-bit `int` and `real` (double) math, and `[expr for i in range]` lists: `data sine: [u8; _] = [round(128 + 127 * sin(i * TAU / 256)) for i in 0..256]`. A generator can `emit` assembly, to produce unrolled "speedcode" whose shape depends on parameters.
 
 ### Later highlights
 
-- **`const fn` and code generators** (M22). Functions that run at compile time to build lookup tables, with unlimited-size `int` and `real` math. A generator can `emit` assembly, to produce unrolled "speedcode" whose shape depends on parameters.
 - **Doc comments (`///`) and a language server** (M23) that shows errors, types and costs in your editor.
 - **Floats as a library** (M24).
 - **A full developer guide**, growing out of this one, with an example for each machine-level behavior.
