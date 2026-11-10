@@ -438,6 +438,8 @@ First, a small item (decision 2026-11-09, "the build's target decides the librar
 
 Spec: 4.1 (planned). One milestone, since generators are most of the reason to build `const fn` (decision 2026-11-03); it may take the full three sessions.
 
+First, a small item (question 92, decision 2026-11-10): `level_api.header` in a binary that defines `data header` at the same address is the error "'level_api.header' is this binary's data 'header'. Use 'header'" (spec 12.3), in place of the general overlap error. Tests: the error, its suggestion in `tern --json`, and an unrelated overlap that keeps the general error.
+
 - Part 1: `const fn` with compile-time `int` and `real`, the step limit, `const fn` in modules, array-building syntax for `data` tables.
 - Part 2: `emit` fragments in asm blocks, `label()`, the listing naming the `emit` line and the call for each generated instruction.
 

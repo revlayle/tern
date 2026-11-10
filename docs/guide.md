@@ -388,6 +388,8 @@ Other kinds are `program`, `zeropage`, `volatile` and `overlay` (3.12). `program
 
 A main file with `export` and no `main` builds a **binary** for another program to call, such as a music player. It starts with a jump table (`setup`, then the exports in order), and the compiler also writes `name_api.tern` for the host to import (example 4.4).
 
+An export table, like `data` at a fixed address, is part of the program file, so the file covers everything between the code and the table: `export add @ $C000` in a program that starts at `$0801` writes a 47 KB `.prg`. Put the table next to the code, or in its own small `program` area.
+
 ### 3.12 Overlays
 
 An overlay is a module that is loaded from disk into a shared area when the program needs it, such as one level of a game. Overlays in the same area replace each other. The main file declares the area and places modules in it with `@`:
