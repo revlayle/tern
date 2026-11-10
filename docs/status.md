@@ -5,10 +5,14 @@ Owned by the coding session. Updated at the end of every coding session.
 ## Current
 
 - **Milestone:** M21, plug-ins against a fixed interface (roadmap). All items are done and the "done when" test passes. M20 follow-up 3 was merged into `main` (`0a698f7`).
-- **Branch:** `m21-plugins`, from `main` at `3d605ad`. 2529 compiler tests pass plus 36 CPU tests. No benchmark changed (1254 / 350780); `SkillTests` pass. All examples and the Galaxy Stars port (`main`, `check_player`, `check_stars`) compile unchanged.
-- **Next step:** `/review` of `m21-plugins`. Questions 89-92 are open (provisional choices made while building; none blocks the review).
+- **Branch:** `m21-plugins`, with `main` merged in (first review, `ee7375d`: ready to merge after one must-fix item, now fixed). 2535 compiler tests pass plus 36 CPU tests. No benchmark changed (1254 / 350780); `SkillTests` pass. All examples and the Galaxy Stars port (`main`, `check_player`, `check_stars`) compile unchanged.
+- **Next step:** `/review` of the fixes (`099c375`), then `/merge m21-plugins`. Questions 89-93 are open (provisional choices; none blocks the merge).
 
 ## Done
+
+- **M21, first review** (2026-11-10, `docs/reviews/m21.md`, `099c375`).
+  - Finding 1 (must fix): `MatchInterface` checks only the interface's variables declared `volatile` (decision 2026-11-03, the skill); a plain fixed variable (`var lives: u8 @ $0340`, `var border: u8 @ $D020`) is the host's memory and a level may use it. `PluginTests.A_plain_fixed_variable_of_the_interface_is_the_hosts_and_needs_no_data`. Question 93 asks to align spec 12.3's error bullet.
+  - Suggestions: 2, a routine past the first program area is "'level_api.far' at $7000 is outside the binary's first program area ... Move it in level_api to the table"; 3, an export table over the startup code says "Give the export table an address after $xxxx"; 4, `CheckFixedData`'s doc comment restored; 5, tests for several export lines with one `@`, a table in a reserved area (the file covers the gap), `export level_api, level_api`; 6, the CLI help mentions `export f, g @ address`.
 
 - **M21: plug-ins against a fixed interface** (2026-11-10, spec 2.2, 12.3; decisions 2026-11-03 and 2026-11-09). One commit per step.
   - *A program module with a library module's name* (`07a9ce0`, spec 2.2): `ModuleLoader.Find` reports an import that finds a library module (the target's folder or `lib/`) and `name.tern` in the importing file's folder: "'io' is both a library module (...) and your file .... Rename your file, e.g. to my_io.tern, and import it by its new name". Not for a main file of that name (never imported), nor for library modules importing each other (`InLibrary`). The old test of the library hiding a program file now checks the two folders without a clash. `ModuleTests` (io in `lib/c64`, random in `lib/`, from another program module, the `--json` suggestion, library modules in a platform folder).
@@ -520,6 +524,8 @@ Not bugs; things to improve, mostly in M7 (optimizer).
 - **90** (M21, spec 12.3): the spec says each export is "placed at the routine's address". Provisional: routines may leave gaps (filled with zeros, which a host should never call); routines closer than 3 bytes are an error; a routine with fixed inputs (`true using carry`) is an error, since a function cannot receive one. Other declarations of the interface module (constants, structs, functions with a body, variables without a fixed address, `data`) are not checked. Right?
 - **91** (M21, spec 12.3): for `export f, g @ addr` in a program with `main`, provisional: (a) the table must lie in a `program` or `reserved` area, like fixed `data`; (b) several `export` lines form one table, and only one of them may have the `@`; (c) `name_api.tern` holds only the entries and their `keeps`, with no memory constants (the plug-in's memory is its slot, not the program's); (d) `setup` may be an export's name, since a program has no setup entry; `main` may not.
 - **92** (M21): a level that names the interface's variable (`level_api.header`) instead of its own `data header` gets the general overlap error "'level_api.header' at $6009-$600A overlaps the data 'header' ... Move one of them", whose fix does not fit. Should the variable count as the binary's own data (allowed), or should the message say to use the binary's own `header`?
+
+- **93** (M21 review, finding 1): spec 12.3's error bullet says "a variable of the module with no `data` of the same name, type and address". As built (decision 2026-11-03, review): only variables declared `volatile` are checked; a plain fixed variable is the host's and needs no `data`. Could the spec say "a `volatile` variable of the module"? Also for the guide (review suggestion 5): an export table (like fixed `data`) in a reserved area far from the code makes the program file cover the gap (`export add @ $C000` writes a 47 KB `.prg`).
 
 Question 88 was settled on 2026-11-09 (as built). Questions 86 and 87 were settled on 2026-11-09 and are built. Questions 79-85 were settled on 2026-11-09 and are built. Questions 76-78 were settled on 2026-11-08 (decisions.md), as built.
 
