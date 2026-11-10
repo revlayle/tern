@@ -75,3 +75,60 @@ gives "addr(fb) is known only when the program is placed, so it cannot be part o
 - [x] `c64.cia_irqs_off()`: a plain `asm fn`, used by `examples/kernal_irq.tern`, checked in VICE (per status).
 - [x] The skill: the evaluation-order rule and its exception, `var` lines in `asm fn`, line continuation.
 - [x] The port's workarounds for gaps 11, 12, 15, 17, 18, 19, 23 (the error) and 24 compile in their plain form (`GalaxyStarsGapTests`).
+
+## Second review (`95a2b15`), 2026-11-09
+
+**Ready to merge.** The three must-fix items and both suggestions from the first review are fixed and tested. Two new suggestions below, both small and in the new memory-block ordering; neither blocks the merge.
+
+2480 compiler tests and 36 CPU tests pass. `BenchmarkTests` and `SkillTests` pass with no baseline change (1254 / 350780).
+
+### First review findings
+
+- **1 (main file named like a library module): fixed.** `Module.cs` compares the main file with the path `Find` returns. `random.tern` with `import random` loads `lib/random.tern` again; `import main` from a module and from the main file still gives the error. `ModuleTests.A_main_file_named_like_a_library_module_imports_the_library_module`.
+- **2 (`len()` of a global in a region): fixed.** `EnsureMemoryLayout` evaluates the memory block the first time a main-file placement `@ name` needs it. My repro works with the constant before and after the variable (`r = 2048`). `ConstantOrderTests.Len_of_a_global_in_a_region_in_a_constant`.
+- **3 (import ring with `addr()` in a demanded global): fixed.** `_addressInits` entries are worked out at their own module's turn. Both repros (`addr(fb)` with a later function, `addr(v)` with a later global) compile and run. `ConstantOrderTests.A_global_used_early_by_another_module_keeps_its_address_initial_value`.
+- **Suggestion 4 (`0 > w` on `i16`): done.** `lda w+1 / bpl`. I also checked `0 < w`, `0 >= w` and `0 == w` at `w = -2` (only `0 >= w` holds).
+- **Suggestion 5 (self-import message): done.** "Remove this import".
+
+### Findings
+
+**1. Suggestion: the memory block is now evaluated for any `@ name`, not only a region, which gives a false cycle.** `Checker.cs:842` calls `EnsureMemoryLayout` whenever the placement is a `NameExpr`, also for a constant address:
+
+```tern
+const SCREEN = $0400
+const SZ = len(buf)
+memory { $C000..=$C000 + SZ reserved }
+var buf: [u8; 16] @ SCREEN
+var r: u8
+fn main() { r = SZ }
+```
+
+This compiles on `a842cf2` (`r = 16`). On `95a2b15` it is "'SZ' depends on itself: SZ -> buf -> SZ", but `buf` does not depend on the memory block, since `SCREEN` is a constant. The program is unusual (a memory block sized by a `len()` of a variable at a fixed address), so this is a suggestion. Fix: call `EnsureMemoryLayout` only when the name is one of the regions in `_module.Syntax.Memory` (the syntax is there before evaluation), or only when `Lookup(name)` finds no symbol.
+
+**2. Suggestion: the new error "The memory block depends on itself" has no test.** (`Checker.cs:219`.) The coding conventions ask for one. It can be reached:
+
+```tern
+const A = len(map)
+memory { $C000..=$C000 + SZ region buffers }
+var map: [u8; 16] @ buffers
+var buf: [u8; 16] @ buffers
+const SZ = len(buf)
+var r: u8
+fn main() { r = A }
+```
+
+The shorter case (`const SZ = len(buf)` used by the block, `buf @ buffers`) gives the constant-cycle error "'SZ' depends on itself: SZ -> buf -> SZ" instead. That error is also right, but its chain does not mention the memory block. Add the program above to `MemoryTests` or `ConstantOrderTests`.
+
+### Done when
+
+- [x] Calls and `volatile` reads run left to right.
+- [x] Constants resolved on demand across modules (findings 2 and 3 of the first review fixed).
+- [x] `var` lines in a plain `asm fn`.
+- [x] `[u8; _]` from a string.
+- [x] `step` a keyword only after a `for` range.
+- [x] A line starting with a binary operator.
+- [x] Spec 11 rows; `BenchmarkTests` and `SkillTests` unchanged.
+- [x] Importing the main file is an error with the fix (the first review's finding 1 fixed).
+- [x] `c64.cia_irqs_off()`.
+- [x] The skill.
+- [x] The port's workarounds for gaps 11, 12, 15, 17, 18, 19, 23 (the error) and 24 compile in their plain form.
