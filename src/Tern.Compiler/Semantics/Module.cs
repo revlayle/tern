@@ -58,6 +58,11 @@ public static class ModuleLoader
                         $"Only the program's main file can set the parameters of '{import.Name}', since a module is loaded once. Import it plainly here and set {import.Args[0].Name} in the main file");
                 if (!loaded.TryGetValue(import.Name, out var module))
                 {
+                    // The main file has rules no module has (spec 2.2), so it is not a module too.
+                    if (sourcePath is not null && string.Equals(System.IO.Path.GetFullPath(System.IO.Path.Combine(m.Directory, import.Name + ".tern")),
+                            System.IO.Path.GetFullPath(sourcePath), StringComparison.OrdinalIgnoreCase))
+                        throw new CompileError(import.Pos,
+                            $"'{import.Name}' is the program's main file, which cannot be imported. Move what {(m.IsMain ? "it" : m.Name)} needs from it into a module that both import");
                     var path = Find(import, m, platform, libraryDirectory);
                     var text = File.ReadAllText(path);
                     module = new Module

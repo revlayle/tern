@@ -292,6 +292,21 @@ public sealed class ModuleTests : IDisposable
     }
 
     [Fact]
+    public void The_main_file_cannot_be_imported()
+    {
+        // Gap 23: demo imports main for its game flow.
+        Write(Src, "demo.tern", "import main\nfn steer() { main.play() }");
+        var e = Assert.Throws<CompileError>(() => CompileMain("import demo\nfn play() { }\nfn main() { demo.steer() }"));
+        Assert.Equal("'main' is the program's main file, which cannot be imported. Move what demo needs from it into a module that both import", e.Description);
+        Assert.Equal(Path.Combine(Src, "demo.tern"), e.Pos.File);
+        Assert.Equal((1, 8), (e.Pos.Line, e.Pos.Column));   // at the module name
+
+        // Also from the main file itself.
+        e = Assert.Throws<CompileError>(() => CompileMain("import main\nfn main() { }"));
+        Assert.StartsWith("'main' is the program's main file, which cannot be imported. Move what it needs", e.Description);
+    }
+
+    [Fact]
     public void Constants_work_across_an_import_cycle()
     {
         // b is declared before a; a's constant is worked out when b's declaration uses it (spec 2.2).
