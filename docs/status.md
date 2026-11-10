@@ -4,11 +4,18 @@ Owned by the coding session. Updated at the end of every coding session.
 
 ## Current
 
-- **Milestone:** M20 follow-up 3 (roadmap). All ten items are done, and the "done when" test passes. M20 follow-up 2 was merged into `main` (`799a0e3`).
-- **Branch:** `m20-followup3`, with `main` merged in (second review, `9c3ec7b`: ready to merge). 2482 compiler tests pass plus 36 CPU tests. No benchmark changed (1254 / 350780); `SkillTests` pass. All examples and the Galaxy Stars port (`main`, `check_player`, `check_stars`) compile unchanged.
-- **Next step:** `/merge m20-followup3`. The second review says ready to merge; its two suggestions are done since (`/review` them first if wanted). Question 88 is open (small; nothing waits on it).
+- **Milestone:** M21, plug-ins against a fixed interface (roadmap). All items are done and the "done when" test passes. M20 follow-up 3 was merged into `main` (`0a698f7`).
+- **Branch:** `m21-plugins`, from `main` at `3d605ad`. 2529 compiler tests pass plus 36 CPU tests. No benchmark changed (1254 / 350780); `SkillTests` pass. All examples and the Galaxy Stars port (`main`, `check_player`, `check_stars`) compile unchanged.
+- **Next step:** `/review` of `m21-plugins`. Questions 89-92 are open (provisional choices made while building; none blocks the review).
 
 ## Done
+
+- **M21: plug-ins against a fixed interface** (2026-11-10, spec 2.2, 12.3; decisions 2026-11-03 and 2026-11-09). One commit per step.
+  - *A program module with a library module's name* (`07a9ce0`, spec 2.2): `ModuleLoader.Find` reports an import that finds a library module (the target's folder or `lib/`) and `name.tern` in the importing file's folder: "'io' is both a library module (...) and your file .... Rename your file, e.g. to my_io.tern, and import it by its new name". Not for a main file of that name (never imported), nor for library modules importing each other (`InLibrary`). The old test of the library hiding a program file now checks the two folders without a clash. `ModuleTests` (io in `lib/c64`, random in `lib/`, from another program module, the `--json` suggestion, library modules in a platform folder).
+  - *`export level_api`* (`d72b1cf`): a name on the export line that is a module the main file imports. `Checker.MatchInterface` matches each routine of the module (by its name in the module's scope) to a function of the main file with the same parameter types and registers and the same return (`Signature.Matches`; names may differ); `setup` must be a routine at the start of the first program area with no parameters or return; routines must not overlap in the table; each non-`data` fixed-address variable of the module needs `data` of the same name, type and address. The table is laid out in address order, zeros in gaps (`TernCompiler`). After code generation, a function (or `setup`'s code) that changes a register its routine `keeps` is an error. `name_api.tern` is still written. `PluginTests` (placement, calls through the interface's addresses, a gap, every error).
+  - *`export f, g @ addr` in a program with `main`* (`b8b1e94`): `ProgramSyntax.ExportTable`; a fixed section "export table" with one `jmp` per function, in a program or reserved area (`CheckExportTable`). The entries are address-taken (`AddressTaken`, `main.UsedAddresses`), so they are compiled and their frames overlap no other. `BinaryInterface.GenerateTable` writes `name_api.tern` with the entries and their `keeps` only. The report has "Export table at $0900:". `CompileResult.Entries` lists the table. `PluginTests`.
+  - *Example and done when* (`77d5b07`): `examples/plugins/` (`level_api.tern` by hand, `game.tern` the host with `export add_score, show @ $0900`, `forest.tern` and `cave.tern` levels written in different orders). Checked in VICE from a disk image (commands in `game.tern`'s header): "FOREST CAVE 80" printed, border grey. `PluginTests.The_example_game_loads_two_levels_built_separately_into_one_slot_and_they_call_its_table` traps SETNAM/SETLFS/LOAD/CHROUT to load the level files in turn.
+  - *Messages* (`4c1fd03`) end with a fix verb; *skill* (`9840774`): `language.md` section 12.
 
 - **M20 follow-up 3, second review suggestions** (2026-11-09). Suggestion 1: the memory block is evaluated early only for a placement `@ name` where `name` is one of its regions, so a constant address (`@ SCREEN`) no longer makes a false cycle. Suggestion 2: the "memory block depends on itself" error has a test. `ConstantOrderTests`.
 
@@ -458,6 +465,9 @@ Including `jsr` and `rts`; from the tests.
 
 ## Known limitations and technical debt
 
+- `.gitignore` covers `examples/*.prg` (and `.lst`, `.vs`) but not the subfolder `examples/plugins/`, so building the plug-in example leaves untracked `.prg`, `.lst`, `.vs`, `.lines`, `.d64` and generated `*_api.tern` files there (`level_api.tern` is the hand-written one). `.gitignore` belongs to no session in `docs/workflow.md`; the spec session could add `examples/plugins/*` patterns.
+- The compiler does not check that a host calls a binary's or plug-in's `setup` before its other entries, nor that the loaded level matches the interface it was built against (spec 12.3: the program's responsibility).
+
 - `using X` with a call in the loop suggests removing `using X` but not why an `inline fn` does not help.
 - `tern run` has no KERNAL, so a program using `c64.set_kernal_irq` can be checked only in VICE (the tests put the KERNAL's IRQ entry bytes at `$FF48`).
 - The skill's outputs include addresses and cycles, so a code generator or library change that moves code fails `SkillTests` until `TERN_UPDATE_SKILL=1 dotnet test --filter SkillTests` rewrites them (read the diff: a prose claim next to an output may need changing too). Listing excerpts (```` ```lst ````) are updated by hand. Question 74 asks for this as a CLAUDE.md convention.
@@ -506,9 +516,12 @@ Not bugs; things to improve, mostly in M7 (optimizer).
 
 ## Questions for the spec session
 
-- **88** (M20 follow-up 3): spec 4 says a struct field's `@` offset "uses only constants declared above the struct". With constants resolved on demand, `struct S { a: u8, b: u8 @ OFF }` with `const OFF = 4` below it compiles (provisional: allowed, since the rule's reason, the order of declaration, is gone). Drop the exception from the spec, or should the compiler enforce it?
+- **89** (M21, spec 12.3): the spec lists "`setup` not at entry 0" as an error. Provisional: an interface module without a `setup` routine is an error too ("declare 'fn setup() @ $6000' in level_api"), since the host must call it; `setup` must take nothing and return nothing. Keep, or allow an interface without `setup`?
+- **90** (M21, spec 12.3): the spec says each export is "placed at the routine's address". Provisional: routines may leave gaps (filled with zeros, which a host should never call); routines closer than 3 bytes are an error; a routine with fixed inputs (`true using carry`) is an error, since a function cannot receive one. Other declarations of the interface module (constants, structs, functions with a body, variables without a fixed address, `data`) are not checked. Right?
+- **91** (M21, spec 12.3): for `export f, g @ addr` in a program with `main`, provisional: (a) the table must lie in a `program` or `reserved` area, like fixed `data`; (b) several `export` lines form one table, and only one of them may have the `@`; (c) `name_api.tern` holds only the entries and their `keeps`, with no memory constants (the plug-in's memory is its slot, not the program's); (d) `setup` may be an export's name, since a program has no setup entry; `main` may not.
+- **92** (M21): a level that names the interface's variable (`level_api.header`) instead of its own `data header` gets the general overlap error "'level_api.header' at $6009-$600A overlaps the data 'header' ... Move one of them", whose fix does not fit. Should the variable count as the binary's own data (allowed), or should the message say to use the binary's own `header`?
 
-Questions 86 and 87 were settled on 2026-11-09 and are built. Questions 79-85 were settled on 2026-11-09 and are built. Questions 76-78 were settled on 2026-11-08 (decisions.md), as built.
+Question 88 was settled on 2026-11-09 (as built). Questions 86 and 87 were settled on 2026-11-09 and are built. Questions 79-85 were settled on 2026-11-09 and are built. Questions 76-78 were settled on 2026-11-08 (decisions.md), as built.
 
 Questions 1-63 and 65-75 are settled (decisions.md; 44, 45 and 59-63 on 2026-11-07, 65-75 on 2026-11-08). Question 64 was withdrawn.
 
