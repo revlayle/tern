@@ -446,6 +446,8 @@ public sealed class ProgramSyntax(List<ConstDecl> consts, List<VarDecl> globals,
     public MemoryDecl? Memory { get; init; }
     /// <summary>Functions named by <c>export</c> lines, in order (spec 12.3).</summary>
     public List<ExportName> Exports { get; init; } = [];
+    /// <summary>The address of a program's export table (<c>export f, g @ $0900</c>), or null.</summary>
+    public ExportTable? ExportTable { get; init; }
     public List<StructDecl> Structs { get; init; } = [];
     /// <summary>Top-level names declared <c>private</c>: usable only inside this file.</summary>
     public HashSet<string> PrivateNames { get; init; } = [];
@@ -471,7 +473,13 @@ public sealed class MemoryLine(SourcePos pos, Expr first, Expr last, string kind
     public string? Name { get; } = name;
 }
 
-/// <summary>A function named in an <c>export</c> line.</summary>
+/// <summary>The <c>@ address</c> of an <c>export</c> line in a program with <c>main</c> (spec 12.3).</summary>
+public sealed class ExportTable(SourcePos pos, Expr address) : Node(pos)
+{
+    public Expr Address { get; } = address;
+}
+
+/// <summary>A function named in an <c>export</c> line, or the interface module of <c>export level_api</c>.</summary>
 public sealed class ExportName(SourcePos pos, string name) : Node(pos)
 {
     public string Name { get; } = name;

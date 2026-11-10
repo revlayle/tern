@@ -159,6 +159,7 @@ public sealed class Parser
             SkipTerminators();
         }
         var exports = new List<ExportName>();
+        ExportTable? exportTable = null;
         var privateNames = new HashSet<string>();
         while (!At(TokenKind.Eof))
         {
@@ -174,7 +175,7 @@ public sealed class Parser
                 ParseDeclaration();
             SkipTerminators();
         }
-        return new ProgramSyntax(consts, globals, functions) { Header = header, Asserts = asserts, Imports = imports, Memory = memory, Exports = exports, Structs = structs, PrivateNames = privateNames };
+        return new ProgramSyntax(consts, globals, functions) { Header = header, Asserts = asserts, Imports = imports, Memory = memory, Exports = exports, ExportTable = exportTable, Structs = structs, PrivateNames = privateNames };
 
         // Parses one top-level declaration and returns its name.
         string ParseDeclaration()
@@ -210,6 +211,14 @@ public sealed class Parser
                         var f = Expect(TokenKind.Identifier, "a function name after 'export'");
                         exports.Add(new ExportName(f.Pos, f.Text));
                     } while (Accept(TokenKind.Comma));
+                    // export f, g @ $0900: a program with main puts its jump table there (spec 12.3).
+                    if (At(TokenKind.At))
+                    {
+                        var at = Advance();
+                        if (exportTable is not null)
+                            throw new CompileError(at.Pos, "A program has one export table. List all its functions on the 'export' line with the '@'");
+                        exportTable = new ExportTable(at.Pos, ParseExpr());
+                    }
                     ExpectEndOfStatement();
                     return "";
                 }

@@ -103,6 +103,8 @@ public static class TernCompiler
                     $"A program with 'main' starts at ${platform.LoadAddress:X4}, where the {platform.Name.ToUpperInvariant()} BASIC line goes, but its first program area begins at ${layout.Program[0].First:X4}. " +
                     (layout.ProgramReplaced ? $"Start the first 'program' line of the memory block at ${platform.LoadAddress:X4}" : "Move the 'reserved' or 'region' range that covers it"));
             CheckFixedData(program, plan);
+            if (program.ExportTableAddress is int tableAt)
+                CheckExportTable(program, new AddressRange(tableAt, tableAt + 3 * program.Exports.Count - 1));
 
             if (!binary)
             {
@@ -114,16 +116,33 @@ public static class TernCompiler
             }
             else
             {
-                // A binary starts with its jump table: setup, then the exports in the order they were listed (spec 12.3).
+                // A binary starts with its jump table: setup, then the exports in the order they were listed,
+                // or at their routines' addresses in the interface module, with zeros between (spec 12.3).
                 items = [new SectionStart("jump table"), new LabelDef(start), new Instr(Jmp, Absolute, new LabelOperand(setup))];
+                int at = layout.Program[0].First + 3;
                 foreach (var export in program.Exports)
+                {
+                    if (program.ExportedAs.TryGetValue(export, out var routine))
+                    {
+                        if (routine.FixedAddress > at) items.Add(new DataBytes(new byte[routine.FixedAddress!.Value - at]));
+                        at = routine.FixedAddress!.Value;
+                    }
                     items.Add(new Instr(Jmp, Absolute, new LabelOperand(gen.LabelOf(export))));
+                    at += 3;
+                }
                 items.Add(new SectionStart("setup"));
                 items.Add(new LabelDef(setup));
                 items.AddRange(Startup(plan, bss, gen.LabelOf));
                 items.Add(new Instr(Rts));
             }
             items.AddRange(functionCode);
+            if (program.ExportTableAddress is int table)
+            {
+                // A program's export table: one jmp per function, in the order listed (spec 12.3).
+                items.Add(new SectionStart("export table", table));
+                foreach (var export in program.Exports)
+                    items.Add(new Instr(Jmp, Absolute, new LabelOperand(gen.LabelOf(export))));
+            }
 
             imageLabels = new Dictionary<VariableSymbol, Label>();
             foreach (var g in plan.ImageGlobals)
@@ -217,8 +236,27 @@ public static class TernCompiler
                 .Aggregate(CpuState.None, (acc, i) => acc | (AsmEffects.Of(i.Mnemonic, i.Mode).Writes & (CpuState.A | CpuState.X | CpuState.Y)));
             var table = new List<(string Name, FunctionSymbol? Function, int Address, CpuState Changed)> { ("setup", null, start.Address, setupChange) };
             for (int i = 0; i < program.Exports.Count; i++)
-                table.Add((program.Exports[i].Name, program.Exports[i], start.Address + 3 * (i + 1), use.Changed(program.Exports[i])));
+            {
+                var f = program.Exports[i];
+                table.Add((f.Name, f, program.ExportedAs.GetValueOrDefault(f)?.FixedAddress ?? start.Address + 3 * (i + 1), use.Changed(f)));
+            }
             entries.AddRange(table.Select(t => (t.Name, t.Address)));
+            // export level_api: each entry keeps what its routine promises to keep.
+            if (program.ExportedAs.Count > 0)
+            {
+                var api = program.ExportedAs.Values.First().Module!;
+                var interfaceSetup = (FunctionSymbol)api.Scope["setup"];
+                foreach (var (name, f, _, changed) in table)
+                {
+                    var routine = f is null ? interfaceSetup : program.ExportedAs[f];
+                    foreach (var reg in routine.Keeps.OrderBy(r => r))
+                        if (changed.HasFlag(reg switch { Register.A => CpuState.A, Register.X => CpuState.X, _ => CpuState.Y }))
+                            throw new CompileError(f?.Pos ?? program.Main.Pos,
+                                f is null
+                                    ? $"'{api.Name}.setup' promises to keep {reg}, but the binary's startup code changes it. Remove {reg} from its 'keeps' list"
+                                    : $"'{name}' changes {reg}, which '{api.Name}.{name}' promises to keep. Change the function so that it leaves {reg} alone, or remove {reg} from the routine's 'keeps' list");
+                }
+            }
 
             var fileRange = new AddressRange(loadAddress, fileEnd - 1);
             // Every range the binary uses, once: a host may not reserve overlapping ranges.
@@ -252,6 +290,17 @@ public static class TernCompiler
             string baseName = sourcePath is null ? "binary" : Path.GetFileNameWithoutExtension(sourcePath);
             apiName = baseName + "_api";
             apiModule = BinaryInterface.Generate(baseName + ".prg", apiName, table, fileRange, others);
+        }
+
+        if (program.ExportTableAddress is int tableAddress)
+        {
+            // The program's table, for plug-ins: no setup, no memory ranges (spec 12.3).
+            var use = new RegisterUse(gen, program.Functions);
+            var table = program.Exports.Select((f, i) => (f.Name, (FunctionSymbol?)f, tableAddress + 3 * i, use.Changed(f))).ToList();
+            entries.AddRange(table.Select(t => (t.Name, t.Item3)));
+            string baseName = sourcePath is null ? "program" : Path.GetFileNameWithoutExtension(sourcePath);
+            apiName = baseName + "_api";
+            apiModule = BinaryInterface.GenerateTable(baseName + ".prg", apiName, table);
         }
 
         var overlayFiles = new List<OverlayFile>();
@@ -299,6 +348,11 @@ public static class TernCompiler
             report.AppendLine($"Jump table at ${start.Address:X4}:");
             foreach (var (name, address) in entries) report.AppendLine($"  ${address:X4}  {name}");
         }
+        else if (program.ExportTableAddress is int exportTable)
+        {
+            report.AppendLine($"Export table at ${exportTable:X4}:");
+            foreach (var (name, address) in entries) report.AppendLine($"  ${address:X4}  {name}");
+        }
         report.AppendLine("Zero page:");
         report.Append(plan.ZeroPageMap);
 
@@ -329,6 +383,17 @@ public static class TernCompiler
     /// Data placed with <c>@ address</c> must lie in a program or reserved area (spec 8.4): anywhere
     /// else is memory the program was not given.
     /// </summary>
+    /// <summary>A program's export table is placed like fixed data: in a program or reserved area (spec 12.3).</summary>
+    private static void CheckExportTable(CheckedProgram program, AddressRange range)
+    {
+        var layout = program.Layout;
+        if (layout.Program.Concat(layout.Reserved).Any(a => a.Contains(range))) return;
+        throw new CompileError(program.Modules[^1].Syntax.ExportTable!.Address.Pos,
+            $"The export table at {range} is not in a program or reserved area. " +
+            $"Program areas: {MemoryLayout.List(layout.Program)}; reserved: {(layout.Reserved.Count == 0 ? "none" : MemoryLayout.List(layout.Reserved))}. " +
+            "Give it an address in one of them");
+    }
+
     private static void CheckFixedData(CheckedProgram program, RamPlan plan)
     {
         var layout = program.Layout;
