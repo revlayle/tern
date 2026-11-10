@@ -1,0 +1,22 @@
+// The interface every level of the plug-in example is built against (spec 12.3), written by hand.
+//
+// A level is a binary that loads into the slot $6000-$6FFF. Its jump table holds the entries below
+// at these addresses, and it puts its header at HEADER. A level built with 'export level_api' is
+// checked against this file; a level written another way only has to follow it.
+
+struct LevelHeader {
+    border: u8          // the border color while the level runs
+    goal: u8            // how many updates the level takes
+}
+
+const SLOT_FIRST = $6000
+const SLOT_LAST = $6FFF
+const ZP_FIRST = $FB    // zero page a level may use: the game leaves it alone
+const ZP_LAST = $FE
+const HEADER = $6009
+
+fn setup() @ $6000                              // first, after loading: sets the level's variables
+fn enter() @ $6003                              // the level starts
+fn update() -> bool using carry @ $6006         // one step; true when the level is finished
+
+volatile var header: LevelHeader @ HEADER       // every level's data at a fixed address

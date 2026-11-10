@@ -1,0 +1,30 @@
+// A level of the plug-in example (game.tern), written in another order than forest.tern: the
+// entries go where level_api puts them, whatever the order of the functions here.
+import game_api
+import level_api
+
+memory {
+    level_api.SLOT_FIRST..=level_api.SLOT_LAST  program
+    level_api.ZP_FIRST..=level_api.ZP_LAST      zeropage
+}
+
+export level_api
+
+var bats: u8
+data NAME = "CAVE "
+
+fn update() -> bool using carry {
+    bats += 1
+    game_api.add_score(points())
+    return bats >= header.goal
+}
+
+fn points() -> u8 {
+    return 25
+}
+
+fn enter() {
+    for i in 0..len(NAME) { game_api.show(NAME[i]) }
+}
+
+data header: level_api.LevelHeader @ level_api.HEADER = level_api.LevelHeader { border = 12, goal = 2 }

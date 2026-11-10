@@ -1,0 +1,64 @@
+// Plug-ins (spec 12.3): levels built separately from the game, against a fixed interface, and
+// loaded from disk one after another into the same slot.
+//
+// level_api.tern is written by hand: the entries every level has and where its header is. Each
+// level (forest.tern, cave.tern) is a binary of its own with 'export level_api', which the compiler
+// checks against the interface. A level added later, or written in assembly, works the same way.
+//
+// The game offers two services to the levels: 'export add_score, show @ $0900' puts a jump table
+// at $0900, and the compiler writes game_api.tern, which the levels import. So build the game first:
+//   dotnet run --project src/Tern.Cli -- examples/plugins/game.tern
+//   dotnet run --project src/Tern.Cli -- examples/plugins/forest.tern
+//   dotnet run --project src/Tern.Cli -- examples/plugins/cave.tern
+//   c1541 -format plugins,01 d64 examples/plugins/plugins.d64 -write examples/plugins/game.prg game
+//         -write examples/plugins/forest.prg forest -write examples/plugins/cave.prg cave
+//   x64sc -default -warp -autostart examples/plugins/plugins.d64
+//
+// Result: "FOREST CAVE 80" is printed (each level prints its name through 'show'; the forest adds
+// 10 points three times, the cave 25 twice) and the border is grey, the cave's color.
+import c64
+import text
+import level_api
+
+memory {
+    $0801..=$5FFF                               program
+    level_api.SLOT_FIRST..=level_api.SLOT_LAST  reserved
+}
+
+export add_score, show @ $0900
+
+var score: u16
+
+data FOREST = "FOREST"
+data CAVE = "CAVE"
+
+// ---------- Services for the levels ----------
+
+fn add_score(points: u8 using A) {
+    score += points as u16
+}
+
+fn show(ch: u8 using A) {
+    c64.chrout(ch)
+}
+
+// ---------- The game ----------
+
+fn play(name: ptr u8, n: u8) {
+    if c64.load(name, n, 8) {
+        c64.vic.border = c64.RED        // loading failed
+        while true { }
+    }
+    level_api.setup()
+    c64.vic.border = level_api.header.border
+    level_api.enter()
+    while !level_api.update() { }
+}
+
+fn main() {
+    play(addr(FOREST), len(FOREST))
+    play(addr(CAVE), len(CAVE))
+    var digits: [u8; 5]
+    var n: u8 = text.dec16(addr(digits), score)
+    c64.print(addr(digits), n)
+}

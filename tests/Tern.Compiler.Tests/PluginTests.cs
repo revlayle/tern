@@ -184,6 +184,48 @@ public sealed class PluginTests : IDisposable
         Assert.Equal("'export level_api' builds a binary that plugs into level_api's jump table, which a program with 'main' does not. List the program's own functions: 'export f, g @ address'", e.Description);
     }
 
+    // ---------- Done when (roadmap M21): the example ----------
+
+    [Fact]
+    public void The_example_game_loads_two_levels_built_separately_into_one_slot_and_they_call_its_table()
+    {
+        foreach (var name in new[] { "level_api.tern", "game.tern", "forest.tern", "cave.tern" })
+            File.Copy(AsmTests.FindExample("plugins/" + name), PathOf(name));
+        var game = TernCompiler.Compile(File.ReadAllText(PathOf("game.tern")), sourcePath: PathOf("game.tern"));
+        Write("game_api.tern", game.ApiModule!);
+        CompileResult Level(string name) => TernCompiler.Compile(File.ReadAllText(PathOf(name + ".tern")), sourcePath: PathOf(name + ".tern"));
+        var levels = new Dictionary<string, CompileResult> { ["FOREST"] = Level("forest"), ["CAVE"] = Level("cave") };
+
+        // Written in different orders, the levels have the same table, in the slot the game reserves.
+        Assert.Equal(new[] { ("setup", 0x6000), ("enter", 0x6003), ("update", 0x6006) }, levels["FOREST"].Entries);
+        Assert.Equal(levels["FOREST"].Entries, levels["CAVE"].Entries);
+        Assert.All(levels.Values, l => Assert.Equal(0x6000, l.LoadAddress));
+        Assert.DoesNotContain(game.Sections, s => s.Size > 0 && s.Address is >= 0x6000 and <= 0x6FFF);
+        Assert.Contains("fn add_score(points: u8 using A) @ $0900 keeps X, Y", game.ApiModule);
+
+        // The KERNAL's SETNAM, SETLFS and LOAD load the level file named; CHROUT collects the output.
+        string named = "";
+        var loads = new List<string>();
+        var output = new System.Text.StringBuilder();
+        var traps = new Dictionary<int, Action<Run>>
+        {
+            [0xFFBD] = r => named = new string(Enumerable.Range(r.Cpu.X | (r.Cpu.Y << 8), r.Cpu.A).Select(a => (char)r.Ram.Bytes[a]).ToArray()),
+            [0xFFBA] = _ => { },
+            [0xFFD5] = r =>
+            {
+                r.Ram.Load((ushort)levels[named].LoadAddress, levels[named].Image);
+                loads.Add(named);
+                r.Cpu.C = false;
+            },
+            [0xFFD2] = r => output.Append((char)r.Cpu.A),
+        };
+        var run = Run.Program(File.ReadAllText(PathOf("game.tern")), sourcePath: PathOf("game.tern"), traps: traps);
+        Assert.Equal(new[] { "FOREST", "CAVE" }, loads);
+        Assert.Equal("FOREST CAVE 80", output.ToString());
+        Assert.Equal(80, run.U16("score"));
+        Assert.Equal(12, run.Ram.Bytes[0xD020]);                     // the cave's border, from its header
+    }
+
     // ---------- export f, g @ addr in a program with main ----------
 
     private const string Host = """
