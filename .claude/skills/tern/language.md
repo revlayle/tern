@@ -628,12 +628,18 @@ a $0003 u8 = 21 ($15)
 ```
 
 - `import name` looks in the platform library (`lib/c64/`), the standard library (`lib/`), then the
-  program's folder. Names are used with the module name. `private` hides a declaration.
+  program's folder. Names are used with the module name. `private` hides a declaration. A module of
+  your own may not have a library module's name (`io.tern`, `random.tern`): rename it.
 - Only what is reached is compiled. Module parameters: `import sprites(COUNT = 24)`; a module
   declares them with `module sprites(COUNT: u8 = 32)` and checks them with `assert`.
 - A `memory { }` block in the main file reserves ranges (`$2000..=$2FFF reserved`), adds regions,
   overlay areas and zero page. A main file with `export` lines and no `main` is a binary for another
   program (`name_api.tern` is written for the host). See `docs/guide.md` sections 3.11 and 3.12.
+- Plug-ins: `export level_api` in a binary takes its entries from a hand-written interface module
+  (routines at fixed addresses, with `setup` at the start of the binary's first program area, and
+  `volatile var`s the binary defines as `data` at the same address); each function must match its
+  routine's registers and `keeps`. A program with `main` can give plug-ins a table of its own:
+  `export add_score, show @ $0900` (and `name_api.tern` for them). See `examples/plugins/`.
 
 ## 13. Standard library
 
