@@ -704,7 +704,13 @@ public sealed class Parser
         else if (Accept(TokenKind.DotDot)) inclusive = false;
         else throw new CompileError(Current.Pos, $"Expected '..' or '..=', found {Describe(Current)}");
         var to = ParseHeaderExpr();
-        Expr? step = Accept(TokenKind.Step) ? ParseHeaderExpr() : null;
+        // 'step' is a keyword only here, right after the range (spec 13); elsewhere it is a name.
+        Expr? step = null;
+        if (At(TokenKind.Identifier) && Current.Text == "step")
+        {
+            Advance();
+            step = ParseHeaderExpr();
+        }
         Register? reg = Accept(TokenKind.Using) ? ParseRegister() : null;
         var body = ParseBlock();
         return new ForStmt(start.Pos, name.Text == "_" ? null : name.Text, from, to, inclusive, step, reg, body);

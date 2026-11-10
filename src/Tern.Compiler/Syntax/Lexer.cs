@@ -21,7 +21,7 @@ public enum TokenKind
     String,
 
     // Keywords
-    Const, Var, Data, Fn, Return, If, Else, While, For, In, Step, Using, Break, Continue,
+    Const, Var, Data, Fn, Return, If, Else, While, For, In, Using, Break, Continue,
     True, False, As, Zp, Struct, Match, Bank, Linear, Inline, Interrupt, Asm, Noinit, Keeps, Import, Private, Volatile, Module, Assert, Export,
 
     // Punctuation and operators
@@ -58,7 +58,7 @@ public static class Lexer
         ["const"] = TokenKind.Const, ["var"] = TokenKind.Var, ["data"] = TokenKind.Data,
         ["fn"] = TokenKind.Fn, ["return"] = TokenKind.Return, ["if"] = TokenKind.If,
         ["else"] = TokenKind.Else, ["while"] = TokenKind.While, ["for"] = TokenKind.For,
-        ["in"] = TokenKind.In, ["step"] = TokenKind.Step, ["using"] = TokenKind.Using,
+        ["in"] = TokenKind.In, ["using"] = TokenKind.Using,
         ["break"] = TokenKind.Break, ["continue"] = TokenKind.Continue,
         ["true"] = TokenKind.True, ["false"] = TokenKind.False, ["as"] = TokenKind.As,
         ["zp"] = TokenKind.Zp, ["struct"] = TokenKind.Struct, ["match"] = TokenKind.Match,

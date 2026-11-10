@@ -78,10 +78,10 @@ public class ErrorTests
     [InlineData("const M = %101\nfn main() { }", 1, 11, "Write binary numbers as 0b101")]
     [InlineData("const M = %2\nfn main() { }", 1, 11, "Expected an expression, found '%'")]
     [InlineData("const M = %0xFF\nfn main() { }", 1, 11, "Expected an expression, found '%'")]
-    [InlineData("fn step() { }\nfn main() { }", 1, 4, "Expected function name, found 'step', which is a keyword. Use another name")]
+    [InlineData("fn match() { }\nfn main() { }", 1, 4, "Expected function name, found 'match', which is a keyword. Use another name")]
     [InlineData("var data: u8\nfn main() { }", 1, 5, "'data', which is a keyword")]
     [InlineData("fn f(in: u8) { }\nfn main() { }", 1, 6, "'in', which is a keyword")]
-    [InlineData("fn main() { for step in 0..3 { } }", 1, 17, "'step', which is a keyword")]
+    [InlineData("fn main() { for using in 0..3 { } }", 1, 17, "'using', which is a keyword")]
     [InlineData("export fn get() { }", 1, 8, "'export' lists functions declared elsewhere, so it is not followed by 'fn'. Remove 'fn' here")]
     [InlineData("export fn update() { }", 1, 8, "declare the function on its own: 'export update' and 'fn update() { }'")]
     public void Names_habits_from_c(string source, int line, int column, string expected)
@@ -106,7 +106,7 @@ public class ErrorTests
     {
         var e = Assert.Throws<CompileError>(() => TernCompiler.Compile("var n: u8\nfn main() { n++ }"));
         Assert.Equal(("Tern has no '++'.", "Write 'n += 1'"), Tools.Diagnostic.Split(e.Description));
-        e = Assert.Throws<CompileError>(() => TernCompiler.Compile("fn step() { }\nfn main() { }"));
+        e = Assert.Throws<CompileError>(() => TernCompiler.Compile("fn match() { }\nfn main() { }"));
         Assert.Equal("Use another name", Tools.Diagnostic.Split(e.Description).Suggestion);
     }
 
