@@ -66,7 +66,7 @@ public static class ModuleLoader
                         ? $"'{import.Name}' is this file, the program's main file, which cannot be imported. Remove this import"
                         : $"'{import.Name}' is the program's main file, which cannot be imported. Move what {m.Name} needs from it into a module that both import");
                     string path;
-                    try { path = Find(import, m, platform, libraryDirectory); }
+                    try { path = Find(import, m, platform, libraryDirectory, IsMainFile); }
                     catch (CompileError) when (IsMainFile(System.IO.Path.GetFullPath(System.IO.Path.Combine(m.Directory, import.Name + ".tern"))))
                     {
                         throw MainImported();   // the main file has not been saved yet
@@ -99,7 +99,7 @@ public static class ModuleLoader
     /// The file for <c>import name</c>: the library's folder for the target platform, the library,
     /// then the importing file's folder. A module in another platform's folder is an error.
     /// </summary>
-    private static string Find(ImportDecl import, Module importer, Platform platform, string library)
+    private static string Find(ImportDecl import, Module importer, Platform platform, string library, Func<string, bool> isMainFile)
     {
         string file = import.Name + ".tern";
         string[] candidates =
@@ -108,8 +108,9 @@ public static class ModuleLoader
             System.IO.Path.Combine(library, file),
             System.IO.Path.Combine(importer.Directory, file),
         ];
-        foreach (var path in candidates)
+        for (int i = 0; i < candidates.Length; i++)
         {
+            var path = candidates[i];
             if (!File.Exists(path)) continue;
             // File names ignore case on Windows. The module name must match the file exactly, so that
             // a module is loaded once and the program also compiles where case matters.
@@ -118,7 +119,15 @@ public static class ModuleLoader
             if (actual != file)
                 throw new CompileError(import.Pos,
                     $"The module file is named {actual}; write 'import {System.IO.Path.GetFileNameWithoutExtension(actual)}'");
-            return System.IO.Path.GetFullPath(path);
+            var full = System.IO.Path.GetFullPath(path);
+            // A program's own module may not have a library module's name (spec 2.2), so the library
+            // never silently hides it. A main file of that name is never imported, and is allowed.
+            var own = System.IO.Path.GetFullPath(candidates[^1]);
+            if (i < candidates.Length - 1 && File.Exists(own) && !isMainFile(own) && !InLibrary(importer.Directory, library)
+                && !string.Equals(own, full, StringComparison.OrdinalIgnoreCase))
+                throw new CompileError(import.Pos,
+                    $"'{import.Name}' is both a library module ({full}) and your file {own}. Rename your file, e.g. to my_{file}, and import it by its new name");
+            return full;
         }
 
         if (System.IO.Directory.Exists(library))
@@ -129,5 +138,14 @@ public static class ModuleLoader
 
         throw new CompileError(import.Pos,
             $"Cannot find module '{import.Name}': there is no {file} in the library ({library}) or in {importer.Directory}");
+    }
+
+    /// <summary>Whether a folder is the library or one of its platform folders.</summary>
+    private static bool InLibrary(string folder, string library)
+    {
+        var lib = System.IO.Path.GetFullPath(library).TrimEnd(System.IO.Path.DirectorySeparatorChar);
+        var dir = System.IO.Path.GetFullPath(folder).TrimEnd(System.IO.Path.DirectorySeparatorChar);
+        return string.Equals(dir, lib, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(System.IO.Path.GetDirectoryName(dir), lib, StringComparison.OrdinalIgnoreCase);
     }
 }
