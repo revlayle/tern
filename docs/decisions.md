@@ -68,7 +68,7 @@ Settled decisions and the reasons for them. Do not reopen one without new inform
 
 ## Compile time
 
-- **v0:** constant expressions plus `include_bytes`. **Later:** `const fn`, a compile-time interpreter for a subset of Tern, with its own unbounded `int` and `real` types, range-checked when values enter the program.
+- **v0:** constant expressions plus `include_bytes`. **Later:** `const fn`, a compile-time interpreter for a subset of Tern, with its own `int` (64-bit, question 87) and `real` types, range-checked when values enter the program.
 
 ## Settled during M1 (2026-11-01)
 
@@ -606,3 +606,17 @@ From `galaxy-star/tern/gaps.md`, steps 3 to 5 (gaps 11 to 25) and the leftover o
 - **92: a specific error, no alias.** A binary that names the interface's variable (`level_api.header`) where it defines its own `data header` at that address gets "'level_api.header' is this binary's data 'header'. Use 'header'"; other overlaps keep the general error. Reason: the general message's fix ("Move one of them") does not fit; letting the interface's name stand for the binary's data would give the same bytes two names (rule 3). Built as a small item at the start of M22 (roadmap).
 - **93: spec 12.3 says a `volatile` variable of the module needs `data`** (a plain fixed variable is the host's), matching the decision of 2026-11-03 and the build; the spec's wording was looser than the decision. The guide notes that an export table far from the code makes the program file cover the gap.
 - **Spec 12.3's plug-ins are recorded as built** (M21), no longer planned.
+
+## 2026-11-10: `const fn` details for M22
+
+Spec 4.1 left these open; settled before M22's coding session.
+
+- **Arrays are values of fixed length** (`[0; n]`, a `for` list, `len(t)`), and a `const fn` may return one. A table takes it with a checked length or `[T; _]`: `data sine: [u8; _] = tables.sine(256)`. Reason: `[T; _]` already means "length from the value" (gap 10), and the element type must be written, since an `int` array has no byte width; the spec's untyped `data sine = tables.sine(256)` is replaced. Growable lists are left out: a generator knows how many entries it makes. `data x = include_bytes(...)` keeps its untyped form, since a file is bytes.
+- **A `real` never becomes an `int` by itself**: `round` (halves away from zero), `floor`, `ceil`, `trunc`. An `int` becomes a `real` freely. Reason: in sine tables the rounding shows directly in the bytes; implicit truncation biases the negative half by half a step. `as` keeps its one meaning (rule 3).
+- **Only compile-time types in a `const fn`**: `int`, `real`, `bool`, arrays of them, `label`. Runtime types are errors; arguments widen. Reason: one integer type that never wraps, with no `as` inside generators; 8-bit behavior is written as `& $FF`, where it shows. Strings and structs are left out until a generator needs them.
+- **`[expr for i in range]`** in `const`, `data`, `var` initial values and `const fn`, with a `for` loop's range forms; one `for`, no filter, no nesting; an error in runtime code (rule 1). Reason: one short form for simple tables, and a `const fn` with ordinary loops for anything more, rather than two ways.
+- **Step limit: 10,000,000 per top-level evaluation**, no setting. Reason: a 64 KB table needs well under 1% of it, and a runaway loop fails in about half a second; a setting waits for a generator that needs one.
+- **`real` is a 64-bit double**, with `.`/exponent literals only in compile-time code, the usual math functions, `PI` and `TAU`; division by zero and `sqrt`/`log` of a negative number are errors. Reason: results match C# exactly in tests, and 53 bits are enough for M24's float constants.
+- **A `const fn` reads constants, module parameters, `sizeof`, field offsets and `data` tables** (including `include_bytes`), but not `var`, `volatile` or fixed data over an overlay, nor `addr()`, which is decided after evaluation. Reason: everything known at compile time may be read, so one table can be built from another or from a file; an `emit` operand can still name an address, since it is assembled after placement.
+- **No built-in for a `real`'s bits** in M22: `floor`, `log2` and `pow` split it. Reason: a built-in would tie the language to one float layout before M24 chooses its format; M24's spec session may add one.
+
