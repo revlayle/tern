@@ -1615,6 +1615,24 @@ public sealed class CodeGen
     }
 
     /// <summary>
+    /// For <c>q + e</c> (either order) into d, with e an unsigned byte that needs code and q a 16-bit
+    /// operand used in place that does not read d: the two bytes of q and e. Null otherwise, also for a
+    /// constant e, which keeps <c>clc / lda q / adc #c</c>.
+    /// </summary>
+    private (Action<Mnemonic, int> Wide, Expr Small)? ByteAddend(BinaryExpr b, Loc d)
+    {
+        static Expr? Narrow(Expr e) =>
+            e.Type is { Size: 1, IsSigned: false } ? e
+            : e is CastExpr { Operand.Type: { Size: 1, IsSigned: false } } c ? c.Operand : null;
+        foreach (var (q, e) in new[] { (b.Left, b.Right), (b.Right, b.Left) })
+        {
+            if (q.Type.Size != 2 || Narrow(e) is not { ConstValue: null } small || ReadsVar(q, d.Var)) continue;
+            if (InPlace16(q, d.Var) is { } wide) return (wide, small);
+        }
+        return null;
+    }
+
+    /// <summary>
     /// <c>x op (y &gt;&gt; k)</c> (or <c>&lt;&lt;</c>, either side unless op is <c>-</c>) with y and x
     /// needing no code: the shifted low byte stays in A and only its high byte goes to a temporary,
     /// <c>lda y+1 / sta t / lda y / lsr t / ror a ... / clc / adc x / sta d / lda t / adc x+1 / sta d+1</c>.
@@ -1833,6 +1851,16 @@ public sealed class CodeGen
                 return;
             }
 
+            case BinaryExpr b when b.Op == TokenKind.Plus && ByteAddend(b, d) is var (wide, small):
+            {
+                // p = q + e with e an unsigned byte (spec 11): e in A / clc / adc q / sta p / lda q+1 / adc #0 / sta p+1.
+                GenA(small);
+                CarryFor(TokenKind.Plus, small);
+                wide(Adc, 0); Op(Sta, d.Lo);
+                wide(Lda, 1); Op(Adc, Byte(0)); Op(Sta, d.Hi);
+                return;
+            }
+
             case BinaryExpr b:
             {
                 if (ShiftedOperand16(b, d)) return;
@@ -1989,6 +2017,27 @@ public sealed class CodeGen
         {
             right = new NumberExpr(right.Pos, c + 1) { Type = right.Type, ConstValue = c + 1 };
             op = op == TokenKind.Greater ? TokenKind.GreaterEq : TokenKind.Less;
+        }
+
+        // A signed s < 0 or s >= 0 is the sign bit (spec 11): lda s / bmi, lda s+1 / bpl for an i16.
+        if (signed && right.ConstValue == 0 && op is TokenKind.Less or TokenKind.GreaterEq)
+        {
+            if (type.Size == 1)
+            {
+                GenA(left);
+                if (!FlagsMatchA()) Op(Cmp, Byte(0));
+            }
+            else if (Simple2(left) is { } pair)
+                Op(Lda, pair.Hi);
+            else
+            {
+                var temp = AcquireTemp(2);
+                Gen16(left, new Loc(temp));
+                Op(Lda, Var(temp, 1));
+                Release(temp);
+            }
+            Branch(op == TokenKind.Less ? Bmi : Bpl, target);
+            return;
         }
 
         // The left side already in A (a using A parameter, F16): compare in place with two branches
