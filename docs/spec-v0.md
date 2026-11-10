@@ -939,6 +939,7 @@ These are the intended translations. The optimizer may produce something shorter
 | `w += 1` (u16) | `inc w` / `bne +` / `inc w+1` |
 | `w += b as u16` (b: u8) | `lda b` / `clc` / `adc w` / `sta w` / `bcc +` / `inc w+1` |
 | `p = q + e` (`q` a pointer or `u16`, `e` a `u8` expression such as `col << 1`) | `e` in A / `clc` / `adc q` / `sta p` / `lda q+1` / `adc #0` / `sta p+1`: an 8-bit add with the carry into the high byte, never a 16-bit temporary |
+| `p = q + e + K` (as above, `K` the constant parts of the sum, written anywhere in it, e.g. `COLOR_RAM - SCREEN`; planned, not scheduled) | the constants added together at compile time, the order of the terms does not change the code; `K` with a low byte of 0 goes into the high-byte add (`adc #>K` in place of `adc #0`), otherwise `K` is added once at the end |
 | `v += 2`, `v -= 2` (one-byte variable held in X or Y, e.g. a loop counter) | `inx` / `inx`, `dex` / `dex` (`iny`, `dey` for Y) |
 | `p += 256`, `w -= 256` | `inc p+1`, `dec w+1` |
 | `b = a[i + 1]` in `for i in 0..last` (last: u8) | `lda a+1,x` / `sta b` (3.2) |
