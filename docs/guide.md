@@ -193,7 +193,7 @@ var e: ptr Enemy @ zp
 e.hp -= 1                          // ldy #2 / lda (e),y / sec / sbc #1 / sta (e),y
 ```
 
-**Struct literals** give a global struct, a global array of structs or `data` its initial bytes: the struct's name, then `field = value` for the fields to set; the others are 0. The tables are built at compile time in the array's layout, so a list of records costs the same as parallel arrays. `[T; _]` takes the length from the list. In code, assign the fields one by one.
+**Struct literals** give a global struct, a global array of structs or `data` its initial bytes: the struct's name, then `field = value` for the fields to set; the others are 0. The tables are built at compile time in the array's layout, so a list of records costs the same as parallel arrays. `[T; _]` takes the length from the list, and `[u8; _]` from a string (`var text: [u8; _] = screen"GALAXY 00 "` has 10 bytes). In code, assign the fields one by one.
 
 ```
 struct Line { row: u8, col: u8, text: ptr u8 }
@@ -284,7 +284,7 @@ if fire_pressed() { shoot() }      // lda #$10 / bit $DC00 / bne skip
 
 `interrupt fn` saves only the registers it changes and ends with `rti`. It is its own root: its memory never overlaps main's. A function called from both main and a handler is an error, unless it has no memory of its own (like `acknowledge` above). One `interrupt fn` called from another becomes a *part* (no saving, ends with `rts`), which is how the library's raster code is combined into one handler you install.
 
-The `c64` module installs handlers: `kernal_off()`, `set_irq(addr(handler))`, `interrupts_on()` (see example 4.3). With the KERNAL left in (needed by the `io` library), `set_kernal_irq(addr(handler))` installs the same kind of handler through `$0314`; the KERNAL's keyboard scan then stops.
+The `c64` module installs handlers: `kernal_off()`, `set_irq(addr(handler))`, `interrupts_on()` (see example 4.3). With the KERNAL left in (needed by the `io` library), `set_kernal_irq(addr(handler))` installs the same kind of handler through `$0314`; the KERNAL's keyboard scan then stops. For a raster interrupt there, call `cia_irqs_off()` first, which turns off the CIA timer interrupts and clears any that are pending.
 
 A handler starts with `cld` only when it can do decimal arithmetic: when its code or asm blocks have `adc` or `sbc`, or it calls anything (`jsr`). A handler without them leaves decimal mode alone, which is safe since nothing in it depends on it.
 
@@ -312,6 +312,21 @@ asm fn fill(value: u8 using A, count: u8 using X) {
 - Operands may name Tern variables, constants, arrays, struct fields (`sta c64.vic.border`) and functions. `#name.lo` / `#name.hi` take the bytes of an address (not `<` / `>`).
 - Labels starting with `.` are local to the block. `;` is not a comment here; use `//`.
 - The compiler works out which registers and variables a block uses and works around it. It never changes your instructions.
+- An `asm fn` (or `inline asm fn`) body may start with `var` lines for its work bytes, with no initial value and no `@`. They are the function's own locals, in its frame, so they share memory with functions that never run at the same time; a pointer used as `(p),y` goes in zero page. An `asm { }` statement has none: declare the variable before the block.
+
+```
+asm fn clear_row(row: ptr u8 using AY) {
+    var p: ptr u8
+    sta p
+    sty p+1
+    lda #32
+    ldy #39
+.loop:
+    sta (p),y
+    dey
+    bpl .loop
+}
+```
 
 ### 3.10 Modules
 
@@ -327,6 +342,8 @@ fn main() {
 
 - `import name` loads `name.tern` from the platform library (`lib/c64/`), the standard library (`lib/`), then your program's folder. Names are always used with the module name: `text.put`.
 - `private` before a declaration hides it from other modules.
+- Modules may import each other, and declarations may be used in any order, also across modules: `const KINDS: u8 = len(star_char)` works wherever `star_char` is declared. Only a constant that depends on itself is an error.
+- The main file cannot be imported. Put what other modules need from it in a module that both import.
 - Only what your program reaches is compiled: an unused import adds no bytes.
 - An `if` on a constant compiles only the branch taken, and a function called only from the other branch is left out entirely, with no code and no memory. So a module option that is off costs nothing:
 
@@ -599,9 +616,10 @@ More in `examples/`: `library.tern` (KERNAL printing, numbers), `structs.tern`, 
 | `wide` | 24- and 32-bit unsigned numbers (`U24`, `U32`): add, subtract, compare, multiply, divide, decimal and hex output |
 | `bcd` | Packed decimal counters of 1-4 bytes, for scores: add, subtract, compare, digits |
 | `random` | 8- and 16-bit xorshift, `below(n)` |
-| `c64` | Screen and color addresses, the 16 colors, KERNAL `chrout`/`print`/`getin`/`cursor`, `load` (for overlays), register structs `vic`, `sid`, `cia1`, `cia2`, interrupt setup |
+| `c64` | Screen and color addresses, the 16 colors, KERNAL `chrout`/`print`/`getin`/`cursor`, `load` (for overlays), register structs `vic`, `sid`, `cia1`, `cia2`, `sprite_xy` (the sprite positions as an array), interrupt setup |
 | `sprites` (C64) | Sprite multiplexer, 8 to 64 sprites, optional flicker |
 | `scroll` (C64) | Smooth eight-way character scrolling with two screens |
+| `io` (C64) | Device I/O through the KERNAL: load and save whole files, sequential files, the drive's command channel and status; needs the KERNAL banked in |
 
 Strings and blocks are passed as a pointer and a length (`addr(s), len(s)`). Signatures and cycle counts are in spec section 10.1 and `docs/status.md`.
 
@@ -612,6 +630,7 @@ Tern trusts you and does not add hidden checks. These are deliberate and often u
 - **Everything wraps, including indexes.** With `head = 255`, `buf[head + 1]` is `buf[0]`, so a 256-byte ring buffer needs no masking.
 - **Indexes are not checked.** An index past the end of an array reads or writes whatever is there, and the optimizer assumes it does not happen. Write across variables on purpose through a pointer.
 - **Signed `>>` rounds down**, not toward zero.
+- **Calls in one statement run left to right**, as do reads of `volatile` memory: in `(rand() + 1) << 2 | rand()` the left `rand()` runs first, and in `a[f()] = g()` the index's call runs first. One case is left open: a variable that a call in the same statement changes. In `x = seed + next()` where `next` changes `seed`, either value of `seed` may be added; put the call or the variable in a local first.
 - **A `for` loop with a variable step of 0 never ends.** Stepped loops stop when the step carries past the end of the type.
 - **Flags after compiled code are unspecified.** An empty `inline asm fn ... -> bool using carry {}` reads the flag an `asm` block just left, when used right after that block.
 - **`keeps` is a promise** from the routine's documentation; the compiler does not check it.
@@ -744,7 +763,6 @@ tern run game.tern --profile                      // the cycles of each function
 - **`const fn` and code generators** (M22). Functions that run at compile time to build lookup tables, with unlimited-size `int` and `real` math. A generator can `emit` assembly, to produce unrolled "speedcode" whose shape depends on parameters.
 - **Doc comments (`///`) and a language server** (M23) that shows errors, types and costs in your editor.
 - **Floats as a library** (M24).
-- **C64 device I/O library**: load and save files on disk or tape, sequential files, the drive's command channel and error status, through the KERNAL.
 - **A full developer guide**, growing out of this one, with an example for each machine-level behavior.
 
 ### New platforms (last)
