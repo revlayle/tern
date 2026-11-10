@@ -620,3 +620,8 @@ Spec 4.1 left these open; settled before M22's coding session.
 - **A `const fn` reads constants, module parameters, `sizeof`, field offsets and `data` tables** (including `include_bytes`), but not `var`, `volatile` or fixed data over an overlay, nor `addr()`, which is decided after evaluation. Reason: everything known at compile time may be read, so one table can be built from another or from a file; an `emit` operand can still name an address, since it is assembled after placement.
 - **No built-in for a `real`'s bits** in M22: `floor`, `log2` and `pow` split it. Reason: a built-in would tie the language to one float layout before M24 chooses its format; M24's spec session may add one.
 
+## 2026-11-10: the Commodore 128 as a later platform
+
+- **The C128 in native mode is a planned platform, M29, after the first release** (roadmap), not part of the release's five platforms. Reason: C64 programs already run on a C128 in its C64 mode, so native mode adds 2 MHz, 80 columns, 128 KB and the extra keys, and is wanted eventually rather than now. It reuses most of the C64 work (same CPU instructions, VIC, SID, CIAs, KERNAL entries), so it is a small platform when its turn comes.
+- **Open for its spec session:** how a C128 build reaches the C64 library modules (a C128 build searching `lib/c128/`, then `lib/c64/`, recommended; a shared folder would change every C64 program's imports, against the decision of 2026-11-09), the free zero page, the BASIC 7 stub, and whether RAM bank 1 waits for a follow-up after bank switching (spec 14.1).
+

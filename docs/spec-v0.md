@@ -14,7 +14,7 @@ Tern is a programming language for 6502-family processors. It aims to be easy to
 4. **Predictable output.** Each construct has a documented code shape (section 11). A reader can estimate the generated code from the source.
 5. **Readable output.** The compiler writes a listing with source lines, addresses, bytes and cycle counts next to the binary.
 6. **Cheap mixing with assembly.** Inline assembly and assembly functions are parsed by the compiler and can use Tern variables by name.
-7. **Multiple targets.** CPU variant (which instructions exist) and platform (memory map, file format) are separate settings. Commodore 64 is the first platform; Atari 8-bit, Apple II, NES and Commander X16 are planned, in that order.
+7. **Multiple targets.** CPU variant (which instructions exist) and platform (memory map, file format) are separate settings. Commodore 64 is the first platform; Atari 8-bit, Apple II, NES and Commander X16 are planned, in that order, then the Commodore 128 in native mode.
 
 **Non-goals**
 
@@ -1029,7 +1029,7 @@ A platform description gives: CPU variant, free zero-page ranges, RAM ranges for
   | `$D000–$DFFF` | VIC, SID, color RAM, CIAs, cartridge I/O |
 - Default encoding: `petscii` (2.1).
 
-**Planned**, in this order: Atari 8-bit (`.xex`), Apple II (binary for DOS 3.3/ProDOS), NES (iNES, `ricoh2a03`, PRG/CHR banks), Commander X16 (`wdc65c02`).
+**Planned**, in this order: Atari 8-bit (`.xex`), Apple II (binary for DOS 3.3/ProDOS), NES (iNES, `ricoh2a03`, PRG/CHR banks), Commander X16 (`wdc65c02`). After them, the Commodore 128 in native mode (`.prg` at `$1C01`).
 
 ### 12.3 Programs without `main`
 

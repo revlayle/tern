@@ -867,5 +867,6 @@ tern run game.tern --profile                      // the cycles of each function
 - Apple II
 - NES, with ROM banks (`@ bank(n)`) and calls between banks
 - 65C02 CPU and the Commander X16
+- Commodore 128 in native mode, after the first release (C64 programs already run in its C64 mode)
 
 Far off, after the compiler is complete: a standalone assembler extracted from Tern, with its generators, memory block and listing.

@@ -498,6 +498,19 @@ Done when: the benchmarks compile for the 65C02 and use the new instructions whe
 
 Decision 2026-11-08: the first release comes once all five platforms work. Done when: M28 is merged, the developer guide covers every behavior in its list, `docs/guide.md` and spec 10.1 describe the compiler and library as built, and every example builds for its platforms.
 
+## After the first release
+
+### M29: Commodore 128 (native mode)
+
+Decision 2026-11-10. C64 programs already run on a C128 in C64 mode; this target is for native mode. Starts with a spec session that checks the machine's details against the C128 reference.
+
+- Platform description: the `.prg` with a BASIC 7 `SYS` line at `$1C01`, the free zero page (smaller than the C64's), volatile areas (the C64's plus the MMU and the VDC)
+- The library: most of `lib/c64` applies (VIC, SID, CIA, `sprites`, `scroll`, much of `io`). To settle: a C128 build searching `lib/c128/`, then `lib/c64/`, then `lib/` (recommended), shared chips in their own folder, or copies
+- `lib/c128`: MMU, 2 MHz mode, `SETBNK` before loading, the 80-column VDC through `$D600`/`$D601`, the KERNAL's own raster interrupts for split screens
+- RAM bank 1 (128 KB) uses bank switching from the NES milestone (spec 14.1); it may be a follow-up
+
+Done when: the benchmarks and a sprite example build for the C128 and run in VICE's `x128`.
+
 ## Not scheduled
 
 Each has a reason to wait; the spec session schedules one when that reason changes.

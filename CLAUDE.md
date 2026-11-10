@@ -1,6 +1,6 @@
 # Tern: a programming language for 6502 processors
 
-Tern (working name) is a small, readable language that compiles to efficient 6502 machine code. The compiler is written in C# and has its own assembler and 6502 emulator. The first target is the Commodore 64; Atari 8-bit, Apple II, NES and Commander X16 are planned, in that order.
+Tern (working name) is a small, readable language that compiles to efficient 6502 machine code. The compiler is written in C# and has its own assembler and 6502 emulator. The first target is the Commodore 64; Atari 8-bit, Apple II, NES and Commander X16 are planned, in that order, then the Commodore 128 (native mode).
 
 ## Key documents
 
