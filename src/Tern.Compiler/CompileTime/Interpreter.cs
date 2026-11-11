@@ -20,7 +20,7 @@ public sealed partial class Interpreter
     public static readonly HashSet<string> Builtins =
     [
         "sin", "cos", "tan", "atan2", "sqrt", "pow", "exp", "log", "log2", "abs", "min", "max",
-        "round", "floor", "ceil", "trunc", "label",
+        "round", "floor", "ceil", "trunc", "label", "repeat",
     ];
 
     private readonly ICompileTimeHost _host;
@@ -82,7 +82,7 @@ public sealed partial class Interpreter
     private CompileError Error(SourcePos pos, string message)
     {
         if (Top.Function is null) return new CompileError(pos, message);
-        return new CompileError(pos, WithNote(message, $"called from {OriginText}"));
+        return new CompileError(pos, WithNote(message, $"called from {OriginText}")) { CalledFrom = _origin };
     }
 
     private void Step()
@@ -90,7 +90,10 @@ public sealed partial class Interpreter
         if (++_steps <= StepLimit) return;
         if (_frames.LastOrDefault(f => f.Function is not null)?.Function is { } fn)
             throw new CompileError(fn.Pos,
-                $"'{fn.Name}' did not finish after {StepLimit:N0} steps (called from {OriginText}). Check its loops for one that never ends");
+                $"'{fn.Name}' did not finish after {StepLimit:N0} steps (called from {OriginText}). Check its loops for one that never ends")
+            {
+                CalledFrom = _origin,
+            };
         throw new CompileError(_origin, $"This list did not finish after {StepLimit:N0} steps. Use a shorter range");
     }
 
@@ -128,16 +131,13 @@ public sealed partial class Interpreter
                 throw Error(c.Pos, "'as' converts runtime types, which a const fn does not have. Use '& $FF' for 8-bit behavior, or round(x), floor(x), ceil(x) or trunc(x) for a real");
             case ArrayLiteralExpr a: return MakeArray(a.Elements.Select(Eval).ToList(), a.Elements.Select(x => x.Pos).ToList(), a.Pos);
             case ListForExpr l: return ListFor(l);
-            case ArrayRepeatExpr r:
-            {
-                var value = Eval(r.Value);
-                long count = Int(Eval(r.Count), r.Count.Pos, "The count of '[value; count]'");
-                if (count < 0 || count > 0x10000)
-                    throw Error(r.Count.Pos, $"An array has 0 to 65536 elements, not {count}. Use a smaller count");
-                var items = new CtValue[count];
-                for (int k = 0; k < count; k++) items[k] = value.Copy();
-                return new CtArray(items, value.Type);
-            }
+            case AsmLabelExpr l:
+                // Only as an argument on a generator's call line (spec 4.1).
+                if (_blockLabels is null || Top.Function is not null)
+                    throw Error(l.Pos, $"'{l.Name}' is a label of an asm block. Pass it as an argument on the generator's call line");
+                if (!_blockLabels.Contains(l.Name))
+                    throw Error(l.Pos, $"'{l.Name}' is not a label of this block. Use a label the block places, e.g. '{l.Name}:'");
+                return new CtLabel(0, l.Pos) { BlockLabel = l.Name };
             default:
                 throw Error(e.Pos, "This is not a compile-time value");
         }
@@ -200,7 +200,7 @@ public sealed partial class Interpreter
         Top.Scopes.Add([]);
         try
         {
-            foreach (long i in Range(l.From, l.To, l.Inclusive, l.Step))
+            foreach (long i in Range(l.From, l.To, l.Inclusive, l.Step, l.RangeText))
             {
                 Step();
                 if (l.Variable is not null) Top.Scopes[^1][l.Variable] = new Slot(new CtInt(i), CtType.Int, "the list's variable");
@@ -216,10 +216,10 @@ public sealed partial class Interpreter
 
     /// <summary>
     /// The values of a <c>for</c> range (spec 5.1): the bounds and step are evaluated once. Without a
-    /// step, two constant bounds give the direction, an end of the constant 0 counts down, and
-    /// anything else counts up.
+    /// step the range counts up; constant bounds from a larger start are an error, as in runtime code
+    /// (an int is signed, so a variable start with an end of 0 is not).
     /// </summary>
-    private IEnumerable<long> Range(Expr fromExpr, Expr toExpr, bool inclusive, Expr? stepExpr)
+    private IEnumerable<long> Range(Expr fromExpr, Expr toExpr, bool inclusive, Expr? stepExpr, string text)
     {
         long from = Int(Eval(fromExpr), fromExpr.Pos, "A loop bound");
         long to = Int(Eval(toExpr), toExpr.Pos, "A loop bound");
@@ -229,8 +229,9 @@ public sealed partial class Interpreter
             step = Int(Eval(stepExpr), stepExpr.Pos, "The step");
             if (step == 0) throw Error(stepExpr.Pos, "The step is 0, so the loop would never end. Use a step other than 0");
         }
-        else if (IsConstant(fromExpr) && IsConstant(toExpr)) step = from <= to ? 1 : -1;
-        else step = IsConstant(toExpr) && to == 0 ? -1 : 1;
+        else if (from > to && IsConstant(fromExpr) && IsConstant(toExpr))
+            throw Error(fromExpr.Pos, Checker.CountsUp(text, fromExpr.Pos, "Write 'step -1' to count down").Description);
+        else step = 1;
         return Values(from, to, inclusive, step);
 
         static IEnumerable<long> Values(long from, long to, bool inclusive, long step)
@@ -288,6 +289,13 @@ public sealed partial class Interpreter
     private CtValue Binary(TokenKind op, CtValue left, CtValue right, SourcePos pos)
     {
         string name = OpText(op);
+        // A label plus or minus an int is a label with an offset (spec 4.1); nothing else reads its number.
+        if (op == TokenKind.Plus && left is CtLabel l1 && right is CtInt r1) return l1.Plus(r1.Value);
+        if (op == TokenKind.Plus && left is CtInt l2 && right is CtLabel r2) return r2.Plus(l2.Value);
+        if (op == TokenKind.Minus && left is CtLabel l3 && right is CtInt r3) return l3.Plus(Checker.ConstNegate(pos, r3.Value));
+        if (left is CtLabel || right is CtLabel)
+            throw Error(pos, $"A label's address is decided when the program is placed, so the const fn cannot use it with '{name}'. "
+                + "Use the label alone, plus or minus an int, or in an emit operand as .lo / .hi");
         if (op is TokenKind.EqEq or TokenKind.NotEq && left is CtBool lb && right is CtBool rb)
             return CtBool.Of((lb.Value == rb.Value) == (op == TokenKind.EqEq));
         if (left is not (CtInt or CtReal) || right is not (CtInt or CtReal))
@@ -419,8 +427,18 @@ public sealed partial class Interpreter
             case "sizeof":
                 if (c.Args is not [NameExpr type]) throw Error(c.Pos, "sizeof() takes one type name, e.g. sizeof(Enemy)");
                 return new CtInt(_host.SizeOf(Top.Module, type.Name, type.Pos));
+            case "offset":
+                return new CtInt(_host.OffsetOf(Top.Module, c));
             case "addr":
-                throw Error(c.Pos, "addr() is decided when the program is placed, after compile-time evaluation. Pass the address to the generator's emit as a name, or use a constant address");
+            {
+                // A label placed by the compiler (spec 4.1): its number is known only after placement.
+                if (c.Args is not [NameExpr name])
+                    throw Error(c.Pos, "addr() in a const fn takes the name of a global, data or function. Write e.g. addr(buffer)");
+                if (FindSlot(name.Name) is not null)
+                    throw Error(name.Pos, $"'{name.Name}' is a variable of the const fn, which has no address. Use addr() with a global, data or a function");
+                var symbol = _host.AddressOf(Top.Module, name.Name, name.Pos);
+                return new CtLabel(0, c.Pos) { Address = symbol, AddressName = name.Name };
+            }
             case "include_bytes":
                 throw Error(c.Pos, "include_bytes() can only be the value of data. Declare the data, and read it in the const fn");
         }
@@ -444,6 +462,17 @@ public sealed partial class Interpreter
             case "label":
                 Count(0);
                 return new CtLabel(++_labels, c.Pos);
+            case "repeat":
+            {
+                // repeat(value, count): count copies of value (spec 4.1).
+                Count(2);
+                long count = Int(args[1], c.Args[1].Pos, "The count of repeat()");
+                if (count < 0 || count > 0x10000)
+                    throw Error(c.Args[1].Pos, $"An array has 0 to 65536 elements, not {count}. Use a smaller count");
+                var items = new CtValue[count];
+                for (int k = 0; k < count; k++) items[k] = args[0].Copy();
+                return new CtArray(items, args[0].Type);
+            }
             case "sin": Count(1); return Result(Math.Sin(Arg(0)));
             case "cos": Count(1); return Result(Math.Cos(Arg(0)));
             case "tan": Count(1); return Result(Math.Tan(Arg(0)));
@@ -523,7 +552,7 @@ public sealed partial class Interpreter
             {
                 // An error the checker raised (a name the const fn cannot read, a constant out of range):
                 // it names the line that started the evaluation too (review M22, finding 2).
-                throw new CompileError(e.Pos, WithNote(e.Description, $"called from {OriginText}"));
+                throw new CompileError(e.Pos, WithNote(e.Description, $"called from {OriginText}")) { CalledFrom = _origin };
             }
             if (fn.ReturnType is null) return null;
             if (flow != Flow.Return)
@@ -607,7 +636,7 @@ public sealed partial class Interpreter
                 }
                 return Flow.Normal;
             case ForStmt f:
-                foreach (long i in Range(f.From, f.To, f.Inclusive, f.Step))
+                foreach (long i in Range(f.From, f.To, f.Inclusive, f.Step, f.RangeText))
                 {
                     Step();
                     Top.Scopes.Add([]);
@@ -683,6 +712,8 @@ public sealed partial class Interpreter
 
     /// <summary>The lines emitted so far, while a generator call runs; null for any other evaluation.</summary>
     private List<AsmLine>? _output;
+    /// <summary>The .labels of the asm block, while a generator call runs.</summary>
+    private HashSet<string>? _blockLabels;
     /// <summary>emit statements run, to give each one's local labels new names.</summary>
     private int _emits;
     /// <summary>Where each label() value was placed, by its id.</summary>
@@ -698,12 +729,13 @@ public sealed partial class Interpreter
     /// The last number given to a renamed label in this asm block: each call continues from it, so the
     /// labels of two calls in one block never clash (review M22, finding 1).
     /// </param>
-    public static List<AsmLine> Generate(CallExpr call, ICompileTimeHost host, ref int numbers)
+    /// <param name="blockLabels">The .labels the calling asm block places, which the call line may pass.</param>
+    public static List<AsmLine> Generate(CallExpr call, ICompileTimeHost host, ref int numbers, HashSet<string> blockLabels)
     {
-        var interpreter = new Interpreter(host, call.Pos) { _output = [], _emits = numbers, _labels = numbers };
+        var interpreter = new Interpreter(host, call.Pos) { _output = [], _emits = numbers, _labels = numbers, _blockLabels = blockLabels };
         var fn = host.ConstFn(null, call.Name, call.Pos);
         if (fn is null)
-            throw new CompileError(call.Pos, Builtins.Contains(call.Name) || call.Name is "len" or "sizeof" or "addr"
+            throw new CompileError(call.Pos, Builtins.Contains(call.Name) || call.Name is "len" or "sizeof" or "offset" or "addr"
                 ? $"{call.Name}() is not a generator. Name a const fn that emits assembly on this line, or use the value in an operand"
                 : $"'{call.Name}' is not declared");
         if (fn.ReturnType is not null)
@@ -713,7 +745,7 @@ public sealed partial class Interpreter
         foreach (var (id, use) in interpreter._used)
             if (!interpreter._placed.ContainsKey(id))
                 throw new CompileError(use, Note("This label() is used but never placed", call.Pos)
-                    + ". Place it in an emit with its variable's name and ':', e.g. 'emit { top: }'");
+                    + ". Place it in an emit with its variable's name and ':', e.g. 'emit { top: }'") { CalledFrom = call.Pos };
         return interpreter._output;
     }
 
@@ -742,8 +774,14 @@ public sealed partial class Interpreter
                     var slot = FindSlot(l.Name);
                     if (slot?.Value is not CtLabel label)
                         throw Error(l.Pos, slot is null
-                            ? $"'{l.Name}' is not a variable of this const fn. Make a label with 'var {l.Name} = label()', or write a local label '.{l.Name}:'"
+                            ? $"'{l.Name}' is not a label variable. Make one with 'var {l.Name} = label()', or write a local label '.{l.Name}:'"
                             : $"'{l.Name}' is not a label() value, so it cannot be placed. Make one with 'var {l.Name} = label()'");
+                    if (label.AddressName is { } of)
+                        throw Error(l.Pos, $"'{l.Name}' is the address of '{of}', which is already placed. Use label() for a new label");
+                    if (label.BlockLabel is not null)
+                        throw Error(l.Pos, $"'{l.Name}' is placed by the calling block. Use label() for a new label");
+                    if (label.Offset != 0)
+                        throw Error(l.Pos, $"'{l.Name}' is a label plus an offset of {label.Offset}, which cannot be placed. Place the label itself, made with label()");
                     if (_placed.TryGetValue(label.Id, out var first))
                         throw Error(l.Pos, $"This label() is placed twice, first at {Where(first)}. Place it once");
                     _placed[label.Id] = l.Pos;
@@ -790,8 +828,17 @@ public sealed partial class Interpreter
         {
             case CtInt i: return new NumberExpr(e.Pos, i.Value);
             case CtLabel label:
-                _used.TryAdd(label.Id, e.Pos);
-                return new AsmLabelExpr(e.Pos, LabelName(label));
+            {
+                Expr name;
+                if (label.Address is { } symbol) name = new NameExpr(e.Pos, label.AddressName!) { Bound = symbol };
+                else if (label.BlockLabel is { } blockLabel) name = new AsmLabelExpr(e.Pos, blockLabel);
+                else
+                {
+                    _used.TryAdd(label.Id, e.Pos);
+                    name = new AsmLabelExpr(e.Pos, LabelName(label));
+                }
+                return label.Offset == 0 ? name : new BinaryExpr(e.Pos, TokenKind.Plus, name, new NumberExpr(e.Pos, label.Offset));
+            }
             case CtReal:
                 throw Error(e.Pos, "This operand is a real. Use round(x), floor(x), ceil(x) or trunc(x)");
             case var v:
@@ -806,6 +853,7 @@ public sealed partial class Interpreter
     private bool NamesAddress(Expr e) => e switch
     {
         NameExpr n => FindSlot(n.Name) is { } slot ? slot.Value is CtLabel : _host.Symbol(Top.Module, n.Name) is VariableSymbol or FunctionSymbol,
+        CallExpr { Name: "addr" } => true,
         BinaryExpr b => NamesAddress(b.Left) || NamesAddress(b.Right),
         UnaryExpr u => NamesAddress(u.Operand),
         MemberExpr m => NamesAddress(m.Target),

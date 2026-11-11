@@ -8,10 +8,20 @@ public sealed class Parser
     private readonly List<Token> _tokens;
     private int _pos;
 
-    private Parser(List<Token> tokens) => _tokens = tokens;
+    /// <summary>The source text and where each line starts in it, for quoting source in messages.</summary>
+    private readonly string _source;
+    private readonly List<int> _lineStarts = [0];
+
+    private Parser(List<Token> tokens, string source)
+    {
+        _tokens = tokens;
+        _source = source;
+        for (int i = 0; i < source.Length; i++)
+            if (source[i] == '\n') _lineStarts.Add(i + 1);
+    }
 
     /// <param name="file">The source file, for positions in error messages and the listing.</param>
-    public static ProgramSyntax Parse(string source, string? file = null) => new Parser(Lexer.Tokenize(source, file)).ParseProgram();
+    public static ProgramSyntax Parse(string source, string? file = null) => new Parser(Lexer.Tokenize(source, file), source).ParseProgram();
 
     /// <summary>Modules imported by this file. <c>name.member</c> after one of them is a qualified name.</summary>
     private readonly HashSet<string> _modules = [];
@@ -21,6 +31,17 @@ public sealed class Parser
     private bool At(TokenKind kind) => Current.Kind == kind;
 
     private Token Advance() => _tokens[_pos++];
+
+    /// <summary>
+    /// The source of tokens <paramref name="from"/> up to <paramref name="to"/> as written, for messages:
+    /// "'Z'..='A'", "a[1]..=0": the text from the first token to the start of token <paramref name="to"/>.
+    /// </summary>
+    private string TokenText(int from, int to)
+    {
+        int Offset(SourcePos pos) => _lineStarts[pos.Line - 1] + pos.Column - 1;
+        // A range over two lines is quoted on one: line breaks and indentation become one space.
+        return System.Text.RegularExpressions.Regex.Replace(_source[Offset(_tokens[from].Pos)..Offset(_tokens[to].Pos)].TrimEnd(), @"\s*\r?\n\s*", " ");
+    }
 
     private bool Accept(TokenKind kind)
     {
@@ -757,12 +778,14 @@ public sealed class Parser
         var start = Expect(TokenKind.For, "'for'");
         var name = Expect(TokenKind.Identifier, "loop variable name or '_'");
         Expect(TokenKind.In, "'in'");
+        int rangeStart = _pos;
         var from = ParseHeaderExpr();
         bool inclusive;
         if (Accept(TokenKind.DotDotEq)) inclusive = true;
         else if (Accept(TokenKind.DotDot)) inclusive = false;
         else throw new CompileError(Current.Pos, $"Expected '..' or '..=', found {Describe(Current)}");
         var to = ParseHeaderExpr();
+        string range = TokenText(rangeStart, _pos);
         // 'step' is a keyword only here, right after the range (spec 13); elsewhere it is a name.
         Expr? step = null;
         if (At(TokenKind.Identifier) && Current.Text == "step")
@@ -772,7 +795,7 @@ public sealed class Parser
         }
         Register? reg = Accept(TokenKind.Using) ? ParseRegister() : null;
         var body = ParseBlock();
-        return new ForStmt(start.Pos, name.Text == "_" ? null : name.Text, from, to, inclusive, step, reg, body);
+        return new ForStmt(start.Pos, name.Text == "_" ? null : name.Text, from, to, inclusive, step, reg, body) { RangeText = range };
     }
 
     // ---------- Assembly ----------
@@ -827,10 +850,9 @@ public sealed class Parser
                 // A generator call on a line of its own: copy_rows(...) or tables.copy_rows(...) (spec 4.1).
                 if (At(TokenKind.LParen) || (At(TokenKind.Dot) && PeekAt(1).Kind == TokenKind.Identifier && PeekAt(2).Kind == TokenKind.LParen))
                 {
+                    // Its arguments may name the block's .labels (spec 4.1), so the parser stays in assembly mode.
                     _pos--;
-                    _inAsm = false;
                     var call = ParsePrimary();
-                    _inAsm = true;
                     lines.Add(new AsmGeneratorCall(call.Pos, (CallExpr)call));
                 }
                 else
@@ -1049,12 +1071,14 @@ public sealed class Parser
         Expect(TokenKind.For, "'for'");
         var name = Expect(TokenKind.Identifier, "a variable name or '_' after 'for'");
         Expect(TokenKind.In, "'in'");
+        int rangeStart = _pos;
         var from = ParseExpr();
         bool inclusive;
         if (Accept(TokenKind.DotDotEq)) inclusive = true;
         else if (Accept(TokenKind.DotDot)) inclusive = false;
         else throw new CompileError(Current.Pos, $"Expected '..' or '..=', found {Describe(Current)}");
         var to = ParseExpr();
+        string range = TokenText(rangeStart, _pos);
         Expr? step = null;
         if (At(TokenKind.Identifier) && Current.Text == "step")
         {
@@ -1066,7 +1090,7 @@ public sealed class Parser
         if (At(TokenKind.If))
             throw new CompileError(Current.Pos, "A list built with 'for' has no filter. Write a const fn with a loop and an 'if' for that");
         Expect(TokenKind.RBracket, "']' after the range of the list");
-        return new ListForExpr(pos, element, name.Text == "_" ? null : name.Text, from, to, inclusive, step);
+        return new ListForExpr(pos, element, name.Text == "_" ? null : name.Text, from, to, inclusive, step) { RangeText = range };
     }
 
     private Expr ParsePrimary()
@@ -1110,15 +1134,19 @@ public sealed class Parser
                     {
                         SkipNewlines();
                         if (At(TokenKind.RBracket)) break; // a trailing ','
+                        int start = _pos;
                         var element = ParseExpr();
-                        // [expr for i in range] and [value; count] (spec 4.1): one element, then ']'.
+                        // [expr for i in range] (spec 4.1): one element, then ']'.
                         if (elements.Count == 0 && At(TokenKind.For)) return ParseListFor(t.Pos, element);
+                        // [value; count], Rust's spelling, is repeat(value, count) in Tern (spec 4.1).
                         if (elements.Count == 0 && At(TokenKind.Semicolon))
                         {
+                            string value = TokenText(start, _pos);
                             Advance();
-                            var count = ParseExpr();
-                            Expect(TokenKind.RBracket, "']' after the count of '[value; count]'");
-                            return new ArrayRepeatExpr(t.Pos, element, count);
+                            int countStart = _pos;
+                            ParseExpr();
+                            string count = TokenText(countStart, _pos);
+                            throw new CompileError(t.Pos, $"'[{value}; {count}]' is not an array in Tern, where [T; n] is only an array type. Write repeat({value}, {count})");
                         }
                         elements.Add(element);
                         SkipNewlines();

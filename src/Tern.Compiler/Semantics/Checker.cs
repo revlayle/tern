@@ -680,6 +680,7 @@ public sealed partial class Checker
     {
         if (decl.Value is StructLiteralExpr lit)
             throw new CompileError(lit.Pos, $"A constant cannot be a struct. Declare it as data: 'data {decl.Name} = {lit.StructName} {{ ... }}'");
+        if (DeclaredRealConst(decl)) return;
         CheckExpr(decl.Value);
         if (decl.Value.ConstValue is not long value)
             throw new CompileError(decl.Value.Pos, $"The value of '{decl.Name}' is not known at compile time");
@@ -702,7 +703,7 @@ public sealed partial class Checker
 
     private void DeclareFunction(FnDecl decl)
     {
-        if (decl.Name is "addr" or "len" or "sizeof" or "include_bytes")
+        if (decl.Name is "addr" or "len" or "sizeof" or "offset" or "include_bytes")
             throw new CompileError(decl.Pos, $"'{decl.Name}' is a built-in function; choose another name");
         var fn = new FunctionSymbol(_module.Qualify(decl.Name), decl.Pos) { Declaration = decl, IsInterrupt = decl.IsInterrupt, IsInline = decl.IsInline };
         decl.Symbol = fn;
@@ -1394,7 +1395,7 @@ public sealed partial class Checker
             if (decl.Init is StructLiteralExpr lit) throw StructLiteralInCode(lit, decl.Name);
             if (type.IsStruct || type.IsStructArray)
                 throw new CompileError(decl.Init.Pos, "A struct cannot have an initial value. Assign its fields");
-            if (type.IsArray && decl.Init is ListForExpr or ArrayRepeatExpr) CheckExpr(decl.Init);
+            if (type.IsArray && IsCompileTimeArray(decl.Init)) CheckExpr(decl.Init);
             if (type.IsArray) throw new CompileError(decl.Init.Pos, "Local arrays cannot have initial values yet");
             CheckExpr(decl.Init);
             Coerce(decl.Init, type);
@@ -1532,10 +1533,15 @@ public sealed partial class Checker
                 throw new CompileError(f.Step.Pos, $"A step of {step} goes the wrong way from {from} to {to}");
             f.StepValue = (int)step;
         }
-        else if (from is not null && to is not null)
-            f.StepValue = to >= from ? 1 : -1;
         else
-            f.StepValue = to == 0 ? -1 : 1;
+        {
+            // Without a step the loop counts up, whatever its bounds (spec 5.1). A loop that could only be
+            // a down-count without its step is an error: constant bounds from a larger start, or an
+            // unsigned counter ending at the constant 0.
+            if (from is not null && to is not null ? from > to : to == 0 && !type.IsSigned)
+                throw CountsUp(f.RangeText, f.Pos, "Write 'step -1' to count down");
+            f.StepValue = 1;
+        }
 
         if (f.UsingRegister is { } reg)
         {
@@ -1574,6 +1580,10 @@ public sealed partial class Checker
         if (f.UsingRegister is { } r) _loopRegisters.Remove(r);
     }
 
+    /// <summary>A loop that counts up from a larger start, so it never runs (or only when the start is 0).</summary>
+    internal static CompileError CountsUp(string range, SourcePos pos, string fix) =>
+        new(pos, $"'{range}' counts up, so it never runs. {fix}");
+
     /// <summary>A step that is not a constant (spec 5.1): a u8 value, in a loop that counts up with a u8 counter.</summary>
     private static void CheckVariableStep(ForStmt f, TernType counter, long? from, long? to)
     {
@@ -1584,8 +1594,8 @@ public sealed partial class Checker
             throw new CompileError(step.Pos, $"A variable step must be a u8, but this is {step.Type}. Convert with 'as u8' if it always fits");
         if (counter.Size != 1 || counter.IsSigned)
             throw new CompileError(step.Pos, $"A variable step needs a u8 loop counter, but the bounds are {counter}. Use a constant step, or u8 bounds");
-        if ((from is not null && to is not null && to < from) || (from is null && to == 0))
-            throw new CompileError(step.Pos, "A variable step cannot be used in a loop that counts down. Count up, or use a constant negative step");
+        if (from is not null && to is not null ? from > to : to == 0)
+            throw CountsUp(f.RangeText, step.Pos, "Use a constant negative step to count down");
         f.VariableStep = true;
         f.StepValue = 1;
     }
@@ -1661,7 +1671,7 @@ public sealed partial class Checker
     /// <summary>True if the code calls a function that may change <paramref name="reg"/>: any function except a routine that keeps it.</summary>
     private bool ContainsCall(Node node, Register reg) => node switch
     {
-        CallExpr c => (c.Name is not ("addr" or "len" or "sizeof") && !(Lookup(c.Name) is FunctionSymbol f && f.Keeps.Contains(reg)))
+        CallExpr c => (c.Name is not ("addr" or "len" or "sizeof" or "offset") && !(Lookup(c.Name) is FunctionSymbol f && f.Keeps.Contains(reg)))
             || c.Args.Any(a => ContainsCall(a, reg)),
         BlockStmt b => b.Statements.Any(x => ContainsCall(x, reg)),
         IfStmt i => ContainsCall(i.Condition, reg) || ContainsCall(i.Then, reg) || (i.Else is not null && ContainsCall(i.Else, reg)),
@@ -1739,7 +1749,7 @@ public sealed partial class Checker
             case StructLiteralExpr lit:
                 throw StructLiteralInCode(lit, null);
 
-            case RealExpr or ListForExpr or ArrayRepeatExpr:
+            case RealExpr or ListForExpr:
                 EvaluateConstant(e);
                 break;
 
@@ -1756,6 +1766,10 @@ public sealed partial class Checker
                     case null: throw NotDeclared(n.Name, n.Pos);
                     case ConstFnSymbol:
                         throw new CompileError(n.Pos, $"'{n.Name}' is a const fn; call it with ()");
+                    case ConstSymbol { Real: not null }:
+                        if (InRuntimeCode) throw InRuntime(e);
+                        EvaluateConstant(e);
+                        break;
                     case ConstSymbol c:
                         // An integer constant, typed or not, is computed exactly in constant expressions (spec 3.1).
                         e.ConstValue = c.Value;
@@ -2236,6 +2250,10 @@ public sealed partial class Checker
                 }
                 throw new InvalidOperationException();
             }
+            case "offset":
+                c.Type = TernType.IntLiteral;
+                c.ConstValue = OffsetOf(c);
+                return;
             case "sizeof":
             {
                 if (c.Args.Count != 1 || c.Args[0] is not NameExpr typeName)

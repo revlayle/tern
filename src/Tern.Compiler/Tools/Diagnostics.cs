@@ -12,6 +12,15 @@ namespace Tern.Compiler.Tools;
 public sealed record Diagnostic(string File, int Line, int Column, string Severity, string Message, string? Suggestion)
 {
     /// <summary>
+    /// For an error in a const fn or in generated code: the line that called it (spec 4.1), also named
+    /// in the message. Null for other errors.
+    /// </summary>
+    public Location? CalledFrom { get; init; }
+
+    /// <summary>A place in a source file.</summary>
+    public sealed record Location(string File, int Line, int Column);
+
+    /// <summary>
     /// Words that start the fix in an error's text: the first sentence (after ". " or "; ") that starts
     /// with one of them begins the suggestion.
     /// </summary>
@@ -25,7 +34,10 @@ public sealed record Diagnostic(string File, int Line, int Column, string Severi
     public static Diagnostic From(CompileError e, string defaultFile)
     {
         var (message, suggestion) = Split(e.Description);
-        return new Diagnostic(e.Pos.File ?? defaultFile, e.Pos.Line, e.Pos.Column, "error", message, suggestion);
+        return new Diagnostic(e.Pos.File ?? defaultFile, e.Pos.Line, e.Pos.Column, "error", message, suggestion)
+        {
+            CalledFrom = e.CalledFrom is { } call ? new Location(call.File ?? defaultFile, call.Line, call.Column) : null,
+        };
     }
 
     /// <summary>Splits an error's text before the first sentence that tells how to fix it.</summary>

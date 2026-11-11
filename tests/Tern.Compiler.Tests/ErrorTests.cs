@@ -19,7 +19,7 @@ public class ErrorTests
     [InlineData("var a: [u8; 4]\nfn main() { a[4] = 1 }", "past the end")]
     [InlineData("var a: [u8; 10]\nvar v: u8\nfn main() { for i in 0..20 { v = a[i] } }", "The loop reaches 19, past the end of 'a' (length 10)")]
     [InlineData("var a: [u8; 10]\nfn main() { for i in 0..=10 { a[i] = 1 } }", "The loop reaches 10, past the end of 'a' (length 10)")]
-    [InlineData("var a: [u8; 10]\nfn main() { for i in 15..=0 { a[i] = 1 } }", "The loop reaches 15, past the end of 'a' (length 10)")]
+    [InlineData("var a: [u8; 10]\nfn main() { for i in 15..=0 step -1 { a[i] = 1 } }", "The loop reaches 15, past the end of 'a' (length 10)")]
     [InlineData("struct E { x: u8, hp: u8 }\nvar e: [E; 4]\nfn main() { for i in 0..8 { e[i].hp = 1 } }", "The loop reaches 7, past the end of 'e' (length 4)")]
     [InlineData("struct E { x: u8, hp: u8 }\nvar e: [E; 4]\nvar v: u8\nfn main() { for i in 0..=4 { v = e[i].x } }", "The loop reaches 4, past the end of 'e' (length 4)")]
     [InlineData("struct S { name: [u8; 4] }\nvar p: ptr S\nfn main() { for i in 0..6 { p.name[i] = 1 } }", "The loop reaches 5, past the end of 'p.name' (length 4)")]
@@ -166,7 +166,7 @@ public class ErrorTests
 
     [Theory]
     [InlineData("[u8; 10]", "for i in 0..10 { a[i] = 1 }")]
-    [InlineData("[u8; 10]", "for i in 9..=0 { a[i] = 1 }")]
+    [InlineData("[u8; 10]", "for i in 9..=0 step -1 { a[i] = 1 }")]
     [InlineData("[u8; 10]", "for i in 0..0 { a[i] = 1 }")]               // no passes
     [InlineData("[u8; 19]", "for i in 0..=20 step 3 { a[i] = 1 }")]       // reaches 18, not 20
     [InlineData("[u8; 10]", "for i in 0..=18 step 2 { a[i >> 1] = 1 }")]   // not the counter itself: unchecked

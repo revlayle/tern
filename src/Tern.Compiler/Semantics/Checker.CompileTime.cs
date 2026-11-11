@@ -21,7 +21,7 @@ public sealed partial class Checker : ICompileTimeHost
 
     private void DeclareConstFn(FnDecl decl)
     {
-        if (decl.Name is "addr" or "len" or "sizeof" or "include_bytes")
+        if (decl.Name is "addr" or "len" or "sizeof" or "offset" or "include_bytes")
             throw new CompileError(decl.Pos, $"'{decl.Name}' is a built-in function; choose another name");
         var fn = new ConstFnSymbol(_module.Qualify(decl.Name), decl.Pos, decl) { Module = _module };
         foreach (var p in decl.Parameters)
@@ -184,7 +184,8 @@ public sealed partial class Checker : ICompileTimeHost
         RealExpr r => new CompileError(e.Pos,
             $"{r.Text} is a real number, which exists only at compile time. Use a constant or a const fn to compute the value, e.g. 'const K = round({r.Text} * 40)'"),
         ListForExpr => new CompileError(e.Pos, "A list built with 'for' is computed at compile time. Use a 'for' loop to fill the array at runtime"),
-        ArrayRepeatExpr => new CompileError(e.Pos, "'[value; count]' builds an array at compile time. Use a 'for' loop to fill the array at runtime"),
+        CallExpr { Name: "repeat" } when Lookup("repeat") is null =>
+            new CompileError(e.Pos, "'repeat' builds an array at compile time. Use a 'for' loop to fill the array at runtime"),
         CallExpr c when Lookup(c.Name) is ConstFnSymbol { Emits: true } => new CompileError(e.Pos,
             $"'{c.Name}' is a generator, which emits assembly. Call it on a line of its own in an asm block"),
         CallExpr c when Lookup(c.Name) is ConstFnSymbol => new CompileError(e.Pos,
@@ -192,7 +193,7 @@ public sealed partial class Checker : ICompileTimeHost
         CallExpr c => new CompileError(e.Pos,
             $"{c.Name}() works only at compile time. Use it in a constant, in data, in a global's initial value or in a const fn"),
         NameExpr n => new CompileError(e.Pos,
-            $"'{n.Name}' is a real number, which exists only at compile time. Use it in a constant or a const fn, e.g. 'const K = round({n.Name} * 40)'"),
+            $"'{n.Name}' is a real number, which exists only at compile time. Use it in a constant or a const fn, e.g. 'const {n.Name}_40 = round({n.Name} * 40)'"),
         _ => new CompileError(e.Pos, "This value exists only at compile time"),
     };
 
@@ -204,9 +205,14 @@ public sealed partial class Checker : ICompileTimeHost
     /// </summary>
     private bool NeedsInterpreter(Expr e) => e switch
     {
-        RealExpr or ListForExpr or ArrayRepeatExpr => true,
-        NameExpr n => n.Name is "PI" or "TAU" && Lookup(n.Name) is null,
-        CallExpr { Name: "addr" or "len" or "sizeof" or "include_bytes" } => false,
+        RealExpr or ListForExpr => true,
+        NameExpr n => Lookup(n.Name) switch
+        {
+            null => n.Name is "PI" or "TAU",
+            ConstSymbol { Real: not null } => true,
+            _ => false,
+        },
+        CallExpr { Name: "addr" or "len" or "sizeof" or "offset" or "include_bytes" } => false,
         CallExpr c => Lookup(c.Name) switch
         {
             ConstFnSymbol => true,
@@ -219,6 +225,34 @@ public sealed partial class Checker : ICompileTimeHost
         IndexExpr ix => NeedsInterpreter(ix.Index),
         _ => false,
     };
+
+    /// <summary>
+    /// A constant whose value comes from compile-time code (spec 4.1): declares it when the value is a real,
+    /// which a const may hold; an array is an error. False for an int or bool, which the caller declares.
+    /// </summary>
+    private bool DeclaredRealConst(ConstDecl decl)
+    {
+        if (!NeedsInterpreter(decl.Value) && decl.Value is not ArrayLiteralExpr) return false;
+        switch (CompileTimeValue(decl.Value))
+        {
+            case CtArray:
+                throw new CompileError(decl.Value.Pos, $"'{decl.Name}' is an array, which a const cannot hold. Use data, e.g. 'data {decl.Name}: [u8; _] = ...'");
+            case CtReal r when decl.TypeSyntax is not null:
+                throw new CompileError(decl.TypeSyntax.Pos,
+                    $"'{decl.Name}' is the real number {r}, which has no runtime type. Remove the type to keep a real constant, or use round(x), floor(x), ceil(x) or trunc(x)");
+            case CtReal r:
+                var names = new HashSet<string>();
+                CollectNames(decl.Value, names);
+                Declare(new ConstSymbol(decl.Name, decl.Pos, TernType.IntLiteral, 0)
+                {
+                    Real = r.Value,
+                    UsedParameters = names.SelectMany(n => _module.Scope.GetValueOrDefault(n) is ConstSymbol c ? c.UsedParameters : []).ToHashSet(),
+                });
+                return true;
+            default:
+                return false;
+        }
+    }
 
     /// <summary>Checks a compile-time expression where a constant is expected: an int or a bool.</summary>
     private void EvaluateConstant(Expr e)
@@ -235,18 +269,26 @@ public sealed partial class Checker : ICompileTimeHost
                 break;
             case CtReal r:
                 throw new CompileError(e.Pos,
-                    $"This value is the real number {r}, which a constant cannot hold. Use round(x), floor(x), ceil(x) or trunc(x) to make it an int");
+                    $"This value is the real number {r}, but an int is expected here. Use round(x), floor(x), ceil(x) or trunc(x) to make it an int");
             case CtArray a:
                 throw new CompileError(e.Pos,
                     $"This value is an array of {a.Items.Length}, which only data or a global array can hold. Use it as their initial value, e.g. 'data t: [u8; _] = ...'");
             default:
-                throw new CompileError(e.Pos, "A label() value is only for emit in a generator. Use it in a const fn that emits assembly");
+                // label() written here (spec 4.1), or a label from a const fn, which may come from addr().
+                throw new CompileError(e.Pos, e is CallExpr { Name: "label" }
+                    ? "A label() value is only for emit in a generator. Use it in a const fn that emits assembly"
+                    : "This value is a label, an address decided when the program is placed, so a constant cannot hold it. Use addr() in the initial value of a var or data, or pass the label to a generator");
         }
     }
 
-    /// <summary>A list built with <c>for</c>, <c>[value; count]</c>, or a call of a const fn that returns an array.</summary>
+    /// <summary>A list built with <c>for</c>, <c>repeat(value, count)</c>, or a call of a const fn that returns an array.</summary>
     private bool IsCompileTimeArray(Expr e) =>
-        e is ListForExpr or ArrayRepeatExpr || e is CallExpr c && Lookup(c.Name) is ConstFnSymbol { ReturnType.Kind: CtKind.Array };
+        e is ListForExpr || e is CallExpr c && Lookup(c.Name) switch
+        {
+            ConstFnSymbol { ReturnType.Kind: CtKind.Array } => true,
+            null => c.Name == "repeat",
+            _ => false,
+        };
 
     private CtArray CompileTimeArray(Expr e) => CompileTimeValue(e) as CtArray
         ?? throw new CompileError(e.Pos, "This value is not an array");
@@ -306,6 +348,7 @@ public sealed partial class Checker : ICompileTimeHost
             case null when FunctionDeclaredIn(module ?? _module, name):
                 throw new CompileError(pos, $"'{name}' is a function, not a value");
             case null: return null;
+            case ConstSymbol { Real: { } real }: return new CtReal(real);
             case ConstSymbol c: return c.Type.Kind == TypeKind.Bool ? CtBool.Of(c.Value != 0) : new CtInt(c.Value);
             case VariableSymbol { IsData: true, Kind: VariableKind.Global } v: return DataArray(v, name, pos);
             case VariableSymbol:
@@ -341,6 +384,18 @@ public sealed partial class Checker : ICompileTimeHost
 
     Symbol? ICompileTimeHost.Symbol(Module? module, string name) => LookupIn(module, name);
 
+    Symbol ICompileTimeHost.AddressOf(Module? module, string name, SourcePos pos) => LookupIn(module, name) switch
+    {
+        VariableSymbol { Kind: VariableKind.Global } v => v,
+        FunctionSymbol f => f,
+        // Functions are declared after constants: a constant cannot hold a label anyway.
+        null when FunctionDeclaredIn(module ?? _module, name) => throw new CompileError(pos,
+            $"addr({name}) is a label, decided when the program is placed, so it cannot be part of a constant. Use it in a generator's emit"),
+        null => throw NotDeclared(name, pos),
+        ConstSymbol => throw new CompileError(pos, $"'{name}' is a constant, which has no address. Use the constant itself"),
+        var other => throw new CompileError(pos, $"'{name}' is a {KindName(other)}, which has no address. Use addr() with a global, data or a function"),
+    };
+
     long ICompileTimeHost.SizeOf(Module? module, string type, SourcePos pos)
     {
         long size = 0;
@@ -348,6 +403,15 @@ public sealed partial class Checker : ICompileTimeHost
         if (module is null) Work();
         else InModule(module, Work);
         return size;
+    }
+
+    long ICompileTimeHost.OffsetOf(Module? module, CallExpr c)
+    {
+        long offset = 0;
+        void Work() => offset = OffsetOf(c);
+        if (module is null) Work();
+        else InModule(module, Work);
+        return offset;
     }
 
     long ICompileTimeHost.Encode(Module? module, CharExpr c) => Encode(c.Value, EncodingOf(c.Encoding, c.Pos), c.Pos);

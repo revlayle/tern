@@ -76,12 +76,8 @@ public sealed class ListForExpr(SourcePos pos, Expr element, string? variable, E
     public Expr To { get; } = to;
     public bool Inclusive { get; } = inclusive;
     public Expr? Step { get; } = step;
-}
-/// <summary><c>[value; count]</c>: an array of <c>count</c> copies, in compile-time code (spec 4.1).</summary>
-public sealed class ArrayRepeatExpr(SourcePos pos, Expr value, Expr count) : Expr(pos)
-{
-    public Expr Value { get; } = value;
-    public Expr Count { get; } = count;
+    /// <summary>The range as written, "9..=0", for messages.</summary>
+    public string RangeText { get; init; } = "";
 }
 /// <summary>A char literal such as <c>'A'</c> or <c>screen'A'</c>; the checker turns it into a number.</summary>
 public sealed class CharExpr(SourcePos pos, char value, string? encoding) : Expr(pos)
@@ -252,6 +248,8 @@ public sealed class ForStmt(
     public Expr To { get; set; } = to;
     public bool Inclusive { get; } = inclusive;
     public Expr? Step { get; } = step;
+    /// <summary>The range as written, "9..=0", for messages.</summary>
+    public string RangeText { get; init; } = "";
     public Register? UsingRegister { get; } = usingRegister;
     public BlockStmt Body { get; } = body;
     /// <summary>The loop counter. For <c>_</c> the checker creates a hidden one.</summary>

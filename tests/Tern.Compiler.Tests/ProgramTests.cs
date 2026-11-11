@@ -188,20 +188,20 @@ public class ProgramTests
     [Theory]
     [InlineData("0..10", 0, 10, false, 1)]
     [InlineData("0..=9", 0, 9, true, 1)]
-    [InlineData("9..=0", 9, 0, true, -1)]
-    [InlineData("10..0", 10, 0, false, -1)]
+    [InlineData("9..=0 step -1", 9, 0, true, -1)]
+    [InlineData("10..0 step -1", 10, 0, false, -1)]
     [InlineData("0..=255", 0, 255, true, 1)]
-    [InlineData("255..=0", 255, 0, true, -1)]
-    [InlineData("200..=0", 200, 0, true, -1)]
+    [InlineData("255..=0 step -1", 255, 0, true, -1)]
+    [InlineData("200..=0 step -1", 200, 0, true, -1)]
     [InlineData("5..5", 5, 5, false, 1)]
     [InlineData("5..=5", 5, 5, true, 1)]
     [InlineData("0..40 step 8", 0, 40, false, 8)]
     [InlineData("0..=40 step 8", 0, 40, true, 8)]
     [InlineData("250..=255 step 4", 250, 255, true, 4)]
     [InlineData("40..=0 step -8", 40, 0, true, -8)]
-    [InlineData("3..=1", 3, 1, true, -1)]
+    [InlineData("3..=1 step -1", 3, 1, true, -1)]
     [InlineData("0..300", 0, 300, false, 1)]
-    [InlineData("1000..=990", 1000, 990, true, -1)]
+    [InlineData("1000..=990 step -1", 1000, 990, true, -1)]
     [InlineData("0..1000 step 100", 0, 1000, false, 100)]
     public void Constant_for_loops_visit_the_right_values(string range, int from, int to, bool inclusive, int step)
     {
@@ -298,7 +298,7 @@ public class ProgramTests
                 for i in 0..n using {{reg}} {
                     values[i] = i + 100
                 }
-                for i in 19..=0 using {{reg}} {
+                for i in 19..=0 step -1 using {{reg}} {
                     values[i] += 1
                 }
             }

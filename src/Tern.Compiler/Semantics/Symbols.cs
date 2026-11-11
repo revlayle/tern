@@ -110,6 +110,8 @@ public sealed class ConstSymbol(string name, SourcePos pos, TernType type, long 
 {
     public TernType Type { get; } = type;
     public long Value { get; } = value;
+    /// <summary>A real constant (<c>const SCALE = 1.5</c>, spec 4.1): used only in compile-time code; <see cref="Value"/> is unused.</summary>
+    public double? Real { get; init; }
     /// <summary>An untyped constant made with <c>~</c> (<c>const M = ~$0F</c>): it takes the width of the type it is used as (spec 3.1).</summary>
     public bool IsBitPattern { get; init; }
     /// <summary>The module parameters this value was computed from, for reporting a failed assert at the import.</summary>
