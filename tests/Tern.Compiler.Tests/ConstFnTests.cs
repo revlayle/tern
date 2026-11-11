@@ -112,8 +112,8 @@ public sealed class ConstFnTests : IDisposable
     [InlineData("data t: [u8; _] = [i for i in 0..4 if i > 1]", "A list built with 'for' has no filter. Write a const fn with a loop and an 'if' for that")]
     [InlineData("data t: [u8; _] = [i for i in 0..10 step 0]", "The step is 0, so the loop would never end. Use a step other than 0")]
     [InlineData("data t: [u16; _] = [i for i in 0..1000]", "An array of u16 has at most 256 elements")]
-    [InlineData("const N = [i for i in 0..4]", "This value is an array of 4, which only data or a global array can hold. Use it as their initial value, e.g. 'data t: [u8; _] = ...'")]
-    [InlineData("data t: [u8; _] = [1, 2.5]", "This value is the real number 2.5, which a constant cannot hold")]
+    [InlineData("const N = [i for i in 0..4]", "'N' is an array, which a const cannot hold. Use data, e.g. 'data N: [u8; _] = ...'")]
+    [InlineData("data t: [u8; _] = [1, 2.5]", "This value is the real number 2.5, but an int is expected here")]
     [InlineData("data t: [u8; _] = [i for i in 0..4]\nfn main2() { t[0] = 1 }", "'t' is data, which is read-only")]
     public void List_errors(string source, string expected)
     {
@@ -222,9 +222,8 @@ public sealed class ConstFnTests : IDisposable
     }
 
     [Theory]
-    [InlineData("const K = 1.5", "This value is the real number 1.5, which a constant cannot hold. Use round(x), floor(x), ceil(x) or trunc(x) to make it an int")]
-    [InlineData("const K = PI", "This value is the real number 3.141592653589793, which a constant cannot hold")]
-    [InlineData("const K: u8 = 1.5 * 2", "which a constant cannot hold")]
+    [InlineData("const K: u8 = 1.5 * 2", "'K' is the real number 3.0, which has no runtime type. Remove the type to keep a real constant, or use round(x), floor(x), ceil(x) or trunc(x)")]
+    [InlineData("const K = [1, 2]", "'K' is an array, which a const cannot hold. Use data")]
     [InlineData("const K = 1 / 0.0", "Division by zero")]
     [InlineData("const K = round(1.0 / 0)", "Division by zero")]
     [InlineData("const K = round(sqrt(-1))", "sqrt() of a negative number (-1) has no real value. Use a number of 0 or more")]
@@ -245,6 +244,59 @@ public sealed class ConstFnTests : IDisposable
     {
         var e = Error(source + "\nfn main() { }");
         Assert.Contains(expected, e.Description);
+    }
+
+    // ---------- Real constants (decision 2026-11-11, question 94) ----------
+
+    [Fact]
+    public void A_real_constant_is_used_in_a_const_fn_a_list_and_another_constant()
+    {
+        Write("waves.tern", """
+            const AMP = 100.5
+            """);
+        var r = RunMain("""
+            import waves
+            const SCALE = 1.5
+            const K = PI / 128
+            const DOUBLE = SCALE * 2
+            const fn scaled(n: int) -> int {
+                return round(n * SCALE)
+            }
+            data t: [u8; _] = [round(i * DOUBLE) for i in 0..4]
+            data s: [u8; _] = [round(waves.AMP * sin(i * K * 64)) for i in 0..3]
+            const N = scaled(7)
+            var a: u8
+            var b: u8
+            fn main() {
+                const HALF = 0.5
+                const H = round(HALF * 9)
+                a = N
+                b = H
+            }
+            """);
+        Assert.Equal([0, 3, 6, 9], Bytes(r, "t", 4));
+        Assert.Equal([0, (byte)Round(100.5), 0], Bytes(r, "s", 3));
+        Assert.Equal(11, r.U8("a"));
+        Assert.Equal(5, r.U8("b"));
+    }
+
+    [Theory]
+    [InlineData("x = SCALE", "'SCALE' is a real number, which exists only at compile time. Use it in a constant or a const fn, e.g. 'const K = round(SCALE * 40)'")]
+    [InlineData("x = x * SCALE", "'SCALE' is a real number, which exists only at compile time")]
+    [InlineData("asm { lda #SCALE }", "'SCALE' is a real number, which exists only at compile time")]
+    [InlineData("const L = 0.25\n    x = L", "'L' is a real number, which exists only at compile time")]
+    public void A_real_constant_in_runtime_code_is_an_error(string statement, string expected)
+    {
+        var e = Error($"const SCALE = 1.5\nfn main() {{\n    var x: u8 = 1\n    {statement}\n}}");
+        Assert.StartsWith(expected, e.Description);
+    }
+
+    [Fact]
+    public void A_real_constant_in_a_global_initial_value_needs_rounding()
+    {
+        var e = Error("const SCALE = 1.5\nvar x: u8 = SCALE\nfn main() { }");
+        Assert.StartsWith("This value is the real number 1.5, but an int is expected here. Use round(x)", e.Description);
+        Assert.Equal(3, Run.Program("const SCALE = 1.5\nvar x: u8 = round(SCALE * 2)\nfn main() { }").U8("x"));
     }
 
     [Theory]
@@ -531,7 +583,8 @@ public sealed class ConstFnTests : IDisposable
     [InlineData("const fn f(n: int) -> int { if n > 0 { return 1 } }\nconst K = f(0)", "'f' ends without returning a value (called from line 2). Add a 'return' at its end")]
     [InlineData("const fn f() { }\nconst K = f()", "'f' returns no value. Give it a return type, or call it on a line of its own")]
     [InlineData("const fn f(n: int) -> int { return f(n + 1) }\nconst K = f(0)", "Const fn calls are nested more than 200 deep here, through 'f'")]
-    [InlineData("const fn f() -> real { return 1.5 }\nconst K = f()", "This value is the real number 1.5, which a constant cannot hold")]
+    [InlineData("const fn f() -> real { return 1.5 }\nconst K: i8 = f()", "'K' is the real number 1.5, which has no runtime type")]
+    [InlineData("const fn f() -> [int; _] { return [1] }\nconst T = f()", "'T' is an array, which a const cannot hold. Use data")]
     [InlineData("const fn f() -> int { return [1, true][0] }\nconst K = f()", "This element is a bool, but the list's first one is an int (called from line 2). Use one kind of value in a list")]
     [InlineData("struct P { x: u8 }\nconst fn f() -> int { var p = P { x = 1 }\n return 0 }\nconst K = f()", "A struct literal is not a compile-time value")]
     [InlineData("const fn f() -> int { return round(!1.5) }\nconst K = f()", "'!' needs a bool, not a real")]
@@ -556,7 +609,7 @@ public sealed class ConstFnTests : IDisposable
     [InlineData("const fn f(t: [int; _]) -> int { return t[0] }\nconst K = f([1.5])", "An element of the argument 't' of 'f' is a real, but an int is expected")]
     [InlineData("const fn f(t: [int; _]) -> int { return t[0] }\nconst K = f(2)", "The argument 't' of 'f' is an int, but an array is expected")]
     [InlineData("const fn f() -> int { return round(pow(-8, 1 / 3.0)) }\nconst K = f()", "pow() has no real value for these numbers (called from line 2). Use other values")]
-    [InlineData("const fn f() -> real { return 1 }\nconst K = f()", "This value is the real number 1.0, which a constant cannot hold")]
+    [InlineData("const fn f() -> real { return 1 }\nconst K: u8 = f()", "'K' is the real number 1.0, which has no runtime type")]
     [InlineData("const fn f(a: int, b: int) -> int { return a }\nconst K = f(1)", "'f' takes 2 arguments, not 1. Pass 2 arguments")]
     [InlineData("const fn f() -> int { return -$7FFF_FFFF_FFFF_FFFF - 1 + abs(-$7FFF_FFFF_FFFF_FFFF - 1) }\nconst K = f()", "(called from line 2). Use smaller values")]
     public void Errors_while_running(string source, string expected)

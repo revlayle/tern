@@ -68,6 +68,7 @@ public sealed partial class Checker
                 switch (n.Bound ?? Lookup(n.Name))
                 {
                     case null: throw NotDeclared(n.Name, n.Pos);
+                    case ConstSymbol { Real: not null }: throw InRuntime(n);
                     case ConstSymbol c: return new AsmValue(c.Value);
                     case FunctionSymbol f: return new AsmValue(0, Function: f);
                     case VariableSymbol v:

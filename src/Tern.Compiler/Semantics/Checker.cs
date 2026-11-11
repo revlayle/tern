@@ -680,6 +680,7 @@ public sealed partial class Checker
     {
         if (decl.Value is StructLiteralExpr lit)
             throw new CompileError(lit.Pos, $"A constant cannot be a struct. Declare it as data: 'data {decl.Name} = {lit.StructName} {{ ... }}'");
+        if (DeclaredRealConst(decl)) return;
         CheckExpr(decl.Value);
         if (decl.Value.ConstValue is not long value)
             throw new CompileError(decl.Value.Pos, $"The value of '{decl.Name}' is not known at compile time");
@@ -1756,6 +1757,10 @@ public sealed partial class Checker
                     case null: throw NotDeclared(n.Name, n.Pos);
                     case ConstFnSymbol:
                         throw new CompileError(n.Pos, $"'{n.Name}' is a const fn; call it with ()");
+                    case ConstSymbol { Real: not null }:
+                        if (InRuntimeCode) throw InRuntime(e);
+                        EvaluateConstant(e);
+                        break;
                     case ConstSymbol c:
                         // An integer constant, typed or not, is computed exactly in constant expressions (spec 3.1).
                         e.ConstValue = c.Value;

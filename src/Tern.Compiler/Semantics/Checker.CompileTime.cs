@@ -205,7 +205,12 @@ public sealed partial class Checker : ICompileTimeHost
     private bool NeedsInterpreter(Expr e) => e switch
     {
         RealExpr or ListForExpr or ArrayRepeatExpr => true,
-        NameExpr n => n.Name is "PI" or "TAU" && Lookup(n.Name) is null,
+        NameExpr n => Lookup(n.Name) switch
+        {
+            null => n.Name is "PI" or "TAU",
+            ConstSymbol { Real: not null } => true,
+            _ => false,
+        },
         CallExpr { Name: "addr" or "len" or "sizeof" or "include_bytes" } => false,
         CallExpr c => Lookup(c.Name) switch
         {
@@ -219,6 +224,34 @@ public sealed partial class Checker : ICompileTimeHost
         IndexExpr ix => NeedsInterpreter(ix.Index),
         _ => false,
     };
+
+    /// <summary>
+    /// A constant whose value comes from compile-time code (spec 4.1): declares it when the value is a real,
+    /// which a const may hold; an array is an error. False for an int or bool, which the caller declares.
+    /// </summary>
+    private bool DeclaredRealConst(ConstDecl decl)
+    {
+        if (!NeedsInterpreter(decl.Value) && decl.Value is not ArrayLiteralExpr) return false;
+        switch (CompileTimeValue(decl.Value))
+        {
+            case CtArray:
+                throw new CompileError(decl.Value.Pos, $"'{decl.Name}' is an array, which a const cannot hold. Use data, e.g. 'data {decl.Name}: [u8; _] = ...'");
+            case CtReal r when decl.TypeSyntax is not null:
+                throw new CompileError(decl.TypeSyntax.Pos,
+                    $"'{decl.Name}' is the real number {r}, which has no runtime type. Remove the type to keep a real constant, or use round(x), floor(x), ceil(x) or trunc(x)");
+            case CtReal r:
+                var names = new HashSet<string>();
+                CollectNames(decl.Value, names);
+                Declare(new ConstSymbol(decl.Name, decl.Pos, TernType.IntLiteral, 0)
+                {
+                    Real = r.Value,
+                    UsedParameters = names.SelectMany(n => _module.Scope.GetValueOrDefault(n) is ConstSymbol c ? c.UsedParameters : []).ToHashSet(),
+                });
+                return true;
+            default:
+                return false;
+        }
+    }
 
     /// <summary>Checks a compile-time expression where a constant is expected: an int or a bool.</summary>
     private void EvaluateConstant(Expr e)
@@ -235,7 +268,7 @@ public sealed partial class Checker : ICompileTimeHost
                 break;
             case CtReal r:
                 throw new CompileError(e.Pos,
-                    $"This value is the real number {r}, which a constant cannot hold. Use round(x), floor(x), ceil(x) or trunc(x) to make it an int");
+                    $"This value is the real number {r}, but an int is expected here. Use round(x), floor(x), ceil(x) or trunc(x) to make it an int");
             case CtArray a:
                 throw new CompileError(e.Pos,
                     $"This value is an array of {a.Items.Length}, which only data or a global array can hold. Use it as their initial value, e.g. 'data t: [u8; _] = ...'");
@@ -306,6 +339,7 @@ public sealed partial class Checker : ICompileTimeHost
             case null when FunctionDeclaredIn(module ?? _module, name):
                 throw new CompileError(pos, $"'{name}' is a function, not a value");
             case null: return null;
+            case ConstSymbol { Real: { } real }: return new CtReal(real);
             case ConstSymbol c: return c.Type.Kind == TypeKind.Bool ? CtBool.Of(c.Value != 0) : new CtInt(c.Value);
             case VariableSymbol { IsData: true, Kind: VariableKind.Global } v: return DataArray(v, name, pos);
             case VariableSymbol:
