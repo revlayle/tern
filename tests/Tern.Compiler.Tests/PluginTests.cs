@@ -192,6 +192,37 @@ public sealed class PluginTests : IDisposable
         Assert.Equal(2, b.Ram.Bytes[0xD020]);
     }
 
+    [Theory]
+    [InlineData("fn leave() { n = level_api.header.width }")]
+    [InlineData("fn leave() { asm { lda level_api.header } }")]
+    [InlineData("fn leave() { var p: ptr u8 = addr(level_api.header) }")]
+    public void The_interface_variable_for_the_binarys_own_data_is_an_error(string leave)
+    {
+        // Question 92: the bytes have one name, the binary's own data.
+        var e = Error(Level.Replace("fn leave() { n = 0 }", leave));
+        Assert.Equal("'level_api.header' is this binary's data 'header'. Use 'header'", e.Description);
+        Assert.Equal(PathOf("level1.tern"), e.Pos.File);
+        var d = Tern.Compiler.Tools.Diagnostic.From(e, "level1.tern");
+        Assert.Equal("'level_api.header' is this binary's data 'header'.", d.Message);
+        Assert.Equal("Use 'header'", d.Suggestion);
+    }
+
+    [Fact]
+    public void The_binarys_own_data_is_used_by_its_name()
+    {
+        var b = Build(Level.Replace("fn leave() { n = 0 }", "fn leave() { n = header.height }"));
+        b.Call("setup");
+        b.Call("leave");
+        Assert.Equal(12, b.Ram.Bytes[b.Result.Symbols["n"]]);
+    }
+
+    [Fact]
+    public void Another_fixed_variable_over_the_binarys_data_keeps_the_general_error()
+    {
+        var e = Error(Level.Replace("var n: u8", "var n: u8\nvar over: u8 @ $600D\nfn touch() { over = 1 }").Replace("fn leave() { n = 0 }", "fn leave() { touch() }"));
+        Assert.Contains("'over' at $600D overlaps the data 'header' at $600C-$600E. Move one of them", e.Description);
+    }
+
     [Fact]
     public void Tern_json_gives_the_fix_as_the_suggestion()
     {

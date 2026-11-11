@@ -334,8 +334,19 @@ public sealed partial class Checker
                 throw new CompileError(pos, $"'{api.Name}.{name}' is data every binary of {api.Name} provides. Declare '{want} = ...' in the main file");
             if (!d.IsData || !d.Type.SameAs(v.Type) || d.FixedAddress != v.FixedAddress)
                 throw new CompileError(d.Pos, $"'{name}' does not match '{api.Name}.{name}'. Declare it as '{want} = ...'");
+            _binaryData[v] = name;
         }
         return result;
+    }
+
+    /// <summary>For <c>export level_api</c>: the interface's volatile variables, each with the name of the binary's own data at its address.</summary>
+    private readonly Dictionary<VariableSymbol, string> _binaryData = [];
+
+    /// <summary>The binary names its own data, not the interface's variable at the same address (spec 12.3, question 92).</summary>
+    private void CheckNotBinaryData(VariableSymbol v, SourcePos pos)
+    {
+        if (_binaryData.TryGetValue(v, out var own))
+            throw new CompileError(pos, $"'{v.QualifiedName}' is this binary's data '{own}'. Use '{own}'");
     }
 
     // ---------- Declarations ----------
@@ -510,6 +521,7 @@ public sealed partial class Checker
     /// <summary>Records that the function being checked uses a global, so it is kept in the program.</summary>
     private void UseGlobal(VariableSymbol v, SourcePos pos)
     {
+        CheckNotBinaryData(v, pos);
         if (v.Kind != VariableKind.Global || _function is null) return;
         // Overlays in one area share their memory: another one's variables are not there while this one runs.
         if (_function.OverlayArea is { } area && v.OverlayArea == area && v.Module != _function.Module && (v.FixedAddress is null || v.IsData) && v.Region is null)
