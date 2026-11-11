@@ -88,6 +88,8 @@ public sealed record Instr(Mnemonic Mnemonic, AddressingMode Mode = AddressingMo
 {
     /// <summary>Set on the shift that scales a linear array's index: A must be below the element count (M20). Not part of the identity.</summary>
     public IndexCheck? Check { get; init; }
+    /// <summary>For an instruction a generator emitted (spec 4.1): the generator call, for errors. Not part of the identity.</summary>
+    public SourcePos? CalledFrom { get; init; }
     public bool Equals(Instr? other) => other is not null && Mnemonic == other.Mnemonic && Mode == other.Mode && Equals(Operand, other.Operand) && AsmPos == other.AsmPos;
     public override int GetHashCode() => HashCode.Combine(Mnemonic, Mode, Operand, AsmPos);
 }
@@ -110,7 +112,8 @@ public sealed record Padding(Func<int, int> SizeAt, string Reason) : AsmItem;
 
 /// <summary>A source line, shown in the listing above the code it produced.</summary>
 /// <param name="File">The file name for lines from a module; null for the main file.</param>
-public sealed record SourceLine(int Line, string Text, string? File = null) : AsmItem;
+/// <param name="Via">For an emit line: the generator call that ran it, shown after the line.</param>
+public sealed record SourceLine(int Line, string Text, string? File = null, string? Via = null) : AsmItem;
 
 public sealed record Comment(string Text) : AsmItem;
 

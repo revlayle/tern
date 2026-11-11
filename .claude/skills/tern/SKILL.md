@@ -18,7 +18,7 @@ output shown is what the tools print, checked by the compiler's test suite (`Ski
 | File | Read it when |
 |---|---|
 | `SKILL.md` (this file) | always: the tools, a first program, the rules you would not guess |
-| `language.md` | writing Tern: types, declarations, arrays, structs, pointers, control flow, functions, interrupts, modules, `asm` |
+| `language.md` | writing Tern: types, declarations, arrays, structs, pointers, control flow, functions, interrupts, modules, `asm`, compile-time tables and generators (`const fn`, `emit`) |
 | `costs.md` | the code each construct compiles to, and how to write fast Tern (measured) |
 | `errors.md` | a compile error you do not understand: the common ones, with fixes |
 | `sprite.md` | a whole program worked through: a sprite moved by the joystick, checked without a C64 |

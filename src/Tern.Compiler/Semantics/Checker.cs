@@ -57,6 +57,13 @@ public sealed partial class Checker
 
     private CheckedProgram Run(List<Module> modules)
     {
+        // Const fns first: declaring one needs no other declaration, and constants of any file may call them (spec 4.1).
+        foreach (var module in modules)
+        {
+            _module = module;
+            foreach (var f in module.Syntax.ConstFns) DeclareConstFn(f);
+        }
+
         // Struct names and module parameters of every file first, so that a constant can be worked out
         // when it is first used, in any module, also across an import ring (spec 2.2, 4).
         foreach (var module in modules)
@@ -334,8 +341,19 @@ public sealed partial class Checker
                 throw new CompileError(pos, $"'{api.Name}.{name}' is data every binary of {api.Name} provides. Declare '{want} = ...' in the main file");
             if (!d.IsData || !d.Type.SameAs(v.Type) || d.FixedAddress != v.FixedAddress)
                 throw new CompileError(d.Pos, $"'{name}' does not match '{api.Name}.{name}'. Declare it as '{want} = ...'");
+            _binaryData[v] = name;
         }
         return result;
+    }
+
+    /// <summary>For <c>export level_api</c>: the interface's volatile variables, each with the name of the binary's own data at its address.</summary>
+    private readonly Dictionary<VariableSymbol, string> _binaryData = [];
+
+    /// <summary>The binary names its own data, not the interface's variable at the same address (spec 12.3, question 92).</summary>
+    private void CheckNotBinaryData(VariableSymbol v, SourcePos pos)
+    {
+        if (_binaryData.TryGetValue(v, out var own))
+            throw new CompileError(pos, $"'{v.QualifiedName}' is this binary's data '{own}'. Use '{own}'");
     }
 
     // ---------- Declarations ----------
@@ -493,6 +511,7 @@ public sealed partial class Checker
         VariableSymbol => "variable",
         ConstSymbol => "constant",
         FunctionSymbol => "function",
+        ConstFnSymbol => "const fn",
         _ => "struct type",
     };
 
@@ -503,13 +522,14 @@ public sealed partial class Checker
     /// <summary>Reports <c>name.member</c> where <c>name</c> is not declared as a missing import.</summary>
     private void CheckMemberTarget(MemberExpr m)
     {
-        if (m.Member is not ("lo" or "hi") && m.Target is NameExpr n && !n.Name.Contains('.') && Lookup(n.Name) is null && !_module.Imports.ContainsKey(n.Name))
+        if (m.Member is not ("lo" or "hi") && m.Target is NameExpr { Bound: null } n && !n.Name.Contains('.') && Lookup(n.Name) is null && !_module.Imports.ContainsKey(n.Name))
             throw MissingImport(n.Name, n.Pos);
     }
 
     /// <summary>Records that the function being checked uses a global, so it is kept in the program.</summary>
     private void UseGlobal(VariableSymbol v, SourcePos pos)
     {
+        CheckNotBinaryData(v, pos);
         if (v.Kind != VariableKind.Global || _function is null) return;
         // Overlays in one area share their memory: another one's variables are not there while this one runs.
         if (_function.OverlayArea is { } area && v.OverlayArea == area && v.Module != _function.Module && (v.FixedAddress is null || v.IsData) && v.Region is null)
@@ -599,6 +619,11 @@ public sealed partial class Checker
             try { DeclareStruct(st); LayOut((StructSymbol)scope.Scope[st.Name]); }
             catch (CompileError) { scope.Scope.Remove(st.Name); }
         }
+        foreach (var f in scope.Syntax.ConstFns)
+        {
+            try { DeclareConstFn(f); }
+            catch (CompileError) { }
+        }
         foreach (var c in scope.Syntax.Consts)
         {
             try { DeclareConst(c); }
@@ -645,8 +670,9 @@ public sealed partial class Checker
     {
         if (_constsDone.Contains(decl)) return;
         StartDeclaring(decl.Name, decl);
+        _constValues++;
         try { DeclareConstValue(decl); }
-        finally { _declaring.RemoveAt(_declaring.Count - 1); }
+        finally { _declaring.RemoveAt(_declaring.Count - 1); _constValues--; }
         _constsDone.Add(decl);
     }
 
@@ -830,6 +856,7 @@ public sealed partial class Checker
         {
             ArrayLiteralExpr list => list.Elements.Count,
             StringExpr => bytes!.Length,
+            { } other when IsCompileTimeArray(other) => CompileTimeArray(other).Items.Length,
             _ => null,
         } : null;
         TernType type;
@@ -954,7 +981,7 @@ public sealed partial class Checker
         }
         if (decl.TypeSyntax is not null) return ResolveType(decl.TypeSyntax);
         if (decl.Init is null) throw new CompileError(decl.Pos, $"'{decl.Name}' needs a type or an initial value");
-        if (decl.Init is ArrayLiteralExpr)
+        if (decl.Init is ArrayLiteralExpr || IsCompileTimeArray(decl.Init))
             throw new CompileError(decl.Pos, decl.IsData
                 ? $"Data arrays need a written type, e.g. data {decl.Name}: [u8; _] = [...], where '_' takes the length from the list"
                 : $"Array variables need a written type, e.g. var {decl.Name}: [u8; _] = [...], where '_' takes the length from the list");
@@ -1003,7 +1030,10 @@ public sealed partial class Checker
         if (type.IsArray)
         {
             if (init is not ArrayLiteralExpr list)
+            {
+                if (IsCompileTimeArray(init)) return ArrayBytes(CompileTimeArray(init), type, init.Pos);
                 throw new CompileError(init.Pos, "An array must be initialized with [ ... ]");
+            }
             if (list.Elements.Count != type.Length)
                 throw new CompileError(init.Pos, $"Expected {type.Length} values, found {list.Elements.Count}");
             var bytes = new List<byte>();
@@ -1229,7 +1259,7 @@ public sealed partial class Checker
                 if (a.Length is null)
                 {
                     len = _listLength ?? throw new CompileError(a.Pos,
-                        "The length '_' is taken from a list or string initial value, so it works only on a global var or data with one, as in 'data t: [u8; _] = [1, 2, 3]'. Write the length here");
+                        "The length '_' is taken from a list or string initial value, a list built with 'for' or a const fn's array, so it works only on a global var or data with one, as in 'data t: [u8; _] = [1, 2, 3]'. Write the length here");
                     _listLength = null;
                 }
                 else
@@ -1364,6 +1394,7 @@ public sealed partial class Checker
             if (decl.Init is StructLiteralExpr lit) throw StructLiteralInCode(lit, decl.Name);
             if (type.IsStruct || type.IsStructArray)
                 throw new CompileError(decl.Init.Pos, "A struct cannot have an initial value. Assign its fields");
+            if (type.IsArray && decl.Init is ListForExpr or ArrayRepeatExpr) CheckExpr(decl.Init);
             if (type.IsArray) throw new CompileError(decl.Init.Pos, "Local arrays cannot have initial values yet");
             CheckExpr(decl.Init);
             Coerce(decl.Init, type);
@@ -1682,6 +1713,12 @@ public sealed partial class Checker
 
     private void CheckExpr(Expr e)
     {
+        // A whole expression with a compile-time part is computed by the interpreter (spec 4.1).
+        if (!InRuntimeCode && e is BinaryExpr or UnaryExpr or MemberExpr or IndexExpr && NeedsInterpreter(e))
+        {
+            EvaluateConstant(e);
+            return;
+        }
         switch (e)
         {
             case NumberExpr n:
@@ -1702,14 +1739,23 @@ public sealed partial class Checker
             case StructLiteralExpr lit:
                 throw StructLiteralInCode(lit, null);
 
+            case RealExpr or ListForExpr or ArrayRepeatExpr:
+                EvaluateConstant(e);
+                break;
+
             case StringExpr:
                 throw new CompileError(e.Pos, "A string can only be the value of data or a global array. "
                     + "Declare it as data, e.g. 'data HI = \"HI\"', and pass addr(HI), len(HI)");
 
             case NameExpr n:
-                switch (Lookup(n.Name))
+                switch (n.Bound ?? Lookup(n.Name))
                 {
+                    case null when n.Name is "PI" or "TAU":
+                        EvaluateConstant(e);
+                        break;
                     case null: throw NotDeclared(n.Name, n.Pos);
+                    case ConstFnSymbol:
+                        throw new CompileError(n.Pos, $"'{n.Name}' is a const fn; call it with ()");
                     case ConstSymbol c:
                         // An integer constant, typed or not, is computed exactly in constant expressions (spec 3.1).
                         e.ConstValue = c.Value;
@@ -2143,6 +2189,12 @@ public sealed partial class Checker
             case "len":
             {
                 if (c.Args.Count != 1) throw new CompileError(c.Pos, "len() takes one array");
+                if (IsCompileTimeArray(c.Args[0]))
+                {
+                    c.Type = TernType.IntLiteral;
+                    c.ConstValue = CompileTimeArray(c.Args[0]).Items.Length;
+                    return;
+                }
                 CheckExpr(c.Args[0]);
                 if (!c.Args[0].Type.IsArray) throw new CompileError(c.Pos, "len() needs an array");
                 c.Type = TernType.IntLiteral;
@@ -2195,6 +2247,11 @@ public sealed partial class Checker
         }
 
         var symbol = Lookup(c.Name);
+        if (symbol is ConstFnSymbol || (symbol is null && CompileTime.Interpreter.Builtins.Contains(c.Name)))
+        {
+            EvaluateConstant(c);
+            return;
+        }
         if (symbol is null && c.Name.Contains('.')) throw NotDeclared(c.Name, c.Pos);
         if (symbol is not FunctionSymbol fn)
             throw new CompileError(c.Pos, $"'{c.Name}' is not a function");

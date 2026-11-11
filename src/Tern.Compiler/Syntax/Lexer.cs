@@ -15,6 +15,8 @@ public sealed class CompileError(SourcePos pos, string message) : Exception($"{p
 public enum TokenKind
 {
     Identifier, Number, Newline, Eof,
+    /// <summary>A real literal such as <c>1.5</c> or <c>2e3</c> (spec 4.1): Text holds its digits.</summary>
+    Real,
     /// <summary>Text holds the character, after escapes. <see cref="Token.Encoding"/> holds a prefix such as <c>screen</c>.</summary>
     Char,
     /// <summary>Text holds the characters, after escapes. <see cref="Token.Encoding"/> holds a prefix such as <c>screen</c>.</summary>
@@ -88,7 +90,7 @@ public static class Lexer
 
     /// <summary>Tokens after which a line break ends the statement.</summary>
     private static bool EndsStatement(TokenKind kind) => kind is
-        TokenKind.Identifier or TokenKind.Number or TokenKind.Char or TokenKind.String or TokenKind.RParen or TokenKind.RBracket or
+        TokenKind.Identifier or TokenKind.Number or TokenKind.Real or TokenKind.Char or TokenKind.String or TokenKind.RParen or TokenKind.RBracket or
         TokenKind.RBrace or TokenKind.True or TokenKind.False or TokenKind.Return or
         TokenKind.Break or TokenKind.Continue or TokenKind.Zp;
 
@@ -213,6 +215,17 @@ public static class Lexer
                 else if (c == '0' && (Peek(source, i + 1) is 'b' or 'B')) { radix = 2; i += 2; }
 
                 int digitsStart = i;
+                // A real literal (spec 4.1): digits with a '.' between digits, or an exponent. 0..25 stays a range.
+                if (radix == 10 && RealLength(source, i) is int realEnd)
+                {
+                    string text = source[start..realEnd];
+                    double real = double.Parse(text.Replace("_", ""), System.Globalization.CultureInfo.InvariantCulture);
+                    if (double.IsInfinity(real))
+                        throw new CompileError(Pos(start), $"The real number {text} is too large. Use a value below 1.7e308");
+                    i = realEnd;
+                    Add(TokenKind.Real, text, 0, start);
+                    continue;
+                }
                 while (i < source.Length && (IsHexDigit(source[i]) || source[i] == '_')) i++;
                 string digits = source[digitsStart..i].Replace("_", "");
                 if (digits.Length == 0)
@@ -302,6 +315,35 @@ public static class Lexer
     {
         while (i < s.Length && s[i] is ' ' or '\t' or '\r') i++;
         return i >= s.Length || s[i] is '\n' or ';' or ')' or ']' or '}' || (s[i] == '/' && Peek(s, i + 1) is '/' or '*');
+    }
+
+    /// <summary>
+    /// The end of a real literal whose digits start at <paramref name="i"/>: digits, then '.' and digits,
+    /// an exponent (<c>e3</c>, <c>E-2</c>), or both. Null if there is neither.
+    /// </summary>
+    private static int? RealLength(string s, int i)
+    {
+        static bool Digit(char c) => c is >= '0' and <= '9';
+        while (Digit(Peek(s, i)) || Peek(s, i) == '_') i++;
+        bool real = false;
+        if (Peek(s, i) == '.' && Digit(Peek(s, i + 1)))
+        {
+            real = true;
+            i++;
+            while (Digit(Peek(s, i)) || Peek(s, i) == '_') i++;
+        }
+        if (Peek(s, i) is 'e' or 'E')
+        {
+            int j = i + 1;
+            if (Peek(s, j) is '+' or '-') j++;
+            if (Digit(Peek(s, j)))
+            {
+                real = true;
+                i = j;
+                while (Digit(Peek(s, i))) i++;
+            }
+        }
+        return real ? i : null;
     }
 
     private static char Peek(string s, int i) => i < s.Length ? s[i] : '\0';

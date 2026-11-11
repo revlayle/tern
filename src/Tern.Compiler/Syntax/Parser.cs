@@ -92,6 +92,7 @@ public sealed class Parser
         var functions = new List<FnDecl>();
         var imports = new List<ImportDecl>();
         var structs = new List<StructDecl>();
+        var constFns = new List<FnDecl>();
 
         var asserts = new List<AssertDecl>();
         SkipTerminators();
@@ -149,7 +150,8 @@ public sealed class Parser
         // Constants may come before the memory block, so its ranges can use them (spec 8.4).
         while (At(TokenKind.Const))
         {
-            consts.Add(ParseConst());
+            if (PeekAt(1).Kind == TokenKind.Fn) constFns.Add(ParseConstFn());
+            else consts.Add(ParseConst());
             SkipTerminators();
         }
         MemoryDecl? memory = null;
@@ -175,7 +177,7 @@ public sealed class Parser
                 ParseDeclaration();
             SkipTerminators();
         }
-        return new ProgramSyntax(consts, globals, functions) { Header = header, Asserts = asserts, Imports = imports, Memory = memory, Exports = exports, ExportTable = exportTable, Structs = structs, PrivateNames = privateNames };
+        return new ProgramSyntax(consts, globals, functions) { Header = header, Asserts = asserts, Imports = imports, Memory = memory, Exports = exports, ExportTable = exportTable, Structs = structs, PrivateNames = privateNames, ConstFns = constFns };
 
         // Parses one top-level declaration and returns its name.
         string ParseDeclaration()
@@ -226,6 +228,7 @@ public sealed class Parser
                     throw new CompileError(Current.Pos, "The memory block goes after the imports and constants, before other declarations, and there is only one");
                 case TokenKind.Identifier when IsIndexedWord():
                 { var d = ParseIndexedVar(); globals.Add(d); return d.Name; }
+                case TokenKind.Const when PeekAt(1).Kind == TokenKind.Fn: { var d = ParseConstFn(); constFns.Add(d); return d.Name; }
                 case TokenKind.Const: { var d = ParseConst(); consts.Add(d); return d.Name; }
                 case TokenKind.Var: { var d = ParseVar(); globals.Add(d); return d.Name; }
                 case TokenKind.Linear: { var d = ParseLinearVar(); globals.Add(d); return d.Name; }
@@ -453,6 +456,24 @@ public sealed class Parser
         return new VarDecl(start.Pos, name.Text, type, placement, init) { IsData = true };
     }
 
+    /// <summary>True while the body of a <c>const fn</c> is parsed, where <c>emit { ... }</c> is a statement.</summary>
+    private bool _inConstFn;
+
+    /// <summary><c>const fn name(p: int, ...) -> type { ... }</c> (spec 4.1).</summary>
+    private FnDecl ParseConstFn()
+    {
+        var start = Expect(TokenKind.Const, "'const'");
+        _inConstFn = true;
+        try
+        {
+            var f = ParseFn();
+            if (f.Address is not null)
+                throw new CompileError(f.Pos, "A const fn runs at compile time and has no address. Remove '@' and the address, and give it a body");
+            return new FnDecl(start.Pos, f.Name, f.Parameters, f.ReturnType, f.ReturnUsing, f.Body) { IsConst = true };
+        }
+        finally { _inConstFn = false; }
+    }
+
     private FnDecl ParseFn(bool isAsm = false)
     {
         var start = Expect(TokenKind.Fn, "'fn'");
@@ -579,7 +600,14 @@ public sealed class Parser
         switch (Current.Kind)
         {
             case TokenKind.Var: return ParseVar();
+            case TokenKind.Const when PeekAt(1).Kind == TokenKind.Fn:
+                throw new CompileError(Current.Pos, "'const fn' must be declared outside functions");
             case TokenKind.Const: return ParseConst();
+            case TokenKind.Identifier when _inConstFn && Current.Text == "emit" && PeekAt(1).Kind == TokenKind.LBrace:
+            {
+                var t = Advance();
+                return new EmitStmt(t.Pos, ParseAsmBody(emit: true));
+            }
             case TokenKind.Linear when PeekAt(1).Kind == TokenKind.Data:
                 throw new CompileError(PeekAt(1).Pos, "'data' must be declared outside functions");
             case TokenKind.Linear: return ParseLinearVar();
@@ -753,10 +781,11 @@ public sealed class Parser
     private bool _inAsm;
 
     /// <summary>The <c>{ ... }</c> of an asm block or asm fn: one instruction per line, and <c>.labels:</c>.</summary>
-    private AsmStmt ParseAsmBody(bool isFn = false)
+    /// <param name="emit">An <c>emit { ... }</c> fragment of a const fn, where <c>name:</c> places a <c>label()</c> value.</param>
+    private AsmStmt ParseAsmBody(bool isFn = false, bool emit = false)
     {
         SkipBreaksBeforeBrace();
-        var start = Expect(TokenKind.LBrace, "'{' after 'asm'");
+        var start = Expect(TokenKind.LBrace, emit ? "'{' after 'emit'" : "'{' after 'asm'");
         var lines = new List<AsmLine>();
         var locals = new List<VarDecl>();
         _inAsm = true;
@@ -784,11 +813,31 @@ public sealed class Parser
             }
             if (At(TokenKind.Semicolon)) throw SemicolonInAsm();
             var word = Expect(TokenKind.Identifier, "an instruction or a .label:");
+            // In an emit fragment, 'top:' places the label() value in the variable top (spec 4.1).
+            if (emit && At(TokenKind.Colon))
+            {
+                Advance();
+                lines.Add(new AsmLabel(word.Pos, word.Text));
+                continue;
+            }
             if (At(TokenKind.Colon))
                 throw new CompileError(word.Pos, $"Labels in assembly start with '.', e.g. .{word.Text}:");
             if (!Enum.TryParse<Mnemonic>(word.Text, ignoreCase: true, out var mnemonic) || !Enum.IsDefined(mnemonic))
-                throw new CompileError(word.Pos, $"Unknown instruction '{word.Text}'");
-            lines.Add(ParseAsmInstruction(word.Pos, mnemonic));
+            {
+                // A generator call on a line of its own: copy_rows(...) or tables.copy_rows(...) (spec 4.1).
+                if (At(TokenKind.LParen) || (At(TokenKind.Dot) && PeekAt(1).Kind == TokenKind.Identifier && PeekAt(2).Kind == TokenKind.LParen))
+                {
+                    _pos--;
+                    _inAsm = false;
+                    var call = ParsePrimary();
+                    _inAsm = true;
+                    lines.Add(new AsmGeneratorCall(call.Pos, (CallExpr)call));
+                }
+                else
+                    throw new CompileError(word.Pos, $"Unknown instruction '{word.Text}'");
+            }
+            else
+                lines.Add(ParseAsmInstruction(word.Pos, mnemonic));
 
             if (Accept(TokenKind.Newline) || At(TokenKind.RBrace)) continue;
             if (At(TokenKind.Semicolon)) throw SemicolonInAsm();
@@ -994,6 +1043,32 @@ public sealed class Parser
         }
     }
 
+    /// <summary>The rest of <c>[expr for i in from..to step k]</c>, after the element (spec 4.1).</summary>
+    private ListForExpr ParseListFor(SourcePos pos, Expr element)
+    {
+        Expect(TokenKind.For, "'for'");
+        var name = Expect(TokenKind.Identifier, "a variable name or '_' after 'for'");
+        Expect(TokenKind.In, "'in'");
+        var from = ParseExpr();
+        bool inclusive;
+        if (Accept(TokenKind.DotDotEq)) inclusive = true;
+        else if (Accept(TokenKind.DotDot)) inclusive = false;
+        else throw new CompileError(Current.Pos, $"Expected '..' or '..=', found {Describe(Current)}");
+        var to = ParseExpr();
+        Expr? step = null;
+        if (At(TokenKind.Identifier) && Current.Text == "step")
+        {
+            Advance();
+            step = ParseExpr();
+        }
+        if (At(TokenKind.For))
+            throw new CompileError(Current.Pos, "A list built with 'for' has one 'for'. Write a const fn with nested loops for more");
+        if (At(TokenKind.If))
+            throw new CompileError(Current.Pos, "A list built with 'for' has no filter. Write a const fn with a loop and an 'if' for that");
+        Expect(TokenKind.RBracket, "']' after the range of the list");
+        return new ListForExpr(pos, element, name.Text == "_" ? null : name.Text, from, to, inclusive, step);
+    }
+
     private Expr ParsePrimary()
     {
         var t = Current;
@@ -1002,6 +1077,9 @@ public sealed class Parser
             case TokenKind.Number:
                 Advance();
                 return new NumberExpr(t.Pos, t.Value);
+            case TokenKind.Real:
+                Advance();
+                return new RealExpr(t.Pos, double.Parse(t.Text.Replace("_", ""), System.Globalization.CultureInfo.InvariantCulture), t.Text);
             case TokenKind.Char:
                 Advance();
                 return new CharExpr(t.Pos, t.Text[0], t.Encoding);
@@ -1033,6 +1111,15 @@ public sealed class Parser
                         SkipNewlines();
                         if (At(TokenKind.RBracket)) break; // a trailing ','
                         var element = ParseExpr();
+                        // [expr for i in range] and [value; count] (spec 4.1): one element, then ']'.
+                        if (elements.Count == 0 && At(TokenKind.For)) return ParseListFor(t.Pos, element);
+                        if (elements.Count == 0 && At(TokenKind.Semicolon))
+                        {
+                            Advance();
+                            var count = ParseExpr();
+                            Expect(TokenKind.RBracket, "']' after the count of '[value; count]'");
+                            return new ArrayRepeatExpr(t.Pos, element, count);
+                        }
                         elements.Add(element);
                         SkipNewlines();
                         if (!At(TokenKind.Comma) && !At(TokenKind.RBracket))
