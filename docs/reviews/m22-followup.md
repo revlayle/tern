@@ -56,3 +56,25 @@ gives "A label() value is only for emit in a generator. Use it in a const fn tha
 - [x] `for` direction from the step alone: the two errors, a signed `n..=0` counting up from a negative `n` (emulator and const fn); tests, skill and library updated; `BenchmarkTests` unchanged. The spec 11 listing test is partial (finding 3).
 - [ ] Addresses as labels: `addr()` of a global, `data` or function as an argument and in a `const fn`, alone, with an `int` offset and as `.lo` / `.hi` in `emit` operands; a `.label` of the calling block; the errors; both emulator runs (`GeneratorTests`). Not met: the spec's argument form `addr(back) + 1` (finding 1).
 - [x] `tern --json` gives the call's location as a field (`DiagnosticTests`; checked with the CLI for a const fn error and for generated code).
+
+## Second review (`2cf1f16`), 2026-11-11
+
+**Ready to merge.** Finding 1 is fixed, and suggestions 2, 4 and 5 are done. Suggestion 3 waits for question 106, as the status says.
+
+2834 compiler tests and 36 CPU tests pass. `BenchmarkTests` and `SkillTests` pass with no baseline change (1254 / 350780).
+
+- **Finding 1** (`1c56e40`): `CtLabel.Offset`; `label + int`, `int + label` and `label - int` give a label of the same kind, written `name + offset` in an `emit` operand. Checked: `ptr_to(addr(back) + 255)` with `#d.lo` / `#d.hi` gives `lda #(back+255).lo` = `$3B` and `.hi` = `$09` with `back` at `$083C` (the high byte carries); `addr(back) - 1 + 2` and `3 + addr(back)` store to `back+1`..`back+3`; `0 - .done` stays an error. `GeneratorTests` runs the spec's form in the emulator, plus offset `label()` and block labels as jump targets, and placing an offset label is an error.
+- **Suggestion 2** (`bc726cb`): `Parser.TokenText` slices the source, so `'Z'..='A'`, a range after a tab, and `repeat('A', 4)` are quoted as written.
+- **Suggestions 4 and 5** (`bc726cb`): `'const K_40 = round(K * 40)'`; a label from a const fn in a constant has its own message, and `label()` written there keeps the spec's.
+
+### Note (no change needed to merge)
+
+A range written over two lines (`for c in 9..=` / `0 { }`) is quoted with its line break and indentation in the message, since `TokenText` takes the source as is. Collapsing whitespace runs to one space would fix it; rare enough to leave.
+
+### Done when
+
+All six items are met; the "addresses as labels" item now includes `addr(back) + 1` as an argument. The spec 11 listing test for `n..0 step -1` stays partial until question 106 is settled.
+
+### For the spec session
+
+Unchanged from the first review: spec 4.1 line 353 still says a `const fn` cannot read `addr()`.
