@@ -107,6 +107,27 @@ public class LoopDirectionTests
         Assert.Equal(expected == 1 ? 0 : 99, type == "u8" ? r.U8("last") : r.U16("last"));
     }
 
+    /// <summary>Spec 11: 'for i in n..0 step -1 using X' is ldx n / beq done / ... dex / bne loop (decision 106).</summary>
+    [Theory]
+    [InlineData(0, 0)]
+    [InlineData(1, 1)]
+    [InlineData(5, 15)]
+    [InlineData(255, 32640)]
+    public void An_unsigned_down_count_to_0_tests_only_its_start(int start, int sum)
+    {
+        var r = Run.Program($$"""
+            var n: u8 = {{start}}
+            var total: u16
+            fn main() {
+                for i in n..0 step -1 using X {
+                    total += i
+                }
+            }
+            """);
+        Assert.Equal(sum, r.U16("total"));
+        Assert.Equal("ldx n|beq main.fend0|txa|clc|adc total|sta total|bcc main.c3|inc total+1|dex|bne main.for2|rts", Code(r));
+    }
+
     [Fact]
     public void A_const_fn_loop_ending_at_0_counts_up_from_a_negative_start()
     {

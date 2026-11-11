@@ -2728,6 +2728,16 @@ public sealed class CodeGen
             || (inclusive && up && to == max) || (inclusive && !up && to == type.MinValue) || _nonEmpty.Contains(f);
         if (!provablyNonEmpty && type.IsSigned)
             SignedEmptyCheck(c, up, inclusive, to, bound, end, flagsHoldStart);
+        else if (!provablyNonEmpty && !up && to == 0 && type.Size == 1)
+        {
+            // n..0 step -1 is empty only when n is 0, which a plain ldx n has already tested (spec 11).
+            if (!flagsHoldStart)
+            {
+                if (c.Register is { } reg) Op(reg == Register.X ? Cpx : Cpy, Byte(0));
+                else Op(Lda, Var(c));
+            }
+            Branch(Beq, end);
+        }
         else if (!provablyNonEmpty)
         {
             var emptyIf = (up, inclusive) switch
