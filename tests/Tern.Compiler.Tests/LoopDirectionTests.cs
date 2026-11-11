@@ -37,6 +37,7 @@ public class LoopDirectionTests
     [InlineData("for c in screen'Z'..=screen'A' { }", "'screen'Z'..=screen'A'' counts up, so it never runs")]
     [InlineData("for i in t[1]..=0 { }", "'t[1]..=0' counts up, so it never runs")]
     [InlineData("for i in n  ..  0 using X { }", "'n  ..  0' counts up, so it never runs")]
+    [InlineData("for i in 9..=\n        0 { }", "'9..= 0' counts up, so it never runs")]
     public void A_loop_that_could_only_count_down_without_its_step_is_an_error(string loop, string expected)
     {
         var e = Error($"const N = 9\nconst ZERO = 0\nvar n: u8 = 3\nvar w: u16 = 3\nvar t: [u8; 4]\nfn main() {{\n    {loop}\n}}");

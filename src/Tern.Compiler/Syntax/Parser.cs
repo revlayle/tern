@@ -39,7 +39,8 @@ public sealed class Parser
     private string TokenText(int from, int to)
     {
         int Offset(SourcePos pos) => _lineStarts[pos.Line - 1] + pos.Column - 1;
-        return _source[Offset(_tokens[from].Pos)..Offset(_tokens[to].Pos)].TrimEnd();
+        // A range over two lines is quoted on one: line breaks and indentation become one space.
+        return System.Text.RegularExpressions.Regex.Replace(_source[Offset(_tokens[from].Pos)..Offset(_tokens[to].Pos)].TrimEnd(), @"\s*\r?\n\s*", " ");
     }
 
     private bool Accept(TokenKind kind)
