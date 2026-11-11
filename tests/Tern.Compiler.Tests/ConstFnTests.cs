@@ -34,7 +34,7 @@ public sealed class ConstFnTests : IDisposable
     {
         Write("tables.tern", """
             const fn sine(n: int) -> [int; _] {
-                var t = [0; n]
+                var t = repeat(0, n)
                 for i in 0..n {
                     t[i] = round(128 + 127 * sin(i * TAU / n))
                 }
@@ -75,7 +75,7 @@ public sealed class ConstFnTests : IDisposable
     [InlineData("[i for i in 10..=0 step -4]", new[] { 10, 6, 2 })]
     [InlineData("[i * i for i in 0..6]", new[] { 0, 1, 4, 9, 16, 25 })]
     [InlineData("[round(i * 1.5) for i in 0..5]", new[] { 0, 2, 3, 5, 6 })]
-    [InlineData("[7; 3]", new[] { 7, 7, 7 })]
+    [InlineData("repeat(7, 3)", new[] { 7, 7, 7 })]
     [InlineData("[N - i for i in 0..N]", new[] { 4, 3, 2, 1 })]
     [InlineData("[1 for _ in 0..2]", new[] { 1, 1 })]
     public void A_list_built_with_for_fills_a_table(string list, int[] expected)
@@ -136,7 +136,7 @@ public sealed class ConstFnTests : IDisposable
     {
         var r = Run.Program("""
             const fn ramp(n: int) -> [int; _] {
-                var r = [0; n]
+                var r = repeat(0, n)
                 for i in 0..n { r[i] = i & $FF }
                 return r
             }
@@ -304,12 +304,59 @@ public sealed class ConstFnTests : IDisposable
     [InlineData("var x: u8 = round(2.5)", "round() works only at compile time. Use it in a constant, in data, in a global's initial value or in a const fn")]
     [InlineData("var x: u8 = 3\n    x = x * PI", "'PI' is a real number, which exists only at compile time")]
     [InlineData("var x: u8 = f(2)", "'f' is a const fn, which runs only at compile time. Use it in a constant, in data or in a global's initial value")]
-    [InlineData("var a: [u8; 3] = [1; 3]", "'[value; count]' builds an array at compile time. Use a 'for' loop to fill the array at runtime")]
+    [InlineData("var a: [u8; 3] = repeat(1, 3)", "'repeat' builds an array at compile time. Use a 'for' loop to fill the array at runtime")]
+    [InlineData("var x: u8 = len(repeat(1, 3))", "'repeat' builds an array at compile time")]
     [InlineData("asm { lda #round(1.5) }", "round() works only at compile time")]
     public void Compile_time_code_in_a_function_body_is_an_error(string statement, string expected)
     {
         var e = Error($"const fn f(n: int) -> int {{ return n }}\nfn main() {{\n    {statement}\n}}");
         Assert.StartsWith(expected, e.Description);
+    }
+
+    // ---------- repeat(value, count) (decision 2026-11-11, question 97) ----------
+
+    [Fact]
+    public void Repeat_fills_data_a_global_and_a_const_fn_array()
+    {
+        var r = RunMain("""
+            const N = 3
+            const fn ramp(n: int) -> [int; _] {
+                var t = repeat(0, n)
+                var none = repeat(7, 0)
+                for i in 0..n { t[i] = i + len(none) }
+                return t
+            }
+            const fn count(t: [int; _]) -> int { return len(t) }
+            data spaces: [u8; 4] = repeat($20, 4)
+            data flags: [bool; _] = repeat(true, N)
+            var words: [u16; _] = repeat(1000, 2)
+            data r: [u8; _] = ramp(4)
+            const EMPTY = count(repeat(1, 0))
+            var e: u8 = EMPTY
+            fn main() { }
+            """);
+        Assert.Equal([0x20, 0x20, 0x20, 0x20], Bytes(r, "spaces", 4));
+        Assert.Equal([1, 1, 1], Bytes(r, "flags", 3));
+        Assert.Equal(1000, r.U16At("words", 0, 2));
+        Assert.Equal(1000, r.U16At("words", 1, 2));
+        Assert.Equal([0, 1, 2, 3], Bytes(r, "r", 4));
+        Assert.Equal(0, r.U8("e"));
+    }
+
+    [Theory]
+    [InlineData("data t: [u8; 4] = [7; 4]", "'[7; 4]' is not an array in Tern, where [T; n] is only an array type. Write repeat(7, 4)")]
+    [InlineData("data t: [u8; _] = [N + 1; f(N)]", "'[N + 1; f(N)]' is not an array in Tern, where [T; n] is only an array type. Write repeat(N + 1, f(N))")]
+    [InlineData("const fn g() -> [int; _] { return [0; -1] }", "'[0; -1]' is not an array in Tern")]
+    [InlineData("data t: [u8; _] = repeat(1, 0)", "Array length must be 1 to 256, not 0")]
+    [InlineData("data t: [u8; 4] = repeat(1, 5)", "Expected 4 values, found 5")]
+    [InlineData("data t: [u8; _] = repeat(300, 2)", "Element 0 is 300, which does not fit in u8")]
+    [InlineData("data t: [u8; _] = repeat(1)", "repeat() takes 2 arguments, not 1")]
+    [InlineData("data t: [u8; _] = repeat(1, 1.5)", "The count of repeat() is a real here, but needs an int")]
+    [InlineData("data t: [u8; _] = repeat(1, 70000)", "An array has 0 to 65536 elements, not 70000. Use a smaller count")]
+    public void Repeat_errors(string source, string expected)
+    {
+        var e = Error("const N = 2\nconst fn f(n: int) -> int { return n }\n" + source + "\nfn main() { }");
+        Assert.Contains(expected, e.Description);
     }
 
     [Fact]
@@ -342,7 +389,7 @@ public sealed class ConstFnTests : IDisposable
                 return steps
             }
             const fn primes(count: int) -> [int; _] {
-                var out = [0; count]
+                var out = repeat(0, count)
                 var found = 0
                 var k = 2
                 while true {
@@ -391,7 +438,7 @@ public sealed class ConstFnTests : IDisposable
                 return x
             }
             const fn grid() -> int {
-                var g: [[int; _]; _] = [[0; 3]; 2]
+                var g: [[int; _]; _] = repeat(repeat(0, 3), 2)
                 g[1][2] = 5
                 var z: [int; 4]
                 z[3] = len(g) + len(g[0])
@@ -596,7 +643,7 @@ public sealed class ConstFnTests : IDisposable
     [InlineData("data d: [u8; 1] = [1]\nconst fn f() -> int { return len(1) }\nconst K = f()", "len() needs an array")]
     [InlineData("const fn f() -> int { return sizeof(1) }\nconst K = f()", "sizeof() takes one type name")]
     [InlineData("const fn f() -> int { return len(include_bytes(\"x.bin\")) }\nconst K = f()", "include_bytes() can only be the value of data")]
-    [InlineData("const fn f() -> int { return len([0; -1]) }\nconst K = f()", "An array has 0 to 65536 elements, not -1")]
+    [InlineData("const fn f() -> int { return len(repeat(0, -1)) }\nconst K = f()", "An array has 0 to 65536 elements, not -1")]
     [InlineData("const fn f() -> int { var t: [int; 70000]\n return 0 }\nconst K = f()", "An array has 0 to 65536 elements, not 70000")]
     [InlineData("const fn f() -> int { return len([0 for i in 0..70000]) }\nconst K = f()", "An array has at most 65536 elements (called from line 2). Use a shorter range")]
     [InlineData("const fn f() -> int { const C = 1\n C = 2\n return C }\nconst K = f()", "'C' is a constant, which cannot be changed")]

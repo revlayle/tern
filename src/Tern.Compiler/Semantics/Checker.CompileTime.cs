@@ -184,7 +184,8 @@ public sealed partial class Checker : ICompileTimeHost
         RealExpr r => new CompileError(e.Pos,
             $"{r.Text} is a real number, which exists only at compile time. Use a constant or a const fn to compute the value, e.g. 'const K = round({r.Text} * 40)'"),
         ListForExpr => new CompileError(e.Pos, "A list built with 'for' is computed at compile time. Use a 'for' loop to fill the array at runtime"),
-        ArrayRepeatExpr => new CompileError(e.Pos, "'[value; count]' builds an array at compile time. Use a 'for' loop to fill the array at runtime"),
+        CallExpr { Name: "repeat" } when Lookup("repeat") is null =>
+            new CompileError(e.Pos, "'repeat' builds an array at compile time. Use a 'for' loop to fill the array at runtime"),
         CallExpr c when Lookup(c.Name) is ConstFnSymbol { Emits: true } => new CompileError(e.Pos,
             $"'{c.Name}' is a generator, which emits assembly. Call it on a line of its own in an asm block"),
         CallExpr c when Lookup(c.Name) is ConstFnSymbol => new CompileError(e.Pos,
@@ -204,7 +205,7 @@ public sealed partial class Checker : ICompileTimeHost
     /// </summary>
     private bool NeedsInterpreter(Expr e) => e switch
     {
-        RealExpr or ListForExpr or ArrayRepeatExpr => true,
+        RealExpr or ListForExpr => true,
         NameExpr n => Lookup(n.Name) switch
         {
             null => n.Name is "PI" or "TAU",
@@ -277,9 +278,14 @@ public sealed partial class Checker : ICompileTimeHost
         }
     }
 
-    /// <summary>A list built with <c>for</c>, <c>[value; count]</c>, or a call of a const fn that returns an array.</summary>
+    /// <summary>A list built with <c>for</c>, <c>repeat(value, count)</c>, or a call of a const fn that returns an array.</summary>
     private bool IsCompileTimeArray(Expr e) =>
-        e is ListForExpr or ArrayRepeatExpr || e is CallExpr c && Lookup(c.Name) is ConstFnSymbol { ReturnType.Kind: CtKind.Array };
+        e is ListForExpr || e is CallExpr c && Lookup(c.Name) switch
+        {
+            ConstFnSymbol { ReturnType.Kind: CtKind.Array } => true,
+            null => c.Name == "repeat",
+            _ => false,
+        };
 
     private CtArray CompileTimeArray(Expr e) => CompileTimeValue(e) as CtArray
         ?? throw new CompileError(e.Pos, "This value is not an array");

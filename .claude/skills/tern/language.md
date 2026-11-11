@@ -215,6 +215,8 @@ player $0918 Enemy (3 bytes):
 - Fields may be nested structs and arrays: `name: [u8; 8]`, `pos: Point`. Padding fields are named `_`.
 - `p[i]` on a struct pointer is not allowed (it would need a multiply); step it with
   `p = p + sizeof(Enemy)`, or use an array of structs.
+- `offset(Enemy.hp)` is a field's offset in bytes, a constant like `sizeof`, also nested
+  (`offset(Enemy.pos.y)`); in assembly through a pointer: `ldy #offset(Enemy.hp)` / `lda (p),y`.
 - `linear var list: [Enemy; 20]` stores whole records (for a pointer to walk); a variable index into
   it needs a struct size of 1, 2, 4 or 8. `indexed var list: [Enemy; 20]` adds an offset table so any
   size works. Plain arrays of structs need neither.
@@ -646,7 +648,7 @@ a $0003 u8 = 21 ($15)
 ```tern
 // tables.tern
 const fn sine(n: int, amplitude: int) -> [int; _] {
-    var t = [0; n]
+    var t = repeat(0, n)
     for i in 0..n {
         t[i] = round(128 + amplitude * sin(i * TAU / n))
     }
@@ -706,11 +708,13 @@ out $0974 [u8; 3] (3 bytes):
   `bool`, `label` and arrays of them (`[int; _]`); `u8` and the other runtime types are errors there.
 - A real never becomes an int by itself: `round(x)` (halves away from zero), `floor`, `ceil`,
   `trunc`. Functions: `sin`, `cos`, `tan`, `atan2`, `sqrt`, `pow`, `exp`, `log`, `log2`, `abs`,
-  `min`, `max`, and `PI`, `TAU`. `1.5` and `2e3` are reals, only in compile-time code.
-- Arrays: `[0; n]`, `[expr for i in 0..n]` (one `for`, no filter; also `..=`, `step`), `len(t)`.
+  `min`, `max`, and `PI`, `TAU`. `1.5` and `2e3` are reals, only in compile-time code. A `const`
+  may hold a real (`const SCALE = 1.5`, no type written), used only in compile-time code.
+- Arrays: `repeat(0, n)`, `[expr for i in 0..n]` (one `for`, no filter; also `..=`, `step`),
+  `len(t)`. Rust's `[0; n]` is an error. A `const` never holds an array; use `data`.
   A table takes one with its element type and `_` or a checked length: `data t: [u8; _] = f(...)`;
   each element must fit the table's type.
-- A `const fn` reads constants, module parameters, `sizeof` and `data` tables (also `include_bytes`),
+- A `const fn` reads constants, module parameters, `sizeof`, `offset(T.field)` and `data` tables (also `include_bytes`),
   not `var`s and not `addr()`. A loop that never ends stops after 10,000,000 steps with an error.
 - A generator is a `const fn` with `emit { ... }` and no return value. It is called on a line of
   its own inside `asm { }` or an `asm fn`; each `emit` adds its instructions there. Operands use

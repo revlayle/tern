@@ -22,6 +22,23 @@ public sealed class Parser
 
     private Token Advance() => _tokens[_pos++];
 
+    /// <summary>The source of tokens <paramref name="from"/> up to <paramref name="to"/>, for messages: "x + 1", "f(n)".</summary>
+    private string TokenText(int from, int to)
+    {
+        var text = new System.Text.StringBuilder();
+        for (int i = from; i < to; i++)
+        {
+            var kind = _tokens[i].Kind;
+            bool tight = i == from || kind is TokenKind.RParen or TokenKind.RBracket or TokenKind.Comma or TokenKind.Dot
+                || _tokens[i - 1].Kind is TokenKind.LParen or TokenKind.LBracket or TokenKind.Dot
+                || kind is TokenKind.LParen && _tokens[i - 1].Kind == TokenKind.Identifier
+                || _tokens[i - 1].Kind is TokenKind.Minus && (i - 1 == from || _tokens[i - 2].Kind is TokenKind.LParen or TokenKind.Comma);
+            if (!tight) text.Append(' ');
+            text.Append(_tokens[i].Text);
+        }
+        return text.ToString();
+    }
+
     private bool Accept(TokenKind kind)
     {
         if (!At(kind)) return false;
@@ -1110,15 +1127,19 @@ public sealed class Parser
                     {
                         SkipNewlines();
                         if (At(TokenKind.RBracket)) break; // a trailing ','
+                        int start = _pos;
                         var element = ParseExpr();
-                        // [expr for i in range] and [value; count] (spec 4.1): one element, then ']'.
+                        // [expr for i in range] (spec 4.1): one element, then ']'.
                         if (elements.Count == 0 && At(TokenKind.For)) return ParseListFor(t.Pos, element);
+                        // [value; count], Rust's spelling, is repeat(value, count) in Tern (spec 4.1).
                         if (elements.Count == 0 && At(TokenKind.Semicolon))
                         {
+                            string value = TokenText(start, _pos);
                             Advance();
-                            var count = ParseExpr();
-                            Expect(TokenKind.RBracket, "']' after the count of '[value; count]'");
-                            return new ArrayRepeatExpr(t.Pos, element, count);
+                            int countStart = _pos;
+                            ParseExpr();
+                            string count = TokenText(countStart, _pos);
+                            throw new CompileError(t.Pos, $"'[{value}; {count}]' is not an array in Tern, where [T; n] is only an array type. Write repeat({value}, {count})");
                         }
                         elements.Add(element);
                         SkipNewlines();

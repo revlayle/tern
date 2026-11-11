@@ -20,7 +20,7 @@ public sealed partial class Interpreter
     public static readonly HashSet<string> Builtins =
     [
         "sin", "cos", "tan", "atan2", "sqrt", "pow", "exp", "log", "log2", "abs", "min", "max",
-        "round", "floor", "ceil", "trunc", "label",
+        "round", "floor", "ceil", "trunc", "label", "repeat",
     ];
 
     private readonly ICompileTimeHost _host;
@@ -128,16 +128,6 @@ public sealed partial class Interpreter
                 throw Error(c.Pos, "'as' converts runtime types, which a const fn does not have. Use '& $FF' for 8-bit behavior, or round(x), floor(x), ceil(x) or trunc(x) for a real");
             case ArrayLiteralExpr a: return MakeArray(a.Elements.Select(Eval).ToList(), a.Elements.Select(x => x.Pos).ToList(), a.Pos);
             case ListForExpr l: return ListFor(l);
-            case ArrayRepeatExpr r:
-            {
-                var value = Eval(r.Value);
-                long count = Int(Eval(r.Count), r.Count.Pos, "The count of '[value; count]'");
-                if (count < 0 || count > 0x10000)
-                    throw Error(r.Count.Pos, $"An array has 0 to 65536 elements, not {count}. Use a smaller count");
-                var items = new CtValue[count];
-                for (int k = 0; k < count; k++) items[k] = value.Copy();
-                return new CtArray(items, value.Type);
-            }
             default:
                 throw Error(e.Pos, "This is not a compile-time value");
         }
@@ -446,6 +436,17 @@ public sealed partial class Interpreter
             case "label":
                 Count(0);
                 return new CtLabel(++_labels, c.Pos);
+            case "repeat":
+            {
+                // repeat(value, count): count copies of value (spec 4.1).
+                Count(2);
+                long count = Int(args[1], c.Args[1].Pos, "The count of repeat()");
+                if (count < 0 || count > 0x10000)
+                    throw Error(c.Args[1].Pos, $"An array has 0 to 65536 elements, not {count}. Use a smaller count");
+                var items = new CtValue[count];
+                for (int k = 0; k < count; k++) items[k] = args[0].Copy();
+                return new CtArray(items, args[0].Type);
+            }
             case "sin": Count(1); return Result(Math.Sin(Arg(0)));
             case "cos": Count(1); return Result(Math.Cos(Arg(0)));
             case "tan": Count(1); return Result(Math.Tan(Arg(0)));

@@ -1395,7 +1395,7 @@ public sealed partial class Checker
             if (decl.Init is StructLiteralExpr lit) throw StructLiteralInCode(lit, decl.Name);
             if (type.IsStruct || type.IsStructArray)
                 throw new CompileError(decl.Init.Pos, "A struct cannot have an initial value. Assign its fields");
-            if (type.IsArray && decl.Init is ListForExpr or ArrayRepeatExpr) CheckExpr(decl.Init);
+            if (type.IsArray && IsCompileTimeArray(decl.Init)) CheckExpr(decl.Init);
             if (type.IsArray) throw new CompileError(decl.Init.Pos, "Local arrays cannot have initial values yet");
             CheckExpr(decl.Init);
             Coerce(decl.Init, type);
@@ -1740,7 +1740,7 @@ public sealed partial class Checker
             case StructLiteralExpr lit:
                 throw StructLiteralInCode(lit, null);
 
-            case RealExpr or ListForExpr or ArrayRepeatExpr:
+            case RealExpr or ListForExpr:
                 EvaluateConstant(e);
                 break;
 
