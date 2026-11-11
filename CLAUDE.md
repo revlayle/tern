@@ -23,6 +23,7 @@ src/Tern.Cpu/            instruction set table, encoder, cycle-exact 6502 emulat
 src/Tern.Compiler/
   Syntax/                lexer, AST, parser
   Semantics/             symbols, types, checker (names, types, constant folding, call graph)
+  CompileTime/           interpreter for const fn and code generators (values, emit)
   Backend/               code generator, allocator (zero page, shared frames), assembler
   Tools/                 agent tools: --json diagnostics, .lines table, tern run, tern bench
   Platform.cs            target machine descriptions (C64)
