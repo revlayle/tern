@@ -117,6 +117,11 @@ public sealed class BoolExpr(SourcePos pos, bool value) : Expr(pos)
 public sealed class NameExpr(SourcePos pos, string name) : Expr(pos)
 {
     public string Name { get; } = name;
+    /// <summary>
+    /// For a name in an instruction a generator emitted (spec 4.1): the symbol it names in the
+    /// generator's module, which the asm block's module may not see by that name.
+    /// </summary>
+    public Symbol? Bound { get; init; }
     /// <summary>Set by the checker when the name is a variable (constants are folded instead).</summary>
     public VariableSymbol? Symbol { get; set; }
 }
@@ -303,7 +308,11 @@ public sealed class AsmStmt(SourcePos pos, List<AsmLine> lines) : Stmt(pos)
     public AsmEffects? Effects { get; set; }
 }
 
-public abstract class AsmLine(SourcePos pos) : Node(pos);
+public abstract class AsmLine(SourcePos pos) : Node(pos)
+{
+    /// <summary>For a line a generator emitted (spec 4.1): the generator call in the asm block. <see cref="Node.Pos"/> is the emit line.</summary>
+    public SourcePos? CalledFrom { get; init; }
+}
 
 /// <summary>A local label such as <c>.loop:</c>. <see cref="Name"/> includes the dot.</summary>
 public sealed class AsmLabel(SourcePos pos, string name) : AsmLine(pos)

@@ -182,6 +182,8 @@ public sealed partial class Checker : ICompileTimeHost
             $"{r.Text} is a real number, which exists only at compile time. Use a constant or a const fn to compute the value, e.g. 'const K = round({r.Text} * 40)'"),
         ListForExpr => new CompileError(e.Pos, "A list built with 'for' is computed at compile time. Use a 'for' loop to fill the array at runtime"),
         ArrayRepeatExpr => new CompileError(e.Pos, "'[value; count]' builds an array at compile time. Use a 'for' loop to fill the array at runtime"),
+        CallExpr c when Lookup(c.Name) is ConstFnSymbol { Emits: true } => new CompileError(e.Pos,
+            $"'{c.Name}' is a generator, which emits assembly. Call it on a line of its own in an asm block"),
         CallExpr c when Lookup(c.Name) is ConstFnSymbol => new CompileError(e.Pos,
             $"'{c.Name}' is a const fn, which runs only at compile time. Use it in a constant, in data or in a global's initial value"),
         CallExpr c => new CompileError(e.Pos,
@@ -333,6 +335,8 @@ public sealed partial class Checker : ICompileTimeHost
         if (dot > 0 && module.Imports.TryGetValue(name[..dot], out var other)) (module, name) = (other, name[(dot + 1)..]);
         return module.Syntax.Functions.Any(f => f.Name == name);
     }
+
+    Symbol? ICompileTimeHost.Symbol(Module? module, string name) => LookupIn(module, name);
 
     long ICompileTimeHost.SizeOf(Module? module, string type, SourcePos pos)
     {

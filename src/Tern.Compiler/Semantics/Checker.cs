@@ -522,7 +522,7 @@ public sealed partial class Checker
     /// <summary>Reports <c>name.member</c> where <c>name</c> is not declared as a missing import.</summary>
     private void CheckMemberTarget(MemberExpr m)
     {
-        if (m.Member is not ("lo" or "hi") && m.Target is NameExpr n && !n.Name.Contains('.') && Lookup(n.Name) is null && !_module.Imports.ContainsKey(n.Name))
+        if (m.Member is not ("lo" or "hi") && m.Target is NameExpr { Bound: null } n && !n.Name.Contains('.') && Lookup(n.Name) is null && !_module.Imports.ContainsKey(n.Name))
             throw MissingImport(n.Name, n.Pos);
     }
 
@@ -1748,7 +1748,7 @@ public sealed partial class Checker
                     + "Declare it as data, e.g. 'data HI = \"HI\"', and pass addr(HI), len(HI)");
 
             case NameExpr n:
-                switch (Lookup(n.Name))
+                switch (n.Bound ?? Lookup(n.Name))
                 {
                     case null when n.Name is "PI" or "TAU":
                         EvaluateConstant(e);
