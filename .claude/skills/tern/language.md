@@ -311,7 +311,7 @@ fn main() {
     if state < 10 { hits = 1 } else if state == 20 { hits = 2 } else { hits = 3 }
 
     for i in 0..10 { log[i] = i }          // 0 to 9
-    for i in 9..=0 { n += 1 }              // 9 down to 0: 10 times
+    for i in 9..=0 step -1 { n += 1 }      // 9 down to 0: 10 times
     for x in 0..40 step 8 { n += 1 }       // 0, 8, 16, 24, 32
     for i in 0..8 using X { log[i] += 1 }  // the counter is in X
     for _ in 0..3 { n += 1 }               // no counter needed
@@ -344,9 +344,10 @@ log $08BE [u8; 16] (10 bytes):
 
 - There is no C-style `for (;;)` and no `do`/`until`. `a..b` excludes `b`, `a..=b` includes it.
 - `for` bounds are evaluated once, and the counter is read-only in the body. A counter is `u8`
-  (`u16` if a bound needs it); with constant bounds the order gives the direction, an end of `0`
-  counts down, a negative `step` too. A negative constant or a signed bound makes it `i8` (`i16` if
-  the bounds do not fit): `for i in -10..10`, `for i in n..=0` with `n: i8`. A signed counter takes
+  (`u16` if a bound needs it). It counts up unless a negative `step` is written: `9..=0` and an
+  unsigned `n..0` are errors, written `9..=0 step -1`, `n..0 step -1`. A negative constant or a
+  signed bound makes it `i8` (`i16` if the bounds do not fit): `for i in -10..10`,
+  `for i in n..=0 step -1` with `n: i8`. A signed counter takes
   only a constant step, and an unsigned variable bound must be converted (`-5..n as i8`).
 - `match` works on `u8` and `i8` (for a `u16`, match `.lo` or `.hi`). Patterns are constants, lists
   `1, 2` and inclusive ranges `3..=7`; `_` is last. One arm per line, no fall-through. A value no

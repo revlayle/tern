@@ -29,10 +29,10 @@ public sealed class Parser
         for (int i = from; i < to; i++)
         {
             var kind = _tokens[i].Kind;
-            bool tight = i == from || kind is TokenKind.RParen or TokenKind.RBracket or TokenKind.Comma or TokenKind.Dot
-                || _tokens[i - 1].Kind is TokenKind.LParen or TokenKind.LBracket or TokenKind.Dot
+            bool tight = i == from || kind is TokenKind.RParen or TokenKind.RBracket or TokenKind.Comma or TokenKind.Dot or TokenKind.DotDot or TokenKind.DotDotEq
+                || _tokens[i - 1].Kind is TokenKind.LParen or TokenKind.LBracket or TokenKind.Dot or TokenKind.DotDot or TokenKind.DotDotEq
                 || kind is TokenKind.LParen && _tokens[i - 1].Kind == TokenKind.Identifier
-                || _tokens[i - 1].Kind is TokenKind.Minus && (i - 1 == from || _tokens[i - 2].Kind is TokenKind.LParen or TokenKind.Comma);
+                || _tokens[i - 1].Kind is TokenKind.Minus && (i - 1 == from || _tokens[i - 2].Kind is TokenKind.LParen or TokenKind.LBracket or TokenKind.Comma or TokenKind.DotDot or TokenKind.DotDotEq);
             if (!tight) text.Append(' ');
             text.Append(_tokens[i].Text);
         }
@@ -774,12 +774,14 @@ public sealed class Parser
         var start = Expect(TokenKind.For, "'for'");
         var name = Expect(TokenKind.Identifier, "loop variable name or '_'");
         Expect(TokenKind.In, "'in'");
+        int rangeStart = _pos;
         var from = ParseHeaderExpr();
         bool inclusive;
         if (Accept(TokenKind.DotDotEq)) inclusive = true;
         else if (Accept(TokenKind.DotDot)) inclusive = false;
         else throw new CompileError(Current.Pos, $"Expected '..' or '..=', found {Describe(Current)}");
         var to = ParseHeaderExpr();
+        string range = TokenText(rangeStart, _pos);
         // 'step' is a keyword only here, right after the range (spec 13); elsewhere it is a name.
         Expr? step = null;
         if (At(TokenKind.Identifier) && Current.Text == "step")
@@ -789,7 +791,7 @@ public sealed class Parser
         }
         Register? reg = Accept(TokenKind.Using) ? ParseRegister() : null;
         var body = ParseBlock();
-        return new ForStmt(start.Pos, name.Text == "_" ? null : name.Text, from, to, inclusive, step, reg, body);
+        return new ForStmt(start.Pos, name.Text == "_" ? null : name.Text, from, to, inclusive, step, reg, body) { RangeText = range };
     }
 
     // ---------- Assembly ----------
@@ -1066,12 +1068,14 @@ public sealed class Parser
         Expect(TokenKind.For, "'for'");
         var name = Expect(TokenKind.Identifier, "a variable name or '_' after 'for'");
         Expect(TokenKind.In, "'in'");
+        int rangeStart = _pos;
         var from = ParseExpr();
         bool inclusive;
         if (Accept(TokenKind.DotDotEq)) inclusive = true;
         else if (Accept(TokenKind.DotDot)) inclusive = false;
         else throw new CompileError(Current.Pos, $"Expected '..' or '..=', found {Describe(Current)}");
         var to = ParseExpr();
+        string range = TokenText(rangeStart, _pos);
         Expr? step = null;
         if (At(TokenKind.Identifier) && Current.Text == "step")
         {
@@ -1083,7 +1087,7 @@ public sealed class Parser
         if (At(TokenKind.If))
             throw new CompileError(Current.Pos, "A list built with 'for' has no filter. Write a const fn with a loop and an 'if' for that");
         Expect(TokenKind.RBracket, "']' after the range of the list");
-        return new ListForExpr(pos, element, name.Text == "_" ? null : name.Text, from, to, inclusive, step);
+        return new ListForExpr(pos, element, name.Text == "_" ? null : name.Text, from, to, inclusive, step) { RangeText = range };
     }
 
     private Expr ParsePrimary()

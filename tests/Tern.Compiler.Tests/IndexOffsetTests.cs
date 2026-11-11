@@ -107,8 +107,8 @@ public class IndexOffsetTests
     [InlineData("0..99", 1, 0, 98, false)]
     [InlineData("0..=254", 1, 0, 254, false)]
     [InlineData("3..=250", 5, 3, 250, false)]
-    [InlineData("200..0", 55, 1, 200, true)]     // counts down, from a constant
-    [InlineData("9..=0", 3, 0, 9, true)]
+    [InlineData("200..0 step -1", 55, 1, 200, true)]     // counts down, from a constant
+    [InlineData("9..=0 step -1", 3, 0, 9, true)]
     public void A_constant_offset_folds_under_constant_bounds(string range, int c, int first, int last, bool down)
     {
         var r = Run.Program($$"""
@@ -195,7 +195,7 @@ public class IndexOffsetTests
     [InlineData("0..=n", 255)]        // inclusive variable end: i can be 255
     [InlineData("0..=255", 255)]
     [InlineData("0..=254", 254)]      // i + 2 reaches 256 at i = 254
-    [InlineData("n..0", 255)]         // counts down from a variable start
+    [InlineData("n..0 step -1", 255)]         // counts down from a variable start
     public void A_sum_that_can_wrap_is_not_folded(string range, int top)
     {
         int c = range == "0..=254" ? 2 : 1;

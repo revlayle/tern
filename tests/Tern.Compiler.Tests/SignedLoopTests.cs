@@ -74,11 +74,11 @@ public class SignedLoopTests
     // Constant bounds, step ±1.
     [InlineData("-10..10", 0, 0, -10, 10, false, 1)]
     [InlineData("-128..=127", 0, 0, -128, 127, true, 1)]
-    [InlineData("127..=-128", 0, 0, 127, -128, true, -1)]
-    [InlineData("5..=-5", 0, 0, 5, -5, true, -1)]
-    [InlineData("-1..=-128", 0, 0, -1, -128, true, -1)]
+    [InlineData("127..=-128 step -1", 0, 0, 127, -128, true, -1)]
+    [InlineData("5..=-5 step -1", 0, 0, 5, -5, true, -1)]
+    [InlineData("-1..=-128 step -1", 0, 0, -1, -128, true, -1)]
     [InlineData("-128..-1", 0, 0, -128, -1, false, 1)]
-    [InlineData("10..-10", 0, 0, 10, -10, false, -1)]
+    [InlineData("10..-10 step -1", 0, 0, 10, -10, false, -1)]
     // Constant bounds, larger steps, also past 127 and -128.
     [InlineData("-5..5 step 3", 0, 0, -5, 5, false, 3)]
     [InlineData("-128..=127 step 2", 0, 0, -128, 127, true, 2)]
@@ -104,15 +104,15 @@ public class SignedLoopTests
     [InlineData("-128..=b", 0, -128, -128, -128, true, 1)]
     [InlineData("-5..=b", 0, 3, -5, 3, true, 1)]
     [InlineData("-5..=b", 0, -6, -5, -6, true, 1)]
-    [InlineData("a..=0", 5, 0, 5, 0, true, -1)]
-    [InlineData("a..=0", 0, 0, 0, 0, true, -1)]
-    [InlineData("a..=0", -1, 0, -1, 0, true, -1)]
-    [InlineData("a..=0", 127, 0, 127, 0, true, -1)]
-    [InlineData("a..=0", -128, 0, -128, 0, true, -1)]
-    [InlineData("a..0", 5, 0, 5, 0, false, -1)]
-    [InlineData("a..0", 0, 0, 0, 0, false, -1)]
-    [InlineData("a..0", -1, 0, -1, 0, false, -1)]
-    [InlineData("a..0", 127, 0, 127, 0, false, -1)]
+    [InlineData("a..=0 step -1", 5, 0, 5, 0, true, -1)]
+    [InlineData("a..=0 step -1", 0, 0, 0, 0, true, -1)]
+    [InlineData("a..=0 step -1", -1, 0, -1, 0, true, -1)]
+    [InlineData("a..=0 step -1", 127, 0, 127, 0, true, -1)]
+    [InlineData("a..=0 step -1", -128, 0, -128, 0, true, -1)]
+    [InlineData("a..0 step -1", 5, 0, 5, 0, false, -1)]
+    [InlineData("a..0 step -1", 0, 0, 0, 0, false, -1)]
+    [InlineData("a..0 step -1", -1, 0, -1, 0, false, -1)]
+    [InlineData("a..0 step -1", 127, 0, 127, 0, false, -1)]
     // Variable bounds, larger steps: the V flag ends the loop past 127 or -128.
     [InlineData("a..b step 3", -5, 5, -5, 5, false, 3)]
     [InlineData("a..b step 3", 5, -5, 5, -5, false, 3)]
@@ -137,8 +137,8 @@ public class SignedLoopTests
     [Theory]
     [InlineData("-1000..1000 step 7", 0, 0, -1000, 1000, false, 7)]
     [InlineData("-200..=100", 0, 0, -200, 100, true, 1)]
-    [InlineData("200..=-50", 0, 0, 200, -50, true, -1)]
-    [InlineData("-32700..=-32768", 0, 0, -32700, -32768, true, -1)]
+    [InlineData("200..=-50 step -1", 0, 0, 200, -50, true, -1)]
+    [InlineData("-32700..=-32768 step -1", 0, 0, -32700, -32768, true, -1)]
     [InlineData("-32768..-32700", 0, 0, -32768, -32700, false, 1)]
     [InlineData("a..b", -100, 100, -100, 100, false, 1)]
     [InlineData("a..b", 100, -100, 100, -100, false, 1)]
@@ -147,12 +147,12 @@ public class SignedLoopTests
     [InlineData("a..=32767", 32600, 0, 32600, 32767, true, 1)]
     [InlineData("a..=b step -1", 50, -50, 50, -50, true, -1)]
     [InlineData("a..=b step -1", -32700, -32768, -32700, -32768, true, -1)]
-    [InlineData("a..=0", 100, 0, 100, 0, true, -1)]
-    [InlineData("a..=0", -100, 0, -100, 0, true, -1)]
-    [InlineData("a..=0", 256, 0, 256, 0, true, -1)]
-    [InlineData("a..0", 256, 0, 256, 0, false, -1)]
-    [InlineData("a..0", 0, 0, 0, 0, false, -1)]
-    [InlineData("a..0", -256, 0, -256, 0, false, -1)]
+    [InlineData("a..=0 step -1", 100, 0, 100, 0, true, -1)]
+    [InlineData("a..=0 step -1", -100, 0, -100, 0, true, -1)]
+    [InlineData("a..=0 step -1", 256, 0, 256, 0, true, -1)]
+    [InlineData("a..0 step -1", 256, 0, 256, 0, false, -1)]
+    [InlineData("a..0 step -1", 0, 0, 0, 0, false, -1)]
+    [InlineData("a..0 step -1", -256, 0, -256, 0, false, -1)]
     [InlineData("a..b step 100", -32768, 32767, -32768, 32767, false, 100)]
     [InlineData("a..=b step 127", 32000, 32767, 32000, 32767, true, 127)]
     [InlineData("a..=b step -127", -32000, -32768, -32000, -32768, true, -127)]
@@ -222,8 +222,8 @@ public class SignedLoopTests
             var n: i8 = 3
             volatile var out: i8
             fn main() {
-                for i in n..=0 using X { out = i }
-                for i in n..0 using X { out = i }
+                for i in n..=0 step -1 using X { out = i }
+                for i in n..0 step -1 using X { out = i }
             }
             """);
         Assert.Equal("ldx n|bmi|BODY|dex|bpl|ldx n|beq|bmi|BODY|dex|bne|rts", Loop(Code(r)));

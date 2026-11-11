@@ -1533,10 +1533,15 @@ public sealed partial class Checker
                 throw new CompileError(f.Step.Pos, $"A step of {step} goes the wrong way from {from} to {to}");
             f.StepValue = (int)step;
         }
-        else if (from is not null && to is not null)
-            f.StepValue = to >= from ? 1 : -1;
         else
-            f.StepValue = to == 0 ? -1 : 1;
+        {
+            // Without a step the loop counts up, whatever its bounds (spec 5.1). A loop that could only be
+            // a down-count without its step is an error: constant bounds from a larger start, or an
+            // unsigned counter ending at the constant 0.
+            if (from is not null && to is not null ? from > to : to == 0 && !type.IsSigned)
+                throw CountsUp(f.RangeText, f.Pos, "Write 'step -1' to count down");
+            f.StepValue = 1;
+        }
 
         if (f.UsingRegister is { } reg)
         {
@@ -1575,6 +1580,10 @@ public sealed partial class Checker
         if (f.UsingRegister is { } r) _loopRegisters.Remove(r);
     }
 
+    /// <summary>A loop that counts up from a larger start, so it never runs (or only when the start is 0).</summary>
+    internal static CompileError CountsUp(string range, SourcePos pos, string fix) =>
+        new(pos, $"'{range}' counts up, so it never runs. {fix}");
+
     /// <summary>A step that is not a constant (spec 5.1): a u8 value, in a loop that counts up with a u8 counter.</summary>
     private static void CheckVariableStep(ForStmt f, TernType counter, long? from, long? to)
     {
@@ -1585,8 +1594,8 @@ public sealed partial class Checker
             throw new CompileError(step.Pos, $"A variable step must be a u8, but this is {step.Type}. Convert with 'as u8' if it always fits");
         if (counter.Size != 1 || counter.IsSigned)
             throw new CompileError(step.Pos, $"A variable step needs a u8 loop counter, but the bounds are {counter}. Use a constant step, or u8 bounds");
-        if ((from is not null && to is not null && to < from) || (from is null && to == 0))
-            throw new CompileError(step.Pos, "A variable step cannot be used in a loop that counts down. Count up, or use a constant negative step");
+        if (from is not null && to is not null ? from > to : to == 0)
+            throw CountsUp(f.RangeText, step.Pos, "Use a constant negative step to count down");
         f.VariableStep = true;
         f.StepValue = 1;
     }

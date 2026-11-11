@@ -190,7 +190,7 @@ public sealed partial class Interpreter
         Top.Scopes.Add([]);
         try
         {
-            foreach (long i in Range(l.From, l.To, l.Inclusive, l.Step))
+            foreach (long i in Range(l.From, l.To, l.Inclusive, l.Step, l.RangeText))
             {
                 Step();
                 if (l.Variable is not null) Top.Scopes[^1][l.Variable] = new Slot(new CtInt(i), CtType.Int, "the list's variable");
@@ -206,10 +206,10 @@ public sealed partial class Interpreter
 
     /// <summary>
     /// The values of a <c>for</c> range (spec 5.1): the bounds and step are evaluated once. Without a
-    /// step, two constant bounds give the direction, an end of the constant 0 counts down, and
-    /// anything else counts up.
+    /// step the range counts up; constant bounds from a larger start are an error, as in runtime code
+    /// (an int is signed, so a variable start with an end of 0 is not).
     /// </summary>
-    private IEnumerable<long> Range(Expr fromExpr, Expr toExpr, bool inclusive, Expr? stepExpr)
+    private IEnumerable<long> Range(Expr fromExpr, Expr toExpr, bool inclusive, Expr? stepExpr, string text)
     {
         long from = Int(Eval(fromExpr), fromExpr.Pos, "A loop bound");
         long to = Int(Eval(toExpr), toExpr.Pos, "A loop bound");
@@ -219,8 +219,9 @@ public sealed partial class Interpreter
             step = Int(Eval(stepExpr), stepExpr.Pos, "The step");
             if (step == 0) throw Error(stepExpr.Pos, "The step is 0, so the loop would never end. Use a step other than 0");
         }
-        else if (IsConstant(fromExpr) && IsConstant(toExpr)) step = from <= to ? 1 : -1;
-        else step = IsConstant(toExpr) && to == 0 ? -1 : 1;
+        else if (from > to && IsConstant(fromExpr) && IsConstant(toExpr))
+            throw Error(fromExpr.Pos, Checker.CountsUp(text, fromExpr.Pos, "Write 'step -1' to count down").Description);
+        else step = 1;
         return Values(from, to, inclusive, step);
 
         static IEnumerable<long> Values(long from, long to, bool inclusive, long step)
@@ -610,7 +611,7 @@ public sealed partial class Interpreter
                 }
                 return Flow.Normal;
             case ForStmt f:
-                foreach (long i in Range(f.From, f.To, f.Inclusive, f.Step))
+                foreach (long i in Range(f.From, f.To, f.Inclusive, f.Step, f.RangeText))
                 {
                     Step();
                     Top.Scopes.Add([]);
