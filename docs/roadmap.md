@@ -448,6 +448,15 @@ First, a small item (question 92, decision 2026-11-10): `level_api.header` in a 
 
 Done when: (part 1) a sine table and a screen-row address table are built by `const fn`s from a module and match C#; (part 2) an unrolled screen copy that skips given rows is generated, runs correctly in the emulator and its listing shows the source of each instruction.
 
+## M22 follow-up (before M23)
+
+Spec: 4, 4.1, 5.1, 10, 11. Decisions 2026-11-11 (M22 questions 94-103). On a branch from `main` after M22 is merged.
+
+- **Real constants** (spec 4.1): `const SCALE = 1.5`, used in a `const fn`, a `for` list and another constant; in runtime code the error a `real` literal gets; `const T = f()` with an array result is "'T' is an array, which a const cannot hold. Use data".
+- **`offset(T.field)`** (spec 10): an untyped constant like `sizeof`; nested fields; in a constant, a `const fn`, an `emit` operand and a plain asm operand (`ldy #offset(Enemy.hp)` / `lda (p),y` run in the emulator); errors for a type that is not a struct and a field it does not have.
+- **`repeat(value, count)` replaces `[value; count]`** (spec 4.1): in `data`, a `var` initial value and a `const fn` (0 elements there); the runtime error; `[7; 4]` is "Write repeat(7, 4)".
+- **`for` direction from the step alone** (spec 5.1, 11): without `step` a loop counts up; the errors for a constant range that counts up from a larger start (`9..=0`) and for an unsigned counter ending at constant 0 without `step`; a signed `n..=0` counting up from a negative `n`. The spec 11 rows with `step -1` keep their code (listing tests). Update the library, examples, tests and the skill that count down without `step`; `BenchmarkTests` should not move. The guide's loop examples are updated by the spec session after the merge.
+
 ## M23: Doc comments and a language server
 
 - `///` doc comments before declarations, kept by the compiler.
