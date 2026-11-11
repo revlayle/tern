@@ -1535,10 +1535,8 @@ public sealed partial class Checker
         }
         else
         {
-            // Without a step the loop counts up, whatever its bounds (spec 5.1). A loop that could only be
-            // a down-count without its step is an error: constant bounds from a larger start, or an
-            // unsigned counter ending at the constant 0.
-            if (from is not null && to is not null ? from > to : to == 0 && !type.IsSigned)
+            // Without a step the loop counts up, whatever its bounds (spec 5.1).
+            if (NeverRuns(f, type, from, to))
                 throw CountsUp(f.RangeText, f.Pos, "Write 'step -1' to count down");
             f.StepValue = 1;
         }
@@ -1580,7 +1578,15 @@ public sealed partial class Checker
         if (f.UsingRegister is { } r) _loopRegisters.Remove(r);
     }
 
-    /// <summary>A loop that counts up from a larger start, so it never runs (or only when the start is 0).</summary>
+    /// <summary>
+    /// A loop counting up that can never run, whatever its variables hold (spec 5.1, decision 104):
+    /// constant bounds with the start past the end, or an unsigned counter ending before 0 (<c>n..0</c>).
+    /// An unsigned <c>n..=0</c> runs once when n is 0, so it is allowed.
+    /// </summary>
+    private static bool NeverRuns(ForStmt f, TernType counter, long? from, long? to) =>
+        from is not null && to is not null ? from > to : to == 0 && !f.Inclusive && !counter.IsSigned;
+
+    /// <summary>A loop that counts up from a larger start, so it never runs.</summary>
     internal static CompileError CountsUp(string range, SourcePos pos, string fix) =>
         new(pos, $"'{range}' counts up, so it never runs. {fix}");
 
@@ -1594,7 +1600,7 @@ public sealed partial class Checker
             throw new CompileError(step.Pos, $"A variable step must be a u8, but this is {step.Type}. Convert with 'as u8' if it always fits");
         if (counter.Size != 1 || counter.IsSigned)
             throw new CompileError(step.Pos, $"A variable step needs a u8 loop counter, but the bounds are {counter}. Use a constant step, or u8 bounds");
-        if (from is not null && to is not null ? from > to : to == 0)
+        if (NeverRuns(f, counter, from, to))
             throw CountsUp(f.RangeText, step.Pos, "Use a constant negative step to count down");
         f.VariableStep = true;
         f.StepValue = 1;

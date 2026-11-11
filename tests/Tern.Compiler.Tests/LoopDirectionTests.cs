@@ -4,7 +4,7 @@ namespace Tern.Compiler.Tests;
 
 /// <summary>
 /// A <c>for</c> loop's direction comes from its step alone (spec 5.1, decision 2026-11-11): without
-/// <c>step</c> it counts up, and a loop that could only be a down-count without its step is an error.
+/// <c>step</c> it counts up, and a loop counting up that can never run is an error (decision 104).
 /// </summary>
 public class LoopDirectionTests
 {
@@ -30,15 +30,15 @@ public class LoopDirectionTests
     [InlineData("for i in -5..=-10 { }", "'-5..=-10' counts up, so it never runs")]
     [InlineData("for i in 1000..=990 { }", "'1000..=990' counts up, so it never runs")]
     [InlineData("for i in n..0 { }", "'n..0' counts up, so it never runs. Write 'step -1' to count down")]
-    [InlineData("for i in n..=0 using X { }", "'n..=0' counts up, so it never runs")]
+    [InlineData("for i in n..0 using X { }", "'n..0' counts up, so it never runs")]
     [InlineData("for i in w..0 { }", "'w..0' counts up, so it never runs")]
-    [InlineData("for i in (n + 1)..=ZERO { }", "'(n + 1)..=ZERO' counts up, so it never runs")]
+    [InlineData("for i in (n + 1)..ZERO { }", "'(n + 1)..ZERO' counts up, so it never runs")]
     [InlineData("for c in 'Z'..='A' { }", "''Z'..='A'' counts up, so it never runs")]
     [InlineData("for c in screen'Z'..=screen'A' { }", "'screen'Z'..=screen'A'' counts up, so it never runs")]
-    [InlineData("for i in t[1]..=0 { }", "'t[1]..=0' counts up, so it never runs")]
+    [InlineData("for i in t[1]..0 { }", "'t[1]..0' counts up, so it never runs")]
     [InlineData("for i in n  ..  0 using X { }", "'n  ..  0' counts up, so it never runs")]
     [InlineData("for i in 9..=\n        0 { }", "'9..= 0' counts up, so it never runs")]
-    public void A_loop_that_could_only_count_down_without_its_step_is_an_error(string loop, string expected)
+    public void A_loop_counting_up_that_can_never_run_is_an_error(string loop, string expected)
     {
         var e = Error($"const N = 9\nconst ZERO = 0\nvar n: u8 = 3\nvar w: u16 = 3\nvar t: [u8; 4]\nfn main() {{\n    {loop}\n}}");
         Assert.Equal(expected, e.Description[..Math.Min(e.Description.Length, expected.Length)]);
@@ -75,6 +75,36 @@ public class LoopDirectionTests
             """);
         Assert.Equal(expected.Length, r.U8("count"));
         for (int k = 0; k < expected.Length; k++) Assert.Equal(expected[k], r.I8("seen", k));
+    }
+
+    /// <summary>An unsigned n..=0 runs once when n is 0 and never otherwise, with no error (decision 104).</summary>
+    [Theory]
+    [InlineData("u8", "for i in n..=0 using X {", 0, 1)]
+    [InlineData("u8", "for i in n..=0 using X {", 5, 0)]
+    [InlineData("u8", "for i in n..=0 {", 0, 1)]
+    [InlineData("u8", "for i in n..=0 {", 5, 0)]
+    [InlineData("u8", "for i in n..=0 {", 255, 0)]
+    [InlineData("u8", "for i in n..=0 step s {", 0, 1)]
+    [InlineData("u8", "for i in n..=0 step s {", 5, 0)]
+    [InlineData("u16", "for i in n..=0 {", 0, 1)]
+    [InlineData("u16", "for i in n..=0 {", 5, 0)]
+    [InlineData("u16", "for i in n..=0 {", 256, 0)]
+    public void An_unsigned_loop_up_to_0_runs_once_when_its_start_is_0(string type, string loop, int start, int expected)
+    {
+        var r = Run.Program($$"""
+            var n: {{type}} = {{start}}
+            var s: u8 = 3
+            var count: u8
+            var last: {{type}} = 99
+            fn main() {
+                {{loop}}
+                    last = i
+                    count += 1
+                }
+            }
+            """);
+        Assert.Equal(expected, r.U8("count"));
+        Assert.Equal(expected == 1 ? 0 : 99, type == "u8" ? r.U8("last") : r.U16("last"));
     }
 
     [Fact]
