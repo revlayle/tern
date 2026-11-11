@@ -4,11 +4,15 @@ Owned by the coding session. Updated at the end of every coding session.
 
 ## Current
 
-- **Milestone:** M22 follow-up (roadmap, before M23; decisions 2026-11-11, questions 94-103). All six items are done.
-- **Branch:** `m22-followup`, from `main` after the M22 merge (`9eff689`). 2823 compiler tests pass plus 36 CPU tests. No benchmark changed (1254 / 350780); `SkillTests` pass. All examples compile unchanged (none counted down without `step`).
-- **Next step:** `/review` of `m22-followup`. After it: M23 (doc comments and a language server). Questions 104-106 below are open; none blocks the review.
+- **Milestone:** M22 follow-up (roadmap, before M23; decisions 2026-11-11, questions 94-103). All six items are done. The first review (`docs/reviews/m22-followup.md`) had one must-fix item, now fixed, and four suggestions: 2, 4 and 5 done, 3 waits for question 106.
+- **Branch:** `m22-followup`, with `main` merged in (`5b7f1b3`). 2834 compiler tests pass plus 36 CPU tests. No benchmark changed (1254 / 350780); `SkillTests` pass. All examples compile unchanged.
+- **Next step:** a second `/review` of `m22-followup`. After the merge: M23 (doc comments and a language server). Questions 104-106 below are open; none blocks the review.
 
 ## Done
+
+- **M22 follow-up, first review** (2026-11-11, `docs/reviews/m22-followup.md`).
+  - Finding 1 (must fix, `1c56e40`): `addr(back) + 1` as a generator argument (spec 4.1's example) was an error. `CtLabel.Offset`: a label plus or minus an int (also `int + label`) is a label of the same kind with the offset changed, written `name + offset` in an emit operand; placing an offset `label()` value is an error; `label - label`, `*`, compares and `int - label` stay errors. `GeneratorTests.A_label_plus_an_int_is_a_label_with_an_offset` (the spec's form in the emulator, `label() + 1` and `.done - 3` as jump targets) and the errors.
+  - Suggestions (`bc726cb`): 2, `Parser.TokenText` slices the source, so messages quote ranges and `[v; n]` as written (`'Z'..='A'`, `t[1]..=0`, `repeat('A', 4)`); 4, the fix for a real constant in runtime code names `K_40`, not `K`; 5, a label from a const fn in a constant gets "This value is a label, an address decided when the program is placed, so a constant cannot hold it. ..." (`label()` written there keeps the spec's message). Suggestion 3 (check the full `n..0 step -1` shape in `LoopDirectionTests`) waits for question 106.
 
 - **M22 follow-up** (2026-11-11, spec 4, 4.1, 5.1, 10, 11; decisions 2026-11-11). One commit per item.
   - *Real constants* (`b5be951`, question 94): `ConstSymbol.Real`. `Checker.DeclaredRealConst` runs a constant's value in the interpreter when it needs it (`NeedsInterpreter`, now also a name of a real constant): a real is declared untyped, a typed one is "'K' is the real number 3.0, which has no runtime type. Remove the type ...", an array is "'T' is an array, which a const cannot hold. Use data, ...". In runtime code and plain asm operands a real constant gets the real-literal error. The message for a real where an int is expected no longer says "a constant cannot hold". `ConstFnTests` (in a const fn, a list, another constant, a module's constant, a local constant; the errors).
@@ -492,7 +496,6 @@ Including `jsr` and `rts`; from the tests.
 - M22: inside an expression computed by the interpreter, typed constants lose their type (`const W: u8 = 40`, then `const K = round(W * 1.5)` is an untyped constant). The value is exact either way.
 - M22: a struct field's array cannot take a compile-time array (`FieldBytes` wants a list literal); a table of structs cannot be built by a const fn (structs are not compile-time values, spec 4.1).
 - `for i in n..0 step -1 using X` (n: `u8`) compiles to `ldx n` / `cpx #$00` / `bcc done` / `beq done`, where spec 11 gives `ldx n` / `beq done`: `CodeGen.CounterBranch` emits the "less or equal" test as `bcc` + `beq`, and `bcc` after `cpx #0` is never taken (4 bytes, 4 cycles once per loop). The same on `main` before the follow-up (it is not from the direction change). Fixing it may move benchmarks.
-- M22 follow-up: a label from `addr()` returned into a constant or data says "A label() value is only for emit in a generator", naming `label()` for any label.
 - M22: an asm operand outside a generator cannot call a const fn or a built-in (`lda #round(1.5)` is an error, as in any runtime code); declare a constant. Inside `emit` operands it works.
 
 - `.gitignore` covers `examples/*.prg` (and `.lst`, `.vs`) but not the subfolder `examples/plugins/`, so building the plug-in example leaves untracked `.prg`, `.lst`, `.vs`, `.lines`, `.d64` and generated `*_api.tern` files there (`level_api.tern` is the hand-written one). `.gitignore` belongs to no session in `docs/workflow.md`; the spec session could add `examples/plugins/*` patterns.
