@@ -469,6 +469,21 @@ Spec: 4.1. On a branch from `main` after the M22 follow-up is merged.
 
 Done when: both examples run in VICE and their listings show each generated instruction's `emit` line. The spec session then writes the guide's section on `const fn` and generators from these two examples.
 
+## Cleanup: split the large classes (before M23)
+
+No language change. On a branch from `main` while no other branch is open, since moving code makes merges with open branches hard. Before M23, which adds a lot of code.
+
+The largest classes are hard for a human reviewer to follow in one file. Split each into partial class files named `Class.Area.cs`, as `Checker.Asm.cs` already is, along the section markers already in the code. The coding session chooses the exact cuts; the aim is no file over about 1,000 lines. A starting point (lines as of 2026-11-11):
+
+- `Backend/CodeGen.cs` (3,462): statements and assignment; 8-bit and 16-bit expressions; conditions; pointers, calls and assembly; `for` loops. The class's fields, emission helpers, functions and tree queries stay in `CodeGen.cs`.
+- `Semantics/Checker.cs` (2,771): declarations; function bodies; expressions; type rules and the call graph.
+- `Backend/Optimizer.cs` (1,233): dead stores; register contents and bit test.
+- `Syntax/Parser.cs` (1,181): declarations; statements and assembly; expressions.
+
+Rules: move code only. No renames, no changes to logic, comments or formatting, so `git diff --color-moved` shows only moved lines. Use one commit per class. The test count, `BenchmarkTests` and `SkillTests` don't change, and every example compiles to the same bytes.
+
+Done when: no source file in `src/` is over about 1,000 lines (a file may stay a little over if a section would otherwise be cut in half), all tests pass unchanged, and a review confirms the diff is moves only.
+
 ## M23: Doc comments and a language server
 
 - `///` doc comments before declarations, kept by the compiler.

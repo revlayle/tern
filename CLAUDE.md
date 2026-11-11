@@ -69,6 +69,7 @@ These come from the spec and `docs/decisions.md`. Apply them to every change.
 - When code shape matters, check the listing (`result.Listing`) in a test.
 - A spec keyword that is not implemented yet must give "'x' is not supported yet", not a confusing parse error.
 - No new NuGet dependencies without asking.
+- Keep source files under about 1,000 lines. When a class grows past that, split it into partial class files by area, named `Class.Area.cs` (e.g. `Checker.Asm.cs`).
 - `BenchmarkTests` fails on any change in bytes or cycles, better or worse. Rewrite the baseline (`TERN_UPDATE_BENCHMARKS=1 dotnet test`) in the same commit as the change that caused it, and give the old and new totals in the commit message.
 - `SkillTests` fails when the skill's examples or tool outputs change (addresses, cycles). Rewrite them with `TERN_UPDATE_SKILL=1 dotnet test --filter SkillTests` in the same commit as the change that moved them, read the diff, and fix any prose that no longer matches. Listing excerpts (```` ```lst ````) are updated by hand.
 - Commit messages: a short summary line, then what changed and why.
