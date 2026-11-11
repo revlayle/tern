@@ -39,6 +39,7 @@ public sealed partial class Checker
         if (!block.Lines.Any(l => l is AsmGeneratorCall)) return;
         var lines = new List<AsmLine>();
         int numbers = 0;
+        var labels = block.Lines.OfType<AsmLabel>().Select(l => l.Name).Where(n => n.StartsWith('.')).ToHashSet();
         foreach (var line in block.Lines)
         {
             if (line is not AsmGeneratorCall g)
@@ -48,7 +49,7 @@ public sealed partial class Checker
             }
             if (Lookup(g.Call.Name) is FunctionSymbol)
                 throw new CompileError(g.Pos, $"'{g.Call.Name}' is a function, which runs on the 6502. Call it with 'jsr {g.Call.Name}'");
-            lines.AddRange(CompileTime.Interpreter.Generate(g.Call, this, ref numbers));
+            lines.AddRange(CompileTime.Interpreter.Generate(g.Call, this, ref numbers, labels));
         }
         block.Lines.Clear();
         block.Lines.AddRange(lines);

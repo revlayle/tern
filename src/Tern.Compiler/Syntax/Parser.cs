@@ -846,10 +846,9 @@ public sealed class Parser
                 // A generator call on a line of its own: copy_rows(...) or tables.copy_rows(...) (spec 4.1).
                 if (At(TokenKind.LParen) || (At(TokenKind.Dot) && PeekAt(1).Kind == TokenKind.Identifier && PeekAt(2).Kind == TokenKind.LParen))
                 {
+                    // Its arguments may name the block's .labels (spec 4.1), so the parser stays in assembly mode.
                     _pos--;
-                    _inAsm = false;
                     var call = ParsePrimary();
-                    _inAsm = true;
                     lines.Add(new AsmGeneratorCall(call.Pos, (CallExpr)call));
                 }
                 else

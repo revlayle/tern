@@ -381,6 +381,18 @@ public sealed partial class Checker : ICompileTimeHost
 
     Symbol? ICompileTimeHost.Symbol(Module? module, string name) => LookupIn(module, name);
 
+    Symbol ICompileTimeHost.AddressOf(Module? module, string name, SourcePos pos) => LookupIn(module, name) switch
+    {
+        VariableSymbol { Kind: VariableKind.Global } v => v,
+        FunctionSymbol f => f,
+        // Functions are declared after constants: a constant cannot hold a label anyway.
+        null when FunctionDeclaredIn(module ?? _module, name) => throw new CompileError(pos,
+            $"addr({name}) is a label, decided when the program is placed, so it cannot be part of a constant. Use it in a generator's emit"),
+        null => throw NotDeclared(name, pos),
+        ConstSymbol => throw new CompileError(pos, $"'{name}' is a constant, which has no address. Use the constant itself"),
+        var other => throw new CompileError(pos, $"'{name}' is a {KindName(other)}, which has no address. Use addr() with a global, data or a function"),
+    };
+
     long ICompileTimeHost.SizeOf(Module? module, string type, SourcePos pos)
     {
         long size = 0;

@@ -128,6 +128,13 @@ public sealed partial class Interpreter
                 throw Error(c.Pos, "'as' converts runtime types, which a const fn does not have. Use '& $FF' for 8-bit behavior, or round(x), floor(x), ceil(x) or trunc(x) for a real");
             case ArrayLiteralExpr a: return MakeArray(a.Elements.Select(Eval).ToList(), a.Elements.Select(x => x.Pos).ToList(), a.Pos);
             case ListForExpr l: return ListFor(l);
+            case AsmLabelExpr l:
+                // Only as an argument on a generator's call line (spec 4.1).
+                if (_blockLabels is null || Top.Function is not null)
+                    throw Error(l.Pos, $"'{l.Name}' is a label of an asm block. Pass it as an argument on the generator's call line");
+                if (!_blockLabels.Contains(l.Name))
+                    throw Error(l.Pos, $"'{l.Name}' is not a label of this block. Use a label the block places, e.g. '{l.Name}:'");
+                return new CtLabel(0, l.Pos) { BlockLabel = l.Name };
             default:
                 throw Error(e.Pos, "This is not a compile-time value");
         }
@@ -279,6 +286,9 @@ public sealed partial class Interpreter
     private CtValue Binary(TokenKind op, CtValue left, CtValue right, SourcePos pos)
     {
         string name = OpText(op);
+        if (left is CtLabel || right is CtLabel)
+            throw Error(pos, $"A label's address is decided when the program is placed, so the const fn cannot use it with '{name}'. "
+                + "Use the label in an emit operand, alone, plus or minus an int, or as .lo / .hi");
         if (op is TokenKind.EqEq or TokenKind.NotEq && left is CtBool lb && right is CtBool rb)
             return CtBool.Of((lb.Value == rb.Value) == (op == TokenKind.EqEq));
         if (left is not (CtInt or CtReal) || right is not (CtInt or CtReal))
@@ -413,7 +423,15 @@ public sealed partial class Interpreter
             case "offset":
                 return new CtInt(_host.OffsetOf(Top.Module, c));
             case "addr":
-                throw Error(c.Pos, "addr() is decided when the program is placed, after compile-time evaluation. Pass the address to the generator's emit as a name, or use a constant address");
+            {
+                // A label placed by the compiler (spec 4.1): its number is known only after placement.
+                if (c.Args is not [NameExpr name])
+                    throw Error(c.Pos, "addr() in a const fn takes the name of a global, data or function. Write e.g. addr(buffer)");
+                if (FindSlot(name.Name) is not null)
+                    throw Error(name.Pos, $"'{name.Name}' is a variable of the const fn, which has no address. Use addr() with a global, data or a function");
+                var symbol = _host.AddressOf(Top.Module, name.Name, name.Pos);
+                return new CtLabel(0, c.Pos) { Address = symbol, AddressName = name.Name };
+            }
             case "include_bytes":
                 throw Error(c.Pos, "include_bytes() can only be the value of data. Declare the data, and read it in the const fn");
         }
@@ -687,6 +705,8 @@ public sealed partial class Interpreter
 
     /// <summary>The lines emitted so far, while a generator call runs; null for any other evaluation.</summary>
     private List<AsmLine>? _output;
+    /// <summary>The .labels of the asm block, while a generator call runs.</summary>
+    private HashSet<string>? _blockLabels;
     /// <summary>emit statements run, to give each one's local labels new names.</summary>
     private int _emits;
     /// <summary>Where each label() value was placed, by its id.</summary>
@@ -702,9 +722,10 @@ public sealed partial class Interpreter
     /// The last number given to a renamed label in this asm block: each call continues from it, so the
     /// labels of two calls in one block never clash (review M22, finding 1).
     /// </param>
-    public static List<AsmLine> Generate(CallExpr call, ICompileTimeHost host, ref int numbers)
+    /// <param name="blockLabels">The .labels the calling asm block places, which the call line may pass.</param>
+    public static List<AsmLine> Generate(CallExpr call, ICompileTimeHost host, ref int numbers, HashSet<string> blockLabels)
     {
-        var interpreter = new Interpreter(host, call.Pos) { _output = [], _emits = numbers, _labels = numbers };
+        var interpreter = new Interpreter(host, call.Pos) { _output = [], _emits = numbers, _labels = numbers, _blockLabels = blockLabels };
         var fn = host.ConstFn(null, call.Name, call.Pos);
         if (fn is null)
             throw new CompileError(call.Pos, Builtins.Contains(call.Name) || call.Name is "len" or "sizeof" or "offset" or "addr"
@@ -746,8 +767,12 @@ public sealed partial class Interpreter
                     var slot = FindSlot(l.Name);
                     if (slot?.Value is not CtLabel label)
                         throw Error(l.Pos, slot is null
-                            ? $"'{l.Name}' is not a variable of this const fn. Make a label with 'var {l.Name} = label()', or write a local label '.{l.Name}:'"
+                            ? $"'{l.Name}' is not a label variable. Make one with 'var {l.Name} = label()', or write a local label '.{l.Name}:'"
                             : $"'{l.Name}' is not a label() value, so it cannot be placed. Make one with 'var {l.Name} = label()'");
+                    if (label.AddressName is { } of)
+                        throw Error(l.Pos, $"'{l.Name}' is the address of '{of}', which is already placed. Use label() for a new label");
+                    if (label.BlockLabel is not null)
+                        throw Error(l.Pos, $"'{l.Name}' is placed by the calling block. Use label() for a new label");
                     if (_placed.TryGetValue(label.Id, out var first))
                         throw Error(l.Pos, $"This label() is placed twice, first at {Where(first)}. Place it once");
                     _placed[label.Id] = l.Pos;
@@ -793,6 +818,10 @@ public sealed partial class Interpreter
         switch (Eval(e))
         {
             case CtInt i: return new NumberExpr(e.Pos, i.Value);
+            case CtLabel { Address: { } symbol } address:
+                return new NameExpr(e.Pos, address.AddressName!) { Bound = symbol };
+            case CtLabel { BlockLabel: { } blockLabel }:
+                return new AsmLabelExpr(e.Pos, blockLabel);
             case CtLabel label:
                 _used.TryAdd(label.Id, e.Pos);
                 return new AsmLabelExpr(e.Pos, LabelName(label));
@@ -810,6 +839,7 @@ public sealed partial class Interpreter
     private bool NamesAddress(Expr e) => e switch
     {
         NameExpr n => FindSlot(n.Name) is { } slot ? slot.Value is CtLabel : _host.Symbol(Top.Module, n.Name) is VariableSymbol or FunctionSymbol,
+        CallExpr { Name: "addr" } => true,
         BinaryExpr b => NamesAddress(b.Left) || NamesAddress(b.Right),
         UnaryExpr u => NamesAddress(u.Operand),
         MemberExpr m => NamesAddress(m.Target),

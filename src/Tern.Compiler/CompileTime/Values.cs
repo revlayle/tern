@@ -60,12 +60,23 @@ public sealed class CtBool : CtValue
     public override string ToString() => Value ? "true" : "false";
 }
 
-/// <summary>A label made by <c>label()</c> in a generator (spec 4.1), placed by <c>emit { name: }</c>.</summary>
+/// <summary>
+/// A label (spec 4.1): an address decided when the program is placed. Made by <c>label()</c> in a
+/// generator and placed by <c>emit { name: }</c>; or the address of a global, data or function
+/// (<c>addr(name)</c>), placed by the compiler; or a <c>.label</c> of the asm block that calls the
+/// generator, written as an argument on the call line and placed by that block.
+/// </summary>
 public sealed class CtLabel(int id, SourcePos made) : CtValue
 {
+    /// <summary>For a label() value: its number, unique in the asm block. 0 for the other kinds.</summary>
     public int Id { get; } = id;
-    /// <summary>Where <c>label()</c> made it.</summary>
+    /// <summary>Where it was made.</summary>
     public SourcePos Made { get; } = made;
+    /// <summary>For <c>addr(name)</c>: the variable, data or function, and the name written.</summary>
+    public Symbol? Address { get; init; }
+    public string? AddressName { get; init; }
+    /// <summary>For a label of the calling block: its name, with the dot (<c>.done</c>).</summary>
+    public string? BlockLabel { get; init; }
     public override CtType Type => CtType.Label;
     public override string ToString() => $"label {Id}";
 }
@@ -97,5 +108,7 @@ public interface ICompileTimeHost
     long OffsetOf(Module? module, CallExpr c);
     /// <summary>The symbol a name in an emitted instruction names in <paramref name="module"/>: a variable, data or function.</summary>
     Symbol? Symbol(Module? module, string name);
+    /// <summary>The global, data or function that <c>addr(name)</c> names in a const fn (spec 4.1); an error for anything else.</summary>
+    Symbol AddressOf(Module? module, string name, SourcePos pos);
     long Encode(Module? module, CharExpr c);
 }
