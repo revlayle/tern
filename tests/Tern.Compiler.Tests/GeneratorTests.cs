@@ -249,11 +249,61 @@ public sealed class GeneratorTests : IDisposable
         Assert.Equal(expected, r.U8("out"));
     }
 
+    [Fact]
+    public void A_label_plus_an_int_is_a_label_with_an_offset()
+    {
+        // Spec 4.1's argument form: copy_rows(addr(back) + 1, ...), and offsets of a label() value
+        // and of the calling block's label as branch targets.
+        var r = Run.Program("""
+            data src: [u8; 3] = [5, 6, 7]
+            var back: [u8; 6]
+            var path: u8
+            const fn copy(dst: label, n: int) {
+                for i in 0..n {
+                    emit {
+                        lda src + i
+                        sta dst + i
+                    }
+                }
+            }
+            const fn skip_one(exit: label) {
+                var here = label()
+                var past = here + 1
+                emit {
+                    jmp past
+                here:
+                    iny
+                    iny
+                    jmp exit + 3
+                }
+            }
+            fn main() {
+                asm {
+                    copy(addr(back) + 1, 3)
+                    copy(4 + addr(back) - 1, 1)
+                    ldy #0
+                    skip_one(.done - 3)
+                    ldy #9
+                .done:
+                    sty path
+                }
+            }
+            """);
+        Assert.Equal([0, 5, 6, 5, 0, 0], r.Ram.Bytes.AsSpan(r.Address("back"), 6).ToArray());
+        // jmp past skips one iny (1 byte); jmp exit + 3, with exit = .done - 3, lands on .done.
+        Assert.Equal(1, r.U8("path"));
+    }
+
     [Theory]
     [InlineData("const fn g(t: label) {\n    emit { t: }\n}", "g(addr(buf))", "'t' is the address of 'buf', which is already placed (called from line 10). Use label() for a new label")]
     [InlineData("const fn g(t: label) {\n    emit { t: }\n}", "g(.done)", "'t' is placed by the calling block (called from line 10). Use label() for a new label")]
     [InlineData("const fn g(t: label) {\n    emit { jmp t }\n}", "g(.nope)", "'.nope' is not a label of this block. Use a label the block places, e.g. '.nope:'")]
-    [InlineData("const fn g(t: label) {\n    var u = t + 1\n}", "g(addr(buf))", "A label's address is decided when the program is placed, so the const fn cannot use it with '+' (called from line 10). Use the label in an emit operand")]
+    [InlineData("const fn g(t: label) {\n    var u = t - t\n}", "g(addr(buf))", "A label's address is decided when the program is placed, so the const fn cannot use it with '-' (called from line 10). Use the label alone, plus or minus an int, or in an emit operand as .lo / .hi")]
+    [InlineData("const fn g(t: label) {\n    var u = t * 2\n}", "g(addr(buf))", "A label's address is decided when the program is placed, so the const fn cannot use it with '*'")]
+    [InlineData("const fn g(t: label) {\n    var u = 1 - t\n}", "g(addr(buf))", "A label's address is decided when the program is placed, so the const fn cannot use it with '-'")]
+    [InlineData("const fn g(t: label) {\n    if t + 1 > 0 { }\n}", "g(.done)", "A label's address is decided when the program is placed, so the const fn cannot use it with '>'")]
+    [InlineData("const fn g() {\n    var t = label() + 1\n    emit { t: }\n}", "g()", "'t' is a label plus an offset of 1, which cannot be placed (called from line 11). Place the label itself, made with label()")]
+    [InlineData("const fn g(t: label) {\n    emit { t: }\n}", "g(addr(buf) + 2)", "'t' is the address of 'buf', which is already placed")]
     [InlineData("const fn g(t: label) {\n    if t == t { }\n}", "g(.done)", "A label's address is decided when the program is placed, so the const fn cannot use it with '=='")]
     [InlineData("const fn g(t: label) {\n    emit { lda t * 2 }\n}", "g(addr(buf))", "In assembly, an address can only have a constant added or subtracted")]
     [InlineData("const fn g(t: int) { }", "g(addr(buf))", "The argument 't' of 'g' is a label, but an int is expected")]

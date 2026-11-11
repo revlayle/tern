@@ -77,7 +77,11 @@ public sealed class CtLabel(int id, SourcePos made) : CtValue
     public string? AddressName { get; init; }
     /// <summary>For a label of the calling block: its name, with the dot (<c>.done</c>).</summary>
     public string? BlockLabel { get; init; }
+    /// <summary>Bytes added to the address: <c>addr(back) + 1</c> is the label of <c>back</c> with offset 1.</summary>
+    public long Offset { get; init; }
     public override CtType Type => CtType.Label;
+    /// <summary>The same label with <paramref name="delta"/> more bytes of offset.</summary>
+    public CtLabel Plus(long delta) => new(Id, Made) { Address = Address, AddressName = AddressName, BlockLabel = BlockLabel, Offset = Offset + delta };
     public override string ToString() => $"label {Id}";
 }
 

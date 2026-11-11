@@ -289,9 +289,13 @@ public sealed partial class Interpreter
     private CtValue Binary(TokenKind op, CtValue left, CtValue right, SourcePos pos)
     {
         string name = OpText(op);
+        // A label plus or minus an int is a label with an offset (spec 4.1); nothing else reads its number.
+        if (op == TokenKind.Plus && left is CtLabel l1 && right is CtInt r1) return l1.Plus(r1.Value);
+        if (op == TokenKind.Plus && left is CtInt l2 && right is CtLabel r2) return r2.Plus(l2.Value);
+        if (op == TokenKind.Minus && left is CtLabel l3 && right is CtInt r3) return l3.Plus(Checker.ConstNegate(pos, r3.Value));
         if (left is CtLabel || right is CtLabel)
             throw Error(pos, $"A label's address is decided when the program is placed, so the const fn cannot use it with '{name}'. "
-                + "Use the label in an emit operand, alone, plus or minus an int, or as .lo / .hi");
+                + "Use the label alone, plus or minus an int, or in an emit operand as .lo / .hi");
         if (op is TokenKind.EqEq or TokenKind.NotEq && left is CtBool lb && right is CtBool rb)
             return CtBool.Of((lb.Value == rb.Value) == (op == TokenKind.EqEq));
         if (left is not (CtInt or CtReal) || right is not (CtInt or CtReal))
@@ -776,6 +780,8 @@ public sealed partial class Interpreter
                         throw Error(l.Pos, $"'{l.Name}' is the address of '{of}', which is already placed. Use label() for a new label");
                     if (label.BlockLabel is not null)
                         throw Error(l.Pos, $"'{l.Name}' is placed by the calling block. Use label() for a new label");
+                    if (label.Offset != 0)
+                        throw Error(l.Pos, $"'{l.Name}' is a label plus an offset of {label.Offset}, which cannot be placed. Place the label itself, made with label()");
                     if (_placed.TryGetValue(label.Id, out var first))
                         throw Error(l.Pos, $"This label() is placed twice, first at {Where(first)}. Place it once");
                     _placed[label.Id] = l.Pos;
@@ -821,13 +827,18 @@ public sealed partial class Interpreter
         switch (Eval(e))
         {
             case CtInt i: return new NumberExpr(e.Pos, i.Value);
-            case CtLabel { Address: { } symbol } address:
-                return new NameExpr(e.Pos, address.AddressName!) { Bound = symbol };
-            case CtLabel { BlockLabel: { } blockLabel }:
-                return new AsmLabelExpr(e.Pos, blockLabel);
             case CtLabel label:
-                _used.TryAdd(label.Id, e.Pos);
-                return new AsmLabelExpr(e.Pos, LabelName(label));
+            {
+                Expr name;
+                if (label.Address is { } symbol) name = new NameExpr(e.Pos, label.AddressName!) { Bound = symbol };
+                else if (label.BlockLabel is { } blockLabel) name = new AsmLabelExpr(e.Pos, blockLabel);
+                else
+                {
+                    _used.TryAdd(label.Id, e.Pos);
+                    name = new AsmLabelExpr(e.Pos, LabelName(label));
+                }
+                return label.Offset == 0 ? name : new BinaryExpr(e.Pos, TokenKind.Plus, name, new NumberExpr(e.Pos, label.Offset));
+            }
             case CtReal:
                 throw Error(e.Pos, "This operand is a real. Use round(x), floor(x), ceil(x) or trunc(x)");
             case var v:
