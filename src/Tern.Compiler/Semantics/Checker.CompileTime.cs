@@ -193,7 +193,7 @@ public sealed partial class Checker : ICompileTimeHost
         CallExpr c => new CompileError(e.Pos,
             $"{c.Name}() works only at compile time. Use it in a constant, in data, in a global's initial value or in a const fn"),
         NameExpr n => new CompileError(e.Pos,
-            $"'{n.Name}' is a real number, which exists only at compile time. Use it in a constant or a const fn, e.g. 'const K = round({n.Name} * 40)'"),
+            $"'{n.Name}' is a real number, which exists only at compile time. Use it in a constant or a const fn, e.g. 'const {n.Name}_40 = round({n.Name} * 40)'"),
         _ => new CompileError(e.Pos, "This value exists only at compile time"),
     };
 
@@ -274,7 +274,10 @@ public sealed partial class Checker : ICompileTimeHost
                 throw new CompileError(e.Pos,
                     $"This value is an array of {a.Items.Length}, which only data or a global array can hold. Use it as their initial value, e.g. 'data t: [u8; _] = ...'");
             default:
-                throw new CompileError(e.Pos, "A label() value is only for emit in a generator. Use it in a const fn that emits assembly");
+                // label() written here (spec 4.1), or a label from a const fn, which may come from addr().
+                throw new CompileError(e.Pos, e is CallExpr { Name: "label" }
+                    ? "A label() value is only for emit in a generator. Use it in a const fn that emits assembly"
+                    : "This value is a label, an address decided when the program is placed, so a constant cannot hold it. Use addr() in the initial value of a var or data, or pass the label to a generator");
         }
     }
 

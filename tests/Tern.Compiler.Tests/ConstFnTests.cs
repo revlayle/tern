@@ -282,7 +282,7 @@ public sealed class ConstFnTests : IDisposable
     }
 
     [Theory]
-    [InlineData("x = SCALE", "'SCALE' is a real number, which exists only at compile time. Use it in a constant or a const fn, e.g. 'const K = round(SCALE * 40)'")]
+    [InlineData("x = SCALE", "'SCALE' is a real number, which exists only at compile time. Use it in a constant or a const fn, e.g. 'const SCALE_40 = round(SCALE * 40)'")]
     [InlineData("x = x * SCALE", "'SCALE' is a real number, which exists only at compile time")]
     [InlineData("asm { lda #SCALE }", "'SCALE' is a real number, which exists only at compile time")]
     [InlineData("const L = 0.25\n    x = L", "'L' is a real number, which exists only at compile time")]
@@ -347,6 +347,7 @@ public sealed class ConstFnTests : IDisposable
     [Theory]
     [InlineData("data t: [u8; 4] = [7; 4]", "'[7; 4]' is not an array in Tern, where [T; n] is only an array type. Write repeat(7, 4)")]
     [InlineData("data t: [u8; _] = [N + 1; f(N)]", "'[N + 1; f(N)]' is not an array in Tern, where [T; n] is only an array type. Write repeat(N + 1, f(N))")]
+    [InlineData("data t: [u8; _] = ['A'; 4]", "'['A'; 4]' is not an array in Tern, where [T; n] is only an array type. Write repeat('A', 4)")]
     [InlineData("const fn g() -> [int; _] { return [0; -1] }", "'[0; -1]' is not an array in Tern")]
     [InlineData("data t: [u8; _] = repeat(1, 0)", "Array length must be 1 to 256, not 0")]
     [InlineData("data t: [u8; 4] = repeat(1, 5)", "Expected 4 values, found 5")]
@@ -608,7 +609,7 @@ public sealed class ConstFnTests : IDisposable
     [InlineData("var score: u8 = 3\nconst K = round(score * 1.5)", "'score' is a variable, whose value is not known at compile time. Use a const or data")]
     [InlineData("data t: [u16; 1] = [addr(t)]\nconst fn f() -> int { return t[0] }\nconst K = f()", "'t' holds addresses, which are decided after compile-time evaluation (called from line 3). Read a table without addr()")]
     [InlineData("var x: u8\nconst fn f() -> int { return addr(x) }\nconst K = f()", "The value 'f' returns is a label, but an int is expected")]
-    [InlineData("const fn f() -> label { return addr(x) }\nvar x: u8\nconst K = f()", "A label() value is only for emit in a generator")]
+    [InlineData("const fn f() -> label { return addr(x) }\nvar x: u8\nconst K = f()", "This value is a label, an address decided when the program is placed, so a constant cannot hold it. Use addr() in the initial value of a var or data, or pass the label to a generator")]
     [InlineData("fn g() { }\nconst fn f() -> label { return addr(g) }\nconst K = f()", "addr(g) is a label, decided when the program is placed, so it cannot be part of a constant (called from line 3). Use it in a generator's emit")]
     [InlineData("struct P { x: u8 }\ndata p = P { x = 1 }\nconst fn f() -> int { return p[0] }\nconst K = f()", "'p' holds structs, which are not compile-time values (called from line 4). Read a table of numbers")]
     [InlineData("fn g() -> u8 { return 1 }\nconst fn f() -> int { return g() }\nconst K = f()", "'g' runs on the 6502, so compile-time code cannot call it (called from line 3). Use a const fn")]

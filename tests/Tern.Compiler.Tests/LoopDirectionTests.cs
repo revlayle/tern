@@ -33,11 +33,15 @@ public class LoopDirectionTests
     [InlineData("for i in n..=0 using X { }", "'n..=0' counts up, so it never runs")]
     [InlineData("for i in w..0 { }", "'w..0' counts up, so it never runs")]
     [InlineData("for i in (n + 1)..=ZERO { }", "'(n + 1)..=ZERO' counts up, so it never runs")]
+    [InlineData("for c in 'Z'..='A' { }", "''Z'..='A'' counts up, so it never runs")]
+    [InlineData("for c in screen'Z'..=screen'A' { }", "'screen'Z'..=screen'A'' counts up, so it never runs")]
+    [InlineData("for i in t[1]..=0 { }", "'t[1]..=0' counts up, so it never runs")]
+    [InlineData("for i in n  ..  0 using X { }", "'n  ..  0' counts up, so it never runs")]
     public void A_loop_that_could_only_count_down_without_its_step_is_an_error(string loop, string expected)
     {
-        var e = Error($"const N = 9\nconst ZERO = 0\nvar n: u8 = 3\nvar w: u16 = 3\nfn main() {{\n    {loop}\n}}");
+        var e = Error($"const N = 9\nconst ZERO = 0\nvar n: u8 = 3\nvar w: u16 = 3\nvar t: [u8; 4]\nfn main() {{\n    {loop}\n}}");
         Assert.Equal(expected, e.Description[..Math.Min(e.Description.Length, expected.Length)]);
-        Assert.Equal(6, e.Pos.Line);
+        Assert.Equal(7, e.Pos.Line);
         if (expected.EndsWith("count down"))
             Assert.Equal("Write 'step -1' to count down", Tern.Compiler.Tools.Diagnostic.From(e, "main.tern").Suggestion);
     }

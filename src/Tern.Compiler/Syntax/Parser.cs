@@ -8,10 +8,20 @@ public sealed class Parser
     private readonly List<Token> _tokens;
     private int _pos;
 
-    private Parser(List<Token> tokens) => _tokens = tokens;
+    /// <summary>The source text and where each line starts in it, for quoting source in messages.</summary>
+    private readonly string _source;
+    private readonly List<int> _lineStarts = [0];
+
+    private Parser(List<Token> tokens, string source)
+    {
+        _tokens = tokens;
+        _source = source;
+        for (int i = 0; i < source.Length; i++)
+            if (source[i] == '\n') _lineStarts.Add(i + 1);
+    }
 
     /// <param name="file">The source file, for positions in error messages and the listing.</param>
-    public static ProgramSyntax Parse(string source, string? file = null) => new Parser(Lexer.Tokenize(source, file)).ParseProgram();
+    public static ProgramSyntax Parse(string source, string? file = null) => new Parser(Lexer.Tokenize(source, file), source).ParseProgram();
 
     /// <summary>Modules imported by this file. <c>name.member</c> after one of them is a qualified name.</summary>
     private readonly HashSet<string> _modules = [];
@@ -22,21 +32,14 @@ public sealed class Parser
 
     private Token Advance() => _tokens[_pos++];
 
-    /// <summary>The source of tokens <paramref name="from"/> up to <paramref name="to"/>, for messages: "x + 1", "f(n)".</summary>
+    /// <summary>
+    /// The source of tokens <paramref name="from"/> up to <paramref name="to"/> as written, for messages:
+    /// "'Z'..='A'", "a[1]..=0": the text from the first token to the start of token <paramref name="to"/>.
+    /// </summary>
     private string TokenText(int from, int to)
     {
-        var text = new System.Text.StringBuilder();
-        for (int i = from; i < to; i++)
-        {
-            var kind = _tokens[i].Kind;
-            bool tight = i == from || kind is TokenKind.RParen or TokenKind.RBracket or TokenKind.Comma or TokenKind.Dot or TokenKind.DotDot or TokenKind.DotDotEq
-                || _tokens[i - 1].Kind is TokenKind.LParen or TokenKind.LBracket or TokenKind.Dot or TokenKind.DotDot or TokenKind.DotDotEq
-                || kind is TokenKind.LParen && _tokens[i - 1].Kind == TokenKind.Identifier
-                || _tokens[i - 1].Kind is TokenKind.Minus && (i - 1 == from || _tokens[i - 2].Kind is TokenKind.LParen or TokenKind.LBracket or TokenKind.Comma or TokenKind.DotDot or TokenKind.DotDotEq);
-            if (!tight) text.Append(' ');
-            text.Append(_tokens[i].Text);
-        }
-        return text.ToString();
+        int Offset(SourcePos pos) => _lineStarts[pos.Line - 1] + pos.Column - 1;
+        return _source[Offset(_tokens[from].Pos)..Offset(_tokens[to].Pos)].TrimEnd();
     }
 
     private bool Accept(TokenKind kind)
