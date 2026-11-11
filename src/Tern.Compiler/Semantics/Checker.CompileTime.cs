@@ -85,7 +85,7 @@ public sealed partial class Checker : ICompileTimeHost
             if (isParameter) return;
             foreach (var scope in _scopes)
                 if (scope.TryGetValue(name, out var earlier))
-                    throw new CompileError(pos, $"'{name}' is already declared at {earlier}");
+                    throw new CompileError(pos, $"'{name}' is already declared at {earlier}. Use another name");
             _scopes[^1][name] = pos;
         }
 
@@ -153,6 +153,9 @@ public sealed partial class Checker : ICompileTimeHost
                 case EmitStmt e:
                     if (fn.ReturnType is not null)
                         throw new CompileError(e.Pos, $"'{fn.Name}' returns a value, so it cannot emit assembly: a generator returns nothing. Move the emit into a const fn with no return type");
+                    // Checked when the const fn is read, like the rest of the fragment (review M22, finding 6).
+                    if (e.Fragment.Lines.OfType<AsmGeneratorCall>().FirstOrDefault() is { } inner)
+                        throw new CompileError(inner.Pos, $"A generator is called as a statement of the const fn, not inside 'emit'. Move '{inner.Call.Name}(...)' out of the emit");
                     fn.Emits = true;
                     break;
                 case AsmStmt a:

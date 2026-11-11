@@ -105,7 +105,7 @@ public sealed class ConstFnTests : IDisposable
     [InlineData("data t: [u8; 4] = [i for i in 0..5]", "Expected 4 values, found 5")]
     [InlineData("data t: [u8; _] = [i * 100 for i in 0..4]", "Element 3 is 300, which does not fit in u8 (0 to 255)")]
     [InlineData("data t: [i8; _] = [i - 200 for i in 0..4]", "Element 0 is -200, which does not fit in i8 (-128 to 127)")]
-    [InlineData("data t: [u8; _] = [i * 0.5 for i in 0..4]", "Element 0 is the real number 0, which needs rounding to fit in u8. Use round(x), floor(x), ceil(x) or trunc(x)")]
+    [InlineData("data t: [u8; _] = [i * 0.5 for i in 0..4]", "Element 0 is the real number 0.0, which needs rounding to fit in u8. Use round(x), floor(x), ceil(x) or trunc(x)")]
     [InlineData("data t: [u8; _] = [i < 2 for i in 0..4]", "Element 0 is a bool, but the table holds u8")]
     [InlineData("data t = [i for i in 0..4]", "Data arrays need a written type, e.g. data t: [u8; _] = [...]")]
     [InlineData("data t: [u8; _] = [i for i in 0..4 for j in 0..2]", "A list built with 'for' has one 'for'. Write a const fn with nested loops for more")]
@@ -381,6 +381,30 @@ public sealed class ConstFnTests : IDisposable
     }
 
     [Fact]
+    public void A_list_of_int_arrays_and_real_arrays_is_a_list_of_real_arrays()
+    {
+        var r = Run.Program("""
+            const fn f() -> int {
+                var g = [[1, 2], [1.5]]
+                return round(g[0][1] * 10 + g[1][0] * 100)
+            }
+            const K = f()
+            var v: u8
+            fn main() { v = K }
+            """);
+        Assert.Equal(170, r.U8("v"));
+    }
+
+    [Fact]
+    public void An_error_the_checker_raises_in_a_module_const_fn_names_the_main_files_line()
+    {
+        Write("tables.tern", "const fn width() -> int {\n    return limit\n}\nvar limit: u8 = 3\n");
+        var e = ErrorInMain("import tables\n\nconst K = tables.width()\nfn main() { }");
+        Assert.Equal(Path.Combine(_dir.FullName, "tables.tern"), e.Pos.File);
+        Assert.Equal("'limit' is a variable, which a const fn cannot read (called from main.tern:3). Use a const or data", e.Description);
+    }
+
+    [Fact]
     public void Arrays_are_values_and_ints_never_wrap()
     {
         var r = Run.Program("""
@@ -480,12 +504,12 @@ public sealed class ConstFnTests : IDisposable
     }
 
     [Theory]
-    [InlineData("var score: u8 = 3\nconst fn f() -> int { return score }\nconst K = f()", "'score' is a variable, which a const fn cannot read. Use a const or data")]
+    [InlineData("var score: u8 = 3\nconst fn f() -> int { return score }\nconst K = f()", "'score' is a variable, which a const fn cannot read (called from line 3). Use a const or data")]
     [InlineData("var score: u8 = 3\nconst K = round(score * 1.5)", "'score' is a variable, whose value is not known at compile time. Use a const or data")]
-    [InlineData("data t: [u16; 1] = [addr(t)]\nconst fn f() -> int { return t[0] }\nconst K = f()", "'t' holds addresses, which are decided after compile-time evaluation. Read a table without addr()")]
+    [InlineData("data t: [u16; 1] = [addr(t)]\nconst fn f() -> int { return t[0] }\nconst K = f()", "'t' holds addresses, which are decided after compile-time evaluation (called from line 3). Read a table without addr()")]
     [InlineData("const fn f() -> int { return addr(K) }\nconst K = f()", "addr() is decided when the program is placed, after compile-time evaluation")]
-    [InlineData("struct P { x: u8 }\ndata p = P { x = 1 }\nconst fn f() -> int { return p[0] }\nconst K = f()", "'p' holds structs, which are not compile-time values. Read a table of numbers")]
-    [InlineData("fn g() -> u8 { return 1 }\nconst fn f() -> int { return g() }\nconst K = f()", "'g' runs on the 6502, so compile-time code cannot call it. Use a const fn")]
+    [InlineData("struct P { x: u8 }\ndata p = P { x = 1 }\nconst fn f() -> int { return p[0] }\nconst K = f()", "'p' holds structs, which are not compile-time values (called from line 4). Read a table of numbers")]
+    [InlineData("fn g() -> u8 { return 1 }\nconst fn f() -> int { return g() }\nconst K = f()", "'g' runs on the 6502, so compile-time code cannot call it (called from line 3). Use a const fn")]
     [InlineData("const fn f() -> int { return K }\nconst K = f()", "'K' depends on itself: K -> K")]
     [InlineData("data t: [u8; _] = f()\nconst fn f() -> [int; _] { return [t[0]] }", "'t' depends on itself: t -> t")]
     [InlineData("const fn f() -> int { return nope }\nconst K = f()", "'nope' is not declared")]
@@ -498,7 +522,7 @@ public sealed class ConstFnTests : IDisposable
     [InlineData("const fn f() -> int { return $7FFF_FFFF_FFFF_FFFF + 1 }\nconst K = f()", "goes outside the signed 64-bit range")]
     [InlineData("const fn f() -> int { return 1 as u8 }\nconst K = f()", "'as' converts runtime types, which a const fn does not have")]
     [InlineData("const fn f(n: int) -> int { return n }\nconst K = f(1.5)", "The argument 'n' of 'f' is a real, but an int is expected. Use round(x), floor(x), ceil(x) or trunc(x)")]
-    [InlineData("const fn f(n: int) -> int { return n }\nconst K = f(1, 2)", "'f' takes 1 argument(s), not 2")]
+    [InlineData("const fn f(n: int) -> int { return n }\nconst K = f(1, 2)", "'f' takes 1 argument, not 2. Pass 1 argument")]
     [InlineData("const fn f(n: int) -> int { return n }\nconst K = f(true)", "The argument 'n' of 'f' is a bool, but an int is expected")]
     [InlineData("const fn f() -> int { var x = 1\n x = 1.5\n return x }\nconst K = f()", "The value of 'x' is a real, but an int is expected")]
     [InlineData("const fn f() -> int { for i in 0..3 { i = 2 }\n return 0 }\nconst K = f()", "'i' is the loop variable, which cannot be changed (called from line 3). Declare a variable with 'var' for a value that changes")]
@@ -529,8 +553,12 @@ public sealed class ConstFnTests : IDisposable
     [InlineData("fn g() { }\nconst fn f() -> int { return g }\nconst K = f()", "'g' is a function, not a value")]
     [InlineData("const C = 1\nconst fn f() -> int { return C() }\nconst K = f()", "'C' is a constant, not a function")]
     [InlineData("const fn f(b: bool) -> int { return 1 }\nconst K = f(1)", "The argument 'b' of 'f' is an int, but a bool is expected")]
-    [InlineData("const fn f(t: [int; _]) -> int { return t[0] }\nconst K = f([1.5])", "The argument 't' of 'f''s element is a real, but an int is expected")]
+    [InlineData("const fn f(t: [int; _]) -> int { return t[0] }\nconst K = f([1.5])", "An element of the argument 't' of 'f' is a real, but an int is expected")]
     [InlineData("const fn f(t: [int; _]) -> int { return t[0] }\nconst K = f(2)", "The argument 't' of 'f' is an int, but an array is expected")]
+    [InlineData("const fn f() -> int { return round(pow(-8, 1 / 3.0)) }\nconst K = f()", "pow() has no real value for these numbers (called from line 2). Use other values")]
+    [InlineData("const fn f() -> real { return 1 }\nconst K = f()", "This value is the real number 1.0, which a constant cannot hold")]
+    [InlineData("const fn f(a: int, b: int) -> int { return a }\nconst K = f(1)", "'f' takes 2 arguments, not 1. Pass 2 arguments")]
+    [InlineData("const fn f() -> int { return -$7FFF_FFFF_FFFF_FFFF - 1 + abs(-$7FFF_FFFF_FFFF_FFFF - 1) }\nconst K = f()", "(called from line 2). Use smaller values")]
     public void Errors_while_running(string source, string expected)
     {
         var e = Error(source + "\nfn main() { }");

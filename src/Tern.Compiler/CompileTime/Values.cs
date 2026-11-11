@@ -42,7 +42,12 @@ public sealed class CtReal(double value) : CtValue
 {
     public double Value { get; } = value;
     public override CtType Type => CtType.Real;
-    public override string ToString() => Value.ToString("R", CultureInfo.InvariantCulture);
+    /// <summary>With a decimal point, so that a whole number reads as a real: 1.0, not 1.</summary>
+    public override string ToString()
+    {
+        string text = Value.ToString("R", CultureInfo.InvariantCulture);
+        return text.Contains('.') || text.Contains('E') ? text : text + ".0";
+    }
 }
 
 public sealed class CtBool : CtValue

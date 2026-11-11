@@ -167,7 +167,7 @@ public sealed partial class Interpreter
     private (CtArray Array, int Index) Element(IndexExpr ix)
     {
         if (Eval(ix.Target) is not CtArray array)
-            throw Error(ix.Pos, "Only arrays can be indexed");
+            throw Error(ix.Pos, "Only arrays can be indexed. Use an array, or a data table");
         long i = Int(Eval(ix.Index), ix.Index.Pos, "An index");
         if (i < 0 || i >= array.Items.Length)
             throw Error(ix.Index.Pos, $"Index {i} is outside the array (length {array.Items.Length}). Use an index from 0 to {array.Items.Length - 1}");
@@ -180,13 +180,17 @@ public sealed partial class Interpreter
         if (values.Count == 0) return new CtArray([], CtType.Int);
         var type = values[0].Type;
         for (int k = 1; k < values.Count; k++)
-        {
-            var t = values[k].Type;
-            if (t.Kind == type.Kind) continue;
-            if (t.Kind is CtKind.Int or CtKind.Real && type.Kind is CtKind.Int or CtKind.Real) type = CtType.Real;
-            else throw Error(positions[k], $"This element is {Describe(t)}, but the list's first one is {Describe(type)}. Use one kind of value in a list");
-        }
+            type = Unify(type, values[k].Type) ?? throw Error(positions[k],
+                $"This element is {Describe(values[k].Type)}, but the list's first one is {Describe(values[0].Type)}. Use one kind of value in a list");
         return new CtArray(values.Select((v, k) => Convert(v, type, positions[k], "This element")).ToArray(), type);
+    }
+
+    /// <summary>The type of a list with elements of both types: an int and a real make a real, also inside arrays. Null if they do not mix.</summary>
+    private static CtType? Unify(CtType a, CtType b)
+    {
+        if (a.Kind is CtKind.Int or CtKind.Real && b.Kind is CtKind.Int or CtKind.Real) return a.Kind == b.Kind ? a : CtType.Real;
+        if (a.Kind == CtKind.Array && b.Kind == CtKind.Array) return Unify(a.Element!, b.Element!) is { } e ? CtType.ArrayOf(e) : null;
+        return a.Kind == b.Kind ? a : null;
     }
 
     private CtArray ListFor(ListForExpr l)
@@ -291,7 +295,7 @@ public sealed partial class Interpreter
             var odd = left is CtInt or CtReal ? right : left;
             throw Error(pos, op is TokenKind.Amp or TokenKind.Pipe && odd is CtBool
                 ? $"'{name}' works on the bits of ints. Use '{name}{name}' for bools"
-                : $"'{name}' needs numbers, not {Describe(odd.Type)}");
+                : $"'{name}' needs numbers, not {Describe(odd.Type)}. Use an int or a real");
         }
         if (left is CtInt li && right is CtInt ri)
         {
@@ -339,6 +343,7 @@ public sealed partial class Interpreter
     private CtReal Finite(double v, SourcePos pos, string what)
     {
         if (double.IsFinite(v)) return new CtReal(v);
+        if (double.IsNaN(v)) throw Error(pos, $"{what} has no real value for these numbers. Use other values");
         throw Error(pos, $"{what} gives a real too large for 64 bits. Use smaller values");
     }
 
@@ -384,7 +389,7 @@ public sealed partial class Interpreter
                 throw Error(pos, $"{what} is a real, but an int is expected. Use round(x), floor(x), ceil(x) or trunc(x)");
             case CtKind.Array when v is CtArray a:
                 if (a.Element.Kind == type.Element!.Kind && type.Element.Kind != CtKind.Array) return a.Copy();
-                return new CtArray(a.Items.Select(x => Convert(x, type.Element, pos, $"{what}'s element")).ToArray(), type.Element);
+                return new CtArray(a.Items.Select(x => Convert(x, type.Element, pos, $"An element of {char.ToLowerInvariant(what[0])}{what[1..]}")).ToArray(), type.Element);
         }
         if (v.Type.Kind != type.Kind)
             throw Error(pos, $"{what} is {Describe(v.Type)}, but {Describe(type)} is expected");
@@ -408,7 +413,7 @@ public sealed partial class Interpreter
         {
             case "len":
             {
-                if (c.Args.Count != 1) throw Error(c.Pos, "len() takes one array");
+                if (c.Args.Count != 1) throw Error(c.Pos, "len() takes one array. Pass the array, e.g. len(t)");
                 return Eval(c.Args[0]) is CtArray a ? new CtInt(a.Items.Length) : throw Error(c.Pos, "len() needs an array");
             }
             case "sizeof":
@@ -489,6 +494,8 @@ public sealed partial class Interpreter
         }
     }
 
+    private static string Count(int n, string what) => n == 1 ? $"1 {what}" : $"{n} {what}s";
+
     private static string Show(CtValue v) => v is CtReal r ? r.Value.ToString("G", CultureInfo.InvariantCulture) : v.ToString()!;
 
     /// <summary>Runs a const fn; null when it returns nothing.</summary>
@@ -497,7 +504,7 @@ public sealed partial class Interpreter
         if (fn.Emits && !statement)
             throw Error(c.Pos, $"'{fn.Name}' emits assembly, so it returns no value. Call it on a line of its own in an asm block");
         if (c.Args.Count != fn.Parameters.Count)
-            throw Error(c.Pos, $"'{fn.Name}' takes {fn.Parameters.Count} argument(s), not {c.Args.Count}");
+            throw Error(c.Pos, $"'{fn.Name}' takes {Count(fn.Parameters.Count, "argument")}, not {c.Args.Count}. Pass {Count(fn.Parameters.Count, "argument")}");
         var args = new List<CtValue>();
         for (int k = 0; k < c.Args.Count; k++)
             args.Add(Convert(Eval(c.Args[k]), fn.Parameters[k].Type, c.Args[k].Pos, $"The argument '{fn.Parameters[k].Name}' of '{fn.Name}'"));
@@ -510,7 +517,14 @@ public sealed partial class Interpreter
         _frames.Add(frame);
         try
         {
-            var flow = ExecBlock(fn.Declaration.Body, newScope: false);
+            Flow flow;
+            try { flow = ExecBlock(fn.Declaration.Body, newScope: false); }
+            catch (CompileError e) when (_frames.Count == 2 && !e.Description.Contains("(called from "))
+            {
+                // An error the checker raised (a name the const fn cannot read, a constant out of range):
+                // it names the line that started the evaluation too (review M22, finding 2).
+                throw new CompileError(e.Pos, WithNote(e.Description, $"called from {OriginText}"));
+            }
             if (fn.ReturnType is null) return null;
             if (flow != Flow.Return)
                 throw Error(fn.Pos, $"'{fn.Name}' ends without returning a value. Add a 'return' at its end");
@@ -680,9 +694,13 @@ public sealed partial class Interpreter
     /// Runs a generator call written on a line of an asm block (spec 4.1) and returns the lines it
     /// emits, with their local labels renamed and their operands' compile-time parts computed.
     /// </summary>
-    public static List<AsmLine> Generate(CallExpr call, ICompileTimeHost host)
+    /// <param name="numbers">
+    /// The last number given to a renamed label in this asm block: each call continues from it, so the
+    /// labels of two calls in one block never clash (review M22, finding 1).
+    /// </param>
+    public static List<AsmLine> Generate(CallExpr call, ICompileTimeHost host, ref int numbers)
     {
-        var interpreter = new Interpreter(host, call.Pos) { _output = [] };
+        var interpreter = new Interpreter(host, call.Pos) { _output = [], _emits = numbers, _labels = numbers };
         var fn = host.ConstFn(null, call.Name, call.Pos);
         if (fn is null)
             throw new CompileError(call.Pos, Builtins.Contains(call.Name) || call.Name is "len" or "sizeof" or "addr"
@@ -691,6 +709,7 @@ public sealed partial class Interpreter
         if (fn.ReturnType is not null)
             throw new CompileError(call.Pos, $"'{fn.Name}' returns a value, so it is not a generator, which emits assembly. Use its value in an operand, e.g. 'lda #{call.Name}(...)'");
         interpreter.CallConstFn(fn, call, statement: true);
+        numbers = Math.Max(interpreter._emits, interpreter._labels);
         foreach (var (id, use) in interpreter._used)
             if (!interpreter._placed.ContainsKey(id))
                 throw new CompileError(use, Note("This label() is used but never placed", call.Pos)
@@ -737,8 +756,6 @@ public sealed partial class Interpreter
                         CalledFrom = _origin,
                     });
                     break;
-                case AsmGeneratorCall g:
-                    throw Error(g.Pos, $"A generator is called as a statement of the const fn, not inside 'emit'. Move '{g.Call.Name}(...)' out of the emit");
             }
             if (_output.Count > EmitLimit)
                 throw Error(e.Pos, $"The generator emitted more than {EmitLimit} lines, more than fit in memory. Check its loops");
