@@ -419,6 +419,8 @@ public sealed partial class Interpreter
             case "sizeof":
                 if (c.Args is not [NameExpr type]) throw Error(c.Pos, "sizeof() takes one type name, e.g. sizeof(Enemy)");
                 return new CtInt(_host.SizeOf(Top.Module, type.Name, type.Pos));
+            case "offset":
+                return new CtInt(_host.OffsetOf(Top.Module, c));
             case "addr":
                 throw Error(c.Pos, "addr() is decided when the program is placed, after compile-time evaluation. Pass the address to the generator's emit as a name, or use a constant address");
             case "include_bytes":
@@ -703,7 +705,7 @@ public sealed partial class Interpreter
         var interpreter = new Interpreter(host, call.Pos) { _output = [], _emits = numbers, _labels = numbers };
         var fn = host.ConstFn(null, call.Name, call.Pos);
         if (fn is null)
-            throw new CompileError(call.Pos, Builtins.Contains(call.Name) || call.Name is "len" or "sizeof" or "addr"
+            throw new CompileError(call.Pos, Builtins.Contains(call.Name) || call.Name is "len" or "sizeof" or "offset" or "addr"
                 ? $"{call.Name}() is not a generator. Name a const fn that emits assembly on this line, or use the value in an operand"
                 : $"'{call.Name}' is not declared");
         if (fn.ReturnType is not null)

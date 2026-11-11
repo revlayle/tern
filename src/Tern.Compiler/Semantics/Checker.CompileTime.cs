@@ -21,7 +21,7 @@ public sealed partial class Checker : ICompileTimeHost
 
     private void DeclareConstFn(FnDecl decl)
     {
-        if (decl.Name is "addr" or "len" or "sizeof" or "include_bytes")
+        if (decl.Name is "addr" or "len" or "sizeof" or "offset" or "include_bytes")
             throw new CompileError(decl.Pos, $"'{decl.Name}' is a built-in function; choose another name");
         var fn = new ConstFnSymbol(_module.Qualify(decl.Name), decl.Pos, decl) { Module = _module };
         foreach (var p in decl.Parameters)
@@ -211,7 +211,7 @@ public sealed partial class Checker : ICompileTimeHost
             ConstSymbol { Real: not null } => true,
             _ => false,
         },
-        CallExpr { Name: "addr" or "len" or "sizeof" or "include_bytes" } => false,
+        CallExpr { Name: "addr" or "len" or "sizeof" or "offset" or "include_bytes" } => false,
         CallExpr c => Lookup(c.Name) switch
         {
             ConstFnSymbol => true,
@@ -382,6 +382,15 @@ public sealed partial class Checker : ICompileTimeHost
         if (module is null) Work();
         else InModule(module, Work);
         return size;
+    }
+
+    long ICompileTimeHost.OffsetOf(Module? module, CallExpr c)
+    {
+        long offset = 0;
+        void Work() => offset = OffsetOf(c);
+        if (module is null) Work();
+        else InModule(module, Work);
+        return offset;
     }
 
     long ICompileTimeHost.Encode(Module? module, CharExpr c) => Encode(c.Value, EncodingOf(c.Encoding, c.Pos), c.Pos);

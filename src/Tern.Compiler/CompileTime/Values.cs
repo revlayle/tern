@@ -93,6 +93,8 @@ public interface ICompileTimeHost
     /// <summary>The const fn named, or null if there is none; an error for a function that runs on the 6502.</summary>
     ConstFnSymbol? ConstFn(Module? module, string name, SourcePos pos);
     long SizeOf(Module? module, string type, SourcePos pos);
+    /// <summary>The value of <c>offset(T.field)</c> (spec 10), with the names in <paramref name="module"/>.</summary>
+    long OffsetOf(Module? module, CallExpr c);
     /// <summary>The symbol a name in an emitted instruction names in <paramref name="module"/>: a variable, data or function.</summary>
     Symbol? Symbol(Module? module, string name);
     long Encode(Module? module, CharExpr c);

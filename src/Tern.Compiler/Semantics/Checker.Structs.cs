@@ -289,4 +289,47 @@ public sealed partial class Checker
 
     /// <summary>The expression a struct field access stands for.</summary>
     private static Expr Unwrap(Expr e) => e.Lowered ?? e;
+
+    /// <summary>
+    /// <c>offset(T.field)</c> (spec 10): a field's offset in bytes from the start of struct <c>T</c>, through
+    /// nested struct fields too (<c>offset(Enemy.pos.x)</c>). <c>T</c> may be qualified (<c>m.Enemy.hp</c>).
+    /// </summary>
+    private long OffsetOf(CallExpr c)
+    {
+        var parts = new List<(string Name, SourcePos Pos)>();
+        var at = c.Args.Count == 1 ? c.Args[0] : null;
+        while (at is MemberExpr m)
+        {
+            parts.Insert(0, (m.Member, m.Pos));
+            at = m.Target;
+        }
+        if (at is not NameExpr root || parts.Count == 0)
+            throw new CompileError(c.Pos, "offset() takes a struct type and one of its fields. Write e.g. offset(Enemy.hp)");
+        parts.Insert(0, (root.Name, root.Pos));
+        // The type is the first name, or a module's struct: the first two.
+        int fields = 1;
+        var type = Lookup(root.Name);
+        if (type is null && parts.Count > 2 && Lookup($"{root.Name}.{parts[1].Name}") is StructSymbol qualified)
+            (type, fields) = (qualified, 2);
+        string typeName = string.Join(".", parts.Take(fields).Select(p => p.Name));
+        if (type is not StructSymbol s)
+            throw type is null && !_module.Imports.ContainsKey(root.Name) && root.Name is not ("u8" or "i8" or "u16" or "i16" or "bool")
+                ? NotDeclared(root.Name, root.Pos)
+                : new CompileError(root.Pos, $"'{typeName}' is not a struct type. Use offset() with a struct type and one of its fields, e.g. offset(Enemy.hp)");
+        long offset = 0;
+        StructSymbol? current = s;
+        foreach (var (name, pos) in parts.Skip(fields))
+        {
+            if (current is null)
+                throw new CompileError(pos, $"'{typeName}' is not a struct, so it has no field '{name}'. Remove '.{name}'");
+            LayOut(current);
+            var field = name == "_" ? null : current.Field(name);
+            if (field is null)
+                throw new CompileError(pos, $"Struct '{current.Name}' has no field '{name}'. Use one of its fields: {string.Join(", ", current.Fields.Where(f => f.Name != "_").Select(f => f.Name))}");
+            offset += field.Offset;
+            typeName += $".{name}";
+            current = field.Type.Struct;
+        }
+        return offset;
+    }
 }
