@@ -390,7 +390,7 @@ public class DataTests
     }
 
     [Theory]
-    [InlineData("data d: [u8; _] = 5\nfn main() { }", "The length '_' is taken from a list or string initial value, so it works only on a global var or data with one, as in 'data t: [u8; _] = [1, 2, 3]'. Write the length here")]
+    [InlineData("data d: [u8; _] = 5\nfn main() { }", "The length '_' is taken from a list or string initial value, a list built with 'for' or a const fn's array, so it works only on a global var or data with one, as in 'data t: [u8; _] = [1, 2, 3]'. Write the length here")]
     [InlineData("var d: [u8; _]\nfn main() { }", "The length '_' is taken from a list or string initial value")]
     [InlineData("fn main() { var d: [u8; _] }", "The length '_' is taken from a list or string initial value")]
     [InlineData("fn f(p: ptr [u8; _]) { }\nfn main() { }", "The length '_' is taken from a list or string initial value")]

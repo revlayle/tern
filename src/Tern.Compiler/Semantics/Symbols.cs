@@ -116,6 +116,17 @@ public sealed class ConstSymbol(string name, SourcePos pos, TernType type, long 
     public HashSet<string> UsedParameters { get; init; } = [];
 }
 
+/// <summary>A <c>const fn</c> (spec 4.1): run by the compile-time interpreter, never compiled.</summary>
+public sealed class ConstFnSymbol(string name, SourcePos pos, FnDecl declaration) : Symbol(name, pos)
+{
+    public FnDecl Declaration { get; } = declaration;
+    public List<(string Name, CompileTime.CtType Type)> Parameters { get; } = [];
+    /// <summary>Null for a const fn that returns nothing (a generator, or one called for its checks).</summary>
+    public CompileTime.CtType? ReturnType { get; set; }
+    /// <summary>Has an <c>emit</c>: a generator, called on a line of its own in assembly.</summary>
+    public bool Emits { get; set; }
+}
+
 /// <summary>A field of a struct: its type and its offset from the start of the struct.</summary>
 public sealed record StructField(string Name, SourcePos Pos, TernType Type, int Offset);
 

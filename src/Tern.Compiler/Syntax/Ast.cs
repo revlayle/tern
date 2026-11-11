@@ -57,6 +57,32 @@ public sealed class NumberExpr(SourcePos pos, long value) : Expr(pos)
 {
     public long Value { get; } = value;
 }
+/// <summary>A real literal such as <c>1.5</c> (spec 4.1): only in compile-time code.</summary>
+public sealed class RealExpr(SourcePos pos, double value, string text) : Expr(pos)
+{
+    public double Value { get; } = value;
+    /// <summary>As written, for error messages.</summary>
+    public string Text { get; } = text;
+}
+/// <summary>
+/// A list built with <c>for</c> (spec 4.1): <c>[expr for i in from..to step k]</c>, computed at compile time.
+/// </summary>
+public sealed class ListForExpr(SourcePos pos, Expr element, string? variable, Expr from, Expr to, bool inclusive, Expr? step) : Expr(pos)
+{
+    public Expr Element { get; } = element;
+    /// <summary>Null for <c>_</c>.</summary>
+    public string? Variable { get; } = variable;
+    public Expr From { get; } = from;
+    public Expr To { get; } = to;
+    public bool Inclusive { get; } = inclusive;
+    public Expr? Step { get; } = step;
+}
+/// <summary><c>[value; count]</c>: an array of <c>count</c> copies, in compile-time code (spec 4.1).</summary>
+public sealed class ArrayRepeatExpr(SourcePos pos, Expr value, Expr count) : Expr(pos)
+{
+    public Expr Value { get; } = value;
+    public Expr Count { get; } = count;
+}
 /// <summary>A char literal such as <c>'A'</c> or <c>screen'A'</c>; the checker turns it into a number.</summary>
 public sealed class CharExpr(SourcePos pos, char value, string? encoding) : Expr(pos)
 {
@@ -319,6 +345,12 @@ public sealed class AsmInstruction(SourcePos pos, Mnemonic mnemonic, AsmForm for
     public AsmValue? Value { get; set; }
 }
 
+/// <summary>A generator call on a line of its own in an asm block (spec 4.1); the checker replaces it with the instructions it emits.</summary>
+public sealed class AsmGeneratorCall(SourcePos pos, CallExpr call) : AsmLine(pos)
+{
+    public CallExpr Call { get; } = call;
+}
+
 /// <summary>A local label used as an operand: <c>bne .loop</c>.</summary>
 public sealed class AsmLabelExpr(SourcePos pos, string name) : Expr(pos)
 {
@@ -337,6 +369,11 @@ public sealed record AsmValue(
     public bool IsNumber => Variable is null && Function is null && Label is null;
 }
 public sealed class ContinueStmt(SourcePos pos) : Stmt(pos);
+/// <summary><c>emit { ... }</c> in a <c>const fn</c> (spec 4.1): adds its instructions to the asm block that called the generator.</summary>
+public sealed class EmitStmt(SourcePos pos, AsmStmt fragment) : Stmt(pos)
+{
+    public AsmStmt Fragment { get; } = fragment;
+}
 public sealed class ReturnStmt(SourcePos pos, Expr? value) : Stmt(pos)
 {
     public Expr? Value { get; set; } = value;
@@ -370,6 +407,8 @@ public sealed class FnDecl(
     public TypeSyntax? ReturnType { get; } = returnType;
     public Register? ReturnUsing { get; } = returnUsing;
     public BlockStmt Body { get; } = body;
+    /// <summary>A <c>const fn</c> (spec 4.1): run only during compilation; it never becomes 6502 code.</summary>
+    public bool IsConst { get; init; }
     /// <summary>An <c>asm fn</c>: the body holds one <see cref="AsmStmt"/>.</summary>
     public bool IsAsm { get; init; }
     /// <summary>An <c>interrupt fn</c>: saves the registers it changes and ends with <c>rti</c>.</summary>
@@ -454,6 +493,8 @@ public sealed class ProgramSyntax(List<ConstDecl> consts, List<VarDecl> globals,
     public List<ConstDecl> Consts { get; } = consts;
     public List<VarDecl> Globals { get; } = globals;
     public List<FnDecl> Functions { get; } = functions;
+    /// <summary>The <c>const fn</c> declarations (spec 4.1), apart from <see cref="Functions"/>: they are never compiled.</summary>
+    public List<FnDecl> ConstFns { get; init; } = [];
 }
 
 /// <summary>The <c>memory { ... }</c> block of the main file.</summary>
