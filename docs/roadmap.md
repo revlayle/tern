@@ -459,6 +459,16 @@ Spec: 4, 4.1, 5.1, 10, 11. Decisions 2026-11-11 (M22 questions 94-103). On a bra
 - **Addresses as labels in generators** (spec 4.1): `addr()` of a global, `data` or function as a `label` argument or in a `const fn`, used in `emit` operands alone, with an `int` offset and as `.lo` / `.hi`; a `.label` of the calling asm block as an argument (`clear_rows(0, 3, .done)`), jumped to from the generated code. Errors: placing either kind with `name:`, a `.label` the block does not have, reading or comparing a label's number. Run in the emulator: a generator copying into a buffer the compiler places, and one that jumps to the caller's label.
 - **`tern --json` gives the call's location** for an error in a `const fn` or in generated code, as a field of its own (spec 4.1).
 
+## M22 follow-up 2: examples (before M23)
+
+Spec: 4.1. On a branch from `main` after the M22 follow-up is merged.
+
+- `examples/sine.tern`: a sine table built by a `const fn` with `real` math (`[... for i in 0..256]`) moves a sprite or raster bar smoothly. It shows that the table costs nothing at run time: only the bytes are in the .prg.
+- `examples/speedcode.tern`: a generator unrolls a per-frame loop (e.g. a colour-RAM cycle or a row copy that skips given rows), with a plain-loop version beside it. `tern bench` compares the two (bytes and cycles) and the numbers go in a comment at the top. It uses `label()`, an `addr()` label argument and the calling block's `.label`.
+- Both compile in the examples test, run in the emulator with memory checked, and are checked in VICE (screenshot).
+
+Done when: both examples run in VICE and their listings show each generated instruction's `emit` line. The spec session then writes the guide's section on `const fn` and generators from these two examples.
+
 ## M23: Doc comments and a language server
 
 - `///` doc comments before declarations, kept by the compiler.
