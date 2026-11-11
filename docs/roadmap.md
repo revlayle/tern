@@ -461,13 +461,18 @@ Spec: 4, 4.1, 5.1, 10, 11. Decisions 2026-11-11 (M22 questions 94-103). On a bra
 
 ## M22 follow-up 2: examples (before M23)
 
-Spec: 4.1. On a branch from `main` after the M22 follow-up is merged.
+Spec: 4.1, 5.1, 11. On a branch from `main` after the M22 follow-up is merged.
 
 - `examples/sine.tern`: a sine table built by a `const fn` with `real` math (`[... for i in 0..256]`) moves a sprite or raster bar smoothly. It shows that the table costs nothing at run time: only the bytes are in the .prg.
 - `examples/speedcode.tern`: a generator unrolls a per-frame loop (e.g. a colour-RAM cycle or a row copy that skips given rows), with a plain-loop version beside it. `tern bench` compares the two (bytes and cycles) and the numbers go in a comment at the top. It uses `label()`, an `addr()` label argument and the calling block's `.label`.
 - Both compile in the examples test, run in the emulator with memory checked, and are checked in VICE (screenshot).
 
-Done when: both examples run in VICE and their listings show each generated instruction's `emit` line. The spec session then writes the guide's section on `const fn` and generators from these two examples.
+Two small changes from questions 104 and 106 (decisions 2026-11-11), in their own commits:
+
+- **`n..=0` without a negative step is allowed** (spec 5.1): an unsigned `n..=0` and `a..=0 step n` compile and run (once when the start is 0), with no warning. `9..=0`, `255..=0 step n` and an unsigned `n..0` keep the error; with a variable step its fix is "Use a constant negative step to count down". Tests in `LoopDirectionTests`, in the emulator for `n` = 0 and 5.
+- **`for i in n..0 step -1` (n: `u8`) matches spec 11:** `ldx n` / `beq done`, without the dead `cpx #$00` / `bcc` (`CodeGen.CounterBranch`). A listing test checks the full shape (review suggestion 3 of the M22 follow-up). Rewrite the benchmark baseline if it moves.
+
+Done when: both examples run in VICE and their listings show each generated instruction's `emit` line; the two loop changes are built. The spec session then writes the guide's section on `const fn` and generators from these two examples.
 
 ## Cleanup: split the large classes (before M23)
 
