@@ -128,6 +128,56 @@ public class LoopDirectionTests
         Assert.Equal("ldx n|beq main.fend0|txa|clc|adc total|sta total|bcc main.c3|inc total+1|dex|bne main.for2|rts", Code(r));
     }
 
+    /// <summary>
+    /// The other paths through the down-count's empty check: a counter in memory, in Y beside a
+    /// variable held in X (the check comes before that load, and skips its store), a start that
+    /// needs a compare, and a larger step. cnt starts at 7, so a skip that stored X would show.
+    /// </summary>
+    [Theory]
+    [InlineData("for i in n..0 step -1 { add(i)\n cnt += 1 }", 0, 1, "lda n|sta main.i|beq")]
+    [InlineData("for i in n..0 step -1 using Y { cnt += 1 }", 0, 1, "ldy n|beq main.fskip3|ldx cnt|")]
+    [InlineData("for i in n..0 step -1 using Y { total += i\n cnt += 1 }", 0, 1, "ldy n|beq")]
+    [InlineData("for i in (n + 1)..0 step -1 using X { total += i\n cnt += 1 }", 1, 1, "lda n|clc|adc #$01|tax|cpx #$00|beq")]
+    [InlineData("for i in n..0 step -2 { total += i\n cnt += 1 }", 0, 2, "")]
+    public void An_unsigned_down_count_to_0_skips_only_an_empty_range(string loop, int offset, int step, string start)
+    {
+        foreach (int n in new[] { 0, 1, 5, 254, 255 })
+        {
+            var r = Run.Program($$"""
+                var n: u8 = {{n}}
+                var total: u16
+                var cnt: u8 = 7
+                fn add(v: u8) { total += v }
+                fn main() {
+                    {{loop}}
+                }
+                """);
+            int passes = 0, sum = 0;
+            for (int i = (n + offset) & 255; i > 0; i -= step) { passes++; sum += i; }
+            Assert.True((byte)(7 + passes) == r.U8("cnt"), $"n = {n}: cnt is {r.U8("cnt")}, not 7 + {passes}");
+            if (!loop.Contains("{ cnt")) Assert.Equal(sum, r.U16("total"));
+            Assert.StartsWith(start, Code(r));
+            Assert.DoesNotContain("cpy", Code(r));
+        }
+    }
+
+    [Theory]
+    [InlineData(-3, 7)]
+    [InlineData(0, 8)]
+    [InlineData(4, 12)]
+    public void A_signed_down_count_tests_its_sign_before_a_held_variable_is_loaded(int start, int expected)
+    {
+        var r = Run.Program($$"""
+            var s: i8 = {{start}}
+            var cnt: u8 = 7
+            fn main() {
+                for i in s..=0 step -1 using Y { cnt += 1 }
+            }
+            """);
+        Assert.Equal(expected, r.U8("cnt"));
+        Assert.StartsWith("ldy s|bmi main.fskip3|ldx cnt|", Code(r));
+    }
+
     [Fact]
     public void A_const_fn_loop_ending_at_0_counts_up_from_a_negative_start()
     {

@@ -2716,21 +2716,24 @@ public sealed class CodeGen
         }
 
         SetCounter(c, f.From);
-        int afterSet = _out.Count;
         if (c.Register is { } held) _reserved.Add(held);
-        var inRegister = HoldInRegister(f.Body, null, c);
         // N and Z still hold the start value after a plain ldx / ldy of it.
-        bool flagsHoldStart = c.Register is not null && Simple1(f.From) is not null && _out.Count == afterSet;
+        bool flagsHoldStart = c.Register is not null && Simple1(f.From) is not null;
 
         // Skip the loop if the range is empty, unless the bounds prove it is not.
         long max = type.MaxValue;
         bool provablyNonEmpty = (from is not null && to is not null)
             || (inclusive && up && to == max) || (inclusive && !up && to == type.MinValue) || _nonEmpty.Contains(f);
-        if (!provablyNonEmpty && type.IsSigned)
+
+        // A down-count to 0 tests only the start's zero (and sign), which a plain ldx n has set: test it
+        // before a variable is loaded into the other index register (spec 11).
+        bool downTo0 = !provablyNonEmpty && !up && to == 0;
+        int checkFrom = _out.Count;
+        if (downTo0 && type.IsSigned)
             SignedEmptyCheck(c, up, inclusive, to, bound, end, flagsHoldStart);
-        else if (!provablyNonEmpty && !up && to == 0 && type.Size == 1)
+        else if (downTo0 && type.Size == 1)
         {
-            // n..0 step -1 is empty only when n is 0, which a plain ldx n has already tested (spec 11).
+            // Unsigned n..0 step -1 is empty only when n is 0.
             if (!flagsHoldStart)
             {
                 if (c.Register is { } reg) Op(reg == Register.X ? Cpx : Cpy, Byte(0));
@@ -2738,7 +2741,23 @@ public sealed class CodeGen
             }
             Branch(Beq, end);
         }
-        else if (!provablyNonEmpty)
+        int checkTo = _out.Count;
+
+        var inRegister = HoldInRegister(f.Body, null, c);
+        // The early check skips the held variable's load, so it must skip its store after the loop too.
+        Label? skip = null;
+        if (inRegister is not null && AssignsVar(f.Body, inRegister) && checkTo > checkFrom)
+        {
+            skip = NewLabel("fskip");
+            for (int i = checkFrom; i < checkTo; i++)
+                if (_out[i] is Instr { Operand: LabelOperand { Label: var target } } branch && target == end)
+                    _out[i] = branch with { Operand = new LabelOperand(skip) };
+        }
+
+        if (provablyNonEmpty || checkTo > checkFrom) { }   // no check, or done above
+        else if (type.IsSigned)
+            SignedEmptyCheck(c, up, inclusive, to, bound, end, flagsHoldStart: false);
+        else
         {
             var emptyIf = (up, inclusive) switch
             {
@@ -2768,6 +2787,7 @@ public sealed class CodeGen
 
         Place(end);
         ReleaseHeld(inRegister, f.Body);
+        if (skip is not null) Place(skip);
         if (c.Register is { } r) _reserved.Remove(r);
         if (flippedTemp is not null) Release(flippedTemp);
         if (stepTemp is not null) Release(stepTemp);
