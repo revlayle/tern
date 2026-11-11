@@ -82,7 +82,7 @@ public sealed partial class Interpreter
     private CompileError Error(SourcePos pos, string message)
     {
         if (Top.Function is null) return new CompileError(pos, message);
-        return new CompileError(pos, WithNote(message, $"called from {OriginText}"));
+        return new CompileError(pos, WithNote(message, $"called from {OriginText}")) { CalledFrom = _origin };
     }
 
     private void Step()
@@ -90,7 +90,10 @@ public sealed partial class Interpreter
         if (++_steps <= StepLimit) return;
         if (_frames.LastOrDefault(f => f.Function is not null)?.Function is { } fn)
             throw new CompileError(fn.Pos,
-                $"'{fn.Name}' did not finish after {StepLimit:N0} steps (called from {OriginText}). Check its loops for one that never ends");
+                $"'{fn.Name}' did not finish after {StepLimit:N0} steps (called from {OriginText}). Check its loops for one that never ends")
+            {
+                CalledFrom = _origin,
+            };
         throw new CompileError(_origin, $"This list did not finish after {StepLimit:N0} steps. Use a shorter range");
     }
 
@@ -545,7 +548,7 @@ public sealed partial class Interpreter
             {
                 // An error the checker raised (a name the const fn cannot read, a constant out of range):
                 // it names the line that started the evaluation too (review M22, finding 2).
-                throw new CompileError(e.Pos, WithNote(e.Description, $"called from {OriginText}"));
+                throw new CompileError(e.Pos, WithNote(e.Description, $"called from {OriginText}")) { CalledFrom = _origin };
             }
             if (fn.ReturnType is null) return null;
             if (flow != Flow.Return)
@@ -738,7 +741,7 @@ public sealed partial class Interpreter
         foreach (var (id, use) in interpreter._used)
             if (!interpreter._placed.ContainsKey(id))
                 throw new CompileError(use, Note("This label() is used but never placed", call.Pos)
-                    + ". Place it in an emit with its variable's name and ':', e.g. 'emit { top: }'");
+                    + ". Place it in an emit with its variable's name and ':', e.g. 'emit { top: }'") { CalledFrom = call.Pos };
         return interpreter._output;
     }
 

@@ -10,6 +10,11 @@ public sealed class CompileError(SourcePos pos, string message) : Exception($"{p
 {
     public SourcePos Pos { get; } = pos;
     public string Description { get; } = message;
+    /// <summary>
+    /// For an error while a const fn runs or in generated code: the line that started the evaluation or
+    /// called the generator (spec 4.1), which the message names too. <c>tern --json</c> gives it as a field.
+    /// </summary>
+    public SourcePos? CalledFrom { get; init; }
 }
 
 public enum TokenKind

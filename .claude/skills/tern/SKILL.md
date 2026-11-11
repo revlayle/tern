@@ -111,7 +111,8 @@ Screen ($0400, 40 x 25):
   but there is no automatic narrowing.
 
 An error gives the file, line and column, what is wrong and how to fix it. With `--json` the fix is
-a separate `suggestion`:
+a separate `suggestion`, and for an error inside a `const fn` or generated code, `calledFrom` is the
+line that called it (`null` otherwise):
 
 ```tern error
 // broken.tern
@@ -140,7 +141,8 @@ $ tern --json broken.tern
       "column": 13,
       "severity": "error",
       "message": "Expected u8, found u16.",
-      "suggestion": "Convert with 'as u8'"
+      "suggestion": "Convert with 'as u8'",
+      "calledFrom": null
     }
   ]
 }
