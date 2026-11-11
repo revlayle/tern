@@ -4,11 +4,15 @@ Owned by the coding session. Updated at the end of every coding session.
 
 ## Current
 
-- **Milestone:** M22 follow-up 2 (roadmap, before M23; decisions 2026-11-11, questions 104-106). All of it is done: both examples and the two loop changes.
-- **Branch:** `m22-followup2`, from `main` at `97a8a62`. 2853 compiler tests pass plus 36 CPU tests. No benchmark changed (1254 / 350780); `SkillTests` pass.
-- **Next step:** `/review m22-followup2`. After it is merged: the cleanup milestone before M23 (roadmap, "Cleanup: split the large classes"). The spec session writes the guide's section on `const fn` and generators from the two examples.
+- **Milestone:** M22 follow-up 2 (roadmap, before M23; decisions 2026-11-11, questions 104-106). Done and reviewed (`docs/reviews/m22-followup2.md`: ready to merge, two suggestions, both done).
+- **Branch:** `m22-followup2`, with `main` merged in (`95ecb18`). 2861 compiler tests pass plus 36 CPU tests. No benchmark changed (1254 / 350780); `SkillTests` pass.
+- **Next step:** `/merge m22-followup2`. After the merge: the cleanup milestone before M23 (roadmap, "Cleanup: split the large classes"). The spec session writes the guide's section on `const fn` and generators from the two examples.
 
 ## Done
+
+- **M22 follow-up 2, first review** (2026-11-11, `docs/reviews/m22-followup2.md`): ready to merge; both suggestions done (`3f669c5`).
+  - Suggestion 2: the empty check of a down-count to 0 (unsigned `n..0`, signed `n..=0` / `n..0`) comes before `HoldInRegister` loads a variable into the other index register, so `for i in n..0 step -1 using Y { cnt += 1 }` is `ldy n` / `beq`, with no `cpy #$00`. When the body changes the held variable, the check's branches go to a label after its store (`fskip`), since its load was skipped too. Other loops are unchanged.
+  - Suggestion 1: `LoopDirectionTests` runs the other paths of the check for n = 0, 1, 5, 254, 255 (counter in memory, in Y beside a held variable, `(n + 1)` with `cpx #$00`, `step -2`) and a signed down-count beside a held variable.
 
 - **M22 follow-up 2** (2026-11-11, spec 4.1, 5.1, 11; decisions 2026-11-11, questions 104-106).
   - *`n..=0` counting up* (`7b787a8`, question 104): `Checker.NeverRuns` keeps the error for constant bounds past the end and an unsigned `n..0` (also with a variable step, fix "Use a constant negative step to count down"); an unsigned `n..=0` and `a..=0 step n` compile with no error and run once when the start is 0. The error rows that used `..=0` with a variable start are now `..0` forms. `LoopDirectionTests` runs `n..=0` for 0, 5, 255 (u8, in X, variable step, u16). The skill says what `n..=0` does.
