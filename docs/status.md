@@ -5,10 +5,12 @@ Owned by the coding session. Updated at the end of every coding session.
 ## Current
 
 - **Milestone:** M22 follow-up (roadmap, before M23; decisions 2026-11-11, questions 94-103). All six items are done. The first review (`docs/reviews/m22-followup.md`) had one must-fix item, now fixed, and four suggestions: 2, 4 and 5 done, 3 waits for question 106.
-- **Branch:** `m22-followup`, with `main` merged in (`5b7f1b3`). 2834 compiler tests pass plus 36 CPU tests. No benchmark changed (1254 / 350780); `SkillTests` pass. All examples compile unchanged.
-- **Next step:** a second `/review` of `m22-followup`. After the merge: M23 (doc comments and a language server). Questions 104-106 below are open; none blocks the review.
+- **Branch:** `m22-followup`, with `main` merged in (`5b7f1b3`). 2835 compiler tests pass plus 36 CPU tests. No benchmark changed (1254 / 350780); `SkillTests` pass. All examples compile unchanged.
+- **Next step:** `/merge m22-followup` (second review, `2a3bffa` on `main`: ready to merge, no findings). After the merge: the next milestone on the roadmap (`main` now has M22 follow-up 2 and a cleanup milestone before M23). Questions 104-106 below are open.
 
 ## Done
+
+- **M22 follow-up, second review** (2026-11-11, `docs/reviews/m22-followup.md` on `main`): ready to merge. Its note, a range written over two lines quoted with the line break, is done: `Parser.TokenText` makes a line break and its indentation one space (`LoopDirectionTests`).
 
 - **M22 follow-up, first review** (2026-11-11, `docs/reviews/m22-followup.md`).
   - Finding 1 (must fix, `1c56e40`): `addr(back) + 1` as a generator argument (spec 4.1's example) was an error. `CtLabel.Offset`: a label plus or minus an int (also `int + label`) is a label of the same kind with the offset changed, written `name + offset` in an emit operand; placing an offset `label()` value is an error; `label - label`, `*`, compares and `int - label` stay errors. `GeneratorTests.A_label_plus_an_int_is_a_label_with_an_offset` (the spec's form in the emulator, `label() + 1` and `.done - 3` as jump targets) and the errors.
