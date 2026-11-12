@@ -542,6 +542,18 @@ Done when: an example draws text and hi-res graphics in an Apple II emulator (Ap
 
 Done when: an example scrolls a background and moves sprites in a NES emulator (Mesen), with code in more than one bank.
 
+### 65C02: analysis (spec session, before M28)
+
+Decision 2026-11-12. Before the X16 platform and its library, a spec session checks how far the compiler should go with the 65C02, beyond the instructions listed in M28. The result may split M28 into a CPU milestone and a platform milestone. Notes from the spec session of 2026-11-12, a starting point, not decisions:
+
+- **Which variants.** The 65C02 family differs: the base CMOS set (`bra`, `stz`, `phx`/`phy`/`plx`/`ply`, `trb`/`tsb`, `inc a`/`dec a`, `(zp)`, `jmp (abs,x)`, `bit #`/`bit zp,x`/`bit abs,x`) is on every part, the Apple IIc and enhanced IIe included; `rmb`/`smb`/`bbr`/`bbs` are on Rockwell and WDC parts only, `wai`/`stp` on WDC parts. The 65C816, which the X16 can take, has the base set and `wai`/`stp` but not `rmb`/`smb`/`bbr`/`bbs`. To settle: one variant or two (e.g. `65c02` and `wdc65c02`), and which one the X16 uses by default.
+- **CPU layer** (small): the table, encoder and emulator; new modes `(zp)`, `(abs,x)` and `zp,relative` (`bbr0 $10, label`); timing differences (decimal mode +1 cycle with valid N and Z, `jmp (abs)` without the page bug, shifts on `abs,x`, unused opcodes as `nop`s of fixed size). Klaus Dormann's 65C02 extended-opcodes test checks it.
+- **Inline assembly:** a 65C02 instruction in an `nmos6502` build is an error naming the variant; the spelling of the bit instructions (`rmb3 $10` or `rmb 3, $10`); `AsmEffects` for the new instructions. NMOS read-modify-write instructions write twice and 65C02 ones do not (the C64's `inc $d019` acknowledge), which matters for library asm moved between variants.
+- **Code shapes** (spec 11, a column per variant; design rule 4): `stz` for stores of 0; `bra` for `jmp` within range; `lda (p)` for `p[0]` and pointer fields at offset 0, which also frees Y (relaxes `using Y` limits); `phx`/`phy` in interrupt handlers; `inc a` for `+ 1` in A when the carry is not needed; `tsb`/`trb` for `|=` and `&= ~` on memory; `jmp (table,x)` for `indexed match` and calls through pointers; `smb`/`rmb`/`bbr`/`bbs` for `bool`s in zero page (only where the variant has them). The optimizer's register tracking must know each one.
+- **Testing:** making the CPU variant a build setting separate from the platform (spec 12) would let the whole end-to-end suite and the benchmarks run as 65C02 code on the C64 description before the X16 platform exists; benchmark baselines then per variant.
+- **Library:** whether a module can have variant-specific bodies (e.g. `mem.fill` with `stz`), and how, without a general conditional compilation feature.
+- **Out of scope:** the 65C816's native mode (16-bit registers would change the language).
+
 ### M28: 65C02 and Commander X16
 
 - The 65C02 CPU variant (spec 12.1): new instructions in the CPU table, emulator and code generator (`stz`, `bra`, `phx`/`phy`, `inc a`, `(zp)` addressing); code shapes per variant
