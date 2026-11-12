@@ -244,6 +244,8 @@ public sealed class ForStmt(
 {
     /// <summary>Null for <c>_</c>.</summary>
     public string? Variable { get; } = variable;
+    /// <summary>Where the loop variable is written.</summary>
+    public SourcePos VariablePos { get; init; }
     public Expr From { get; set; } = from;
     public Expr To { get; set; } = to;
     public bool Inclusive { get; } = inclusive;
@@ -313,6 +315,8 @@ public sealed class AsmStmt(SourcePos pos, List<AsmLine> lines) : Stmt(pos)
     public List<VarDecl> Locals { get; } = [];
     /// <summary>Set by the checker: what the block reads and changes.</summary>
     public AsmEffects? Effects { get; set; }
+    /// <summary>For an <c>asm { ... }</c> statement: where the word <c>asm</c> is (<see cref="Node.Pos"/> is the <c>{</c>).</summary>
+    public SourcePos? KeywordPos { get; set; }
 }
 
 public abstract class AsmLine(SourcePos pos) : Node(pos)

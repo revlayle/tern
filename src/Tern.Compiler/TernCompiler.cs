@@ -410,7 +410,7 @@ public static class TernCompiler
         {
             report.AppendLine("Functions with memory reachable from two roots:");
             foreach (var f in shared)
-                report.AppendLine($"  {f.Name} ({f.FrameVariables.Sum(v => v.Type.Size)} bytes): {string.Join(", ", f.Roots.OrderBy(program.Functions.IndexOf).Select(r => r.Name))}");
+                report.AppendLine($"  {f.Name} ({Bytes(f.FrameVariables.Sum(v => v.Type.Size))}): {string.Join(", ", f.Roots.OrderBy(program.Functions.IndexOf).Select(r => r.Name))}");
         }
         report.AppendLine("Zero page:");
         report.Append(plan.ZeroPageMap);
@@ -437,6 +437,8 @@ public static class TernCompiler
             DeclaredFunctions = program.Modules.SelectMany(m => m.Scope.Values.OfType<FunctionSymbol>()).Select(f => f.Name).ToHashSet(),
         };
     }
+
+    private static string Bytes(int n) => n == 1 ? "1 byte" : $"{n} bytes";
 
     /// <summary>A program's export table is placed like fixed data: in a program or reserved area (spec 12.3).</summary>
     private static void CheckExportTable(CheckedProgram program, AddressRange range)

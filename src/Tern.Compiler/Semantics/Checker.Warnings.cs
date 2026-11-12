@@ -179,7 +179,7 @@ public sealed partial class Checker
                     Read(f.To);
                     if (f.Step is not null) Read(f.Step);
                     _scopes.Add([]);
-                    if (f.Variable is not null) Add(f.Variable, f.Pos, warned: true, loop: true);
+                    if (f.Variable is not null) Add(f.Variable, f.VariablePos, warned: true, loop: true);
                     Block(f.Body);
                     _scopes.RemoveAt(_scopes.Count - 1);
                     break;
@@ -321,8 +321,23 @@ public sealed partial class Checker
             }
         }
 
-        /// <summary>Where a statement starts: an assignment's position is its operator's.</summary>
-        private static SourcePos Start(Stmt s) => s is AssignStmt a ? a.Target.Pos : s.Pos;
+        /// <summary>
+        /// Where a statement starts: an assignment's position is its operator's, an asm block's its '{'.
+        /// </summary>
+        private static SourcePos Start(Stmt s) => s switch
+        {
+            AssignStmt a => Leftmost(a.Target),
+            AsmStmt { KeywordPos: { } keyword } => keyword,
+            _ => s.Pos,
+        };
+
+        /// <summary>The first token of an assignment target: <c>buf</c> in <c>buf[1]</c>, <c>pt</c> in <c>pt.a</c>.</summary>
+        private static SourcePos Leftmost(Expr e) => e switch
+        {
+            IndexExpr ix => Leftmost(ix.Target),
+            MemberExpr m => Leftmost(m.Target),
+            _ => e.Pos,
+        };
 
         /// <summary>Checks the blocks inside a statement.</summary>
         private static void Inner(Stmt s, Action<SourcePos, string> warn)

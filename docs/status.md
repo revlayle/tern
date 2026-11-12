@@ -4,11 +4,17 @@ Owned by the coding session. Updated at the end of every coding session.
 
 ## Current
 
-- **Milestone:** Warnings (roadmap "Warnings"; spec 13 "Warnings", 5.1, 8.1; decision 2026-11-12 "warnings for code that does nothing"). Done, not reviewed yet.
-- **Branch:** `warnings`, from `main` at `12f1ae1`. 2936 compiler tests pass plus 36 CPU tests. No benchmark changed (1254 / 350780); `SkillTests` pass (one skill output rewritten, see below).
-- **Next step:** `/review` of `warnings`. After this: `implements`, encodings, M24.
+- **Milestone:** Warnings (roadmap "Warnings"; spec 13 "Warnings", 5.1, 8.1; decision 2026-11-12 "warnings for code that does nothing"). Done and reviewed (`docs/reviews/warnings.md`: ready to merge; suggestions 1, 2 and 4 done, note 3 is question 118).
+- **Branch:** `warnings`, from `main` at `12f1ae1`, with `main` merged in again for the review. 2943 compiler tests pass plus 36 CPU tests. No benchmark changed (1254 / 350780); `SkillTests` pass (one skill output rewritten, see below).
+- **Next step:** `/merge warnings`. After this: `implements`, encodings, M24.
 
 ## Done
+
+- **Warnings, first review** (2026-11-12, `docs/reviews/warnings.md`): ready to merge.
+  - Suggestion 1: the unreachable warning points at the first token of an assignment target (`buf` in `buf[1] = 2`, `pt` in `pt.a = 2`) and at the word `asm` of an asm block (`AsmStmt.KeywordPos`; the block's own position stays its `{`, so asm errors are unchanged).
+  - Suggestion 2: the report writes "1 byte" for one.
+  - Suggestion 4: an unused `for` variable is reported at its name (`ForStmt.VariablePos`). The skill's `tidy.tern` output moved from 10:5 to 10:9.
+  - Note 3 (`for _` slower than `for i`): question 118.
 
 - **Warnings** (2026-11-12, branch `warnings`). Five commits.
   - *The analysis* (`a9a88d9`, `Semantics/Checker.Warnings.cs`). `Lookup` records every top-level symbol it resolves (`_named`; a generator's bound names too), and each file's imports it names something of (`_usedImports`). Main-file names used in module parameter values (checked in a copy of the main file) are kept by name. After the checks find no error, `FindWarnings`:
@@ -554,7 +560,7 @@ Including `jsr` and `rts`; from the tests.
 ## Known limitations and technical debt
 
 - Warnings: a `for _` loop can be slower than the same loop with a named counter: `for _ in 9..=0 step -1 { n += 1 }` takes 107 cycles, `for i in ...` 83, since the optimizer keeps `n` in Y across the loop only with a named counter (the `_` loop counts down with `dex`/`bne` and does `inc n` each pass). The skill's `flow.tern` went from 802 to 826 cycles when its unread counters became `_`. For the optimizer.
-- Warnings: an unused `for` variable is reported at the `for` keyword, an unused import at the module name.
+- Warnings: an unused import is reported at the module name.
 - M23: after an error in a `for` or `match` header, its body is not checked (an `if`/`while` body is). An error in an `asm` block, `match` arm, struct or memory block skips the rest of it: one error each.
 - M23: after an unclosed `(` or `[`, the lines of the statement that start further right than it are skipped with it (the lexer gives no line breaks inside brackets).
 - M23: a function whose signature has an error is not checked; its body's errors appear once the signature is fixed.
@@ -615,6 +621,8 @@ Not bugs; things to improve, mostly in M7 (optimizer).
 - `w = addr(map) - 1` (or `+`) into a 16-bit variable stores `addr(map)` and then subtracts at run time; `CodeGen.AddressBytes` could make it two `lda #` / `sta` pairs, as it already does for `.lo` / `.hi`.
 
 ## Questions for the spec session
+
+Question 118 (review Warnings, note 3): the warning for an unused `for` variable says "Write '_'", but `for _` can be slower: `for _ in 9..=0 step -1 { n += 1 }` takes the "repeat n times" path (`ldx #10` / `inc n` / `dex` / `bne`, 8 bytes, 107 cycles), while `for i` keeps `n` in Y (`ldy n` / `iny` / `dex` / `bpl` / `sty n`, 11 bytes, 83 cycles). Should the repeat path also hold a variable in the free index register? Spec 11 rule 4 ("match it or be shorter") allows the shorter, slower code, so the trade-off needs a decision. Not caused by this branch.
 
 Questions 114-117 (Warnings, provisional, built as described):
 - **114:** a compound assignment (`x += 1`) is a write, not a read, so a local only changed that way is unused (as Rust warns). Spec 13 says "never read"; `x += 1` reads `x` to compute the new value, but nothing reads the result.

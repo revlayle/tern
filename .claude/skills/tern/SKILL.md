@@ -186,7 +186,7 @@ fn main() {
 tidy.tern:2:8: warning: 'text' is imported but not used. Remove the import
 tidy.tern:6:1: warning: 'old_draw' is never used. Remove it, or start its name with '_' to keep it
 tidy.tern:9:5: warning: 'temp' is never used. Remove it, or start its name with '_' to keep it
-tidy.tern:10:5: warning: 'i' is never used. Write '_' as the loop variable
+tidy.tern:10:9: warning: 'i' is never used. Write '_' as the loop variable
 tidy.tern:12:5: warning: This statement is never reached, since the 'return' on line 11 ends the function. Remove it
 5 warnings
 ...

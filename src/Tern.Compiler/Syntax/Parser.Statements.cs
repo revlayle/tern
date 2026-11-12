@@ -109,8 +109,12 @@ public sealed partial class Parser
             case TokenKind.Inline:
                 throw new CompileError(Current.Pos, "'inline fn' must be declared outside functions. Move it to the top level of the file");
             case TokenKind.Asm:
-                Advance();
-                return ParseAsmBody();
+            {
+                var keyword = Advance().Pos;
+                var block = ParseAsmBody();
+                block.KeywordPos = keyword;
+                return block;
+            }
         }
         var expr = ParseExpr();
         if (Current.Kind is TokenKind.Eq or TokenKind.PlusEq or TokenKind.MinusEq or TokenKind.AmpEq
@@ -220,7 +224,7 @@ public sealed partial class Parser
         }
         Register? reg = Accept(TokenKind.Using) ? ParseRegister() : null;
         var body = ParseBlock();
-        return new ForStmt(start.Pos, name.Text == "_" ? null : name.Text, from, to, inclusive, step, reg, body) { RangeText = range };
+        return new ForStmt(start.Pos, name.Text == "_" ? null : name.Text, from, to, inclusive, step, reg, body) { RangeText = range, VariablePos = name.Pos };
     }
 
     // ---------- Assembly ----------

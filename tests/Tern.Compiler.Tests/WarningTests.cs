@@ -419,6 +419,43 @@ public sealed class WarningTests : IDisposable
             """));
     }
 
+    // Review Warnings, findings 1 and 4: a warning points at the start of the statement, and at the loop variable.
+    [Theory]
+    [InlineData("    n = 2", 5)]
+    [InlineData("    buf[1] = 2", 5)]
+    [InlineData("    pt.a = 2", 5)]
+    [InlineData("    buf[pt.a].lo = 2", 5)]
+    [InlineData("    asm { nop }", 5)]
+    [InlineData("    f()", 5)]
+    public void An_unreachable_statement_is_reported_at_its_start(string statement, int column)
+    {
+        // Other names of the program may be unused; the statement's warning is the one on line 8.
+        var w = Assert.Single(Compile($$"""
+            struct P { a: u8 }
+            var pt: P
+            var n: u8
+            var buf: [u16; 4]
+            fn f() { }
+            fn main() {
+                return
+            {{statement}}
+            }
+            """).Warnings, w => w.Pos.Line == 8);
+        Assert.Equal((8, column), (w.Pos.Line, w.Pos.Column));
+    }
+
+    [Fact]
+    public void An_unused_loop_variable_is_reported_at_its_name()
+    {
+        var w = Assert.Single(Compile("""
+            var n: u8
+            fn main() {
+                for count in 0..4 { n += 1 }
+            }
+            """).Warnings);
+        Assert.Equal((3, 9), (w.Pos.Line, w.Pos.Column));
+    }
+
     [Fact]
     public void A_break_of_an_inner_loop_does_not_end_while_true()
     {
@@ -465,7 +502,7 @@ public sealed class WarningTests : IDisposable
             """).Report.Split('\n').Select(l => l.TrimEnd('\r')).ToList();
         int at = report.IndexOf("Functions with memory reachable from two roots:");
         Assert.True(at >= 0, string.Join("\n", report));
-        Assert.Equal("  f (1 bytes): main, h1, h2", report[at + 1]);
+        Assert.Equal("  f (1 byte): main, h1, h2", report[at + 1]);
         Assert.Equal("Zero page:", report[at + 2]);
 
         Assert.DoesNotContain("two roots", TernCompiler.Compile("fn main() { }").Report);
