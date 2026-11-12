@@ -215,7 +215,10 @@ e.pos.y = 5                        // ldy #1 / sta (e),y
 - Following a pointer field, as in `e.next.hp`, first copies the pointer into a zero-page temporary, then reads through it.
 - Through a pointer, a field's offset must be 0-255, since that is what `(p),Y` reaches. A larger offset is an error at the access, not at the declaration, since the struct may still be used as a variable or at a fixed address.
 - **Array fields** such as `name: [u8; 8]` work normally in a single struct (`player.name[i]` is `lda player+off,x`). Through a pointer, the index and the field offset are added: `lda i` / `clc` / `adc #off` / `tay` / `lda (e),y`. Array fields with 16-bit elements are split inside the record, as in 3.2: `pts: [u16; 2]` is two low bytes, then two high bytes.
-- Array fields whose elements are structs (`parts: [Point; 4]`) are not supported yet (14.11).
+- **Array fields whose elements are structs** (`parts: [Point; 4]`; planned, decision 2026-11-12; until built, "not supported yet"):
+  - Stored as one table per byte of the element inside the record, as arrays of structs are (below): `parts: [Point; 4]` is four `x` bytes, then four `y` bytes. On a struct variable `boss.parts[i].x` is `lda boss+off,x`; through a pointer the index and offset are added, as for array fields above; inside an array of structs the index must be a constant, as for array fields there.
+  - `linear parts: [Point; 4]` stores whole elements one after another, for hardware layouts such as interleaved x/y registers. A constant index is a fixed offset; a variable index needs an element size of 1, 2, 4 or 8 (a shift), otherwise it is an error that suggests padding the struct with `_` fields, as for `linear` arrays.
+  - `addr()` of such a field works where it does for other array fields.
 - **Struct literals in initial values.** A global struct variable, a global array of structs and `data` may have an initial value written as struct literals: the struct's name, then `field = value` for each field to set, in any order. Fields not listed are 0.
   ```
   struct Point { x: u8, y: u8 }
@@ -1150,5 +1153,5 @@ Each item is decided when the feature it belongs to is built.
 8. **Language name.** "Tern" is kept for now (2026-11-02). Rejected: "Moss"/"Mossy" (after MOS Technology), since "Moss" is already the name of several small languages and of Stanford's MOSS plagiarism checker.
 9. **`data` at a fixed address.** Settled 2026-11-02: section 8.4.
 10. **Fixed-address RAM that is not volatile.** Settled 2026-11-02: platform volatile areas plus a `volatile` keyword (section 4).
-11. **Arrays of structs as struct fields** (`parts: [Point; 4]`, or the VIC's interleaved sprite x/y). Not supported yet; a limited form is wanted eventually. Discuss after a first complete version. Notes so far: a constant index is always a fixed offset; stored as tables inside the record, a variable index costs nothing extra; a `linear` field (needed for hardware layouts) could allow a variable index only when the element size is 2, 4 or 8 (a shift, as for 16-bit pointers).
+11. **Arrays of structs as struct fields.** Settled 2026-11-12: section 3.3 (array fields). Built after the first release, or when a program needs it.
 12. **Memory layout declaration.** Settled 2026-11-02: sections 8.4 (memory layout), 8.5 (overlays) and 12.3 (programs without `main`).

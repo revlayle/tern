@@ -631,7 +631,7 @@ A draft from the spec session of 2026-11-12, to start from: `///` only right bef
 Each has a reason to wait; the spec session schedules one when that reason changes.
 
 - **Question 63 (b)** (deferred 2026-11-07): folding `a[i + c]` proved from another access (no benchmark needs it, and it makes one line's cost depend on another, rule 4). Reconsider when a real program needs it. F20 is rejected and F14 is replaced by `indexed match` (decision 2026-11-08).
-- **Arrays of structs as struct fields** (14.11): discussed after the first release. (Second copies of functions called from two roots, 14.2, are not planned: decision 2026-11-12.)
+- **Arrays of structs as struct fields** (spec 3.3, decision 2026-11-12): designed; built after the first release or when a program needs it. (Second copies of functions called from two roots, 14.2, are not planned: decision 2026-11-12.)
 - **`pha`/`pla` temporaries** (spec 14.3, decision 2026-11-12): first count, in the benchmarks and examples, the temporaries outside zero page that are saved from A and restored into A with no `jsr` or `asm` block between; build it with the optimizer work after M21 if there are enough.
 - **The `nmos6502+undoc` CPU variant** (spec 12.1, opt-in undocumented opcodes).
 - **65C816 native mode** (decision 2026-11-12): an exploration, after the first release is complete. 16-bit A, X and Y, a 24-bit address space and a movable direct page and stack would change types, code shapes and the memory model, so it starts with a spec session on what the language would need. Emulation mode needs nothing new: it runs the base 65C02 set (see the 65C02 analysis).
