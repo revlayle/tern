@@ -519,6 +519,19 @@ Done when: the tests pass and the skill's error examples match the new order.
 
 Decision 2026-11-12. The compiler reports errors only; it has no warnings. Before any are built, a spec session goes through the language and decides which, if any, there should be, checked against decision 2026-11-07 ("Tern trusts the programmer": deliberate but unusual code, such as a wrapping index, gets no warning). Candidates to weigh: unused variables, functions, constants and imports (the strongest candidate, per the developer: they cost nothing in the binary, since only reachable code is compiled (2.2), but they are code a developer wants to clean up; to settle, which declarations count, since a library module's unused public functions are normal, and how a declaration kept on purpose is marked), an empty constant range (`5..5`; spec 5.1 once promised a warning, never built), a value that never fits its type after constant folding, an unreachable statement. Also to settle: how a warning is shown and turned off, whether `tern --json` gives it as `"severity": "warning"`, and whether warnings can be made errors. The result is a milestone, or a decision to have none.
 
+## Overlay interfaces: `implements` (after the warnings analysis, before M24)
+
+Spec: 8.5 ("Interfaces: `implements`"). Decision 2026-11-12. Small; reuses the checks of `export` naming a module (M21).
+
+- `import m @ area implements i` (and `implements a, b`): a jump table at each routine's address, the module's code around it; the checks of 12.3; the call graph counts a call to an interface routine as a call to each implementation.
+- The errors listed in 8.5, each with a test.
+- An example: two levels as overlays implementing one interface, loaded in turn and called through it (`tern run`, and VICE).
+- The skill and guide mention `implements` next to overlays.
+
+Tests: calls through the interface reach the loaded overlay (load each in turn in the emulator); frames of the implementations are shared with other code; each check and error; a plain call next to an interface call.
+
+Done when: the tests and the example pass.
+
 ## M24: Floats as a library
 
 Decision 2026-11-08. A portable library module with a 4-byte format, built on `wide`; no language change. After M22, so `const fn` with `real` can build float constants and tables. Scope settled by a spec session before coding: the format (IEEE 754 single, or a layout closer to the 6502's needs, e.g. exponent byte plus 24-bit mantissa), the value type (a 4-byte struct), the operations (add, subtract, multiply, divide, compare, conversion to and from integers, to text), and how a `const fn` turns a `real` into the format's bytes.
@@ -548,7 +561,7 @@ Done when: an example draws text and hi-res graphics in an Apple II emulator (Ap
 
 ### M27: NES
 
-- Bank switching settled first (spec 14.1): `@ bank(n)`, calls between banks through generated stubs, a first mapper (likely NROM, then UxROM or MMC1)
+- Bank switching (spec 14.1, direction settled 2026-11-12): the overlay model with banks placed on the import, plain calls, `implements`; the spec session settles the bank area syntax and a first mapper (likely NROM, then UxROM or MMC1)
 - iNES output; 2 KB of RAM, so frame sharing and zero page matter most; PPU and APU register structs; NMI-driven frame loop; user-defined encodings for tiles (14.5)
 
 Done when: an example scrolls a background and moves sprites in a NES emulator (Mesen), with code in more than one bank.
