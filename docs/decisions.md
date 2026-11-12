@@ -662,3 +662,4 @@ Spec 4.1 left these open; settled before M22's coding session.
 ## 2026-11-12: a 65C02 analysis before M28
 
 - **A spec session analyses 65C02 support before M28** (roadmap, "65C02: analysis"), before any work on the Commander X16 library. Reason (the developer's): the X16 depends on the 65C02, and how far the compiler goes with it (which variants, code shapes per variant, testing CPU and platform separately, variant-specific library code) should be settled first. Not now: it is a later analysis, like the warnings one. The roadmap keeps the spec session's first notes as a starting point, not decisions.
+- **65C816 native mode: explored later, after the first release is complete** (roadmap, Not scheduled). Reason (the developer's): it could be useful, but its 16-bit registers and 24-bit addresses would change the language, so it waits until v1.0 is done. The 65C02 analysis keeps the X16's 65C816 in view only as a chip running 65C02 code.
