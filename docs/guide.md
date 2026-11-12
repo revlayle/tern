@@ -34,7 +34,9 @@ For `game.tern` the compiler writes, next to the source (or the `-o` path):
 | `game_api.tern` | Only for a binary without `main`, or a program with an export table (section 3.11): the module others import |
 | `level1.prg`, ... | One file per overlay module (section 3.12), named after the module |
 
-It also prints a report: where code and variables went, and the zero-page map. Errors look like `game.tern:12:5: error: ...` and say how to fix the problem. `tern --json game.tern` gives the same result as JSON, for editors and coding agents: each diagnostic has its file, line, column, message, the fix as `suggestion`, and `calledFrom` for an error inside compile-time code (3.14). `tern run` and `tern bench` run a program in the built-in emulator (7.11).
+It also prints a report: where code and variables went, the zero-page map, and the functions whose memory is reachable from two roots (main and an interrupt handler). Errors look like `game.tern:12:5: error: ...` and say how to fix the problem. `tern --json game.tern` gives the same result as JSON, for editors and coding agents: each diagnostic has its file, line, column, message, the fix as `suggestion`, and `calledFrom` for an error inside compile-time code (3.14). `tern run` and `tern bench` run a program in the built-in emulator (7.11).
+
+The compiler also warns about code that does nothing: an unused local, an unused private or main-file declaration, an unused import, and a statement that is never reached (`game.tern:9:5: warning: 'temp' is never used. ...`). Code that runs is never warned about, however unusual. Warnings do not stop the build. To keep something unused on purpose, start its name with `_` (`fn _debug_dump()`); for a loop counter you do not read, write `for _ in ...`, which is never slower than a named counter. `--no-warnings` turns them off, `--warnings-as-errors` makes them errors (for CI); both work with `tern run` too, and `--json` reports them with `"severity": "warning"`.
 
 Run the result in VICE:
 
@@ -996,7 +998,7 @@ The compiler never unrolls a loop by itself. When a loop must finish within a fr
 
 | Version | Bytes | Cycles |
 |---|--:|--:|
-| `cycle_plain`: loops over rows and columns, through a pointer | 66 | 29,537 |
+| `_cycle_plain`: loops over rows and columns, through a pointer (kept for comparison; main does not call it, hence the `_`) | 66 | 29,537 |
 | `cycle_unrolled`: a generator, one `lda` / `sta` pair per row in one column loop | 422 | 8,697 |
 
 A PAL frame leaves the CPU about 19,000 cycles, so only the unrolled version moves the colours every frame, for 356 more bytes. Unroll only what must be fast: the bytes grow with every row. A branch reaches at most 128 bytes back, so the example emits a column loop for each group of up to 20 rows.
@@ -1035,8 +1037,8 @@ tern run game.tern --profile                      // the cycles of each function
 
 ### Next
 
-- **Several errors per compile** (M23): one run reports every error it finds, not only the first (`--max-errors n` to stop after `n`).
-- **Warnings for code that does nothing**: an unused local, private declaration, main-file declaration or import, and a statement that is never reached. Code that runs is never warned about, however unusual. Start a name with `_` to keep it unused on purpose; `--no-warnings` and `--warnings-as-errors` turn them off or make them errors.
+- **Overlay interfaces** (`implements`): overlays that provide the same routines, called through one interface whichever is loaded.
+- **Encodings declared by the program**: your own character mapping for string literals, beside `screen` and `petscii`.
 
 ### Later highlights
 

@@ -533,7 +533,18 @@ Tests (`WarningTests`): each warning and each case that is not warned (above, pl
 
 Done when: the tests pass, and the examples, library and skill compile with no warnings.
 
-## Overlay interfaces: `implements` (after warnings, before M24)
+## `for _` follow-up (after warnings, before `implements`)
+
+Spec: 5.1 (`_` as the loop variable), 11. Decision 2026-11-12 (question 118). No language change; code generator only.
+
+- A `for _` loop is never slower than the same loop with a named counter the body does not read. Today the repeat path (`ldx #10` … `dex` / `bne`) does not hold a variable in the free index register across the loop, as the named-counter path does: `for _ in 9..=0 step -1 { n += 1 }` takes 107 cycles, `for i in ...` 83 (`ldy n` … `iny` … `sty n`). The repeat path holds a variable under the same conditions as the named path, or uses the named path's code where that is faster.
+- The spec 11 row `for _ in 0..10` (`ldx #10` … `dex` / `bne loop`) stays the shape when nothing is held.
+
+Tests: for each `for _` form (constant count, variable count, counting up and down, a count of 0 and 256 where the range allows), the loop and its named twin give the same memory, and the `_` loop takes no more cycles; a listing test for the example above; the skill's `flow.tern` back to at most its 802 cycles from before its counters became `_`. Benchmark and skill outputs rewritten in the same commit if they move.
+
+Done when: the tests pass.
+
+## Overlay interfaces: `implements` (after the `for _` follow-up, before M24)
 
 Spec: 8.5 ("Interfaces: `implements`"). Decision 2026-11-12. Small; reuses the checks of `export` naming a module (M21).
 
