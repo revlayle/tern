@@ -1036,6 +1036,7 @@ tern run game.tern --profile                      // the cycles of each function
 ### Next
 
 - **Several errors per compile** (M23): one run reports every error it finds, not only the first (`--max-errors n` to stop after `n`).
+- **Warnings for code that does nothing**: an unused local, private declaration, main-file declaration or import, and a statement that is never reached. Code that runs is never warned about, however unusual. Start a name with `_` to keep it unused on purpose; `--no-warnings` and `--warnings-as-errors` turn them off or make them errors.
 
 ### Later highlights
 

@@ -504,7 +504,7 @@ Tests: a program with errors in several statements, functions and modules report
 
 Done when: the tests above pass, every error test's first error is unchanged, and the errors without a fix sentence are fixed or listed.
 
-## M23 follow-up (before the warnings analysis)
+## M23 follow-up (before warnings)
 
 Spec: 13. Decision 2026-11-12 (M23 questions 107-111). On a branch from `main`.
 
@@ -517,11 +517,23 @@ Tests: in `SeveralErrorsTests`, the order for errors found out of source order (
 
 Done when: the tests pass and the skill's error examples match the new order.
 
-## Warnings: analysis (spec session, after M23)
+## Warnings (after the M23 follow-up, before `implements`)
 
-Decision 2026-11-12. The compiler reports errors only; it has no warnings. Before any are built, a spec session goes through the language and decides which, if any, there should be, checked against decision 2026-11-07 ("Tern trusts the programmer": deliberate but unusual code, such as a wrapping index, gets no warning). Candidates to weigh: unused variables, functions, constants and imports (the strongest candidate, per the developer: they cost nothing in the binary, since only reachable code is compiled (2.2), but they are code a developer wants to clean up; to settle, which declarations count, since a library module's unused public functions are normal, and how a declaration kept on purpose is marked), an empty constant range (`5..5`; spec 5.1 once promised a warning, never built), a value that never fits its type after constant folding, an unreachable statement. Also to settle: how a warning is shown and turned off, whether `tern --json` gives it as `"severity": "warning"`, and whether warnings can be made errors. The result is a milestone, or a decision to have none.
+Spec: 13 ("Warnings"), 5.1, 8.1. Decision 2026-11-12 ("warnings for code that does nothing"). No language change; front end and tools.
 
-## Overlay interfaces: `implements` (after the warnings analysis, before M24)
+- **The four warnings** of spec 13: an unused local (a `for` variable too, with "Write '_' as the loop variable"), an unused `private` declaration of a module or top-level declaration of the main file, an unused import (not one that sets module parameters), an unreachable statement (one per block). Uses are counted in Tern code and assembly operands, in any function, reachable or not. Names starting with `_`, `main`, exports, fixed-address globals of the main file, parameters, fields, module parameters, `pub` declarations and library modules are never warned.
+- Each message says what is unused or unreached, then a fix sentence starting with a verb from `Diagnostic.FixVerbs`.
+- Reported only when the checks found no error; sorted by place with later errors. Text `warning:` and the summary "1 error, 2 warnings"; `tern --json` with `"severity": "warning"`, `ok` true with only warnings. `--max-errors` counts errors only.
+- `--no-warnings`, `--warnings-as-errors` (each warning reported and counted as an error, the build stops), both together an error. `tern run` reports warnings; `tern bench` does not.
+- **The report lists functions with memory reachable from two roots** (spec 8.1), with their roots.
+- **Clean the repository:** examples, `src/lib` (with warnings turned on for it in a test, though users never see them) and the skill's examples compile with no warnings; a warning that shows deliberate code gets a `_` name or a change, not a switch.
+- The skill says what each warning means and that `_` keeps a name; the guide (spec session) mentions them.
+
+Tests (`WarningTests`): each warning and each case that is not warned (above, plus `0..COUNT` with `COUNT` 0, `if DEBUG { return }` followed by code, a `break` of an inner loop under `while true`, an `asm` block before the next statement); a name used only in assembly; a variable only written; a function used only by an unused function (one warning, then one for the callee after removing it); no warnings with a check error, warnings with an allocation error; the order with errors; `--json` severity and `ok`; both switches and the error for both; `tern run` and `tern bench` output; the report's two-roots list.
+
+Done when: the tests pass, and the examples, library and skill compile with no warnings.
+
+## Overlay interfaces: `implements` (after warnings, before M24)
 
 Spec: 8.5 ("Interfaces: `implements`"). Decision 2026-11-12. Small; reuses the checks of `export` naming a module (M21).
 
