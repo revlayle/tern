@@ -132,9 +132,9 @@ public sealed class SeveralErrorsTests : IDisposable
     }
 
     [Fact]
-    public void A_misspelled_function_name_in_its_declaration_gives_one_error()
+    public void A_misspelled_function_name_in_its_declaration_gives_an_error_at_every_call()
     {
-        // The calls use the right name: it is reported at the first call, not at every call.
+        // Decision 107: the compiler cannot know whether the declaration or the calls are wrong.
         var errors = Errors("""
             var n: u8
             fn updte() { n += 1 }
@@ -144,11 +144,11 @@ public sealed class SeveralErrorsTests : IDisposable
                 if n > 3 { update() }
             }
             """);
-        Assert.Equal(["4: 'update' is not a function"], errors);
+        Assert.Equal(["4: 'update' is not a function", "5: 'update' is not a function", "6: 'update' is not a function"], errors);
     }
 
     [Fact]
-    public void A_name_that_is_not_declared_is_reported_once()
+    public void A_name_that_is_not_declared_is_reported_at_every_use()
     {
         var errors = Errors("""
             var b: u8
@@ -158,7 +158,27 @@ public sealed class SeveralErrorsTests : IDisposable
             }
             fn other() { b = cnt + 1 }
             """);
-        Assert.Equal(["3: 'cnt' is not declared"], errors);
+        Assert.Equal(["3: 'cnt' is not declared", "4: 'cnt' is not declared", "6: 'cnt' is not declared"], errors);
+    }
+
+    [Fact]
+    public void An_undeclared_type_or_module_member_is_reported_at_every_use()
+    {
+        var errors = Errors("""
+            import util
+            fn main() {
+                var a: Pos
+                var b: Pos
+                util.nope()
+                util.nope()
+            }
+            """, modules: ("util", "fn go() { }\n"));
+        Assert.Equal([
+            "3: Unknown type 'Pos'",
+            "4: Unknown type 'Pos'",
+            "5: 'util.nope' is not declared",
+            "6: 'util.nope' is not declared",
+        ], errors);
     }
 
     [Fact]
@@ -409,7 +429,7 @@ public sealed class SeveralErrorsTests : IDisposable
     }
 
     [Fact]
-    public void A_missing_import_is_reported_once()
+    public void A_missing_import_is_reported_at_every_use()
     {
         var errors = Errors("""
             fn main() {
@@ -417,7 +437,7 @@ public sealed class SeveralErrorsTests : IDisposable
                 text.put('B')
             }
             """);
-        Assert.Equal(["2: 'text' is not declared"], errors);
+        Assert.Equal(["2: 'text' is not declared", "3: 'text' is not declared"], errors);
     }
 
     [Fact]

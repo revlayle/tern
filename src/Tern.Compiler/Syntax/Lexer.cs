@@ -25,9 +25,6 @@ public sealed class CompileError(SourcePos pos, string message) : Exception($"{p
 
     /// <summary><c>--max-errors</c> stopped the compile: more errors were not reported.</summary>
     public bool MoreNotReported { get; internal set; }
-
-    /// <summary>For "'x' is not declared": the name, so its later uses in the module add no errors.</summary>
-    internal string? Undeclared { get; init; }
 }
 
 public enum TokenKind

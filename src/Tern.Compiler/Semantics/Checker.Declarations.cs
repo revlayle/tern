@@ -143,7 +143,7 @@ public sealed partial class Checker
         if (_module.Imports.ContainsKey(name))
             return new CompileError(pos, $"'{name}' is a module; use the names in it as {name}.name");
         int dot = name.IndexOf('.');
-        if (dot <= 0) return new CompileError(pos, $"'{name}' is not declared. Check the spelling, or declare it") { Undeclared = name };
+        if (dot <= 0) return new CompileError(pos, $"'{name}' is not declared. Check the spelling, or declare it");
         // s.a() where s is declared: a field or member, not a function in a module.
         switch (Lookup(name[..dot]))
         {
@@ -179,7 +179,7 @@ public sealed partial class Checker
 
     /// <summary><c>text.put</c> where <c>text</c> is not declared: most likely a missing import.</summary>
     private static CompileError MissingImport(string module, SourcePos pos) =>
-        new(pos, $"'{module}' is not declared. Add 'import {module}' at the top of the file to use the module {module}") { Undeclared = module };
+        new(pos, $"'{module}' is not declared. Add 'import {module}' at the top of the file to use the module {module}");
 
     /// <summary>Reports <c>name.member</c> where <c>name</c> is not declared as a missing import.</summary>
     private void CheckMemberTarget(MemberExpr m)
