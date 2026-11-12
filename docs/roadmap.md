@@ -534,6 +534,18 @@ Tests: calls through the interface reach the loaded overlay (load each in turn i
 
 Done when: the tests and the example pass.
 
+## Encodings declared by the program (before M24)
+
+Spec: 2.1 ("Encodings declared by the program"). Decision 2026-11-12. Small; front end only.
+
+- `encoding name { ... }` with single characters and ranges, `encoding name: base { ... }`, `pub encoding` and `module.name` prefixes, `default encoding name` in the main file (program files only, not library modules).
+- Errors: a character listed twice, a range past `$FF`, an unknown base, a second `default encoding` line, `default encoding` outside the main file, a character the encoding lacks (suggesting `\$NN`), `\n` not mapped.
+- An example: a C64 program with its own character set and an encoding for it.
+
+Tests: bytes of strings and chars in a declared encoding (ranges, a base with changes, a non-ASCII character), a qualified prefix, the default in the main file and a program module but not in a library module, each error.
+
+Done when: the tests and the example pass.
+
 ## M24: Floats as a library
 
 Decision 2026-11-08. A portable library module with a 4-byte format, built on `wide`; no language change. After M22, so `const fn` with `real` can build float constants and tables. Scope settled by a spec session before coding: the format (IEEE 754 single, or a layout closer to the 6502's needs, e.g. exponent byte plus 24-bit mantissa), the value type (a 4-byte struct), the operations (add, subtract, multiply, divide, compare, conversion to and from integers, to text), and how a `const fn` turns a `real` into the format's bytes.
@@ -546,6 +558,7 @@ In this order (decision 2026-11-07; renumbered 2026-11-08). Each starts with a s
 
 ### M25: Atari 8-bit
 
+- `--target` (spec 12.2, decision 2026-11-12): required on `tern`, `tern run` and `tern bench` once the Atari exists; scripts, tests' command lines, the skill and the guide name `--target c64`
 - Platform description: memory map, free zero page, volatile areas (hardware registers, OS variables), ATASCII and screen-code encodings
 - `.xex` output (load segments, run address); the `memory` block's areas map to segments
 - `lib/atari`: OS routines (CIO) as routines at a fixed address; register structs for ANTIC, GTIA, POKEY, PIA; display lists; VBI and DLI handlers through the OS vectors
@@ -564,7 +577,7 @@ Done when: an example draws text and hi-res graphics in an Apple II emulator (Ap
 ### M27: NES
 
 - Bank switching (spec 14.1, direction settled 2026-11-12): the overlay model with banks placed on the import, plain calls, `implements`; the spec session settles the bank area syntax and a first mapper (likely NROM, then UxROM or MMC1)
-- iNES output; 2 KB of RAM, so frame sharing and zero page matter most; PPU and APU register structs; NMI-driven frame loop; user-defined encodings for tiles (14.5)
+- iNES output; 2 KB of RAM, so frame sharing and zero page matter most; PPU and APU register structs; NMI-driven frame loop; no default encoding, so examples declare one (`encoding`, `default encoding`, spec 2.1)
 
 Done when: an example scrolls a background and moves sprites in a NES emulator (Mesen), with code in more than one bank.
 

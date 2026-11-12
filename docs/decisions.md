@@ -690,6 +690,12 @@ Spec 4.1 left these open; settled before M22's coding session.
 - **Unchanged:** a module's `private` variable used from two roots stays an error (8.1), with its exception for the module's own handler; globals used from two roots are volatile.
 - To weigh in the warnings analysis: a warning, which the developer can turn off, for a function with memory reached from two roots.
 
+## 2026-11-12: encodings declared by the program; the build names its target (spec 14.5)
+
+- **`encoding name { 'c' = $NN, 'a'..='z' = $NN }`**, optionally based on another (`encoding hud: screen { ... }`); the name is a literal prefix like a built-in one, and `pub encoding` is used as `module.name"..."` (spec 2.1). Reason: the NES has no character set and C64 games with their own fonts move digits and letters; today they write `\$NN` or build tables by hand. A declaration keeps text readable at no run-time cost. `encoding` and `default` are words only in their places, like `step` and `emit`.
+- **`default encoding name` in the main file** sets the encoding of unprefixed literals in the program's own files, on any target. Reason (the developer's): the target decides the default, and where a platform has none, providing one is the developer's job; allowed on the C64 too, for a game whose font replaces PETSCII everywhere. Library modules keep the platform's default, so a program's line cannot change a library's text.
+- **The build names its target**: `tern --target <platform>`, required once a second platform exists (M25), for `tern`, `tern run` and `tern bench`. Reason (the developer's): a build is for one platform (decision 2026-11-09), and with several platforms the command should say which, rather than default to the C64.
+
 ## 2026-11-12: `pha`/`pla` temporaries are an optimizer choice (spec 14.3)
 
 - **The optimizer may keep a temporary on the stack** when it is saved from A and restored into A with no `jsr` or `asm` block between, and the temporary would otherwise be outside zero page (2 bytes and 7 cycles against 6 and 8: better in both). A zero-page temporary stays (4 bytes and 6 cycles: 1 cycle faster). Reason (the developer's): it is an optimization, not something the language asks of the developer, so no syntax and no rule a program can see. A stack temporary also cannot be overwritten by an interrupt, which matters more now that functions may be shared with handlers. Built only if a count of the pattern in the benchmarks and examples shows enough cases; otherwise closed with the numbers.

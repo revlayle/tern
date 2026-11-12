@@ -67,7 +67,28 @@ A string literal is only an initial value, of `data` or of a global array. It is
 | `atascii` | Atari 8-bit | Default on the Atari |
 | `atari_screen` | Atari 8-bit | Atari internal screen codes |
 
-Each encoding is implemented together with its platform. The NES has no character set (text is tile numbers chosen by each game), so it has no default encoding: a literal without a prefix is an error there. User-defined encodings are planned (14.5).
+Each encoding is implemented together with its platform. The NES has no character set (text is tile numbers chosen by each game), so it has no default encoding: the program declares one (below).
+
+**Encodings declared by the program** (planned; decision 2026-11-12). A game with its own character set, on the C64 or the NES, declares which byte each character is. The name is then a prefix like a built-in one:
+
+```
+encoding tiles {
+    '0'..='9' = $00          // a range: consecutive bytes from the one given
+    'A'..='Z' = $0A
+    ' '       = $24
+    '♥'       = $25
+}
+
+data SCORE = tiles"SCORE 00"
+screen[i] = tiles'0' + digit
+```
+
+- **Based on another encoding:** `encoding hud: screen { '♥' = $53 }` starts from `screen` (built-in or declared) and changes or adds the characters listed.
+- The rules of built-in encodings apply: a character with no code is an error that suggests `\$NN`; `\n` is an error unless the encoding maps `'\n'`; `\$NN` is a raw byte. A character listed twice, or a range whose bytes pass `$FF`, is an error. Two characters may have the same byte.
+- A module's `pub encoding` is used with the module's name: `font.tiles"HI"`, so a font and its encoding can live in one module.
+- **The program's default:** `default encoding tiles` (or `font.tiles`) in the main file makes it the encoding of literals without a prefix, in the main file and the program's own modules, on any target; at most one such line. Library modules always use the platform's default (on a platform without one they write a prefix on every literal), so a program's default never changes a library's text. On a platform with no default encoding, a literal without a prefix and no `default encoding` line is an error that says to declare one.
+- `encoding` is a word only at the start of a top-level declaration (after `pub`), and `default` only before `encoding`; elsewhere both are ordinary names, as `step` and `emit` are (13).
+- Everything happens at compile time; the encoding takes no memory.
 
 ### 2.2 Modules and imports
 
@@ -1025,7 +1046,9 @@ These are the intended translations. The optimizer may produce something shorter
 
 ### 12.2 Platforms
 
-A platform description gives: CPU variant, free zero-page ranges, RAM ranges for variables, volatile areas (4), code start address, output file format, startup code, and the default character encoding (2.1).
+A platform description gives: CPU variant, free zero-page ranges, RAM ranges for variables, volatile areas (4), code start address, output file format, startup code, and the default character encoding (2.1), if it has one.
+
+**The build names its target** (decision 2026-11-12): `tern --target c64 game.tern`, and the same for `tern run` and `tern bench`. Once a second platform exists (M25) the switch is required; until then every build is for the C64. The target decides the platform's library modules (2.2) and the default encoding.
 
 **C64 (first platform)**
 
@@ -1121,7 +1144,7 @@ Each item is decided when the feature it belongs to is built.
 2. **Functions called from both main and interrupts.** Settled 2026-11-12: allowed, with one frame shared by both roots (8.1); the compiler makes no copy per root and gives no error. Keeping an interrupt from running the function while main is inside it is the program's responsibility; the developer guide explains the risk and the ways to avoid it.
 3. **`pha`/`pla` for temporaries.** Settled 2026-11-12: an optimization, not a language rule. `pha`/`pla` is 2 bytes and 7 cycles, against 4 and 6 for a zero-page temporary and 6 and 8 for an absolute one. The optimizer may keep a temporary on the stack when it is saved from A and restored into A, with no `jsr` and no `asm` block between, and the temporary would otherwise be outside zero page; a zero-page temporary stays, being 1 cycle faster. A temporary used as an operand (`adc tmp`) cannot move to the stack. A stack temporary belongs to its call, so an interrupt cannot overwrite it (8.1). Built only if counting the pattern in the benchmarks and examples shows it is worth it.
 4. **Checks in debug builds.** Settled 2026-11-07: there is no check in the program. In test runs the built-in emulator reports a variable array index outside its array, with the source line, as a debugging aid (3.2); the program behaves the same with or without it. The run goes on after a bad index, so one run reports every bad access (counted per instruction). An `indexed match` value outside its span (5.2) is reported too and stops the run, since its jump lands on whatever bytes follow the tables. Arithmetic is not checked: it wraps by definition (3.1), and wrapping is often intended.
-5. **User-defined encodings,** e.g. for the NES, where each game decides which tile shows which character: a character-to-byte table declared in source. Built-in encodings are settled (2.1).
+5. **User-defined encodings.** Settled 2026-11-12: the `encoding` declaration and `default encoding` line (2.1).
 6. **`using` on local variables** (`var count: u8 using Y`). Not planned (2026-11-07). Loop counters and register parameters already go in registers, the optimizer removes reloads, and A, X and Y are needed by most expressions and indexing, so a local held in one would mostly produce errors; a hidden save and reload would break rule 1. The M17 analysis found no gap that needs it (its class 3 is empty): values held in registers across loops are an optimizer change (M18).
 7. **A general decorator syntax.** Only if modifier keywords grow past five or six.
 8. **Language name.** "Tern" is kept for now (2026-11-02). Rejected: "Moss"/"Mossy" (after MOS Technology), since "Moss" is already the name of several small languages and of Stanford's MOSS plagiarism checker.
