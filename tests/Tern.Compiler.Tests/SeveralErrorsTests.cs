@@ -66,6 +66,7 @@ public sealed class SeveralErrorsTests : IDisposable
     /// <summary>
     /// Errors found out of source order: the checker declares functions before globals and checks bodies last,
     /// the lexer and parser run before the checker, and modules are loaded while the main file is parsed.
+    /// zeta imports beta, so beta comes before alpha: the loader's order, depth first (decision 112).
     /// </summary>
     private List<string> OutOfOrderErrors(int? maxErrors = null) => Errors("""
         import zeta
@@ -77,7 +78,7 @@ public sealed class SeveralErrorsTests : IDisposable
             var x: u8 = true
             x = )
         }
-        """, maxErrors, ("zeta", "fn z() {\n    var a: u8 = 300\n    a = )\n}\n"), ("alpha", "var q: u8 = 'xy'\nvar r: Bad\n"));
+        """, maxErrors, ("zeta", "import beta\nfn z() {\n    var a: u8 = 300\n    a = )\n}\n"), ("alpha", "var q: u8 = 'xy'\nvar r: Bad\n"), ("beta", "var k: u8 = 999\n"));
 
     [Fact]
     public void Errors_are_sorted_by_place_main_file_first_then_modules_in_import_order()
@@ -88,8 +89,9 @@ public sealed class SeveralErrorsTests : IDisposable
             "6: Invalid digit '2' in number 0b12",
             "7: Expected u8, found bool",
             "8: Expected an expression, found ')'",
-            "zeta.tern:2: 300 does not fit in u8 (0 to 255)",
-            "zeta.tern:3: Expected an expression, found ')'",
+            "zeta.tern:3: 300 does not fit in u8 (0 to 255)",
+            "zeta.tern:4: Expected an expression, found ')'",
+            "beta.tern:1: 999 does not fit in u8 (0 to 255)",
             "alpha.tern:1: A character literal holds exactly one character",
             "alpha.tern:2: Unknown type 'Bad'",
         ], OutOfOrderErrors());
