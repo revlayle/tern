@@ -110,6 +110,31 @@ public sealed class WarningTests : IDisposable
     }
 
     [Fact]
+    public void An_asm_fns_var_line_and_a_const_fns_code_after_return_are_warned()
+    {
+        Assert.Equal([
+            "4: 'spare' is never used. Remove it, or start its name with '_' to keep it",
+            "11: 'y' is never used. Remove it, or start its name with '_' to keep it",
+            "11: This statement is never reached, since the 'return' on line 10 ends the function. Remove it",
+        ], Warnings("""
+            var out: u8
+            asm fn f(v: u8 using A) -> u8 {
+                var t: u8
+                var spare: u8
+                sta t
+                adc t
+                rts
+            }
+            const fn g(x: int) -> int {
+                return x
+                var y = 1
+            }
+            const K = g(2)
+            fn main() { out = f(K) }
+            """));
+    }
+
+    [Fact]
     public void A_name_used_only_in_assembly_is_used()
     {
         Assert.Empty(Warnings("""
@@ -477,6 +502,25 @@ public sealed class WarningTests : IDisposable
         Assert.Equal([true, false, true], e.WithWarnings.Select(x => x.IsWarning).ToList());
         Assert.Equal([2, e.Pos.Line, 7], e.WithWarnings.Select(x => x.Pos.Line).ToList());
         Assert.Single(e.All);
+    }
+
+    [Fact]
+    public void Warnings_come_with_an_allocation_error()
+    {
+        // Two bytes of zero page for four: the allocator's error, after the checks.
+        var e = Assert.Throws<CompileError>(() => Compile("""
+            memory {
+                $80..=$81 zeropage
+            }
+            var a: u16 @ zp
+            var b: u16 @ zp
+            fn main() {
+                var unused: u8 = 1
+                a = b
+            }
+            """));
+        Assert.Equal([false, true], e.WithWarnings.Select(x => x.IsWarning).ToList());
+        Assert.Equal(7, e.WithWarnings[1].Pos.Line);
     }
 
     [Fact]
