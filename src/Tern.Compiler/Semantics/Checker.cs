@@ -246,59 +246,6 @@ public sealed partial class Checker
     }
 
     /// <summary>The name of the root that stands for a binary's entries (spec 12.3); it has no code.</summary>
-    // ---------- Going on after an error (spec 13) ----------
-
-    /// <summary>Where errors go; null: the first error is thrown and checking stops.</summary>
-    private readonly ErrorList? _errors;
-    /// <summary>Functions whose declaration had an error: their bodies are not checked.</summary>
-    private readonly HashSet<FnDecl> _brokenFunctions = [];
-
-    /// <summary>
-    /// Runs the check of one declaration or statement. On an error, reports it and returns false, with
-    /// the checker's state as before; a use of a broken name (<see cref="FollowOnError"/>) is not reported.
-    /// A name reported as not declared is then declared in the file, so its other uses add no errors.
-    /// </summary>
-    private bool Recover(Action check)
-    {
-        if (_errors is null)
-        {
-            check();
-            return true;
-        }
-        var (module, function, loopDepth, dead, scopes, longBytes, listLength) = (_module, _function, _loopDepth, _dead, _scopes.Count, _allowLongBytes, _listLength);
-        var registers = _loopRegisters.ToList();
-        var loopMax = _loopMax.ToList();
-        try
-        {
-            check();
-            return true;
-        }
-        catch (CompileError e)
-        {
-            _errors.Add(e);
-            if (e.Undeclared is { } name && e.Pos.File == module.Path) module.Scope.TryAdd(name, new ErrorSymbol(name, e.Pos));
-        }
-        catch (FollowOnError) { }
-        (_module, _function, _loopDepth, _dead, _allowLongBytes, _listLength) = (module, function, loopDepth, dead, longBytes, listLength);
-        if (_scopes.Count > scopes) _scopes.RemoveRange(scopes, _scopes.Count - scopes);
-        _loopRegisters.Clear();
-        _loopRegisters.UnionWith(registers);
-        _loopMax.Clear();
-        foreach (var (v, max) in loopMax) _loopMax[v] = max;
-        return false;
-    }
-
-    /// <summary>
-    /// Runs the check of a top-level declaration of <paramref name="name"/>. After an error, the name
-    /// is broken: its uses add no errors. Not when the error was that another declaration has the name.
-    /// </summary>
-    private bool Declaring(string name, SourcePos pos, Action declare)
-    {
-        var module = _module;
-        if (Recover(declare)) return true;
-        if (!module.Scope.TryGetValue(name, out var s) || s.Pos == pos) module.Scope[name] = new ErrorSymbol(name, pos);
-        return false;
-    }
     private const string EntriesRoot = "(entries)";
 
     /// <summary>The functions named by <c>export</c> lines, in order. Each must be callable with registers alone.</summary>
@@ -437,5 +384,59 @@ public sealed partial class Checker
     {
         if (_binaryData.TryGetValue(v, out var own))
             throw new CompileError(pos, $"'{v.QualifiedName}' is this binary's data '{own}'. Use '{own}'");
+    }
+
+    // ---------- Going on after an error (spec 13) ----------
+
+    /// <summary>Where errors go; null: the first error is thrown and checking stops.</summary>
+    private readonly ErrorList? _errors;
+    /// <summary>Functions whose declaration had an error: their bodies are not checked.</summary>
+    private readonly HashSet<FnDecl> _brokenFunctions = [];
+
+    /// <summary>
+    /// Runs the check of one declaration or statement. On an error, reports it and returns false, with
+    /// the checker's state as before; a use of a broken name (<see cref="FollowOnError"/>) is not reported.
+    /// A name reported as not declared is then declared in the file, so its other uses add no errors.
+    /// </summary>
+    private bool Recover(Action check)
+    {
+        if (_errors is null)
+        {
+            check();
+            return true;
+        }
+        var (module, function, loopDepth, dead, scopes, longBytes, listLength) = (_module, _function, _loopDepth, _dead, _scopes.Count, _allowLongBytes, _listLength);
+        var registers = _loopRegisters.ToList();
+        var loopMax = _loopMax.ToList();
+        try
+        {
+            check();
+            return true;
+        }
+        catch (CompileError e)
+        {
+            _errors.Add(e);
+            if (e.Undeclared is { } name && e.Pos.File == module.Path) module.Scope.TryAdd(name, new ErrorSymbol(name, e.Pos));
+        }
+        catch (FollowOnError) { }
+        (_module, _function, _loopDepth, _dead, _allowLongBytes, _listLength) = (module, function, loopDepth, dead, longBytes, listLength);
+        if (_scopes.Count > scopes) _scopes.RemoveRange(scopes, _scopes.Count - scopes);
+        _loopRegisters.Clear();
+        _loopRegisters.UnionWith(registers);
+        _loopMax.Clear();
+        foreach (var (v, max) in loopMax) _loopMax[v] = max;
+        return false;
+    }
+
+    /// <summary>
+    /// Runs the check of a top-level declaration of <paramref name="name"/>. After an error, the name
+    /// is broken: its uses add no errors. Not when the error was that another declaration has the name.
+    /// </summary>
+    private bool Declaring(string name, SourcePos pos, Action declare)
+    {
+        var module = _module;
+        if (Recover(declare)) return true;
+        if (!module.Scope.TryGetValue(name, out var s) || s.Pos == pos) module.Scope[name] = new ErrorSymbol(name, pos);
+        return false;
     }
 }
