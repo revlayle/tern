@@ -1019,7 +1019,7 @@ tern run game.tern --profile                      // the cycles of each function
 
 ### Next
 
-- **Doc comments (`///`) and a language server** (M23) that shows errors, types and costs in your editor.
+- **Several errors per compile** (M23): one run reports every error it can, up to 20, not only the first.
 
 ### Later highlights
 
@@ -1027,12 +1027,14 @@ tern run game.tern --profile                      // the cycles of each function
 - **A full developer guide**, growing out of this one, with an example for each machine-level behavior.
 - Not scheduled yet: calls through function variables (`var handler: fn() targets [idle, walk]`), import paths with subfolders and aliases, `@ align(n)` placement, and a generator that also returns a value (such as the cycles of the code it emitted).
 
-### New platforms (last)
+### New platforms
 
 - Atari 8-bit
 - Apple II
 - NES, with ROM banks (`@ bank(n)`) and calls between banks
 - 65C02 CPU and the Commander X16
 - Commodore 128 in native mode, after the first release (C64 programs already run in its C64 mode)
+
+Last: **doc comments (`///`) and a language server** (M30) that shows errors, types and costs in your editor.
 
 Far off, after the compiler is complete: a standalone assembler extracted from Tern, with its generators, memory block and listing.

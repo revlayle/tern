@@ -489,10 +489,20 @@ Rules: move code only. No renames, no changes to logic, comments or formatting, 
 
 Done when: no source file in `src/` is over about 1,000 lines (a file may stay a little over if a section would otherwise be cut in half), all tests pass unchanged, and a review confirms the diff is moves only.
 
-## M23: Doc comments and a language server
+## M23: Several errors per compile
 
-- `///` doc comments before declarations, kept by the compiler.
-- A Tern language server (LSP): errors as you type (in the M19 JSON format), hover with the doc comment, type and cost (bytes, cycles where fixed), go to definition, e.g. showing that `set_irq` needs an `interrupt fn`.
+Spec: 13 ("Several errors per compile"). Decision 2026-11-12. No language change. Today the compiler stops at its first error.
+
+- **Parser:** after a syntax error, go on at the next statement at the same brace depth, or at the next top-level declaration. The coding session decides how lines inside `( )` and `[ ]` are skipped.
+- **Checker:** at most one error per statement or declaration, then go on. A name whose declaration failed (unknown type, bad initializer, bad signature) is declared with an error type that accepts every use, so it causes no follow-on errors.
+- Allocation, code generation and layout run only when the checks found no error; their errors stay one at a time.
+- At most 20 errors; past that, "more errors were not reported". Text output ends with the count ("3 errors"); `tern --json` keeps its format, with several entries in `diagnostics`. `tern run` and `tern bench` report the same list.
+- **Errors without a fix sentence:** a test runs every error test's message through `Diagnostic.Split` and lists those with no suggestion (e.g. "300 does not fit in u8 (0 to 255)"). Each gets a fix sentence, or is listed in the test as having none that helps, with the reason.
+- The skill says that `tern --json` lists several errors, so an agent can fix them in one pass.
+
+Tests: a program with errors in several statements, functions and modules reports each once; a misspelled type, a misspelled function name in its declaration and a bad initializer each give one error, with no follow-on errors at their uses; a syntax error followed by a type error reports both; 25 errors report 20 and the note; an allocation error is still reported alone. Every existing error test still gets its error first.
+
+Done when: the tests above pass, every error test's first error is unchanged, and the errors without a fix sentence are fixed or listed.
 
 ## M24: Floats as a library
 
@@ -551,6 +561,15 @@ Decision 2026-11-10. C64 programs already run on a C128 in C64 mode; this target
 - RAM bank 1 (128 KB) uses bank switching from the NES milestone (spec 14.1); it may be a follow-up
 
 Done when: the benchmarks and a sprite example build for the C128 and run in VICE's `x128`.
+
+### M30: Doc comments and a language server
+
+Decision 2026-11-12: the last milestone, after the platforms (was M23). Starts with a spec session that settles the design; its spec section is not written yet.
+
+- `///` doc comments before declarations, kept by the compiler.
+- A Tern language server (LSP): errors as you type (in the M19 JSON format, several per compile since M23), hover with the doc comment, type and cost (bytes, cycles where fixed), go to definition, e.g. showing that `set_irq` needs an `interrupt fn`.
+
+A draft from the spec session of 2026-11-12, to start from: `///` only right before a declaration or struct field (elsewhere, or with a blank line between, an error); a `///` block at the top of a file followed by a blank line documents the module; Markdown text, no `@param` tags; the library's comments become `///`. The server is `tern lsp` (stdio, no new NuGet package) with a VS Code extension in `editors/vscode/` (colouring and a client); a module is compiled through a main file that imports it, or checked alone; hover shows signature, address, bytes and fixed cycles for functions, type and address for variables, values for constants, offsets for struct fields, from the last version that compiled when the text does not; go to definition for names, `module.name`, `import`, fields, asm `.label`s and `addr()` arguments.
 
 ## Not scheduled
 
