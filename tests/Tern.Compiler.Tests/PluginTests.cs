@@ -164,7 +164,7 @@ public sealed class PluginTests : IDisposable
     }
 
     [Theory]
-    [InlineData("fn setup() @ $6000\n", "", "level_api has no 'setup' routine. The host calls setup first, at entry 0 of the jump table: declare 'fn setup() @ $6000' in level_api")]
+    [InlineData("fn setup() @ $6000\n", "", "level_api has no 'setup' routine. The host calls setup first, at entry 0 of the jump table. Declare 'fn setup() @ $6000' in level_api")]
     [InlineData("fn setup() @ $6000", "fn setup() @ $6100", "'level_api.setup' is at $6100, but setup is entry 0")]
     [InlineData("fn setup() @ $6000", "fn setup(n: u8 using A) @ $6000", "'level_api.setup' must take nothing and return nothing")]
     [InlineData("@ $6006\n", "@ $6004\n", "'level_api.update' at $6004 overlaps the entry before it: each entry of the jump table is a 3-byte jmp, from $6000. Move it to $6006 or later")]

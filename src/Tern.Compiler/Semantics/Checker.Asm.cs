@@ -13,7 +13,7 @@ public sealed partial class Checker
         var labels = new Dictionary<string, AsmLabel>();
         foreach (var l in block.Lines.OfType<AsmLabel>())
             if (!labels.TryAdd(l.Name, l))
-                throw new CompileError(l.Pos, $"Label '{l.Name}' is defined twice in this block");
+                throw new CompileError(l.Pos, $"Label '{l.Name}' is defined twice in this block. Rename one of them");
 
         var effects = new AsmEffects();
         foreach (var ins in block.Lines.OfType<AsmInstruction>())
@@ -66,7 +66,7 @@ public sealed partial class Checker
             case AsmLabelExpr l:
                 return labels.TryGetValue(l.Name, out var label)
                     ? new AsmValue(0, Label: label)
-                    : throw new CompileError(l.Pos, $"Label '{l.Name}' is not defined in this asm block");
+                    : throw new CompileError(l.Pos, $"Label '{l.Name}' is not defined in this asm block. Define it with '.{l.Name}:' on a line of the block");
 
             case NameExpr n:
                 switch (n.Bound ?? Lookup(n.Name))
@@ -93,14 +93,14 @@ public sealed partial class Checker
                 CheckMemberTarget(m);
                 CheckExpr(m.Target);
                 if (!(m.Target.Type.IsStruct || m.Target.Type is { IsPointer: true, Element.IsStruct: true }))
-                    throw new CompileError(m.Pos, $"Unknown member '.{m.Member}'; assembly only has .lo and .hi, and fields of struct variables");
+                    throw new CompileError(m.Pos, $"Unknown member '.{m.Member}'; assembly only has .lo and .hi, and fields of struct variables. Use one of those");
                 CheckField(m);
                 if (m.Lowered is NameExpr { Symbol.AliasOf: { } storage } view)
                     return new AsmValue(view.Symbol!.AliasOffset, Variable: storage);
                 if (m.Place is { Kind: PlaceKind.Memory } place)
                     return new AsmValue(place.Offset, Variable: place.Base);
                 throw new CompileError(m.Pos,
-                    "In assembly, a field must belong to a struct variable (lda player.hp). Fields through a pointer or in an array of structs have no fixed address");
+                    "In assembly, a field must belong to a struct variable (lda player.hp). Fields through a pointer or in an array of structs have no fixed address. Read them with an index register: ldy #offset(T.field) and lda (p),y");
             }
 
             case MemberExpr m:
@@ -108,7 +108,7 @@ public sealed partial class Checker
                 CheckMemberTarget(m);
                 var inner = AsmOperand(m.Target, labels);
                 bool high = m.Member == "hi";
-                if (inner.High is not null) throw new CompileError(m.Pos, $".{m.Member} of a value that is already one byte");
+                if (inner.High is not null) throw new CompileError(m.Pos, $".{m.Member} of a value that is already one byte. Remove one '.{m.Member}'");
                 if (inner.IsNumber) return new AsmValue(high ? (inner.Number >> 8) & 0xFF : inner.Number & 0xFF);
                 return inner with { High = high };
             }
@@ -122,13 +122,13 @@ public sealed partial class Checker
                     return l with { Number = l.Number + (b.Op == TokenKind.Plus ? r.Number : -r.Number) };
                 if (!r.IsNumber && r.High is null && l.IsNumber && b.Op == TokenKind.Plus)
                     return r with { Number = r.Number + l.Number };
-                throw new CompileError(b.Pos, "In assembly, an address can only have a constant added or subtracted, e.g. name+1 or (name+1).hi");
+                throw new CompileError(b.Pos, "In assembly, an address can only have a constant added or subtracted. Write e.g. name+1 or (name+1).hi");
             }
 
             case UnaryExpr { Op: TokenKind.Minus or TokenKind.Plus or TokenKind.Tilde } u:
             {
                 var inner = AsmOperand(u.Operand, labels);
-                if (!inner.IsNumber) throw new CompileError(u.Pos, "Only numbers can be negated or inverted");
+                if (!inner.IsNumber) throw new CompileError(u.Pos, "Only numbers can be negated or inverted. Use a constant here, not an address");
                 return new AsmValue(u.Op switch { TokenKind.Minus => ConstNegate(u.Pos, inner.Number), TokenKind.Tilde => ~inner.Number, _ => inner.Number });
             }
         }
@@ -136,17 +136,17 @@ public sealed partial class Checker
         // Literals, len(), sizeof(), casts of constants.
         CheckExpr(e);
         if (e.ConstValue is long value) return new AsmValue(value);
-        throw new CompileError(e.Pos, "An assembly operand must be a constant, or the name of a variable, function or .label");
+        throw new CompileError(e.Pos, "An assembly operand must be a constant, or the name of a variable, function or .label. Declare a constant for a computed value");
     }
 
     private static long FoldAsm(BinaryExpr b, long l, long r) => b.Op switch
     {
-        TokenKind.Slash or TokenKind.Percent when r == 0 => throw new CompileError(b.Pos, "Division by zero"),
+        TokenKind.Slash or TokenKind.Percent when r == 0 => throw new CompileError(b.Pos, "Division by zero. Check the divisor"),
         TokenKind.Plus or TokenKind.Minus or TokenKind.Star or TokenKind.Slash or TokenKind.Percent
             or TokenKind.Amp or TokenKind.Pipe or TokenKind.Caret => ConstArithmetic(b.Pos, b.Op, l, r),
         TokenKind.Shl or TokenKind.Shr when r is >= 0 and < 64 => ConstArithmetic(b.Pos, b.Op, l, r),
-        TokenKind.Shl or TokenKind.Shr => throw new CompileError(b.Right.Pos, "Shift count must be 0 to 63"),
-        _ => throw new CompileError(b.Pos, "Assembly operands can only use + - * / % & | ^ << >>"),
+        TokenKind.Shl or TokenKind.Shr => throw new CompileError(b.Right.Pos, "Shift count must be 0 to 63. Use a count in that range"),
+        _ => throw new CompileError(b.Pos, "Assembly operands can only use + - * / % & | ^ << >>. Declare a constant for anything else"),
     };
 
     /// <summary>
@@ -167,15 +167,15 @@ public sealed partial class Checker
             case AsmForm.None:
                 if (Has(Implied)) return Implied;
                 if (Has(Accumulator)) return Accumulator;
-                throw new CompileError(ins.Pos, $"'{name}' needs an operand");
+                throw new CompileError(ins.Pos, $"'{name}' needs an operand. Write one after it, e.g. {name} #0 or {name} name");
             case AsmForm.Accumulator:
                 return Accumulator;
             case AsmForm.Immediate:
-                if (!Has(Immediate)) throw new CompileError(ins.Pos, $"'{name}' has no immediate mode (#)");
+                if (!Has(Immediate)) throw new CompileError(ins.Pos, $"'{name}' has no immediate mode (#). Remove '#' to use the address, or use another instruction");
                 if (v!.IsNumber && v.Number is < -128 or > 255)
-                    throw new CompileError(ins.Operand!.Pos, $"#{v.Number} does not fit in a byte");
+                    throw new CompileError(ins.Operand!.Pos, $"#{v.Number} does not fit in a byte. Use a value from -128 to 255, or .lo and .hi of it");
                 if (!v.IsNumber && v.High is null)
-                    throw new CompileError(ins.Operand!.Pos, "An address has two bytes: write #name.lo or #name.hi");
+                    throw new CompileError(ins.Operand!.Pos, "An address has two bytes. Write #name.lo or #name.hi");
                 return Immediate;
         }
 
@@ -188,13 +188,13 @@ public sealed partial class Checker
         if (v!.High is not null)
             throw new CompileError(ins.Operand!.Pos, ".lo and .hi give a byte value, not an address. Use it as an immediate: #name.lo");
         if (v.IsNumber && v.Number is < 0 or > 0xFFFF)
-            throw new CompileError(ins.Operand!.Pos, $"Address {v.Number} is outside memory");
+            throw new CompileError(ins.Operand!.Pos, $"Address {v.Number} is outside memory. Use an address from $0000 to $FFFF");
 
         switch (ins.Form)
         {
             case AsmForm.Direct when ins.Index is null:
                 if (Has(Absolute)) return Absolute;
-                throw new CompileError(ins.Pos, $"'{name}' takes no operand");
+                throw new CompileError(ins.Pos, $"'{name}' takes no operand. Remove it");
             case AsmForm.Direct:
             {
                 var (abs, zp) = ins.Index == Register.X ? (AbsoluteX, ZeroPageX) : (AbsoluteY, ZeroPageY);
@@ -205,16 +205,16 @@ public sealed partial class Checker
                     RequireZeroPage(ins, v, $"'{name} {form}'");
                     return zp;
                 }
-                throw new CompileError(ins.Pos, $"'{name}' has no {form} mode");
+                throw new CompileError(ins.Pos, $"'{name}' has no {form} mode. Use another addressing mode or instruction");
             }
             case AsmForm.Indirect:
                 if (Has(Indirect)) return Indirect;
-                throw new CompileError(ins.Pos, $"'{name}' has no (address) mode. To read through a pointer, write (pointer),y");
+                throw new CompileError(ins.Pos, $"'{name}' has no (address) mode. Write (pointer),y to read through a pointer");
             default:
             {
                 var mode = ins.Form == AsmForm.IndexedIndirect ? IndexedIndirect : IndirectIndexed;
                 string form = mode == IndexedIndirect ? "(address,x)" : "(address),y";
-                if (!Has(mode)) throw new CompileError(ins.Pos, $"'{name}' has no {form} mode");
+                if (!Has(mode)) throw new CompileError(ins.Pos, $"'{name}' has no {form} mode. Use another addressing mode or instruction");
                 RequireZeroPage(ins, v, $"'{name} {form}'");
                 return mode;
             }
@@ -228,13 +228,13 @@ public sealed partial class Checker
         if (v.IsNumber)
         {
             if (v.Number > 0xFF)
-                throw new CompileError(pos, $"{what} needs a zero-page address ($00-$FF), not ${v.Number:X4}");
+                throw new CompileError(pos, $"{what} needs a zero-page address ($00-$FF), not ${v.Number:X4}. Use a variable in zero page");
             return;
         }
         if (v.Variable is not { } var)
-            throw new CompileError(pos, $"{what} needs a zero-page address, not a {(v.Function is not null ? "function" : "label")}");
+            throw new CompileError(pos, $"{what} needs a zero-page address, not a {(v.Function is not null ? "function" : "label")}. Use a variable in zero page");
         if (var.FixedAddress is int a && a + v.Number > 0xFF)
-            throw new CompileError(pos, $"{what} needs a zero-page address, but '{var.Name}' is at ${a:X4}");
+            throw new CompileError(pos, $"{what} needs a zero-page address, but '{var.Name}' is at ${a:X4}. Place it in zero page ('@ zp' or an address below $100)");
         var.AsmZeroPage = true;
     }
 
@@ -313,9 +313,9 @@ public sealed partial class Checker
         if (AsmEffects.ReadsMemory(ins.Mnemonic, ins.Mode)) effects.VariablesRead.Add(variable);
         if (AsmEffects.WritesMemory(ins.Mnemonic, ins.Mode))
         {
-            if (variable.IsData) throw new CompileError(ins.Operand!.Pos, $"'{variable.Name}' is data, which is read-only");
+            if (variable.IsData) throw new CompileError(ins.Operand!.Pos, $"'{variable.Name}' is data, which is read-only. Declare it with 'var' to change it");
             if (variable.ReadOnly)
-                throw new CompileError(ins.Operand!.Pos, $"Loop variable '{variable.Name}' cannot be changed inside the loop");
+                throw new CompileError(ins.Operand!.Pos, $"Loop variable '{variable.Name}' cannot be changed inside the loop. Use a 'while' loop to change the counter yourself");
             effects.VariablesWritten.Add(variable);
         }
     }

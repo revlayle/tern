@@ -62,7 +62,7 @@ public sealed partial class Parser
                 Advance();
                 var name = Expect(TokenKind.Identifier, "a module name after 'import'");
                 if (!_modules.Add(name.Text))
-                    throw new CompileError(name.Pos, $"'{name.Text}' is imported twice");
+                    throw new CompileError(name.Pos, $"'{name.Text}' is imported twice. Remove one of the imports");
                 var args = new List<ImportArg>();
                 if (Accept(TokenKind.LParen))
                 {
@@ -116,7 +116,7 @@ public sealed partial class Parser
                     var p = Advance();
                     if (!(Current.Kind is TokenKind.Const or TokenKind.Var or TokenKind.Linear or TokenKind.Struct or TokenKind.Data or TokenKind.Fn
                           or TokenKind.Interrupt or TokenKind.Noinit or TokenKind.Volatile or TokenKind.Inline || IsIndexedWord() || (At(TokenKind.Asm) && PeekAt(1).Kind == TokenKind.Fn)))
-                        throw new CompileError(p.Pos, $"'private' goes before a declaration (const, var, data, struct or fn); found {Describe(Current)}");
+                        throw new CompileError(p.Pos, $"'private' goes before a declaration (const, var, data, struct or fn); found {Describe(Current)}. Write it at the start of the declaration it hides");
                     privateNames.Add(ParseDeclaration());
                 }
                 else
@@ -141,9 +141,9 @@ public sealed partial class Parser
             switch (Current.Kind)
             {
                 case TokenKind.Import:
-                    throw new CompileError(Current.Pos, "'import' must be at the top of the file, before other declarations");
+                    throw new CompileError(Current.Pos, "'import' must be at the top of the file, before other declarations. Move it there");
                 case TokenKind.Module:
-                    throw new CompileError(Current.Pos, "'module' must be the first line of the file, before the imports");
+                    throw new CompileError(Current.Pos, "'module' must be the first line of the file, before the imports. Move it there");
                 case TokenKind.Assert:
                 {
                     var t = Advance();
@@ -181,7 +181,7 @@ public sealed partial class Parser
                     return "";
                 }
                 case TokenKind.Identifier when IsMemoryBlock():
-                    throw new CompileError(Current.Pos, "The memory block goes after the imports and constants, before other declarations, and there is only one");
+                    throw new CompileError(Current.Pos, "The memory block goes after the imports and constants, before other declarations, and there is only one. Move it there, or join the two blocks");
                 case TokenKind.Identifier when IsIndexedWord():
                 { var d = ParseIndexedVar(); globals.Add(d); return d.Name; }
                 case TokenKind.Const when PeekAt(1).Kind == TokenKind.Fn: { var d = ParseConstFnWhole(); constFns.Add(d); return d.Name; }
@@ -197,10 +197,10 @@ public sealed partial class Parser
                     bool isAsm = At(TokenKind.Asm) && PeekAt(1).Kind == TokenKind.Fn;
                     if (isAsm) Advance();
                     if (!At(TokenKind.Fn))
-                        throw new CompileError(t.Pos, $"'inline' goes before 'fn', e.g. 'inline fn wait_frame() {{ ... }}'; found {Describe(Current)}");
+                        throw new CompileError(t.Pos, $"'inline' goes before 'fn', e.g. 'inline fn wait_frame() {{ ... }}'; found {Describe(Current)}. Write 'inline fn' or remove 'inline'");
                     var d = ParseFn(isAsm);
                     if (d.Address is not null)
-                        throw new CompileError(d.Pos, "An inline function needs a body; '@ $addr' declares a routine that is already there");
+                        throw new CompileError(d.Pos, "An inline function needs a body; '@ $addr' declares a routine that is already there. Remove 'inline' or the address");
                     d.IsInline = true;
                     functions.Add(d);
                     return d.Name;
@@ -209,11 +209,11 @@ public sealed partial class Parser
                 {
                     var t = Advance();
                     if (!(Current.Kind is TokenKind.Var or TokenKind.Linear or TokenKind.Volatile or TokenKind.Noinit || IsIndexedWord()))
-                        throw new CompileError(t.Pos, $"'noinit' goes before 'var', e.g. 'noinit var buffer: [u8; 256]'; found {Describe(Current)}");
+                        throw new CompileError(t.Pos, $"'noinit' goes before 'var', e.g. 'noinit var buffer: [u8; 256]'; found {Describe(Current)}. Write 'noinit var' or remove 'noinit'");
                     var name = ParseDeclaration();
                     var d = globals[^1];
-                    if (d.IsData) throw new CompileError(t.Pos, "'noinit' is for variables; data is never zeroed");
-                    if (d.IsNoinit) throw new CompileError(t.Pos, "'noinit' is written twice");
+                    if (d.IsData) throw new CompileError(t.Pos, "'noinit' is for variables; data is never zeroed. Remove 'noinit'");
+                    if (d.IsNoinit) throw new CompileError(t.Pos, "'noinit' is written twice. Remove one");
                     d.IsNoinit = true;
                     return name;
                 }
@@ -221,11 +221,11 @@ public sealed partial class Parser
                 {
                     var t = Advance();
                     if (!(Current.Kind is TokenKind.Var or TokenKind.Linear or TokenKind.Noinit or TokenKind.Volatile || IsIndexedWord()))
-                        throw new CompileError(t.Pos, $"'volatile' goes before 'var', e.g. 'volatile var flags: u8 @ $C000'; found {Describe(Current)}");
+                        throw new CompileError(t.Pos, $"'volatile' goes before 'var', e.g. 'volatile var flags: u8 @ $C000'; found {Describe(Current)}. Write 'volatile var' or remove 'volatile'");
                     var name = ParseDeclaration();
                     var d = globals[^1];
-                    if (d.IsData) throw new CompileError(t.Pos, "'volatile' is for variables; data is read-only, so nothing changes it");
-                    if (d.IsVolatile) throw new CompileError(t.Pos, "'volatile' is written twice");
+                    if (d.IsData) throw new CompileError(t.Pos, "'volatile' is for variables; data is read-only, so nothing changes it. Remove 'volatile'");
+                    if (d.IsVolatile) throw new CompileError(t.Pos, "'volatile' is written twice. Remove one");
                     d.IsVolatile = true;
                     return name;
                 }
@@ -234,11 +234,11 @@ public sealed partial class Parser
                     var t = Advance();
                     if (!At(TokenKind.Fn))
                         throw new CompileError(t.Pos, At(TokenKind.Asm)
-                            ? "An interrupt handler in assembly is an 'asm fn' that saves what it changes and ends with rti; 'interrupt' is for handlers in Tern"
-                            : $"'interrupt' goes before 'fn', e.g. 'interrupt fn raster() {{ ... }}'; found {Describe(Current)}");
+                            ? "An interrupt handler in assembly is an 'asm fn' that saves what it changes and ends with rti; 'interrupt' is for handlers in Tern. Remove 'interrupt'"
+                            : $"'interrupt' goes before 'fn', e.g. 'interrupt fn raster() {{ ... }}'; found {Describe(Current)}. Write 'interrupt fn' or remove 'interrupt'");
                     var d = ParseFn();
                     if (d.Address is not null)
-                        throw new CompileError(d.Pos, "An interrupt handler needs a body; '@ $addr' declares a routine that is already there");
+                        throw new CompileError(d.Pos, "An interrupt handler needs a body; '@ $addr' declares a routine that is already there. Remove 'interrupt' or the address");
                     d.IsInterrupt = true;
                     functions.Add(d);
                     return d.Name;
@@ -255,7 +255,7 @@ public sealed partial class Parser
                         "An asm block must be inside a function. Use 'asm fn name() { ... }' for a whole function in assembly");
                 default:
                     if (LeadingOperator() is { } lead) throw lead;
-                    throw new CompileError(Current.Pos, $"Expected 'const', 'var', 'data', 'struct' or 'fn', found {Describe(Current)}");
+                    throw new CompileError(Current.Pos, $"Expected 'const', 'var', 'data', 'struct' or 'fn', found {Describe(Current)}. Check that statements are inside a function, and that each '{{' has its '}}'");
             }
         }
     }
@@ -286,10 +286,10 @@ public sealed partial class Parser
         SkipTerminators();
         while (!At(TokenKind.RBrace))
         {
-            if (At(TokenKind.Eof)) throw new CompileError(start.Pos, "The memory block is not closed with '}'");
+            if (At(TokenKind.Eof)) throw new CompileError(start.Pos, "The memory block is not closed with '}'. Add '}' after its last range");
             var first = ParseExpr();
             if (At(TokenKind.DotDot))
-                throw new CompileError(Current.Pos, "A memory range includes its last address: write first..=last");
+                throw new CompileError(Current.Pos, "A memory range includes its last address. Write first..=last");
             Expect(TokenKind.DotDotEq, "'..=' and the last address of the range");
             var last = ParseExpr();
             var kind = At(TokenKind.Volatile) ? Advance() : Expect(TokenKind.Identifier, "the kind of memory: program, zeropage, reserved, region, volatile or overlay");
@@ -321,14 +321,14 @@ public sealed partial class Parser
         {
             while (Accept(TokenKind.Newline)) { }
             if (Accept(TokenKind.RBrace)) break;
-            if (At(TokenKind.Eof)) throw new CompileError(start.Pos, $"Struct '{name.Text}' is not closed with '}}'");
+            if (At(TokenKind.Eof)) throw new CompileError(start.Pos, $"Struct '{name.Text}' is not closed with '}}'. Add '}}' after its last field");
             var field = Expect(TokenKind.Identifier, "a field 'name: type'");
             Expect(TokenKind.Colon, "':' and the field's type");
             var type = ParseType();
             Expr? offset = Accept(TokenKind.At) ? ParseExpr() : null;
             fields.Add(new FieldSyntax(field.Pos, field.Text, type, offset));
             if (Accept(TokenKind.Comma) || At(TokenKind.Newline) || At(TokenKind.RBrace)) continue;
-            throw new CompileError(Current.Pos, $"Expected ',' or a line break after the field, found {Describe(Current)}");
+            throw new CompileError(Current.Pos, $"Expected ',' or a line break after the field, found {Describe(Current)}. Separate the fields with ',' or a line break");
         }
         ExpectEndOfStatement();
         return new StructDecl(start.Pos, name.Text, fields);
@@ -356,7 +356,7 @@ public sealed partial class Parser
         if (At(TokenKind.Identifier) && Current.Text == "indexed")
             throw new CompileError(Current.Pos, "'indexed' replaces 'linear': it stores records the same way. Write 'indexed var', not 'linear indexed var'");
         if (!At(TokenKind.Var) && !At(TokenKind.Data))
-            throw new CompileError(Current.Pos, $"'linear' goes before 'var' or 'data', e.g. 'linear var list: [Enemy; 8]'; found {Describe(Current)}");
+            throw new CompileError(Current.Pos, $"'linear' goes before 'var' or 'data', e.g. 'linear var list: [Enemy; 8]'; found {Describe(Current)}. Write 'linear var' or remove 'linear'");
         var decl = At(TokenKind.Data) ? ParseData() : ParseVar();
         return new VarDecl(linear.Pos, decl.Name, decl.TypeSyntax, decl.Placement, decl.Init) { IsLinear = true, IsData = decl.IsData };
     }
@@ -391,12 +391,12 @@ public sealed partial class Parser
         if (!Accept(TokenKind.At)) return Placement.None;
         if (At(TokenKind.Zp))
         {
-            if (!allowZeroPage) throw new CompileError(Current.Pos, "Data is read-only and lives in the program; '@ zp' is for variables");
+            if (!allowZeroPage) throw new CompileError(Current.Pos, "Data is read-only and lives in the program; '@ zp' is for variables. Remove '@ zp', or make it a var");
             Advance();
             return new Placement(PlacementKind.ZeroPage);
         }
         if (At(TokenKind.Bank))
-            throw new CompileError(Current.Pos, "'@ bank(n)' is not supported yet");
+            throw new CompileError(Current.Pos, "'@ bank(n)' is not supported yet. Remove it");
         return new Placement(PlacementKind.Address, ParseExpr());
     }
 
@@ -445,7 +445,7 @@ public sealed partial class Parser
                 {
                     var value = ParseExpr();
                     if (!At(TokenKind.Using))
-                        throw new CompileError(Current.Pos, $"Expected a parameter 'name: type', or a fixed input such as 'true using carry'; found {Describe(Current)}");
+                        throw new CompileError(Current.Pos, $"Expected a parameter 'name: type', or a fixed input such as 'true using carry'; found {Describe(Current)}. Write the parameter as 'name: type'");
                     Advance();
                     parameters.Add(new ParamSyntax(value.Pos, "", new NamedTypeSyntax(value.Pos, ""), ParseRegister()) { FixedValue = value });
                     continue;
@@ -467,14 +467,14 @@ public sealed partial class Parser
             if (Accept(TokenKind.Using)) returnUsing = ParseRegister();
         }
         if (At(TokenKind.Keeps))
-            throw new CompileError(Current.Pos, $"'keeps' is only for routines at a fixed address: fn {name.Text}(...) @ $addr keeps X");
+            throw new CompileError(Current.Pos, $"'keeps' is only for routines at a fixed address: fn {name.Text}(...) @ $addr keeps X. Remove 'keeps' here");
 
         // A routine that already exists at a fixed address: no body.
         if (At(TokenKind.At))
         {
             var at = Advance();
             if (isAsm)
-                throw new CompileError(at.Pos, "An asm fn at a fixed address is not supported yet");
+                throw new CompileError(at.Pos, "An asm fn at a fixed address is not supported yet. Remove 'asm' and the body to declare a routine that is already there, or remove the address");
             var address = ParseExpr();
             var keeps = new List<(Register, SourcePos)>();
             if (Accept(TokenKind.Keeps))
@@ -482,7 +482,7 @@ public sealed partial class Parser
                 do keeps.Add((ParseRegister(), PeekAt(-1).Pos)); while (Accept(TokenKind.Comma));
             }
             if (At(TokenKind.LBrace))
-                throw new CompileError(at.Pos, "A function with a body at a fixed address is not supported yet. Without a body, it declares a routine that is already there");
+                throw new CompileError(at.Pos, "A function with a body at a fixed address is not supported yet. Without a body, it declares a routine that is already there. Remove the address or the body");
             ExpectEndOfStatement();
             return new FnDecl(start.Pos, name.Text, parameters, returnType, returnUsing, new BlockStmt(at.Pos, []))
             {
@@ -504,7 +504,7 @@ public sealed partial class Parser
             "AX" => Register.AX, "AY" => Register.AY, "XY" => Register.XY,
             "carry" => Register.Carry, "zero" => Register.Zero, "negative" => Register.Negative,
             "overflow" => Register.Overflow,
-            _ => throw new CompileError(t.Pos, $"Unknown register or flag '{t.Text}'"),
+            _ => throw new CompileError(t.Pos, $"Unknown register or flag '{t.Text}'. Use A, X, Y, AX, AY, XY, carry, zero, negative or overflow"),
         };
     }
 

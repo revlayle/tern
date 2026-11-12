@@ -26,9 +26,9 @@ public sealed record Diagnostic(string File, int Line, int Column, string Severi
     /// </summary>
     private static readonly HashSet<string> FixVerbs = new(StringComparer.OrdinalIgnoreCase)
     {
-        "Add", "Assign", "Call", "Change", "Check", "Choose", "Compare", "Convert", "Declare", "Export", "Fill", "Free", "Give",
-        "Import", "Install", "Join", "Keep", "Leave", "Make", "Mark", "Match", "Move", "Pass", "Place", "Prefer", "Put",
-        "Read", "Remove", "Rename", "Replace", "Return", "Set", "Split", "Store", "Take", "Use", "Write",
+        "Add", "Assign", "Call", "Change", "Check", "Choose", "Compare", "Convert", "Declare", "Define", "Export", "Fill", "Free", "Give",
+        "Import", "Install", "Join", "Keep", "Leave", "Make", "Mark", "Match", "Move", "Name", "Pass", "Place", "Prefer", "Put",
+        "Read", "Remove", "Rename", "Replace", "Return", "Separate", "Set", "Split", "Start", "Store", "Take", "Use", "Write",
     };
 
     public static Diagnostic From(CompileError e, string defaultFile)

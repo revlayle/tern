@@ -148,10 +148,10 @@ public static class ModuleLoader
             foreach (var dir in System.IO.Directory.GetDirectories(library))
                 if (File.Exists(System.IO.Path.Combine(dir, file)))
                     throw new CompileError(import.Pos,
-                        $"'{import.Name}' is a module for the {System.IO.Path.GetFileName(dir)} platform; this program is compiled for {platform.Name}");
+                        $"'{import.Name}' is a module for the {System.IO.Path.GetFileName(dir)} platform; this program is compiled for {platform.Name}. Remove the import, or use a module for {platform.Name}");
 
         throw new CompileError(import.Pos,
-            $"Cannot find module '{import.Name}': there is no {file} in the library ({library}) or in {importer.Directory}");
+            $"Cannot find module '{import.Name}': there is no {file} in the library ({library}) or in {importer.Directory}. Check the spelling, or put {file} next to the importing file");
     }
 
     /// <summary>Whether a folder is the library or one of its platform folders.</summary>

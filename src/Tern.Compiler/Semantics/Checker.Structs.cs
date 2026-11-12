@@ -40,13 +40,13 @@ public sealed partial class Checker
         try
         {
             var decl = s.Declaration;
-            if (decl.Fields.Count == 0) throw new CompileError(decl.Pos, $"Struct '{s.Name}' has no fields");
+            if (decl.Fields.Count == 0) throw new CompileError(decl.Pos, $"Struct '{s.Name}' has no fields. Add at least one field");
 
             int next = 0;
             foreach (var f in decl.Fields)
             {
                 if (f.Name != "_" && s.Field(f.Name) is { } twice)
-                    throw new CompileError(f.Pos, $"Field '{f.Name}' is declared twice in '{s.Name}' (first at {twice.Pos})");
+                    throw new CompileError(f.Pos, $"Field '{f.Name}' is declared twice in '{s.Name}' (first at {twice.Pos}). Rename one of them");
                 var type = ResolveType(f.Type);
                 if (type.IsArray && type.Element!.IsStruct)
                     throw new CompileError(f.Pos, "A field cannot be an array of structs yet. Use an array of structs outside the struct, or a pointer");
@@ -55,19 +55,19 @@ public sealed partial class Checker
                 {
                     CheckExpr(f.Offset);
                     if (f.Offset.ConstValue is not long o)
-                        throw new CompileError(f.Offset.Pos, "A field offset must be known at compile time");
-                    if (o < 0 || o > 0xFFFF) throw new CompileError(f.Offset.Pos, $"Field offset {o} is outside memory");
+                        throw new CompileError(f.Offset.Pos, "A field offset must be known at compile time. Use a number or a constant");
+                    if (o < 0 || o > 0xFFFF) throw new CompileError(f.Offset.Pos, $"Field offset {o} is outside memory. Use an offset from 0 to $FFFF");
                     offset = (int)o;
                 }
                 foreach (var other in s.Fields)
                     if (offset < other.Offset + other.Type.Size && other.Offset < offset + type.Size)
                         throw new CompileError(f.Pos,
-                            $"Field '{f.Name}' (offset {offset}, {type.Size} byte(s)) overlaps field '{other.Name}' (offset {other.Offset}, {other.Type.Size} byte(s))");
+                            $"Field '{f.Name}' (offset {offset}, {type.Size} byte(s)) overlaps field '{other.Name}' (offset {other.Offset}, {other.Type.Size} byte(s)). Move one with '@ offset'");
                 s.Fields.Add(new StructField(f.Name, f.Pos, type, offset));
                 next = offset + type.Size;
                 s.Size = Math.Max(s.Size, next);
             }
-            if (s.Size > 0xFFFF) throw new CompileError(decl.Pos, $"Struct '{s.Name}' is {s.Size} bytes, more than memory");
+            if (s.Size > 0xFFFF) throw new CompileError(decl.Pos, $"Struct '{s.Name}' is {s.Size} bytes, more than memory. Make its fields smaller");
             s.LayoutState = 2;
         }
         catch (Exception e) when (e is CompileError or FollowOnError)
@@ -120,9 +120,9 @@ public sealed partial class Checker
         }
 
         if (m.Member == "_")
-            throw new CompileError(m.Pos, $"'_' is padding in struct '{s.Name}': it takes space but has no name, so it cannot be read or written");
+            throw new CompileError(m.Pos, $"'_' is padding in struct '{s.Name}': it takes space but has no name, so it cannot be read or written. Give the field a name to use it");
         var field = s.Field(m.Member)
-            ?? throw new CompileError(m.Pos, $"Struct '{s.Name}' has no field '{m.Member}'. Its fields: {string.Join(", ", s.Fields.Where(f => f.Name != "_").Select(f => f.Name))}");
+            ?? throw new CompileError(m.Pos, $"Struct '{s.Name}' has no field '{m.Member}'. Use one of its fields: {string.Join(", ", s.Fields.Where(f => f.Name != "_").Select(f => f.Name))}");
         var type = field.Type;
         m.Type = type;
         var at = place with { Offset = place.Offset + field.Offset };
@@ -166,7 +166,7 @@ public sealed partial class Checker
             {
                 int last = at.Offset + (type.Size == 2 ? secondByte : 0);
                 if (last > 255)
-                    throw new CompileError(pos, $"'{name}' is at offset {last} of the struct; through a pointer, (p),y reaches offsets 0 to 255");
+                    throw new CompileError(pos, $"'{name}' is at offset {last} of the struct; through a pointer, (p),y reaches offsets 0 to 255. Move the pointer to the field first: p + offset(T.field)");
                 var zero = new NumberExpr(pos, 0) { Type = TernType.U8, ConstValue = 0 };
                 return new IndexExpr(pos, at.Pointer!, zero) { Type = type, Offset = at.Offset, SecondByte = secondByte };
             }
@@ -190,9 +190,9 @@ public sealed partial class Checker
             if (ix.Index.ConstValue is not long j)
                 throw new CompileError(ix.Index.Pos, at.Kind == PlaceKind.Table
                     ? "An array field in an array of structs needs a constant index, since a variable one would need a multiply. Declare the array 'linear' and step through it with a pointer"
-                    : "An array field in an array of structs needs a constant index, since the record's offset is already in the index register. Step through the array with a pointer");
+                    : "An array field in an array of structs needs a constant index, since the record's offset is already in the index register. Use a pointer to step through the array");
             if (j >= array.Length)
-                throw new CompileError(ix.Index.Pos, $"Index {j} is past the end of '{name}' (length {array.Length})");
+                throw new CompileError(ix.Index.Pos, $"Index {j} is past the end of '{name}' (length {array.Length}). Use an index below {array.Length}");
             ix.Lowered = LowerScalar(ix.Pos, at with { Offset = at.Offset + (int)j }, element, $"{name}[{j}]", secondByte: array.Length);
             return true;
         }
@@ -202,12 +202,12 @@ public sealed partial class Checker
         if (ix.Index.ConstValue is long ci)
         {
             if (ci >= array.Length)
-                throw new CompileError(ix.Index.Pos, $"Index {ci} is past the end of '{name}' (length {array.Length})");
+                throw new CompileError(ix.Index.Pos, $"Index {ci} is past the end of '{name}' (length {array.Length}). Use an index below {array.Length}");
             last = at.Offset + (int)ci + (element.Size == 2 ? array.Length : 0);
         }
         CheckLoopIndex(ix.Index, name, array.Length);
         if (last > 255)
-            throw new CompileError(ix.Pos, $"'{name}' reaches offset {last} of the struct; through a pointer, (p),y reaches offsets 0 to 255");
+            throw new CompileError(ix.Pos, $"'{name}' reaches offset {last} of the struct; through a pointer, (p),y reaches offsets 0 to 255. Move the pointer to the field first: p + offset(T.field)");
         ix.Lowered = new IndexExpr(ix.Pos, at.Pointer!, ix.Index)
         {
             Type = element,
@@ -222,7 +222,7 @@ public sealed partial class Checker
     private void CheckRecordIndex(IndexExpr ix, VariableSymbol arr)
     {
         if (ix.Index.ConstValue is long idx && idx >= arr.Type.Length)
-            throw new CompileError(ix.Index.Pos, $"Index {idx} is past the end of '{arr.Name}' (length {arr.Type.Length})");
+            throw new CompileError(ix.Index.Pos, $"Index {idx} is past the end of '{arr.Name}' (length {arr.Type.Length}). Use an index below {arr.Type.Length}");
         CheckLoopIndex(ix.Index, arr.Name, arr.Type.Length);
         var element = arr.Type.Element!;
         ix.Type = element;
@@ -240,7 +240,7 @@ public sealed partial class Checker
         int size = element.Size;
         if (arr.Type.Size > 256)
             throw new CompileError(ix.Pos,
-                $"'{arr.Name}' is {arr.Type.Size} bytes, more than the 256 an 8-bit offset reaches, so it cannot be indexed with a variable. Step through it with a pointer: p = p + sizeof({element})");
+                $"'{arr.Name}' is {arr.Type.Size} bytes, more than the 256 an 8-bit offset reaches, so it cannot be indexed with a variable. Use a pointer to step through it: p = p + sizeof({element})");
         var u8 = TernType.U8;
         Expr offset;
         if (arr.IsIndexed)
@@ -265,7 +265,7 @@ public sealed partial class Checker
             int next = size < 4 ? 4 : size < 8 ? 8 : 16;
             throw new CompileError(ix.Pos,
                 $"'{arr.Name}' has records of {size} bytes, and a variable index into a linear array needs 1, 2, 4 or 8. " +
-                $"Pad {element} with '_' fields to {next} bytes (e.g. _: [u8; {next - size}]), or declare the array 'indexed var {arr.Name}' to use a table of {arr.Type.Length} bytes");
+                $"Add '_' fields to {element} to make it {next} bytes (e.g. _: [u8; {next - size}]), or declare the array 'indexed var {arr.Name}' to use a table of {arr.Type.Length} bytes");
         }
         ix.Place = new StructPlace(PlaceKind.Records, 0, Base: arr, Index: offset);
     }

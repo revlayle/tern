@@ -81,7 +81,7 @@ public sealed partial class Checker
             _module = module;
             var program = module.Syntax;
             if (!module.IsMain && program.Functions.FirstOrDefault(f => f.Name == "main") is { } wrongMain)
-                Recover(() => throw new CompileError(wrongMain.Pos, $"Only the program's main file has 'fn main()'; '{module.Name}' is a module"));
+                Recover(() => throw new CompileError(wrongMain.Pos, $"Only the program's main file has 'fn main()'; '{module.Name}' is a module. Rename the function"));
             foreach (var s in program.Structs) Declaring(s.Name, s.Pos, () => DeclareStruct(s));
             // After an error, the parameters not declared yet accept every use.
             if (!Recover(() => DeclareParameters(module, modules[^1])))
@@ -96,9 +96,9 @@ public sealed partial class Checker
             var program = module.Syntax;
             foreach (var c in program.Consts) Declaring(c.Name, c.Pos, () => DeclareConst(c));
             if (!module.IsMain && program.Memory is { } wrongMemory)
-                Recover(() => throw new CompileError(wrongMemory.Pos, $"Only the program's main file may have a memory block, since it describes the whole program; '{module.Name}' is a module"));
+                Recover(() => throw new CompileError(wrongMemory.Pos, $"Only the program's main file may have a memory block, since it describes the whole program; '{module.Name}' is a module. Move the block to the main file"));
             if (!module.IsMain && program.Exports.Count > 0)
-                Recover(() => throw new CompileError(program.Exports[0].Pos, $"Only the program's main file may export functions; '{module.Name}' is a module"));
+                Recover(() => throw new CompileError(program.Exports[0].Pos, $"Only the program's main file may export functions; '{module.Name}' is a module. Move the 'export' line to the main file"));
             if (module.IsMain) Recover(EnsureMemoryLayout);
             foreach (var s in program.Structs)
                 if (module.Scope.GetValueOrDefault(s.Name) is StructSymbol st && st.Declaration == s)
@@ -129,7 +129,7 @@ public sealed partial class Checker
         {
             if (_layout.Overlays.ContainsKey(import.Area!)) continue;
             Recover(() => throw new CompileError(import.AreaPos, _layout.Regions.ContainsKey(import.Area!)
-                ? $"'{import.Area}' is a region, not an overlay area; '@' on an import names an area declared with 'overlay {import.Area}' in the memory block"
+                ? $"'{import.Area}' is a region, not an overlay area; '@' on an import names an area declared with 'overlay {import.Area}' in the memory block. Use the name of an overlay area"
                 : $"The memory block has no overlay area '{import.Area}'. Add a line 'first..=last overlay {import.Area}' to it"));
         }
 
@@ -182,17 +182,17 @@ public sealed partial class Checker
                     // main may be in a declaration the parser dropped.
                     if (mainModule.Syntax.HasSyntaxErrors) throw new FollowOnError();
                     throw new CompileError(new SourcePos(1, 1, mainModule.Path),
-                        "The program has no 'fn main()'. A binary for another program to call has an 'export' line instead");
+                        "The program has no 'fn main()'. Add 'fn main() { }', or an 'export' line for a binary that another program calls");
                 }
                 main = realMain;
                 if (main.Parameters.Count > 0 || main.ReturnType.Kind != TypeKind.Void)
-                    throw new CompileError(main.Pos, "'main' must have no parameters and no return value");
+                    throw new CompileError(main.Pos, "'main' must have no parameters and no return value. Remove them");
                 if (main.FixedAddress is not null)
-                    throw new CompileError(main.Pos, "'main' must have a body");
+                    throw new CompileError(main.Pos, "'main' must have a body. Remove the address and write the body");
                 if (main.IsInterrupt)
                     throw new CompileError(main.Pos, "'main' cannot be an interrupt handler; give the handler another name");
                 if (main.IsInline)
-                    throw new CompileError(main.Pos, "'main' cannot be inline: nothing calls it");
+                    throw new CompileError(main.Pos, "'main' cannot be inline: nothing calls it. Remove 'inline'");
                 if (exportTable is not null)
                 {
                     if (ExportedModule(mainModule) is { } api)
@@ -309,13 +309,13 @@ public sealed partial class Checker
         {
             if (mainModule.Scope.GetValueOrDefault(e.Name) is ErrorSymbol) throw new FollowOnError();
             if (!mainModule.Scope.TryGetValue(e.Name, out var symbol) || symbol is not FunctionSymbol f)
-                throw new CompileError(e.Pos, mainModule.Scope.ContainsKey(e.Name) ? $"'{e.Name}' is not a function, so it cannot be exported" : $"'{e.Name}' is not declared; 'export' names functions of the main file");
+                throw new CompileError(e.Pos, mainModule.Scope.ContainsKey(e.Name) ? $"'{e.Name}' is not a function, so it cannot be exported. Remove it from the export line" : $"'{e.Name}' is not declared; 'export' names functions of the main file. Declare it there, or remove it from the export line");
             if (e.Name == "setup" && !inProgram)
                 throw new CompileError(e.Pos, "'setup' is the name of the binary's startup entry (entry 0 of the jump table). Rename the function");
             if (e.Name == "main")
                 throw new CompileError(e.Pos, "'main' is where the program starts; plug-ins cannot call it. Remove it from the export line");
             if (result.Contains(f))
-                throw new CompileError(e.Pos, $"'{e.Name}' is exported twice");
+                throw new CompileError(e.Pos, $"'{e.Name}' is exported twice. Remove one");
             CheckExportable(f, e.Name, e.Pos, inProgram ? "a plug-in" : "the caller of a binary");
             result.Add(f);
         }
@@ -330,7 +330,7 @@ public sealed partial class Checker
         if (f.IsInline)
             throw new CompileError(pos, $"'{name}' is inline: it has no code of its own to put in the jump table. Remove 'inline'");
         if (f.FixedAddress is not null)
-            throw new CompileError(pos, $"'{name}' is a routine at a fixed address, not part of this binary");
+            throw new CompileError(pos, $"'{name}' is a routine at a fixed address, not part of this binary. Remove it from the export line");
         if (f.Parameters.FirstOrDefault(p => p.PassedIn is null) is { } memoryParam)
             throw new CompileError(pos,
                 $"'{name}' takes '{memoryParam.Name}' in memory, which {caller} cannot set. Pass it in a register ({memoryParam.Name}: {memoryParam.Type} using A)");
@@ -380,7 +380,7 @@ public sealed partial class Checker
 
         if (routines.FirstOrDefault(r => r.Name == "setup").Routine is not { } setup)
             throw new CompileError(pos,
-                $"{api.Name} has no 'setup' routine. The host calls setup first, at entry 0 of the jump table: declare 'fn setup() @ ${start:X4}' in {api.Name}");
+                $"{api.Name} has no 'setup' routine. The host calls setup first, at entry 0 of the jump table. Declare 'fn setup() @ ${start:X4}' in {api.Name}");
         if (setup.FixedAddress != start)
             throw new CompileError(pos,
                 $"'{api.Name}.setup' is at ${setup.FixedAddress:X4}, but setup is entry 0 of the jump table, at the start of the binary's first program area (${start:X4}). " +

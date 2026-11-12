@@ -212,6 +212,6 @@ public sealed partial class Parser
         // After an unclosed ( or [, which was reported, the lexer gives no line breaks: a declaration
         // starting a new line ends the statement (spec 13).
         if (_failures > 0 && StartsDeclaration(Current) && Current.Pos.Line != _tokens[_pos - 1].Pos.Line) return;
-        throw new CompileError(Current.Pos, $"Expected end of statement, found {Describe(Current)}");
+        throw new CompileError(Current.Pos, $"Expected end of statement, found {Describe(Current)}. Put each statement on its own line, or separate them with ';'");
     }
 }

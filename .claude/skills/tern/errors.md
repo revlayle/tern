@@ -19,7 +19,7 @@ fn main() {
 ```
 
 ```text
-example.tern:5:18: error: '*' only works on constants. At runtime use a library function (mul8, div8, ...), or shifts for powers of two
+example.tern:5:18: error: '*' only works on constants. Use a library function at run time (mul8, div8, ...), or shifts for powers of two
 1 error
 ```
 
@@ -89,7 +89,7 @@ fn main() {
 ```
 
 ```text
-example.tern:1:13: error: 300 does not fit in u8 (0 to 255)
+example.tern:1:13: error: 300 does not fit in u8 (0 to 255). Use a value in that range, or a wider type
 1 error
 ```
 
@@ -176,7 +176,7 @@ fn main() {
 ```
 
 ```text
-example.tern:2:5: error: Local variable 'count' needs an initial value
+example.tern:2:5: error: Local variable 'count' needs an initial value. Write one: var count: u8 = 0
 1 error
 ```
 
@@ -208,7 +208,7 @@ fn main() {
 ```
 
 ```text
-example.tern:4:5: error: 'vic' is not declared. To use the module vic, add 'import vic' at the top of the file
+example.tern:4:5: error: 'vic' is not declared. Add 'import vic' at the top of the file to use the module vic
 1 error
 ```
 
@@ -226,7 +226,7 @@ fn main() {
 ```
 
 ```text
-example.tern:1:19: error: An array of u16 has at most 256 elements. Only a global var or data of u8 or i8 may be longer (spec 3.2), and it is used through a pointer
+example.tern:1:19: error: An array of u16 has at most 256 elements. Only a global var or data of u8 or i8 may be longer (spec 3.2), and it is used through a pointer. Split it into arrays of at most 256
 1 error
 ```
 
@@ -303,7 +303,7 @@ fn main() {
 ```
 
 ```text
-example.tern:3:1: error: Recursion is not allowed: count -> count
+example.tern:3:1: error: Recursion is not allowed: count -> count. Use a loop instead, with an array as the stack if needed
 1 error
 ```
 
@@ -451,7 +451,7 @@ fn main() {
 ```
 
 ```text
-example.tern:6:10: error: A range in a match includes its end: write 'low..=high'
+example.tern:6:10: error: A range in a match includes its end. Write 'low..=high'
 1 error
 ```
 
@@ -511,7 +511,7 @@ fn main() {
 ```
 
 ```text
-example.tern:5:14: error: An address has two bytes: write #name.lo or #name.hi
+example.tern:5:14: error: An address has two bytes. Write #name.lo or #name.hi
 1 error
 ```
 

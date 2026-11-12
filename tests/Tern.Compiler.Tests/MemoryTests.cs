@@ -342,7 +342,7 @@ public class MemoryTests
 
     [Theory]
     [InlineData("memory { $2000..=$1000 reserved }\nfn main() { }", "starts at $2000 and ends at $1000, before its start")]
-    [InlineData("memory { $2000..$2FFF reserved }\nfn main() { }", "A memory range includes its last address: write first..=last")]
+    [InlineData("memory { $2000..$2FFF reserved }\nfn main() { }", "A memory range includes its last address. Write first..=last")]
     [InlineData("memory { $2000..=$2FFF reserved\n$2800..=$37FF reserved }\nfn main() { }", "$2800-$37FF (reserved) overlaps $2000-$2FFF (reserved, line 1)")]
     [InlineData("memory { $0801..=$4FFF program\n$4000..=$9FFF program }\nfn main() { }", "overlaps $0801-$4FFF (program, line 1)")]
     [InlineData("memory { $2000..=$2FFF region a\n$2000..=$2FFF reserved }\nfn main() { }", "(reserved) overlaps $2000-$2FFF (region a, line 1)")]

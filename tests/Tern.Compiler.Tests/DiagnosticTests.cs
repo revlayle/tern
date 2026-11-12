@@ -57,9 +57,9 @@ public class DiagnosticTests
     [Fact]
     public void An_error_with_no_fix_has_no_suggestion()
     {
-        var d = Error("fn main() { x = 1 }");
+        var d = Error("var x: u8\nfn main() { x = ) }");   // listed in FixSentenceTests.NoFix
         Assert.Null(d.Suggestion);
-        Assert.Contains("'x'", d.Message);
+        Assert.Contains("')'", d.Message);
     }
 
     [Theory]
@@ -108,7 +108,7 @@ public class DiagnosticTests
     [Fact]
     public void A_missing_suggestion_is_null_in_the_json()
     {
-        var d = Error("fn main() { x = 1 }");
+        var d = Error("var x: u8\nfn main() { x = ) }");   // listed in FixSentenceTests.NoFix
         using var doc = JsonDocument.Parse(Diagnostic.ToJson(false, [], null, [d]));
         Assert.Equal(JsonValueKind.Null, doc.RootElement.GetProperty("diagnostics")[0].GetProperty("suggestion").ValueKind);
     }
@@ -127,7 +127,7 @@ public class DiagnosticTests
         var d = Error("const fn f(n: int) -> int {\n    return 10 / n\n}\nconst A = 1\nconst K = f(0)\nfn main() { }");
         var e = Json(d);
         Assert.Equal(2, e.GetProperty("line").GetInt32());
-        Assert.Equal("Division by zero (called from line 5)", e.GetProperty("message").GetString());
+        Assert.Equal("Division by zero (called from line 5).", e.GetProperty("message").GetString());
         var call = e.GetProperty("calledFrom");
         Assert.Equal("game.tern", call.GetProperty("file").GetString());
         Assert.Equal(5, call.GetProperty("line").GetInt32());

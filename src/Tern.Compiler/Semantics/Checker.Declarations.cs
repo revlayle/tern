@@ -33,7 +33,7 @@ public sealed partial class Checker
         long Value(Expr e)
         {
             CheckExpr(e);
-            return e.ConstValue ?? throw new CompileError(e.Pos, "A memory range must be known at compile time: use numbers and constants");
+            return e.ConstValue ?? throw new CompileError(e.Pos, "A memory range must be known at compile time. Use numbers and constants");
         }
         return MemoryLayout.Build(_platform, memory.Lines.Select(l => (l, Value(l.First), Value(l.Last))).ToList());
     }
@@ -47,7 +47,7 @@ public sealed partial class Checker
             throw new CompileError(symbol.Pos, $"'{name}' is the name of an imported module; choose another name");
         // A name reported as not declared, used before this declaration, is now declared (spec 13).
         if (Lookup(name, demand: false) is { } existing and not ErrorSymbol)
-            throw new CompileError(symbol.Pos, $"'{name}' is already declared at {existing.Pos}");
+            throw new CompileError(symbol.Pos, $"'{name}' is already declared at {existing.Pos}. Rename one of them");
         scope[name] = symbol;
     }
 
@@ -143,19 +143,19 @@ public sealed partial class Checker
         if (_module.Imports.ContainsKey(name))
             return new CompileError(pos, $"'{name}' is a module; use the names in it as {name}.name");
         int dot = name.IndexOf('.');
-        if (dot <= 0) return new CompileError(pos, $"'{name}' is not declared") { Undeclared = name };
+        if (dot <= 0) return new CompileError(pos, $"'{name}' is not declared. Check the spelling, or declare it") { Undeclared = name };
         // s.a() where s is declared: a field or member, not a function in a module.
         switch (Lookup(name[..dot]))
         {
             case VariableSymbol { Type: var t } when t.IsStruct || t is { IsPointer: true, Element.IsStruct: true }:
-                return new CompileError(pos, $"'{name}' is a field, not a function; only functions can be called");
+                return new CompileError(pos, $"'{name}' is a field, not a function; only functions can be called. Remove the ()");
             case { } s:
-                return new CompileError(pos, $"'{name}' is not a function: '{name[..dot]}' is a {KindName(s)}, not a module");
+                return new CompileError(pos, $"'{name}' is not a function: '{name[..dot]}' is a {KindName(s)}, not a module. Check the spelling of the module name");
         }
         if (!_module.Imports.TryGetValue(name[..dot], out var other))
             return MissingImport(name[..dot], pos);
         if (other.Syntax.PrivateNames.Contains(name[(dot + 1)..]))
-            return new CompileError(pos, $"'{name}' is private to the module {other.Name}; only code in {other.Name} can use it");
+            return new CompileError(pos, $"'{name}' is private to the module {other.Name}; only code in {other.Name} can use it. Remove 'private' there, or use another of its functions");
         // Modules that import each other are declared one after the other, so a declaration
         // in the first one cannot use the second one's names yet.
         if (!other.Declared)
@@ -165,7 +165,7 @@ public sealed partial class Checker
                 $"'{name}' cannot be used in a declaration of {here}: {other.Name} and {here} import each other, and {other.Name} is declared after {here}. " +
                 $"Move {name[(dot + 1)..]} to {here}, or to a module both import");
         }
-        return new CompileError(pos, $"'{name}' is not declared");
+        return new CompileError(pos, $"'{name}' is not declared. Check the spelling, or declare it in {other.Name}");
     }
 
     private static string KindName(Symbol s) => s switch
@@ -179,7 +179,7 @@ public sealed partial class Checker
 
     /// <summary><c>text.put</c> where <c>text</c> is not declared: most likely a missing import.</summary>
     private static CompileError MissingImport(string module, SourcePos pos) =>
-        new(pos, $"'{module}' is not declared. To use the module {module}, add 'import {module}' at the top of the file") { Undeclared = module };
+        new(pos, $"'{module}' is not declared. Add 'import {module}' at the top of the file to use the module {module}") { Undeclared = module };
 
     /// <summary>Reports <c>name.member</c> where <c>name</c> is not declared as a missing import.</summary>
     private void CheckMemberTarget(MemberExpr m)
@@ -215,9 +215,9 @@ public sealed partial class Checker
         var header = module.Syntax.Header;
         var import = module.ImportedBy;
         if (header is not null && module.IsMain)
-            throw new CompileError(header.Pos, "The main file has no module header; 'module' is only for modules that have parameters");
+            throw new CompileError(header.Pos, "The main file has no module header; 'module' is only for modules that have parameters. Remove the header");
         if (header is not null && header.Name != module.Name)
-            throw new CompileError(header.Pos, $"The module header says '{header.Name}' but the file is {module.Name}.tern; the name must match the file");
+            throw new CompileError(header.Pos, $"The module header says '{header.Name}' but the file is {module.Name}.tern; the name must match the file. Rename one of them");
         var parameters = header?.Parameters ?? [];
         if (import is not null)
         {
@@ -226,10 +226,10 @@ public sealed partial class Checker
             {
                 if (parameters.All(p => p.Name != arg.Name))
                     throw new CompileError(arg.Pos, header is null
-                        ? $"Module '{module.Name}' has no parameters (it has no 'module {module.Name}(...)' header)"
-                        : $"Module '{module.Name}' has no parameter '{arg.Name}'; its parameters are {string.Join(", ", parameters.Select(p => p.Name))}");
+                        ? $"Module '{module.Name}' has no parameters (it has no 'module {module.Name}(...)' header). Remove the arguments from the import"
+                        : $"Module '{module.Name}' has no parameter '{arg.Name}'; its parameters are {string.Join(", ", parameters.Select(p => p.Name))}. Use one of those names");
                 if (!seen.Add(arg.Name))
-                    throw new CompileError(arg.Pos, $"Parameter '{arg.Name}' is set twice");
+                    throw new CompileError(arg.Pos, $"Parameter '{arg.Name}' is set twice. Remove one");
             }
         }
         var saved = _module;
@@ -237,7 +237,7 @@ public sealed partial class Checker
         {
             var type = ResolveType(p.Type);
             if (!(type.IsInteger || type.Kind == TypeKind.Bool))
-                throw new CompileError(p.Type.Pos, "A module parameter is an integer type or bool");
+                throw new CompileError(p.Type.Pos, "A module parameter is an integer type or bool. Use u8, i8, u16, i16 or bool");
             var arg = import?.Args.FirstOrDefault(a => a.Name == p.Name);
             Expr value = arg?.Value ?? p.Default;
             if (arg is not null)
@@ -250,15 +250,15 @@ public sealed partial class Checker
                 {
                     var m = System.Text.RegularExpressions.Regex.Match(e.Description, "^'([^']+)' is not declared");
                     if (m.Success && _unusableConstants.TryGetValue(m.Groups[1].Value, out var why))
-                        throw new CompileError(e.Pos, $"'{m.Groups[1].Value}' cannot be used in a parameter value, since it does not check without the rest of the program: {why}");
-                    throw new CompileError(e.Pos, e.Description + ". A parameter value uses literals and the main file's constants that do not depend on imported modules");
+                        throw new CompileError(e.Pos, $"'{m.Groups[1].Value}' cannot be used in a parameter value, since it does not check without the rest of the program: {why}. Write the value as a number");
+                    throw new CompileError(e.Pos, e.Description + ". A parameter value uses literals and the main file's constants that do not depend on imported modules. Write the value as a number");
                 }
                 finally { _module = saved; }
             }
             else
                 CheckExpr(value);
             if (value.ConstValue is not long v)
-                throw new CompileError(value.Pos, $"The value of parameter '{p.Name}' is not known at compile time");
+                throw new CompileError(value.Pos, $"The value of parameter '{p.Name}' is not known at compile time. Use numbers and constants");
             Coerce(value, type);
             Declare(new ConstSymbol(p.Name, p.Pos, type, v) { UsedParameters = [p.Name] });
         }
@@ -299,9 +299,9 @@ public sealed partial class Checker
     {
         CheckExpr(a.Condition);
         if (a.Condition.Type.Kind != TypeKind.Bool)
-            throw new CompileError(a.Condition.Pos, "An assert condition is a bool, e.g. COUNT <= 64");
+            throw new CompileError(a.Condition.Pos, "An assert condition is a bool. Write a comparison, e.g. COUNT <= 64");
         if (a.Condition.ConstValue is not long v)
-            throw new CompileError(a.Condition.Pos, "An assert condition must be known at compile time: use constants, sizeof and len");
+            throw new CompileError(a.Condition.Pos, "An assert condition must be known at compile time. Use constants, sizeof and len");
         if (v != 0) return;
         // A wrong parameter is reported where the main file set it, also when the condition only
         // uses constants computed from it.
@@ -345,12 +345,12 @@ public sealed partial class Checker
         if (DeclaredRealConst(decl)) return;
         CheckExpr(decl.Value);
         if (decl.Value.ConstValue is not long value)
-            throw new CompileError(decl.Value.Pos, $"The value of '{decl.Name}' is not known at compile time");
+            throw new CompileError(decl.Value.Pos, $"The value of '{decl.Name}' is not known at compile time. Use numbers and constants, or a var for a value computed at run time");
         var type = decl.Value.Type;
         if (decl.TypeSyntax is not null)
         {
             type = ResolveType(decl.TypeSyntax);
-            if (!type.IsScalar) throw new CompileError(decl.Pos, "Constants must be numbers or bool");
+            if (!type.IsScalar) throw new CompileError(decl.Pos, "Constants must be numbers or bool. Use data for an array or a string");
             Coerce(decl.Value, type);
         }
         var names = new HashSet<string>();
@@ -379,33 +379,33 @@ public sealed partial class Checker
                 // Checked with the routine's address, after the globals are declared.
                 if (decl.Address is null)
                     throw new CompileError(p.Pos, decl.IsAsm
-                        ? "Fixed inputs are only for routines at a fixed address. An asm fn sets up its inputs in its own code"
+                        ? "Fixed inputs are only for routines at a fixed address. An asm fn sets up its inputs in its own code. Remove it"
                         : "Fixed inputs are only for routines at a fixed address (fn name(...) @ $addr). Give the parameter a name and a type: 'name: type'");
                 continue;
             }
             var type = ResolveType(p.Type);
             if (type.IsStruct)
                 throw new CompileError(p.Pos, $"A struct cannot be passed to a function, since structs are never copied. Pass a pointer (ptr {type}) or an index");
-            if (!type.IsScalar) throw new CompileError(p.Pos, "Parameters must be numbers or bool");
+            if (!type.IsScalar) throw new CompileError(p.Pos, "Parameters must be numbers or bool. Pass a pointer to an array: ptr u8");
             var param = new VariableSymbol(p.Name, p.Pos, type, VariableKind.Parameter, fn);
             if (fn.Parameters.Any(x => x.Name == p.Name))
-                throw new CompileError(p.Pos, $"Parameter '{p.Name}' is declared twice");
+                throw new CompileError(p.Pos, $"Parameter '{p.Name}' is declared twice. Rename one of them");
             if (p.UsingRegister is { } reg)
             {
                 CheckRegisterFits(reg, type, p.Pos, allowFlags: false);
                 foreach (char r in reg.ToString().Where(char.IsUpper))
                     if (!usedRegisters.Add(r))
-                        throw new CompileError(p.Pos, $"Register {r} is used by more than one parameter");
+                        throw new CompileError(p.Pos, $"Register {r} is used by more than one parameter. Use another register for one of them");
                 param.PassedIn = reg;
                 // An asm fn or a fixed-address routine uses register parameters where they arrive; they have no memory.
                 if (decl.IsAsm || decl.Address is not null) param.Register = reg;
             }
             else if (decl.IsAsm && decl.IsInline)
                 throw new CompileError(p.Pos,
-                    $"Parameter '{p.Name}' of an inline asm fn must be passed in a register (using A, X, Y, AX, AY or XY): it is copied into each caller, which has no memory for it");
+                    $"Parameter '{p.Name}' of an inline asm fn must be passed in a register (using A, X, Y, AX, AY or XY): it is copied into each caller, which has no memory for it. Add 'using A', 'using X' or 'using Y'");
             else if (decl.Address is not null)
                 throw new CompileError(p.Pos,
-                    $"Parameter '{p.Name}' must be passed in a register (using A, X, Y, AX, AY or XY): a routine at a fixed address has no memory for parameters");
+                    $"Parameter '{p.Name}' must be passed in a register (using A, X, Y, AX, AY or XY): a routine at a fixed address has no memory for parameters. Add 'using A', 'using X' or 'using Y'");
             fn.Parameters.Add(param);
             if (param.InMemory) fn.FrameVariables.Add(param);
         }
@@ -415,7 +415,7 @@ public sealed partial class Checker
             fn.ReturnType = ResolveType(decl.ReturnType);
             if (fn.ReturnType.IsStruct)
                 throw new CompileError(decl.ReturnType.Pos, $"A function cannot return a struct, since structs are never copied. Return a pointer (ptr {fn.ReturnType}) or an index");
-            if (!fn.ReturnType.IsScalar) throw new CompileError(decl.ReturnType.Pos, "Functions can only return numbers or bool");
+            if (!fn.ReturnType.IsScalar) throw new CompileError(decl.ReturnType.Pos, "Functions can only return numbers or bool. Return a pointer to an array: ptr u8");
             fn.ReturnRegister = decl.ReturnUsing ?? fn.ReturnType.Kind switch
             {
                 TypeKind.Bool => Register.Carry,
@@ -428,7 +428,7 @@ public sealed partial class Checker
                     "Only an asm fn, an inline asm fn or a routine at a fixed address can return a bool using overflow: no instruction sets the V flag, so a fn cannot 'return true' in it. Return it using carry, zero or negative");
         }
         else if (decl.ReturnUsing is not null)
-            throw new CompileError(decl.Pos, "'using' needs a return type");
+            throw new CompileError(decl.Pos, "'using' needs a return type. Write it before 'using': -> u8 using A");
 
         Declare(fn, decl.Name);
     }
@@ -440,22 +440,22 @@ public sealed partial class Checker
         var value = p.FixedValue!;
         CheckExpr(value);
         if (value.ConstValue is not long v)
-            throw new CompileError(value.Pos, "A fixed input must be a constant");
+            throw new CompileError(value.Pos, "A fixed input must be a constant. Use a number, true, false or a const");
         switch (reg)
         {
             case Register.Carry:
                 if (value.Type.Kind != TypeKind.Bool)
-                    throw new CompileError(value.Pos, "The carry takes true or false");
+                    throw new CompileError(value.Pos, "The carry takes true or false. Write 'true using carry' or 'false using carry'");
                 break;
             case Register.A or Register.X or Register.Y:
                 Coerce(value, TernType.U8);
                 break;
             default:
-                throw new CompileError(p.Pos, $"A fixed input goes in A, X, Y or the carry, not {reg}");
+                throw new CompileError(p.Pos, $"A fixed input goes in A, X, Y or the carry, not {reg}. Use one of those");
         }
         char key = reg == Register.Carry ? 'c' : reg.ToString()[0];
         if (!usedRegisters.Add(key))
-            throw new CompileError(p.Pos, reg == Register.Carry ? "The carry is set more than once" : $"Register {reg} is used by more than one parameter");
+            throw new CompileError(p.Pos, reg == Register.Carry ? "The carry is set more than once. Remove one" : $"Register {reg} is used by more than one parameter. Use another register for one of them");
         fn.FixedInputs.Add((reg, v));
     }
 
@@ -464,9 +464,9 @@ public sealed partial class Checker
     {
         CheckExpr(decl.Address!);
         if (decl.Address!.ConstValue is not long a)
-            throw new CompileError(decl.Address.Pos, "The address must be known at compile time");
+            throw new CompileError(decl.Address.Pos, "The address must be known at compile time. Use a number or a constant");
         if (a < 0 || a > 0xFFFF)
-            throw new CompileError(decl.Address.Pos, $"Address ${a:X} is outside memory");
+            throw new CompileError(decl.Address.Pos, $"Address ${a:X} is outside memory. Use an address from $0000 to $FFFF");
         fn.FixedAddress = (int)a;
 
         var usedRegisters = fn.Parameters.SelectMany(p => p.PassedIn!.Value.ToString().Where(char.IsUpper)).ToHashSet();
@@ -476,11 +476,11 @@ public sealed partial class Checker
         foreach (var (reg, pos) in decl.Keeps)
         {
             if (reg is not (Register.A or Register.X or Register.Y))
-                throw new CompileError(pos, $"'keeps' lists the registers A, X and Y, not {reg}. Flags always count as changed");
+                throw new CompileError(pos, $"'keeps' lists the registers A, X and Y, not {reg}. Flags always count as changed. Remove {reg}");
             if (!fn.Keeps.Add(reg))
-                throw new CompileError(pos, $"{reg} is listed twice after 'keeps'");
+                throw new CompileError(pos, $"{reg} is listed twice after 'keeps'. Remove one");
             if (fn.ReturnRegister is { } ret && ret.Uses(reg))
-                throw new CompileError(pos, $"'{fn.Name}' returns a value in {reg}, so it cannot keep {reg}");
+                throw new CompileError(pos, $"'{fn.Name}' returns a value in {reg}, so it cannot keep {reg}. Remove {reg} from 'keeps'");
         }
     }
 
@@ -492,7 +492,7 @@ public sealed partial class Checker
             Register.AX or Register.AY or Register.XY => type.Size == 2,
             _ => allowFlags && type.Kind == TypeKind.Bool,
         };
-        if (!ok) throw new CompileError(pos, $"A {type} value cannot be passed using {reg}");
+        if (!ok) throw new CompileError(pos, $"A {type} value cannot be passed using {reg}. Use {(type.Size == 2 ? "AX, AY or XY" : "A, X or Y")}");
     }
 
     /// <summary>Set while a global's type is resolved: a byte array there may be longer than 256 (spec 3.2).</summary>
@@ -546,19 +546,19 @@ public sealed partial class Checker
             throw new CompileError(decl.Pos, $"'{decl.Name}' is at a fixed address, which is never zeroed; leave out 'noinit'");
 
         if (decl.IsData && !type.IsArray && !type.IsStruct)
-            throw new CompileError(decl.Pos, "Data must be an array, a string or a struct. For a single value, use 'const'");
+            throw new CompileError(decl.Pos, "Data must be an array, a string or a struct. Use 'const' for a single value");
         if (decl.Init is not null)
         {
             if (v.FixedAddress is not null && !decl.IsData)
-                throw new CompileError(decl.Init.Pos, "A variable at a fixed address cannot have an initial value");
+                throw new CompileError(decl.Init.Pos, "A variable at a fixed address cannot have an initial value. Assign it at the start of main, or use data");
             if (v.Region is not null && !decl.IsData)
                 throw new CompileError(decl.Init.Pos, "A variable in a region cannot have an initial value: the region is not part of the program file. Assign it at the start of main");
             if (bytes is not null)
             {
                 if (!type.IsArray || type.Element!.Kind != TypeKind.U8)
-                    throw new CompileError(decl.Init.Pos, $"This value is a [u8; {bytes.Length}] array, but '{decl.Name}' is {type}");
+                    throw new CompileError(decl.Init.Pos, $"This value is a [u8; {bytes.Length}] array, but '{decl.Name}' is {type}. Change the type to [u8; {bytes.Length}]");
                 if (type.Length != bytes.Length)
-                    throw new CompileError(decl.Init.Pos, $"Expected {type.Length} bytes, found {bytes.Length}");
+                    throw new CompileError(decl.Init.Pos, $"Expected {type.Length} bytes, found {bytes.Length}. Change the length to {bytes.Length}, or write '_' to take it from the value");
                 v.InitialBytes = bytes;
             }
             else if (UsesAddr(decl.Init)) _addressInits.Add((decl, v, _module));
@@ -575,7 +575,7 @@ public sealed partial class Checker
         switch (init)
         {
             case StringExpr s:
-                if (s.Text.Length == 0) throw new CompileError(s.Pos, "A string must have at least one character");
+                if (s.Text.Length == 0) throw new CompileError(s.Pos, "A string must have at least one character. Write at least one");
                 var encoding = EncodingOf(s.Encoding, s.Pos);
                 return s.Text.Select(c => (byte)Encode(c, encoding, s.Pos)).ToArray();
             case CallExpr { Name: "include_bytes" } call:
@@ -590,7 +590,7 @@ public sealed partial class Checker
     {
         if (prefix is null) return _platform.DefaultEncoding;
         if (CharEncoding.ByName.TryGetValue(prefix, out var encoding)) return encoding;
-        throw new CompileError(pos, $"Unknown encoding '{prefix}'. Known encodings: {string.Join(", ", CharEncoding.ByName.Keys)}");
+        throw new CompileError(pos, $"Unknown encoding '{prefix}'. Use one of: {string.Join(", ", CharEncoding.ByName.Keys)}");
     }
 
     private static int Encode(char c, CharEncoding encoding, SourcePos pos)
@@ -604,7 +604,7 @@ public sealed partial class Checker
     private byte[] IncludeBytes(CallExpr call)
     {
         if (call.Args is not [StringExpr { Encoding: null } file])
-            throw new CompileError(call.Pos, "include_bytes() takes a file name in quotes");
+            throw new CompileError(call.Pos, "include_bytes() takes a file name in quotes. Write include_bytes(\"file.bin\")");
         var path = Path.Combine(_module.Directory, file.Text);
         byte[] bytes;
         try
@@ -613,9 +613,9 @@ public sealed partial class Checker
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
         {
-            throw new CompileError(file.Pos, $"Cannot read '{file.Text}' ({path}): {e.Message}");
+            throw new CompileError(file.Pos, $"Cannot read '{file.Text}' ({path}): {e.Message}. Check the file name, relative to the source file");
         }
-        if (bytes.Length == 0) throw new CompileError(file.Pos, $"'{file.Text}' is empty");
+        if (bytes.Length == 0) throw new CompileError(file.Pos, $"'{file.Text}' is empty. Use a file with at least one byte");
         return bytes;
     }
 
@@ -627,7 +627,7 @@ public sealed partial class Checker
             var t = decl.TypeSyntax is null ? null : ResolveType(decl.TypeSyntax);
             if (t is null || !t.IsStructArray)
                 throw new CompileError(decl.Pos,
-                    "'indexed' is for arrays of structs, e.g. 'indexed var list: [Enemy; 20]'. Arrays of numbers are indexed directly");
+                    "'indexed' is for arrays of structs, e.g. 'indexed var list: [Enemy; 20]'. Arrays of numbers are indexed directly. Remove 'indexed'");
             if (t.Size > 256)
                 throw new CompileError(decl.Pos,
                     $"An indexed array is at most 256 bytes, so that every byte is reachable with an 8-bit offset; '{decl.Name}' is {t.Size} ({t.Length} records of {t.Element!.Size}). " +
@@ -639,20 +639,20 @@ public sealed partial class Checker
             var t = decl.TypeSyntax is null ? null : ResolveType(decl.TypeSyntax);
             if (t is null || !t.IsArray)
                 throw new CompileError(decl.Pos,
-                    "'linear' is for arrays of 16-bit values or structs, e.g. 'linear var pts: [u16; 32]' or 'linear var list: [Enemy; 8]'");
+                    "'linear' is for arrays of 16-bit values or structs, e.g. 'linear var pts: [u16; 32]' or 'linear var list: [Enemy; 8]'. Remove 'linear'");
             if (t.Element!.Size == 1 && !t.Element.IsStruct)
-                throw new CompileError(decl.Pos, $"'linear' is only for arrays of 16-bit values or structs: the elements of a {t} are one byte each, so they are already stored in order");
+                throw new CompileError(decl.Pos, $"'linear' is only for arrays of 16-bit values or structs: the elements of a {t} are one byte each, so they are already stored in order. Remove 'linear'");
             if (!t.Element.IsStruct && t.Length > 128)
                 throw new CompileError(decl.Pos,
                     $"A linear array of 16-bit values has at most 128 elements, so that the doubled index fits in a register; '{decl.Name}' has {t.Length}. Leave out 'linear' to store it split");
             return TernType.ArrayOf(t.Element, t.Length, linear: true);
         }
         if (decl.TypeSyntax is not null) return ResolveType(decl.TypeSyntax);
-        if (decl.Init is null) throw new CompileError(decl.Pos, $"'{decl.Name}' needs a type or an initial value");
+        if (decl.Init is null) throw new CompileError(decl.Pos, $"'{decl.Name}' needs a type or an initial value. Write one: var {decl.Name}: u8");
         if (decl.Init is ArrayLiteralExpr || IsCompileTimeArray(decl.Init))
             throw new CompileError(decl.Pos, decl.IsData
-                ? $"Data arrays need a written type, e.g. data {decl.Name}: [u8; _] = [...], where '_' takes the length from the list"
-                : $"Array variables need a written type, e.g. var {decl.Name}: [u8; _] = [...], where '_' takes the length from the list");
+                ? $"Data arrays need a written type. Write data {decl.Name}: [u8; _] = [...], where '_' takes the length from the list"
+                : $"Array variables need a written type. Write var {decl.Name}: [u8; _] = [...], where '_' takes the length from the list");
         if (decl.Init is StructLiteralExpr lit) return ResolveType(new NamedTypeSyntax(lit.Pos, lit.StructName));
         CheckExpr(decl.Init);
         if (decl.Init.Type.IsStruct) Coerce(decl.Init, decl.Init.Type); // "A struct cannot be used as a value"
@@ -667,7 +667,7 @@ public sealed partial class Checker
                 v.RequireZeroPage = true;
                 break;
             case PlacementKind.Address:
-                if (!allowAddress) throw new CompileError(decl.Pos, "Only global variables can have a fixed address");
+                if (!allowAddress) throw new CompileError(decl.Pos, "Only global variables can have a fixed address. Move the variable out of the function");
                 var addr = decl.Placement.Address!;
                 // Only a region name needs the memory block; a constant address does not.
                 if (addr is NameExpr placed && _module.Syntax.Memory?.Lines.Any(l => l.Kind == "region" && l.Name == placed.Name) == true)
@@ -685,9 +685,9 @@ public sealed partial class Checker
                 }
                 CheckExpr(addr);
                 if (addr.ConstValue is not long a)
-                    throw new CompileError(addr.Pos, "The address must be known at compile time");
+                    throw new CompileError(addr.Pos, "The address must be known at compile time. Use a number or a constant");
                 if (a < 0 || a + v.Type.Size > 0x10000)
-                    throw new CompileError(addr.Pos, $"Address ${a:X} is outside memory");
+                    throw new CompileError(addr.Pos, $"Address ${a:X} is outside memory. Use an address up to $FFFF, less the variable's size");
                 v.FixedAddress = (int)a;
                 v.InVolatileArea = _platform.IsVolatile((int)a, (int)a + v.Type.Size - 1);
                 break;
@@ -703,10 +703,10 @@ public sealed partial class Checker
             if (init is not ArrayLiteralExpr list)
             {
                 if (IsCompileTimeArray(init)) return ArrayBytes(CompileTimeArray(init), type, init.Pos);
-                throw new CompileError(init.Pos, "An array must be initialized with [ ... ]");
+                throw new CompileError(init.Pos, "An array must be initialized with [ ... ]. Write the elements in brackets");
             }
             if (list.Elements.Count != type.Length)
-                throw new CompileError(init.Pos, $"Expected {type.Length} values, found {list.Elements.Count}");
+                throw new CompileError(init.Pos, $"Expected {type.Length} values, found {list.Elements.Count}. Change the length to {list.Elements.Count}, or write '_' to take it from the list");
             var bytes = new List<byte>();
             foreach (var e in list.Elements) bytes.AddRange(ConstantBytes(e, type.Element!, target, at + bytes.Count));
             return bytes.ToArray();
@@ -717,14 +717,14 @@ public sealed partial class Checker
         CheckExpr(init);
         Coerce(init, type);
         if (init.ConstValue is not long value)
-            throw new CompileError(init.Pos, "A global's initial value must be known at compile time");
+            throw new CompileError(init.Pos, "A global's initial value must be known at compile time. Assign it at the start of main instead");
         return type.Size == 1 ? [(byte)value] : [(byte)value, (byte)(value >> 8)];
     }
 
     /// <summary>A struct literal where a number, bool or pointer is expected; <paramref name="field"/> names the field, if any.</summary>
     private static CompileError LiteralForScalar(StructLiteralExpr lit, TernType type, string? field)
     {
-        if (!type.IsPointer) return new CompileError(lit.Pos, $"Expected {type}, found a {lit.StructName} literal");
+        if (!type.IsPointer) return new CompileError(lit.Pos, $"Expected {type}, found a {lit.StructName} literal. Use a struct literal only for a struct");
         string what = field is null ? "This value" : $"'{field}'";
         string write = field is null ? "addr(name)" : $"{field} = addr(name)";
         return new CompileError(lit.Pos,
@@ -744,7 +744,7 @@ public sealed partial class Checker
                 $"A {s.Name} is initialized with a struct literal. Write '{s.Name} {{ {named.FirstOrDefault() ?? "field"} = ... }}'");
         var written = ResolveType(new NamedTypeSyntax(lit.Pos, lit.StructName));
         if (!written.IsStruct)
-            throw new CompileError(lit.Pos, $"'{lit.StructName}' is not a struct, so '{lit.StructName} {{ ... }}' is not a struct literal");
+            throw new CompileError(lit.Pos, $"'{lit.StructName}' is not a struct, so '{lit.StructName} {{ ... }}' is not a struct literal. Check the spelling of the struct name");
         if (written.Struct != s)
             throw new CompileError(lit.Pos, $"This is a {written.Struct!.Name} literal, but the value here is a {s.Name}. Write '{s.Name} {{ ... }}'");
         var bytes = new byte[s.Size];
@@ -787,16 +787,16 @@ public sealed partial class Checker
         if (ByteSource(value) is { } text)
         {
             if (element.Size != 1 || !element.IsInteger)
-                throw new CompileError(value.Pos, $"A string is a [u8; {text.Length}] array, but the field '{field.Name}' is {type}");
+                throw new CompileError(value.Pos, $"A string is a [u8; {text.Length}] array, but the field '{field.Name}' is {type}. Change the field to [u8; {text.Length}]");
             if (text.Length != n)
-                throw new CompileError(value.Pos, $"The field '{field.Name}' is {type}: expected {n} bytes, found {text.Length}");
+                throw new CompileError(value.Pos, $"The field '{field.Name}' is {type}: expected {n} bytes, found {text.Length}. Write a string of {n} characters");
             text.CopyTo(record, offset);
             return;
         }
         if (value is not ArrayLiteralExpr list)
             throw new CompileError(value.Pos, $"The field '{field.Name}' is {type}, so its value is a list. Write [ ... ] with {n} values");
         if (list.Elements.Count != n)
-            throw new CompileError(value.Pos, $"The field '{field.Name}' is {type}: expected {n} values, found {list.Elements.Count}");
+            throw new CompileError(value.Pos, $"The field '{field.Name}' is {type}: expected {n} values, found {list.Elements.Count}. Write {n} values");
         for (int i = 0; i < n; i++)
             ScalarInto(list.Elements[i], element, target, record, offset + i, element.Size == 2 ? offset + n + i : null, at);
     }
@@ -905,7 +905,7 @@ public sealed partial class Checker
                     case "u16": return TernType.U16;
                     case "i16": return TernType.I16;
                     case "bool": return TernType.Bool;
-                    case "ptr": throw new CompileError(n.Pos, "'ptr' needs the type it points to, e.g. 'ptr u8'");
+                    case "ptr": throw new CompileError(n.Pos, "'ptr' needs the type it points to. Write e.g. 'ptr u8'");
                 }
                 switch (Lookup(n.Name))
                 {
@@ -915,17 +915,17 @@ public sealed partial class Checker
                     case null when n.Name.Contains('.'):
                         throw NotDeclared(n.Name, n.Pos);
                     case null:
-                        throw new CompileError(n.Pos, $"Unknown type '{n.Name}'");
+                        throw new CompileError(n.Pos, $"Unknown type '{n.Name}'. Check the spelling, or declare a struct of that name");
                     default:
-                        throw new CompileError(n.Pos, $"'{n.Name}' is not a type");
+                        throw new CompileError(n.Pos, $"'{n.Name}' is not a type. Use a number type, bool, ptr, an array or a struct");
                 }
             case PointerTypeSyntax p:
                 var target = ResolveType(p.Target, layOut: false);
-                if (!target.IsScalar && !target.IsStruct) throw new CompileError(p.Pos, "A pointer must point to a number, bool, pointer or struct");
+                if (!target.IsScalar && !target.IsStruct) throw new CompileError(p.Pos, "A pointer must point to a number, bool, pointer or struct. Use the array's element type: ptr u8");
                 return TernType.PointerTo(target);
             case ArrayTypeSyntax a:
                 var element = ResolveType(a.Element);
-                if (!element.IsScalar && !element.IsStruct) throw new CompileError(a.Pos, "Array elements must be numbers, bool, pointers or structs");
+                if (!element.IsScalar && !element.IsStruct) throw new CompileError(a.Pos, "Array elements must be numbers, bool, pointers or structs. Use one array per row, or a longer array");
                 long len;
                 if (a.Length is null)
                 {
@@ -936,12 +936,12 @@ public sealed partial class Checker
                 else
                 {
                     CheckExpr(a.Length);
-                    len = a.Length.ConstValue ?? throw new CompileError(a.Length.Pos, "Array length must be known at compile time");
+                    len = a.Length.ConstValue ?? throw new CompileError(a.Length.Pos, "Array length must be known at compile time. Use a number or a constant");
                 }
                 if (len < 1 || len > 256 && !(_allowLongBytes && element.Size == 1 && element.IsInteger))
                     throw new CompileError(a.Length?.Pos ?? a.Pos, len > 256
-                        ? $"An array of {element} has at most 256 elements. Only a global var or data of u8 or i8 may be longer (spec 3.2), and it is used through a pointer"
-                        : $"Array length must be 1 to 256, not {len}");
+                        ? $"An array of {element} has at most 256 elements. Only a global var or data of u8 or i8 may be longer (spec 3.2), and it is used through a pointer. Split it into arrays of at most 256"
+                        : $"Array length must be 1 to 256, not {len}. Use a length in that range");
                 if (len > 0x10000)
                     throw new CompileError(a.Length?.Pos ?? a.Pos, $"An array of {element} has at most 65536 elements, all of memory, not {len}. Use a smaller length");
                 return TernType.ArrayOf(element, (int)len);

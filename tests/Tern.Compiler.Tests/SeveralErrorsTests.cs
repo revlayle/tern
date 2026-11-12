@@ -15,14 +15,14 @@ public sealed class SeveralErrorsTests : IDisposable
 
     public void Dispose() => _dir.Delete(recursive: true);
 
-    /// <summary>Every error of the compile as "line: message" (with the file name when it is not main.tern).</summary>
+    /// <summary>Every error of the compile as "line: message", without the fix sentence (with the file name when it is not main.tern).</summary>
     private List<string> Errors(string source, int? maxErrors = null, params (string Name, string Text)[] modules)
     {
         foreach (var (name, text) in modules) File.WriteAllText(Path.Combine(_dir.FullName, name + ".tern"), text);
         var e = Assert.Throws<CompileError>(() =>
             TernCompiler.Compile(source, sourcePath: Path.Combine(_dir.FullName, "main.tern"), maxErrors: maxErrors));
         Assert.Same(e, e.All[0]);
-        return e.All.Select(x => (x.Pos.File is { } f && Path.GetFileName(f) != "main.tern" ? Path.GetFileName(f) + ":" : "") + $"{x.Pos.Line}: {x.Description}").ToList();
+        return e.All.Select(x => (x.Pos.File is { } f && Path.GetFileName(f) != "main.tern" ? Path.GetFileName(f) + ":" : "") + $"{x.Pos.Line}: {Diagnostic.Split(x.Description).Message.TrimEnd('.')}").ToList();
     }
 
     [Fact]
@@ -56,10 +56,10 @@ public sealed class SeveralErrorsTests : IDisposable
         Assert.Equal([
             "util.tern:3: 300 does not fit in u8 (0 to 255)",
             "util.tern:4: -1 does not fit in u8 (0 to 255)",
-            "5: Expected u8, found u16. Convert with 'as u8'",
+            "5: Expected u8, found u16",
             "6: Expected u8, found bool",
             "10: 'missing' is not a function",
-            "11: Expected u8, found u16. Convert with 'as u8'",
+            "11: Expected u8, found u16",
         ], errors);
     }
 
@@ -195,8 +195,8 @@ public sealed class SeveralErrorsTests : IDisposable
             """);
         Assert.Equal([
             "3: Invalid digit '2' in number 0b102",
-            "4: A character literal holds exactly one character; use \"...\" for a string",
-            "5: Tern has no '++'. Write 'b += 1'",
+            "4: A character literal holds exactly one character",
+            "5: Tern has no '++'",
             "6: Expected u8, found bool",
         ], errors);
     }
@@ -309,7 +309,7 @@ public sealed class SeveralErrorsTests : IDisposable
                 text.put('B')
             }
             """);
-        Assert.Equal(["2: 'text' is not declared. To use the module text, add 'import text' at the top of the file"], errors);
+        Assert.Equal(["2: 'text' is not declared"], errors);
     }
 
     [Fact]
@@ -393,7 +393,7 @@ public sealed class SeveralErrorsTests : IDisposable
         Assert.Equal([
             $"{path}:5:9: error: Expected an expression, found ')'",
             $"{path}:3:9: error: Expected u8, found bool",
-            $"{path}:4:9: error: 300 does not fit in u8 (0 to 255)",
+            $"{path}:4:9: error: 300 does not fit in u8 (0 to 255). Use a value in that range, or a wider type",
             "3 errors",
         ], error.TrimEnd().Split(Environment.NewLine));
 

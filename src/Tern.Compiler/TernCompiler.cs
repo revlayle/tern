@@ -107,7 +107,7 @@ public static class TernCompiler
                 if (v.Address is >= 0 and < 0x100 && v.FixedAddress is null)
                     foreach (int o in v.JumpVectorOffsets)
                         if (((v.Address + o) & 0xFF) == 0xFF)
-                            throw new CompileError(v.Pos, $"'{v.Name}' is used as jmp ({v.Name}{o:+0;-0;''}) and was placed so that the vector starts at $FF, where the 6502 reads it wrongly");
+                            throw new CompileError(v.Pos, $"'{v.Name}' is used as jmp ({v.Name}{o:+0;-0;''}) and was placed so that the vector starts at $FF, where the 6502 reads it wrongly. Place it at a fixed address whose low byte is not $FF");
 
             if (!binary && layout.Program[0].First != platform.LoadAddress)
                 throw new CompileError(program.Main.Pos,
@@ -422,7 +422,7 @@ public static class TernCompiler
             foreach (var (areaName2, area2) in layout.Overlays)
                     if (area2.Overlaps(range))
                         throw new CompileError(g.Pos,
-                            $"'{g.Name}' at {range} is in the overlay area {areaName2} ({area2}), but it belongs to the resident program. Fixed data in an overlay area belongs in an overlay module, which is loaded there");
+                            $"'{g.Name}' at {range} is in the overlay area {areaName2} ({area2}), but it belongs to the resident program. Fixed data in an overlay area belongs in an overlay module, which is loaded there. Move it to that module");
             if (layout.Program.Concat(layout.Reserved).Any(a => a.Contains(range))) continue;
             throw new CompileError(g.Pos,
                 $"'{g.Name}' at {range} is not in a program or reserved area. " +
@@ -460,7 +460,7 @@ public static class TernCompiler
                 if (!g.DeclaredVolatile && module.Any(s => range.Overlaps(new AddressRange(s.Address, s.Address + s.Size - 1))))
                     throw new CompileError(g.Pos,
                         $"'{g.Name}' at {range} overlaps the overlay {module.Key} at {file}, which is loaded there. " +
-                        $"If the overlap is intended, declare it 'volatile var {g.Name}'; otherwise name the overlay's own variable ({module.Key}.name) or move '{g.Name}' out of the overlay's area");
+                        $"Declare it 'volatile var {g.Name}' if the overlap is intended; otherwise name the overlay's own variable ({module.Key}.name) or move '{g.Name}' out of the overlay's area");
             }
             foreach (var (regionName, use) in plan.RegionUse)
                 if (range.Overlaps(use))

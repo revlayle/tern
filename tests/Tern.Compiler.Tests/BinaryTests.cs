@@ -454,7 +454,7 @@ public class BinaryTests
     [InlineData("memory { $C000..=$C003 program\n$C100..=$C1FF program }\nexport play\nfn play() { }", "The jump table (6 bytes) must be at the start of the first program area")]
     [InlineData("memory { $C000..=$CFFF program }\nexport play\ndata first: [u8; 3] @ $C000 = [1, 2, 3]\nfn play() { }", "overlaps the jump table at $C000-")]
     [InlineData("fn f() { }\nexport", "Expected a function name after 'export'")]
-    [InlineData("fn f() { }", "The program has no 'fn main()'. A binary for another program to call has an 'export' line instead")]
+    [InlineData("fn f() { }", "The program has no 'fn main()'. Add 'fn main() { }', or an 'export' line for a binary that another program calls")]
     [InlineData("fn f() { f() }\nexport f", "Recursion is not allowed")]
     public void Reports_errors(string source, string expected)
     {

@@ -108,7 +108,7 @@ public sealed class ConstFnTests : IDisposable
     [InlineData("data t: [i8; _] = [i - 200 for i in 0..4]", "Element 0 is -200, which does not fit in i8 (-128 to 127)")]
     [InlineData("data t: [u8; _] = [i * 0.5 for i in 0..4]", "Element 0 is the real number 0.0, which needs rounding to fit in u8. Use round(x), floor(x), ceil(x) or trunc(x)")]
     [InlineData("data t: [u8; _] = [i < 2 for i in 0..4]", "Element 0 is a bool, but the table holds u8")]
-    [InlineData("data t = [i for i in 0..4]", "Data arrays need a written type, e.g. data t: [u8; _] = [...]")]
+    [InlineData("data t = [i for i in 0..4]", "Data arrays need a written type. Write data t: [u8; _] = [...]")]
     [InlineData("data t: [u8; _] = [i for i in 0..4 for j in 0..2]", "A list built with 'for' has one 'for'. Write a const fn with nested loops for more")]
     [InlineData("data t: [u8; _] = [i for i in 0..4 if i > 1]", "A list built with 'for' has no filter. Write a const fn with a loop and an 'if' for that")]
     [InlineData("data t: [u8; _] = [i for i in 0..10 step 0]", "The step is 0, so the loop would never end. Use a step other than 0")]
@@ -710,7 +710,7 @@ public sealed class ConstFnTests : IDisposable
         var e = ErrorInMain("import tables\n\nconst K = tables.inverse(0)\nfn main() { }");
         Assert.Equal(Path.Combine(_dir.FullName, "tables.tern"), e.Pos.File);
         Assert.Equal(2, e.Pos.Line);
-        Assert.Equal("Division by zero (called from main.tern:3)", e.Description);
+        Assert.Equal("Division by zero (called from main.tern:3). Check the divisor", e.Description);
     }
 
     [Fact]

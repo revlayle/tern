@@ -222,7 +222,7 @@ public static class Lexer
                     if (source[i] == '\n') { line++; lineStart = i + 1; }
                     i++;
                 }
-                if (i >= source.Length) throw new CompileError(start, "Unterminated block comment");
+                if (i >= source.Length) throw new CompileError(start, "Unterminated block comment. Add '*/' where the comment ends");
                 i += 2;
                 return;
             }
@@ -271,12 +271,12 @@ public static class Lexer
                 while (i < source.Length && (IsHexDigit(source[i]) || source[i] == '_')) i++;
                 string digits = source[digitsStart..i].Replace("_", "");
                 if (digits.Length == 0)
-                    throw new CompileError(Pos(start), "Number has no digits");
+                    throw new CompileError(Pos(start), "Number has no digits. Write digits after '$' or '0b', e.g. $FF or 0b1010");
                 long value = 0;
                 foreach (char d in digits)
                 {
                     int dv = Convert.ToInt32(d.ToString(), 16);
-                    if (dv >= radix) throw new CompileError(Pos(start), $"Invalid digit '{d}' in number {source[start..i]}");
+                    if (dv >= radix) throw new CompileError(Pos(start), $"Invalid digit '{d}' in number {source[start..i]}. Use 0-9 in a decimal number, 0-9 and A-F after '$', 0 and 1 after '0b'");
                     // Spec 2.1: up to 2^63 - 1. Checked before the step, so the sum never overflows.
                     if (value > (long.MaxValue - dv) / radix)
                         throw new CompileError(Pos(start), "Number is too large. Use a value up to $7FFFFFFFFFFFFFFF (9223372036854775807)");
@@ -308,7 +308,7 @@ public static class Lexer
                 }
             }
             if (!matched)
-                throw new CompileError(Pos(i), $"Unexpected character '{c}'");
+                throw new CompileError(Pos(i), $"Unexpected character '{c}'. Remove it, or put it in a string or a comment");
         }
     }
 
@@ -322,7 +322,7 @@ public static class Lexer
         while (true)
         {
             if (i >= source.Length || source[i] == '\n')
-                throw new CompileError(pos, quote == '"' ? "String is not closed with '\"'" : "Character literal is not closed with '''");
+                throw new CompileError(pos, quote == '"' ? "String is not closed with '\"'. Add '\"' at its end, on the same line" : "Character literal is not closed with '''. Add ''' after the character");
             char c = source[i++];
             if (c == quote) return sb.ToString();
             if (c != '\\')

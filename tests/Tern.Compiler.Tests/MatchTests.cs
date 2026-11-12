@@ -478,7 +478,7 @@ public class MatchTests
     [InlineData("var x: u8\nfn main() { match x {\n _ => x = 1\n 0 => x = 2\n } }", "This arm can never run: '_' above it matches every value. Put '_' last")]
     [InlineData("var x: u8\nfn main() { match x { 1, _ => x = 1 } }", "'_' matches every value, so it must be alone in its arm")]
     [InlineData("var x: u8\nfn main() { match x { _, 1 => x = 1 } }", "'_' matches every value, so it must be alone in its arm")]
-    [InlineData("var x: u8\nfn main() { match x { 0..5 => x = 1 } }", "A range in a match includes its end: write 'low..=high'")]
+    [InlineData("var x: u8\nfn main() { match x { 0..5 => x = 1 } }", "A range in a match includes its end. Write 'low..=high'")]
     [InlineData("var x: u8\nfn main() { match x { 5..=3 => x = 1 } }", "The range 5..=3 is empty; write the smaller value first")]
     [InlineData("var x: u8\nfn main() { match x { 300 => x = 1 } }", "300 does not fit in u8 (0 to 255)")]
     [InlineData("var x: u8\nfn main() { match x { -1 => x = 1 } }", "-1 does not fit in u8")]

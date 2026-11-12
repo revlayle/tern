@@ -74,7 +74,7 @@ public sealed partial class Checker
                     case FunctionSymbol:
                         throw new CompileError(n.Pos, $"'{n.Name}' is a function; call it with ()");
                     case StructSymbol:
-                        throw new CompileError(n.Pos, $"'{n.Name}' is a struct type, not a value");
+                        throw new CompileError(n.Pos, $"'{n.Name}' is a struct type, not a value. Use sizeof({n.Name}) for its size, or a variable of the type");
                 }
                 break;
 
@@ -94,16 +94,16 @@ public sealed partial class Checker
                     var element = ix.Target.Type.Element!;
                     if (element.IsStruct)
                         throw new CompileError(ix.Pos,
-                            $"A pointer to a struct cannot be indexed: p[i] would need a multiply by the struct size. Step the pointer instead: p = p + sizeof({element})");
+                            $"A pointer to a struct cannot be indexed: p[i] would need a multiply by the struct size. Move the pointer instead: p = p + sizeof({element})");
                     if (element.Size == 2 && ix.Index.ConstValue is > 127)
                         throw new CompileError(ix.Index.Pos,
-                            $"Index {ix.Index.ConstValue} is too large: p[i] reaches 256 bytes, which is 128 {element} values");
+                            $"Index {ix.Index.ConstValue} is too large: p[i] reaches 256 bytes, which is 128 {element} values. Move the pointer forward first: p + 256");
                     if (indexed is NameExpr { Symbol: { AliasOf: null } pv }) pv.Dereferenced = true;
                     e.Type = element;
                     break;
                 }
                 if (indexed is not NameExpr { Symbol: VariableSymbol arr } || !arr.Type.IsArray)
-                    throw new CompileError(ix.Pos, "Only arrays and pointers can be indexed");
+                    throw new CompileError(ix.Pos, "Only arrays and pointers can be indexed. Use .lo or .hi for a byte of a 16-bit value");
                 if (arr.Type.IsStructArray)
                 {
                     CheckRecordIndex(ix, arr);
@@ -113,7 +113,7 @@ public sealed partial class Checker
                     throw new CompileError(ix.Pos,
                         $"'{arr.Name}' has {arr.Type.Length} elements, too many for a u8 index. Read it through a pointer: addr({arr.Name})");
                 if (ix.Index.ConstValue is long idx && idx >= arr.Type.Length)
-                    throw new CompileError(ix.Index.Pos, $"Index {idx} is past the end of '{arr.Name}' (length {arr.Type.Length})");
+                    throw new CompileError(ix.Index.Pos, $"Index {idx} is past the end of '{arr.Name}' (length {arr.Type.Length}). Use an index below {arr.Type.Length}");
                 CheckLoopIndex(ix.Index, arr.Name, arr.Type.Length);
                 e.Type = arr.Type.Element!;
                 if (arr.Type.Linear) ix.Lowered = LinearIndex(ix);
@@ -135,13 +135,13 @@ public sealed partial class Checker
                     break;
                 }
                 if (m.Member is not ("lo" or "hi"))
-                    throw new CompileError(m.Pos, $"Unknown member '.{m.Member}'");
+                    throw new CompileError(m.Pos, $"Unknown member '.{m.Member}'. Use .lo or .hi, or a field of a struct");
                 // A typed 16-bit constant keeps its size (LINE.hi with LINE: u16 = 250 is 0); otherwise the size of the value.
                 if (m.Target.Type.Kind == TypeKind.IntLiteral) Coerce(m.Target, m.Target.ConstType is { Size: 2 } wide ? wide : LiteralType(m.Target));
                 if (m.Target.Type.IsPointer)
                     throw new CompileError(m.Pos, $".{m.Member} needs a number; convert the pointer first: (p as u16).{m.Member}");
                 if (m.Target.Type.Size != 2 || !m.Target.Type.IsInteger)
-                    throw new CompileError(m.Pos, $".{m.Member} needs a 16-bit value, not {m.Target.Type}");
+                    throw new CompileError(m.Pos, $".{m.Member} needs a 16-bit value, not {m.Target.Type}. Remove '.{m.Member}': a {m.Target.Type} is one byte already");
                 e.Type = TernType.U8;
                 if (m.Target.ConstValue is long mv)
                     e.ConstValue = m.Member == "lo" ? mv & 0xFF : (mv >> 8) & 0xFF;
@@ -151,7 +151,7 @@ public sealed partial class Checker
                 CheckExpr(c.Operand);
                 var target = ResolveType(c.Target);
                 var source = c.Operand.Type;
-                if (!target.IsScalar) throw new CompileError(c.Pos, $"Cannot convert to {target}");
+                if (!target.IsScalar) throw new CompileError(c.Pos, $"Cannot convert to {target}. Convert to a number, bool or pointer type");
                 if (target.Kind == TypeKind.Bool)
                     throw new CompileError(c.Pos, "Numbers cannot be converted to bool; compare instead, e.g. 'x != 0'");
                 if (target.IsPointer || source.IsPointer)
@@ -159,20 +159,20 @@ public sealed partial class Checker
                     // Pointers convert to other pointers and to and from u16, with no code.
                     if (source.Kind == TypeKind.IntLiteral) Coerce(c.Operand, TernType.U16);
                     else if (!(source.IsPointer || source.Kind == TypeKind.U16))
-                        throw new CompileError(c.Pos, $"Cannot convert {source} to {target}; only u16 and pointers convert to a pointer");
+                        throw new CompileError(c.Pos, $"Cannot convert {source} to {target}; only u16 and pointers convert to a pointer. Convert to u16 first");
                     if (!(target.IsPointer || target.Kind == TypeKind.U16))
-                        throw new CompileError(c.Pos, $"Cannot convert {source} to {target}; a pointer converts only to u16 or another pointer");
+                        throw new CompileError(c.Pos, $"Cannot convert {source} to {target}; a pointer converts only to u16 or another pointer. Convert to u16 first, then take .lo or .hi");
                 }
                 else if (source.Kind == TypeKind.IntLiteral)
                     Coerce(c.Operand, c.Operand.IsBitPattern && c.Operand.ConstValue < 0 ? target : LiteralType(c.Operand));
                 else if (!source.IsScalar)
-                    throw new CompileError(c.Pos, $"Cannot convert {source} to {target}");
+                    throw new CompileError(c.Pos, $"Cannot convert {source} to {target}. Convert one element or field of it instead");
                 e.Type = target;
                 if (c.Operand.ConstValue is long cv) e.ConstValue = Normalize(cv, target);
                 break;
 
             case ArrayLiteralExpr:
-                throw new CompileError(e.Pos, "An array literal can only be used to initialize a global array");
+                throw new CompileError(e.Pos, "An array literal can only be used to initialize a global array. Declare the list as data, and read it from there");
 
             default:
                 throw new InvalidOperationException(e.GetType().Name);
@@ -200,7 +200,7 @@ public sealed partial class Checker
                     u.IsBitPattern = u.Op == TokenKind.Plus && u.Operand.IsBitPattern;
                     return;
                 }
-                if (!t.IsInteger) throw new CompileError(u.Pos, $"Unary '{(u.Op == TokenKind.Minus ? "-" : "+")}' needs a number");
+                if (!t.IsInteger) throw new CompileError(u.Pos, $"Unary '{(u.Op == TokenKind.Minus ? "-" : "+")}' needs a number. Use '!' to negate a bool");
                 u.Type = t;
                 if (v is not null) u.ConstValue = Normalize(u.Op == TokenKind.Minus ? -v.Value : v.Value, t);
                 return;
@@ -255,7 +255,7 @@ public sealed partial class Checker
                 else if (b.Left.Type.Kind == TypeKind.Bool || b.Right.Type.Kind == TypeKind.Bool)
                 {
                     if (b.Left.Type.Kind != b.Right.Type.Kind || b.Op is not (TokenKind.EqEq or TokenKind.NotEq))
-                        throw new CompileError(b.Pos, "bool values can only be compared with == and !=");
+                        throw new CompileError(b.Pos, "bool values can only be compared with == and !=. Use one of those");
                 }
                 else
                 {
@@ -277,7 +277,7 @@ public sealed partial class Checker
             {
                 var t = b.Left.Type;
                 if (!(t.IsInteger || t.Kind == TypeKind.IntLiteral))
-                    throw new CompileError(b.Pos, "Only numbers can be shifted");
+                    throw new CompileError(b.Pos, "Only numbers can be shifted. Convert the value to a number with 'as'");
                 CheckShiftCount(b.Right, t);
                 b.Type = t;
                 if (l is not null)
@@ -295,9 +295,9 @@ public sealed partial class Checker
             {
                 if (l is null || r is null)
                     throw new CompileError(b.Pos,
-                        $"'{OpText(b.Op)}' only works on constants. At runtime use a library function (mul8, div8, ...), or shifts for powers of two");
+                        $"'{OpText(b.Op)}' only works on constants. Use a library function at run time (mul8, div8, ...), or shifts for powers of two");
                 var t = Unify(b.Left, b.Right, b.Pos);
-                if (b.Op != TokenKind.Star && r == 0) throw new CompileError(b.Pos, "Division by zero");
+                if (b.Op != TokenKind.Star && r == 0) throw new CompileError(b.Pos, "Division by zero. Check the divisor");
                 long value = ConstArithmetic(b.Pos, b.Op, l.Value, r.Value);
                 b.Type = t;
                 b.ConstValue = t.Kind == TypeKind.IntLiteral ? value : Normalize(value, t);
@@ -314,7 +314,7 @@ public sealed partial class Checker
                 }
                 var t = Unify(b.Left, b.Right, b.Pos);
                 if (!(t.IsInteger || t.Kind == TypeKind.IntLiteral))
-                    throw new CompileError(b.Pos, $"'{OpText(b.Op)}' needs numbers");
+                    throw new CompileError(b.Pos, $"'{OpText(b.Op)}' needs numbers. Use '&&', '||' and '!' for bool values");
                 b.Type = t;
                 if (l is not null && r is not null)
                 {
@@ -365,7 +365,7 @@ public sealed partial class Checker
             return;
         }
         if (!leftPtr && b.Op == TokenKind.Minus)
-            throw new CompileError(b.Pos, "A pointer cannot be subtracted from a number");
+            throw new CompileError(b.Pos, "A pointer cannot be subtracted from a number. Convert the pointer with 'as u16'");
         // w + p would be a pointer while w + (p as u16) is a number: only a constant may come first (spec 3.5).
         if (!leftPtr && b.Left.ConstValue is null)
             throw new CompileError(b.Pos,
@@ -385,7 +385,7 @@ public sealed partial class Checker
             return;
         }
         if (!offset.Type.IsInteger || offset.Type.IsSigned)
-            throw new CompileError(offset.Pos, $"A pointer moves by a u8 or u16, not {offset.Type}");
+            throw new CompileError(offset.Pos, $"A pointer moves by a u8 or u16, not {offset.Type}. Convert the offset with 'as u16'");
     }
 
     private void CheckShiftCount(Expr count, TernType shifted)
@@ -394,7 +394,7 @@ public sealed partial class Checker
             throw new CompileError(count.Pos, "The shift count must be a constant. Use shl8/shr8 for a variable count");
         int bits = shifted.Kind == TypeKind.IntLiteral ? 64 : shifted.Size * 8;
         if (n < 0 || n >= bits)
-            throw new CompileError(count.Pos, $"Shift count must be 0 to {bits - 1}");
+            throw new CompileError(count.Pos, $"Shift count must be 0 to {bits - 1}. Use a count in that range");
         if (count.Type.Kind == TypeKind.IntLiteral) Coerce(count, TernType.U8);
     }
 
@@ -470,10 +470,10 @@ public sealed partial class Checker
         {
             case PlaceKind.Pointer:
                 throw new CompileError(field.Pos,
-                    $"'{name}' is reached through a pointer, so it has no fixed address. addr() works on fields of struct variables; through a pointer, add the field's offset to the pointer");
+                    $"'{name}' is reached through a pointer, so it has no fixed address. addr() works on fields of struct variables. Add the field's offset to the pointer: p + offset(T.field)");
             case PlaceKind.Table:
                 throw new CompileError(field.Pos,
-                    $"'{name}' is in an array of structs, which is stored as one table per field, so the record has no address. addr() works on fields of struct variables");
+                    $"'{name}' is in an array of structs, which is stored as one table per field, so the record has no address. addr() works on fields of struct variables. Declare the array 'linear' to keep each record in one piece");
             case PlaceKind.Records:
                 throw new CompileError(field.Pos,
                     $"'{name}' has a variable index, so its address is not known at compile time. Use a constant index, or add the record's offset to the array's address");
@@ -490,7 +490,7 @@ public sealed partial class Checker
         {
             case "len":
             {
-                if (c.Args.Count != 1) throw new CompileError(c.Pos, "len() takes one array");
+                if (c.Args.Count != 1) throw new CompileError(c.Pos, "len() takes one array. Write len(name)");
                 if (IsCompileTimeArray(c.Args[0]))
                 {
                     c.Type = TernType.IntLiteral;
@@ -498,13 +498,13 @@ public sealed partial class Checker
                     return;
                 }
                 CheckExpr(c.Args[0]);
-                if (!c.Args[0].Type.IsArray) throw new CompileError(c.Pos, "len() needs an array");
+                if (!c.Args[0].Type.IsArray) throw new CompileError(c.Pos, "len() needs an array. Use sizeof() for the size of a type");
                 c.Type = TernType.IntLiteral;
                 c.ConstValue = c.Args[0].Type.Length;
                 return;
             }
             case "include_bytes":
-                throw new CompileError(c.Pos, "include_bytes() can only be the value of data or a global array");
+                throw new CompileError(c.Pos, "include_bytes() can only be the value of data or a global array. Declare data with it: data name = include_bytes(\"file.bin\")");
             case "addr":
             {
                 if (c.Args.Count == 1 && c.Args[0] is MemberExpr { Member: not ("lo" or "hi") } field)
@@ -513,7 +513,7 @@ public sealed partial class Checker
                     return;
                 }
                 if (c.Args.Count != 1 || c.Args[0] is not NameExpr name)
-                    throw new CompileError(c.Pos, "addr() takes the name of a variable, array or data, or a field of a struct variable");
+                    throw new CompileError(c.Pos, "addr() takes the name of a variable, array or data, or a field of a struct variable. Write addr(name)");
                 switch (Lookup(name.Name))
                 {
                     // Constants are declared before the file's functions.
@@ -521,12 +521,12 @@ public sealed partial class Checker
                         throw new CompileError(name.Pos,
                             $"addr({name.Name}) is known only when the program is placed, so it cannot be part of a constant. Use it in a var, data or code");
                     case null: throw NotDeclared(name.Name, name.Pos);
-                    case ConstSymbol: throw new CompileError(name.Pos, $"'{name.Name}' is a constant, which has no address");
+                    case ConstSymbol: throw new CompileError(name.Pos, $"'{name.Name}' is a constant, which has no address. Use data for a value in memory");
                     case FunctionSymbol f:
                         TakeFunctionAddress(c, f, name.Pos);
                         return;
                     case VariableSymbol v:
-                        if (!v.InMemory) throw new CompileError(name.Pos, $"'{name.Name}' lives in a register and has no address");
+                        if (!v.InMemory) throw new CompileError(name.Pos, $"'{name.Name}' lives in a register and has no address. Remove 'using' to keep it in memory");
                         name.Symbol = v;
                         name.Type = v.Type;
                         UseGlobal(v, name.Pos);
@@ -545,7 +545,7 @@ public sealed partial class Checker
             case "sizeof":
             {
                 if (c.Args.Count != 1 || c.Args[0] is not NameExpr typeName)
-                    throw new CompileError(c.Pos, "sizeof() takes one type name, e.g. sizeof(Enemy)");
+                    throw new CompileError(c.Pos, "sizeof() takes one type name. Write e.g. sizeof(Enemy)");
                 c.Type = TernType.IntLiteral;
                 c.ConstValue = ResolveType(new NamedTypeSyntax(typeName.Pos, typeName.Name)).Size;
                 return;
@@ -560,7 +560,7 @@ public sealed partial class Checker
         }
         if (symbol is null && c.Name.Contains('.')) throw NotDeclared(c.Name, c.Pos);
         if (symbol is not FunctionSymbol fn)
-            throw new CompileError(c.Pos, $"'{c.Name}' is not a function") { Undeclared = symbol is null ? c.Name : null };
+            throw new CompileError(c.Pos, symbol is null ? $"'{c.Name}' is not a function. Check the spelling, or declare it" : $"'{c.Name}' is not a function. Remove the ()") { Undeclared = symbol is null ? c.Name : null };
         if (fn.IsInterrupt)
         {
             if (_function is not { IsInterrupt: true })
@@ -568,7 +568,7 @@ public sealed partial class Checker
                     $"'{c.Name}' is an interrupt fn, which only the CPU or another interrupt fn calls. Install its address in the interrupt vector, or call it from an interrupt fn");
         }
         if (c.Args.Count != fn.Parameters.Count)
-            throw new CompileError(c.Pos, $"'{fn.Name}' takes {fn.Parameters.Count} argument(s), not {c.Args.Count}");
+            throw new CompileError(c.Pos, $"'{fn.Name}' takes {fn.Parameters.Count} argument(s), not {c.Args.Count}. Pass {fn.Parameters.Count}: {fn.Name}({Signature.Parameters(fn)})");
         for (int i = 0; i < c.Args.Count; i++)
         {
             CheckExpr(c.Args[i]);
