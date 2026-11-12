@@ -108,7 +108,8 @@ fn main() {
         count += 1
     }
     score = count as u16 + table[3]
-    border = lives
+    buffer[0] = WIDTH
+    border = lives + buffer[0]
 }
 ```
 
@@ -311,8 +312,8 @@ fn main() {
     if state < 10 { hits = 1 } else if state == 20 { hits = 2 } else { hits = 3 }
 
     for i in 0..10 { log[i] = i }          // 0 to 9
-    for i in 9..=0 step -1 { n += 1 }      // 9 down to 0: 10 times
-    for x in 0..40 step 8 { n += 1 }       // 0, 8, 16, 24, 32
+    for _ in 9..=0 step -1 { n += 1 }      // 9 down to 0: 10 times
+    for _ in 0..40 step 8 { n += 1 }       // 0, 8, 16, 24, 32
     for i in 0..8 using X { log[i] += 1 }  // the counter is in X
     for _ in 0..3 { n += 1 }               // no counter needed
 
@@ -334,12 +335,12 @@ fn main() {
 
 ```console
 $ tern run flow.tern --dump hits --dump n --dump 'log:10'
-Main returned: 802 cycles (618 in main)
-A=$1F X=$00 Y=$0A SP=$FF PC=$0825
+Main returned: 826 cycles (642 in main)
+A=$1F X=$00 Y=$00 SP=$FF PC=$0825
 hits $0003 u8 = 31 ($1F)
 n $0004 u8 = 18 ($12)
-log $08BE [u8; 16] (10 bytes):
-  $08BE  01 02 03 04 05 06 07 08 08 09
+log $08BA [u8; 16] (10 bytes):
+  $08BA  01 02 03 04 05 06 07 08 08 09
 ```
 
 - There is no C-style `for (;;)` and no `do`/`until`. `a..b` excludes `b`, `a..=b` includes it.

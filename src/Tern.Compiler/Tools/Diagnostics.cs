@@ -34,16 +34,19 @@ public sealed record Diagnostic(string File, int Line, int Column, string Severi
     public static Diagnostic From(CompileError e, string defaultFile)
     {
         var (message, suggestion) = Split(e.Description);
-        return new Diagnostic(e.Pos.File ?? defaultFile, e.Pos.Line, e.Pos.Column, "error", message, suggestion)
+        return new Diagnostic(e.Pos.File ?? defaultFile, e.Pos.Line, e.Pos.Column, e.IsWarning ? "warning" : "error", message, suggestion)
         {
             CalledFrom = e.CalledFrom is { } call ? new Location(call.File ?? defaultFile, call.Line, call.Column) : null,
         };
     }
 
-    /// <summary>The line that ends the text output of a failed compile: "3 errors" (spec 13).</summary>
+    /// <summary>The line that ends the text output of a compile with errors or warnings: "3 errors", "1 error, 2 warnings" (spec 13).</summary>
     /// <param name="more">--max-errors stopped the compile before every error was found.</param>
-    public static string Count(int count, bool more, int maxErrors) =>
-        (count == 1 ? "1 error" : $"{count} errors") + (more ? $"; more errors were not reported (--max-errors {maxErrors})" : "");
+    public static string Count(int count, bool more, int maxErrors, int warnings = 0) =>
+        string.Join(", ", new[] { Plural(count, "error"), Plural(warnings, "warning") }.Where(p => p.Length > 0))
+        + (more ? $"; more errors were not reported (--max-errors {maxErrors})" : "");
+
+    private static string Plural(int n, string what) => n switch { 0 => "", 1 => $"1 {what}", _ => $"{n} {what}s" };
 
     /// <summary>Splits an error's text before the first sentence that tells how to fix it.</summary>
     public static (string Message, string? Suggestion) Split(string text)

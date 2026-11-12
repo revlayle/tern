@@ -61,7 +61,7 @@ public sealed partial class Checker
         var found = Find();
         // A name whose declaration had an error, or an import that did: the error was reported (spec 13).
         if (demand && found is ErrorSymbol) throw new FollowOnError();
-        return found;
+        return demand ? Named(found, name) : found;
 
         Symbol? Find()
         {
@@ -69,6 +69,7 @@ public sealed partial class Checker
             if (dot > 0)
             {
                 if (!_module.Imports.TryGetValue(name[..dot], out var module)) return _module.Scope.GetValueOrDefault(name[..dot]) as ErrorSymbol;
+                if (demand) _usedImports.Add((_module, name[..dot]));
                 string member = name[(dot + 1)..];
                 if (module.Syntax.PrivateNames.Contains(member)) return null;
                 return module.Scope.GetValueOrDefault(member) ?? (demand ? Demand(module, member) : null);

@@ -22,6 +22,8 @@ public sealed class Module
     public ImportDecl? ImportedBy { get; set; }
     /// <summary>The overlay area the main file places this module in (<c>import name @ area</c>), or null for a resident module.</summary>
     public string? OverlayArea => ImportedBy?.Area;
+    /// <summary>A module found in the compiler's library folders (spec 2.2): never warned about (spec 13).</summary>
+    public bool IsLibrary { get; init; }
     /// <summary>Set by the checker once the file's top-level declarations are in <see cref="Scope"/>.</summary>
     public bool Declared { get; set; }
 
@@ -97,6 +99,7 @@ public static class ModuleLoader
                         Directory = System.IO.Path.GetDirectoryName(path)!,
                         Source = text,
                         Syntax = Parser.Parse(text, path, errors),
+                        IsLibrary = InLibrary(System.IO.Path.GetDirectoryName(path)!, libraryDirectory),
                     };
                     // Registered before its imports are visited, so modules may import each other.
                     loaded[import.Name] = module;

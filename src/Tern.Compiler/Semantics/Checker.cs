@@ -53,12 +53,22 @@ public sealed partial class Checker
         _layout = MemoryLayout.Default(platform);
     }
 
+    /// <summary>Takes the warnings (spec 13), found once the checks found no error; null: none are worked out.</summary>
+    private List<CompileError>? _warnings;
+    private bool _warnLibrary;
+
     /// <param name="modules">The main file and its modules, each module before the files that import it.</param>
     /// <param name="errors">
     /// Takes every error found by the checks, which go on at the next statement or declaration (spec 13);
     /// if there is any, the first is thrown, carrying all, before the call graph is worked out. Null: the first error is thrown.
     /// </param>
-    public static CheckedProgram Check(List<Module> modules, Platform platform, ErrorList? errors = null) => new Checker(platform, errors).Run(modules);
+    /// <param name="warnings">
+    /// Takes the warnings (spec 13), in the order found, before the call graph is worked out, so they are there
+    /// also when it throws an error. Null: none are worked out.
+    /// </param>
+    /// <param name="warnLibrary">Warn about library modules too, which programs never are (for the repository's test of its library).</param>
+    public static CheckedProgram Check(List<Module> modules, Platform platform, ErrorList? errors = null, List<CompileError>? warnings = null, bool warnLibrary = false) =>
+        new Checker(platform, errors) { _warnings = warnings, _warnLibrary = warnLibrary }.Run(modules);
 
     private CheckedProgram Run(List<Module> modules)
     {
@@ -217,6 +227,7 @@ public sealed partial class Checker
         Recover(CheckInlineCallsBetweenOverlays);
         // The call graph and what follows need a program without errors (spec 13).
         _errors?.ThrowIfAny();
+        _warnings?.AddRange(FindWarnings(modules, _warnLibrary, exports));
 
         // Struct fields become plain variables, arrays and pointers for the code generator.
         foreach (var module in modules)

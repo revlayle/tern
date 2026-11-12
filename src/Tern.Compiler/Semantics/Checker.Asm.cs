@@ -69,7 +69,7 @@ public sealed partial class Checker
                     : throw new CompileError(l.Pos, $"Label '{l.Name}' is not defined in this asm block. Define it with '.{l.Name}:' on a line of the block");
 
             case NameExpr n:
-                switch (n.Bound ?? Lookup(n.Name))
+                switch (Named(n.Bound, n.Name) ?? Lookup(n.Name))
                 {
                     case null: throw NotDeclared(n.Name, n.Pos);
                     case ConstSymbol { Real: not null }: throw InRuntime(n);

@@ -46,7 +46,7 @@ public sealed partial class Checker
                     + "Declare it as data, e.g. 'data HI = \"HI\"', and pass addr(HI), len(HI)");
 
             case NameExpr n:
-                switch (n.Bound ?? Lookup(n.Name))
+                switch (Named(n.Bound, n.Name) ?? Lookup(n.Name))
                 {
                     case null when n.Name is "PI" or "TAU":
                         EvaluateConstant(e);

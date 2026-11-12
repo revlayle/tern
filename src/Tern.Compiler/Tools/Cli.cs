@@ -11,7 +11,7 @@ public static class Cli
 {
     public const string Usage = """
         Usage:
-          tern [--json] [--max-errors <n>] <file.tern> [-o <output.prg>]
+          tern [--json] [--max-errors <n>] [--no-warnings | --warnings-as-errors] <file.tern> [-o <output.prg>]
           tern run <file.tern> [options]
           tern bench [options] <file.tern>... | --code <statements>...
 
@@ -29,10 +29,17 @@ public static class Cli
                            lines, and diagnostics (file, line, column, severity, message,
                            suggestion)
           --max-errors <n> report the first n errors; without it, every error found is reported
+          --no-warnings    do not report warnings
+          --warnings-as-errors
+                           report each warning as an error, which stops the build
 
         Errors are listed by place (the main file first, then modules in the order first
         imported; by line and column), then their number. Errors of the later stages
         (memory allocation, code generation, layout) come only when there are no others.
+        Warnings are for code that does nothing: an unused local, declaration or import,
+        and a statement that is never reached. A name starting with '_' is never warned
+        as unused. Warnings come only when the checks found no error, listed by place with
+        the errors; they do not stop the build.
 
         tern run <file.tern> compiles the program and runs it in the built-in emulator until
         main returns, then prints the cycles taken and the registers. Memory is plain RAM (no
@@ -50,13 +57,14 @@ public static class Cli
                            may be given more than once
           --screen         show the screen at $0400 as text
           --profile        show the cycles of each function and each source line
-          --max-errors <n> as for tern <file.tern>
+          --max-errors <n>, --no-warnings, --warnings-as-errors  as for tern <file.tern>
           --json           print the result as JSON
 
         tern bench compiles and runs each variant (as tern run does) and compares them:
         program bytes, the measured function's bytes, its calls and cycles (with what it
         calls), and the memory chosen for its variables and the program's globals. A variant
         whose run finds an array index outside its array fails, and the errors are printed.
+        Warnings are not reported, since compared snippets often leave values unused.
           <file.tern>      a variant: a whole program
           --code <stmts>   a variant: statements run as the body of main (';' or newlines
                            between statements); may be given more than once
@@ -67,6 +75,24 @@ public static class Cli
                            tern run)
           --cycles <n>, --irq <n>, --set <a>=<v>, --max-errors <n>, --json  as for tern run
         """;
+
+    /// <summary><c>--no-warnings</c> and <c>--warnings-as-errors</c> (spec 13); giving both is an error.</summary>
+    private sealed class WarningSwitches
+    {
+        private bool _off, _asErrors;
+
+        public WarningMode Mode => _off ? WarningMode.Off : _asErrors ? WarningMode.AsErrors : WarningMode.Report;
+
+        public string? Problem => _off && _asErrors ? "--no-warnings and --warnings-as-errors cannot be given together" : null;
+
+        public bool Parse(string argument)
+        {
+            if (argument == "--no-warnings") _off = true;
+            else if (argument == "--warnings-as-errors") _asErrors = true;
+            else return false;
+            return true;
+        }
+    }
 
     /// <summary>Runs one <c>tern</c> command; returns the process exit code.</summary>
     public static int Run(string[] args, TextWriter output, TextWriter error)
@@ -89,19 +115,22 @@ public static class Cli
         {
             bool json = false;
             int maxErrors = 0;
+            var warnings = new WarningSwitches();
             string? input = null, outputPath = null;
             for (int i = 0; i < arguments.Length; i++)
             {
                 if (arguments[i] == "--json") json = true;
+                else if (warnings.Parse(arguments[i])) { }
                 else if (arguments[i] == "-o" && i + 1 < arguments.Length) outputPath = arguments[++i];
                 else if (arguments[i] == "--max-errors" && i + 1 < arguments.Length && int.TryParse(arguments[i + 1], out maxErrors) && maxErrors > 0) i++;
                 else if (input is null && !arguments[i].StartsWith('-')) input = arguments[i];
                 else return Usage1($"Unknown argument: {arguments[i]}");
             }
             if (input is null) return Usage1("No source file given");
+            if (warnings.Problem is { } both) return Usage1(both);
             outputPath ??= Path.ChangeExtension(input, ".prg");
 
-            var result = CompileFile(input, json, maxErrors);
+            var result = CompileFile(input, json, maxErrors, warnings.Mode);
             if (result is null) return 1;
             var files = new List<string>();
             void Write(string path, Action<string> write)
@@ -121,7 +150,7 @@ public static class Cli
 
             if (json)
             {
-                output.WriteLine(Diagnostic.ToJson(true, files, result.Report, []));
+                output.WriteLine(Diagnostic.ToJson(true, files, result.Report, Warnings(result, input)));
                 return 0;
             }
             foreach (var f in files.Skip(4)) output.WriteLine($"Wrote {f}");
@@ -136,6 +165,7 @@ public static class Cli
         {
             bool json = false, screen = false, profile = false;
             int maxErrors = 0;
+            var warnings = new WarningSwitches();
             string? input = null;
             long cycles = new RunOptions().MaxCycles, irq = 0;
             var dumps = new List<string>();
@@ -145,6 +175,7 @@ public static class Cli
                 string a = arguments[i];
                 bool hasValue = i + 1 < arguments.Length;
                 if (a == "--json") json = true;
+                else if (warnings.Parse(a)) { }
                 else if (a == "--set" && hasValue)
                 {
                     try { sets.Add(MemorySet.Parse(arguments[++i])); }
@@ -160,8 +191,9 @@ public static class Cli
                 else return Usage1($"Unknown or incomplete argument: {a}");
             }
             if (input is null) return Usage1("No source file given");
+            if (warnings.Problem is { } both) return Usage1(both);
 
-            var program = CompileFile(input, json, maxErrors);
+            var program = CompileFile(input, json, maxErrors, warnings.Mode);
             if (program is null) return 1;
             List<MemoryDump> parsed;
             try { parsed = dumps.Select(d => MemoryDump.Parse(d, program)).ToList(); }
@@ -170,7 +202,7 @@ public static class Cli
             try { run = Runner.Run(program, new RunOptions { MaxCycles = cycles, IrqEvery = irq, MainFile = Path.GetFileName(input), Sets = sets }); }
             catch (InvalidOperationException e) { return Fail(json, new Diagnostic(input, 0, 0, "error", e.Message, null), e.Message); }
             var lines = profile ? LineTable.Rows(program, Path.GetFileName(input), run.Profile) : null;
-            output.Write(json ? RunReport.Json(run, parsed, screen, lines) + Environment.NewLine : RunReport.Text(run, parsed, screen, lines));
+            output.Write(json ? RunReport.Json(run, parsed, screen, lines, Warnings(program, input)) + Environment.NewLine : RunReport.Text(run, parsed, screen, lines));
             return !run.Returned ? 2 : run.IndexErrors.Count > 0 ? 3 : 0;
         }
 
@@ -231,7 +263,7 @@ public static class Cli
 
         // ---------- shared ----------
 
-        CompileResult? CompileFile(string input, bool json, int maxErrors)
+        CompileResult? CompileFile(string input, bool json, int maxErrors, WarningMode warnings)
         {
             string source;
             try
@@ -246,21 +278,31 @@ public static class Cli
             }
             try
             {
-                return TernCompiler.Compile(source, sourcePath: input, maxErrors: maxErrors > 0 ? maxErrors : null);
+                var result = TernCompiler.Compile(source, sourcePath: input, maxErrors: maxErrors > 0 ? maxErrors : null, warnings: warnings);
+                // In JSON the warnings are in the result's diagnostics.
+                if (!json && result.Warnings.Count > 0) Print(result.Warnings, false);
+                return result;
             }
             catch (CompileError e)
             {
-                // Every error found (spec 13); the text ends with their number.
-                var all = e.All.Select(x => Diagnostic.From(x, input)).ToList();
-                if (json) output.WriteLine(Diagnostic.ToJson(false, [], null, all));
-                else
-                {
-                    for (int i = 0; i < all.Count; i++) error.WriteLine($"{all[i].File}:{all[i].Line}:{all[i].Column}: error: {e.All[i].Description}");
-                    error.WriteLine(Diagnostic.Count(all.Count, e.MoreNotReported, maxErrors));
-                }
+                // Every error found, with any warnings, sorted by place (spec 13); the text ends with their numbers.
+                if (json) output.WriteLine(Diagnostic.ToJson(false, [], null, e.WithWarnings.Select(x => Diagnostic.From(x, input)).ToList()));
+                else Print(e.WithWarnings, e.MoreNotReported);
                 return null;
             }
+
+            void Print(IReadOnlyList<CompileError> list, bool more)
+            {
+                foreach (var x in list)
+                {
+                    var d = Diagnostic.From(x, input);
+                    error.WriteLine($"{d.File}:{d.Line}:{d.Column}: {d.Severity}: {x.Description}");
+                }
+                error.WriteLine(Diagnostic.Count(list.Count(x => !x.IsWarning), more, maxErrors, list.Count(x => x.IsWarning)));
+            }
         }
+
+        static List<Diagnostic> Warnings(CompileResult result, string input) => result.Warnings.Select(w => Diagnostic.From(w, input)).ToList();
 
         int Fail(bool json, Diagnostic d, string text)
         {

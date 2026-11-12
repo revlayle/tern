@@ -4,11 +4,31 @@ Owned by the coding session. Updated at the end of every coding session.
 
 ## Current
 
-- **Milestone:** M23 follow-up (roadmap "M23 follow-up (before warnings)"; spec 13, 8.1; decisions 107, 108, 112, 113 and "a function may be called from main and from a handler", 2026-11-12). Done and reviewed (`docs/reviews/m23-followup.md`: ready to merge, three suggestions, all done).
-- **Branch:** `m23-followup`, from `main` at `1f9426d`, with `main` merged in again for the review (`33d568d`). 2896 compiler tests pass plus 36 CPU tests. No benchmark changed (1254 / 350780); `SkillTests` pass.
-- **Next step:** `/merge m23-followup`. After this: the Warnings milestone (roadmap "Warnings"), then `implements`, encodings, M24.
+- **Milestone:** Warnings (roadmap "Warnings"; spec 13 "Warnings", 5.1, 8.1; decision 2026-11-12 "warnings for code that does nothing"). Done and reviewed (`docs/reviews/warnings.md`: ready to merge; suggestions 1, 2 and 4 done, note 3 is question 118).
+- **Branch:** `warnings`, from `main` at `12f1ae1`, with `main` merged in again for the review. 2943 compiler tests pass plus 36 CPU tests. No benchmark changed (1254 / 350780); `SkillTests` pass (one skill output rewritten, see below).
+- **Next step:** `/merge warnings`. After this: `implements`, encodings, M24.
 
 ## Done
+
+- **Warnings, first review** (2026-11-12, `docs/reviews/warnings.md`): ready to merge.
+  - Suggestion 1: the unreachable warning points at the first token of an assignment target (`buf` in `buf[1] = 2`, `pt` in `pt.a = 2`) and at the word `asm` of an asm block (`AsmStmt.KeywordPos`; the block's own position stays its `{`, so asm errors are unchanged).
+  - Suggestion 2: the report writes "1 byte" for one.
+  - Suggestion 4: an unused `for` variable is reported at its name (`ForStmt.VariablePos`). The skill's `tidy.tern` output moved from 10:5 to 10:9.
+  - Note 3 (`for _` slower than `for i`): question 118.
+
+- **Warnings** (2026-11-12, branch `warnings`). Five commits.
+  - *The analysis* (`a9a88d9`, `Semantics/Checker.Warnings.cs`). `Lookup` records every top-level symbol it resolves (`_named`; a generator's bound names too), and each file's imports it names something of (`_usedImports`). Main-file names used in module parameter values (checked in a copy of the main file) are kept by name. After the checks find no error, `FindWarnings`:
+    - unused locals: `LocalUses` walks each function body (a local, local `const`, `for` variable, asm fn `var` line, const fn local); an assignment target is a write, not a read (a pointer stored through is read); `for` variables get "Write '_' as the loop variable". A const fn's body is never resolved by the checks, so the walk also records its top-level names and imports.
+    - unused declarations: consts, globals, data, functions, const fns and structs of the main file, `private` ones of modules; not `main`, exports (also the functions matched by `export level_api`), globals with `@`, names starting with `_`.
+    - unused imports, except those with module parameter values.
+    - unreachable statements (`Unreachable`): one per block, at the statement after one that never finishes; nested blocks are checked only up to that statement.
+    - library modules (`Module.IsLibrary`, set by the loader) are skipped, unless `warnLibrary` (used by the repository test).
+  - `TernCompiler.Compile(..., WarningMode warnings, bool warnLibrary)`: `Report`, `Off`, `AsErrors`. Warnings are `CompileError`s with `IsWarning`, sorted by place (`ErrorList.Sort`) in `CompileResult.Warnings`. An error after the checks (call graph, allocation, layout) carries them in `CompileError.WithWarnings`, sorted with it. `AsErrors` adds each warning to the `ErrorList` as an error and throws, before the call graph. `Compile` is split into the checks and `Build`.
+  - *Tools* (`7abd10a`). `tern` and `tern run`: `file:line:col: warning: ...`, then "2 warnings" / "1 error, 2 warnings" (`Diagnostic.Count`); `--max-errors` counts errors only. `--json`: `"severity": "warning"`, `ok` true with only warnings; `tern run --json` has a `diagnostics` field (warnings). `--no-warnings`, `--warnings-as-errors`; both: "--no-warnings and --warnings-as-errors cannot be given together". `tern bench` compiles with warnings off. Help text updated.
+  - *Report* (`1717041`): "Functions with memory reachable from two roots:", one line per function with a frame (`  f (1 bytes): main, h1, h2`), before the zero-page map; inline functions and functions with no memory are not listed.
+  - *Repository*: `RepositoryWarningTests` compiles every example (binaries first, writing their `.prg` and `_api.tern`) and every library module with `warnLibrary`: no warnings. Raster's unused `BAND` removed; speedcode's `cycle_plain` (kept for comparison, main does not call it) is now `_cycle_plain` (the guide's table, spec session's, still says `cycle_plain`; question 117). `SkillTests` compiles the skill's programs with `--warnings-as-errors`; `decl.tern` uses `WIDTH` and `buffer`, `flow.tern` writes `_` for two counters it never read.
+  - *Skill* (`03042aa`): SKILL.md shows `tidy.tern` with all four warnings (a new ```` ```tern warning ```` block kind in `SkillTests`), what each means, `_`, the switches, `run`/`bench`, and the report's list. The unreachable warning points at the start of an assignment (its position was the operator's).
+  - Tests: `WarningTests` (29, including the report's list and an allocation error), `WarningToolTests` (9), `RepositoryWarningTests` (2).
 
 - **M23 follow-up, first review** (2026-11-12, `docs/reviews/m23-followup.md`): ready to merge; all three suggestions done.
   - Suggestion 1 (`23653db`): `OutOfOrderErrors` has `zeta` import `beta`, so the errors come main, zeta, beta, alpha: only the depth-first order of decision 112 passes.
@@ -539,6 +559,8 @@ Including `jsr` and `rts`; from the tests.
 
 ## Known limitations and technical debt
 
+- Warnings: a `for _` loop can be slower than the same loop with a named counter: `for _ in 9..=0 step -1 { n += 1 }` takes 107 cycles, `for i in ...` 83, since the optimizer keeps `n` in Y across the loop only with a named counter (the `_` loop counts down with `dex`/`bne` and does `inc n` each pass). The skill's `flow.tern` went from 802 to 826 cycles when its unread counters became `_`. For the optimizer.
+- Warnings: an unused import is reported at the module name.
 - M23: after an error in a `for` or `match` header, its body is not checked (an `if`/`while` body is). An error in an `asm` block, `match` arm, struct or memory block skips the rest of it: one error each.
 - M23: after an unclosed `(` or `[`, the lines of the statement that start further right than it are skipped with it (the lexer gives no line breaks inside brackets).
 - M23: a function whose signature has an error is not checked; its body's errors appear once the signature is fixed.
@@ -599,6 +621,14 @@ Not bugs; things to improve, mostly in M7 (optimizer).
 - `w = addr(map) - 1` (or `+`) into a 16-bit variable stores `addr(map)` and then subtracts at run time; `CodeGen.AddressBytes` could make it two `lda #` / `sta` pairs, as it already does for `.lo` / `.hi`.
 
 ## Questions for the spec session
+
+Question 118 (review Warnings, note 3): the warning for an unused `for` variable says "Write '_'", but `for _` can be slower: `for _ in 9..=0 step -1 { n += 1 }` takes the "repeat n times" path (`ldx #10` / `inc n` / `dex` / `bne`, 8 bytes, 107 cycles), while `for i` keeps `n` in Y (`ldy n` / `iny` / `dex` / `bpl` / `sty n`, 11 bytes, 83 cycles). Should the repeat path also hold a variable in the free index register? Spec 11 rule 4 ("match it or be shorter") allows the shorter, slower code, so the trade-off needs a decision. Not caused by this branch.
+
+Questions 114-117 (Warnings, provisional, built as described):
+- **114:** a compound assignment (`x += 1`) is a write, not a read, so a local only changed that way is unused (as Rust warns). Spec 13 says "never read"; `x += 1` reads `x` to compute the new value, but nothing reads the result.
+- **115:** a local `const` that is never used is warned like a local variable ("a local" in spec 13).
+- **116:** every global at a fixed address (`@ $C000`, `@ zp`, `@ region`) is never warned, also a module's `private` one. Spec 13 says "a global variable at a fixed address"; the roadmap and the decision say "of the main file". A private fixed global of a module is normally hardware or reserved memory too.
+- **117:** `examples/speedcode.tern`'s `cycle_plain` is now `_cycle_plain`; `docs/guide.md` (the speedcode table) still names `cycle_plain`. The guide should also mention the warnings (roadmap).
 
 Questions 112-113 were settled on 2026-11-12 (decisions.md): as built.
 

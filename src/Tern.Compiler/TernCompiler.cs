@@ -51,7 +51,12 @@ public sealed class CompileResult
     public IReadOnlyDictionary<string, VariableInfo> Variables { get; init; } = new Dictionary<string, VariableInfo>();
     /// <summary>Every function declared in the program and its modules ("module.name"), compiled or not.</summary>
     public IReadOnlySet<string> DeclaredFunctions { get; init; } = new HashSet<string>();
+    /// <summary>The warnings (spec 13), sorted by place; none with <see cref="WarningMode.Off"/>.</summary>
+    public IReadOnlyList<CompileError> Warnings { get; internal set; } = [];
 }
+
+/// <summary>What the compiler does with warnings (spec 13).</summary>
+public enum WarningMode { Report, Off, AsErrors }
 
 public static class TernCompiler
 {
@@ -65,14 +70,55 @@ public static class TernCompiler
     /// The first error. Errors found by the parser and the checks are all reported (spec 13): <see cref="CompileError.All"/>
     /// has them sorted by place. Allocation, code generation and layout run only without them, and report one error.
     /// </exception>
-    public static CompileResult Compile(string source, Platform? platform = null, string? sourcePath = null, string? libraryDirectory = null, int? maxErrors = null)
+    /// <param name="warnings">Report warnings (spec 13), leave them out (<c>--no-warnings</c>), or report each as an error (<c>--warnings-as-errors</c>).</param>
+    /// <param name="warnLibrary">Warn about library modules too, which programs never are (for the repository's test of its library).</param>
+    public static CompileResult Compile(string source, Platform? platform = null, string? sourcePath = null, string? libraryDirectory = null, int? maxErrors = null,
+        WarningMode warnings = WarningMode.Report, bool warnLibrary = false)
     {
         platform ??= Platform.C64;
 
         var errors = new ErrorList(maxErrors);
+        var found = warnings == WarningMode.Off ? null : new List<CompileError>();
         var modules = ModuleLoader.Load(source, sourcePath, platform, libraryDirectory ?? DefaultLibraryDirectory, errors);
-        var program = Checker.Check(modules, platform, errors);
+        CheckedProgram program;
+        // Warnings are found only when the checks found no error; a later error (the call graph's, allocation,
+        // layout) is reported with them, sorted by place (spec 13).
+        try { program = Checker.Check(modules, platform, errors, found, warnLibrary); }
+        catch (CompileError e) when (found is { Count: > 0 })
+        {
+            AddWarnings(e);
+            throw;
+        }
+        if (warnings == WarningMode.AsErrors && found!.Count > 0) ThrowWarningsAsErrors();
+        try
+        {
+            var result = Build(program, platform, sourcePath);
+            result.Warnings = found is null ? [] : errors.Sort(found);
+            return result;
+        }
+        catch (CompileError e) when (found is { Count: > 0 })
+        {
+            AddWarnings(e);
+            throw;
+        }
 
+        void AddWarnings(CompileError e)
+        {
+            if (warnings == WarningMode.AsErrors) ThrowWarningsAsErrors();
+            e.WithWarnings = errors.Sort(e.All.Concat(found!));
+        }
+
+        // --warnings-as-errors: each warning is an error, and the build stops (spec 13).
+        void ThrowWarningsAsErrors()
+        {
+            foreach (var w in found!) errors.Add(new CompileError(w.Pos, w.Description));
+            errors.ThrowIfAny();
+        }
+    }
+
+    /// <summary>Allocation, code generation and layout, for a program whose checks found no error.</summary>
+    private static CompileResult Build(CheckedProgram program, Platform platform, string? sourcePath)
+    {
         var gen = new CodeGen(program);
         var functionCode = gen.GenerateFunctions();
         // Indexed arrays placed so that they do not cross a page, with the variables starting on one;
@@ -358,6 +404,14 @@ public static class TernCompiler
             report.AppendLine($"Export table at ${exportTable:X4}:");
             foreach (var (name, address) in entries) report.AppendLine($"  ${address:X4}  {name}");
         }
+        // Information, not a warning (spec 8.1): a call from one root can overwrite another root's call in progress.
+        var shared = program.Functions.Where(f => f.Roots.Count > 1 && !f.IsInline && f.FrameVariables.Sum(v => v.Type.Size) > 0).ToList();
+        if (shared.Count > 0)
+        {
+            report.AppendLine("Functions with memory reachable from two roots:");
+            foreach (var f in shared)
+                report.AppendLine($"  {f.Name} ({Bytes(f.FrameVariables.Sum(v => v.Type.Size))}): {string.Join(", ", f.Roots.OrderBy(program.Functions.IndexOf).Select(r => r.Name))}");
+        }
         report.AppendLine("Zero page:");
         report.Append(plan.ZeroPageMap);
 
@@ -383,6 +437,8 @@ public static class TernCompiler
             DeclaredFunctions = program.Modules.SelectMany(m => m.Scope.Values.OfType<FunctionSymbol>()).Select(f => f.Name).ToHashSet(),
         };
     }
+
+    private static string Bytes(int n) => n == 1 ? "1 byte" : $"{n} bytes";
 
     /// <summary>A program's export table is placed like fixed data: in a program or reserved area (spec 12.3).</summary>
     private static void CheckExportTable(CheckedProgram program, AddressRange range)
