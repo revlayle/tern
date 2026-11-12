@@ -13,6 +13,7 @@ public sealed partial class Parser
         SkipBreaksBeforeBrace();
         var start = Expect(TokenKind.LBrace, "'{'");
         var statements = new List<Stmt>();
+        int outerColumn = _statementColumn;
         SkipTerminators();
         while (!At(TokenKind.RBrace))
         {
@@ -22,6 +23,7 @@ public sealed partial class Parser
                 throw new CompileError(start.Pos, "Block is not closed with '}'. Add '}' where it ends");
             }
             int from = _pos;
+            _statementColumn = Current.Pos.Column;
             try { statements.Add(ParseStatement()); }
             catch (Exception e) when (Recovers(e))
             {
@@ -34,6 +36,7 @@ public sealed partial class Parser
             }
             SkipTerminators();
         }
+        _statementColumn = outerColumn;
         Advance();
         return new BlockStmt(start.Pos, statements);
     }

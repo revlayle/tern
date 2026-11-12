@@ -192,6 +192,29 @@ public sealed class SeveralErrorsTests : IDisposable
     }
 
     [Fact]
+    public void After_an_unclosed_parenthesis_the_next_line_at_the_statement_column_is_checked()
+    {
+        // Review M23, finding 2: the lexer gives no line breaks inside ( ), so the skip ran to the '}'.
+        var errors = Errors("""
+            var g: u8
+            fn main() {
+                g = (1 +
+                g = 2
+                g = 500
+                f(1,
+                  2
+                g = true
+            }
+            """);
+        Assert.Equal([
+            "4: Expected ')', found '='",
+            "8: Expected ')', found 'g'",
+            "5: 500 does not fit in u8 (0 to 255)",
+            "8: Expected u8, found bool",
+        ], errors);
+    }
+
+    [Fact]
     public void A_semicolon_in_brackets_does_not_end_the_skipped_statement()
     {
         var errors = Errors("""

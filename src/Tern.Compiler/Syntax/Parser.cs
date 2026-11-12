@@ -85,6 +85,9 @@ public sealed partial class Parser
         while (!At(TokenKind.Eof))
         {
             if (braces == 0 && At(TokenKind.RBrace)) return;
+            // After an unclosed ( the lexer gives no line breaks: a line that starts no further right
+            // than the statement did is the next statement.
+            if (braces == 0 && _pos > from && StartsLineAt(_tokens[from].Pos.Column)) return;
             var t = Advance();
             if (t.Kind is TokenKind.LParen or TokenKind.LBracket) brackets++;
             else if (t.Kind is TokenKind.RParen or TokenKind.RBracket) brackets = Math.Max(0, brackets - 1);
@@ -112,6 +115,13 @@ public sealed partial class Parser
             else if (t.Kind == TokenKind.RBrace) braces = Math.Max(0, braces - 1);
         }
     }
+
+    /// <summary>Whether the current token is the first of its line, at <paramref name="column"/> or further left.</summary>
+    private bool StartsLineAt(int column) =>
+        _pos > 0 && Current.Pos.Line != _tokens[_pos - 1].Pos.Line && Current.Pos.Column <= column;
+
+    /// <summary>The column of the statement being parsed in a block, for going on after an unclosed ( (spec 13).</summary>
+    private int _statementColumn = 1;
 
     /// <summary>Whether the current token starts a top-level declaration, also with a word from another language (pub fn, let x).</summary>
     private bool StartsCurrentDeclaration()
@@ -224,6 +234,8 @@ public sealed partial class Parser
         // After an unclosed ( or [, which was reported, the lexer gives no line breaks: a declaration
         // starting a new line ends the statement (spec 13).
         if (_failures > 0 && StartsCurrentDeclaration() && Current.Pos.Line != _tokens[_pos - 1].Pos.Line) return;
+        // So does a line that starts no further right than this statement.
+        if (_failures > 0 && StartsLineAt(_statementColumn)) return;
         throw new CompileError(Current.Pos, $"Expected end of statement, found {Describe(Current)}. Put each statement on its own line, or separate them with ';'");
     }
 }
