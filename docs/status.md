@@ -4,11 +4,17 @@ Owned by the coding session. Updated at the end of every coding session.
 
 ## Current
 
-- **Milestone:** M23: several errors per compile (spec 13, decision 2026-11-12). Done and reviewed (`docs/reviews/m23.md`: ready to merge, four suggestions, all done).
-- **Branch:** `m23-errors`, from `main` at `aa45421` (cleanup merged), with `main` merged in again for the review. 2892 compiler tests pass plus 36 CPU tests. No benchmark changed (1254 / 350780); `SkillTests` pass.
-- **Next step:** `/merge m23-errors` (or a second look at the suggestions first). Questions 107-111 below are provisional choices for the spec session. After M23: the warnings analysis (spec session), then M24.
+- **Milestone:** M23 follow-up (roadmap "M23 follow-up (before warnings)"; spec 13, 8.1; decisions 107, 108 and "a function may be called from main and from a handler", 2026-11-12). Done; not reviewed yet.
+- **Branch:** `m23-followup`, from `main` at `1f9426d` (M23 merged, the warnings decision in). 2895 compiler tests pass plus 36 CPU tests. No benchmark changed (1254 / 350780); `SkillTests` pass.
+- **Next step:** `/review` of `m23-followup`. Questions 112-113 below are provisional choices for the spec session. After this: the Warnings milestone (roadmap "Warnings"), then `implements`, encodings, M24.
 
 ## Done
+
+- **M23 follow-up** (2026-11-12, branch `m23-followup`). Three commits.
+  - Errors sorted by place (`25f7658`, decision 108): `ErrorList` collects every error and sorts them when it throws: the main file, then modules in the loader's order (`ErrorList.AddFile`, called as each file is loaded), then line and column; errors at the same place keep the order found. `--max-errors n` keeps the first `n` after sorting, so the checks now always run to the end (`ErrorLimitReached` is gone). Help text and skill updated.
+  - An undeclared name is reported at every use (`d9d9f95`, decision 107): the step that declared it after its first error is removed, with `CompileError.Undeclared`. A broken declaration still gives one error.
+  - A function may be called from main and from a handler (`44d1761`): `Checker.CheckSharedFunctions` is removed. `Allocator.FrameOffsets` places the frames of functions with two roots after all others, like those reached from an address-taken function, so they overlap no frame (their callees have the same roots and follow them). Tests check the zero-page map of the report (temporaries and inline variables included) and run a program where main's call returns the handler's values. Skill: the two-roots error examples are replaced by what happens and the ways out; the private-variable error stays.
+  - Not in this follow-up: the report's list of functions with memory reachable from two roots (roadmap "Warnings").
 
 - **M23, first review** (2026-11-12, `docs/reviews/m23.md`): ready to merge; all four suggestions done.
   - Suggestion 4 (`ad3ec5e`): the "Going on after an error" section moved to the end of `Checker.cs`, so the `EntriesRoot` summary is on its constant again. Moved code only.
@@ -589,13 +595,12 @@ Not bugs; things to improve, mostly in M7 (optimizer).
 
 ## Questions for the spec session
 
-Questions 107-111 come from M23; each is built as described, provisionally.
+Questions 112-113 come from the M23 follow-up; each is built as described, provisionally.
 
-- **107: "A misspelled function name in its declaration gives one error"** (roadmap M23 tests). Read as: `fn updte()` with calls to `update()` gives one error, at the first call ("'update' is not a function"), not one per call. Built for every name reported as not declared: later uses in the same file add no errors. Is that the intended reading? (Also: an undeclared call still says "is not a function", now with "Check the spelling, or declare it".)
-- **108: "In the order found" is the checker's order, not the source order.** The checker declares constants, then functions, then globals, then checks bodies, so `var e: Enmy` on line 2 comes after `fn hit(p: ptr Enmy)` on line 4; lexer errors of a file come before its parser errors. Sorting by file and line would read more naturally; spec 13 says "in the order found". Keep, or sort?
-- **109: The call graph runs only without errors.** Recursion, two roots and the shared-function checks need the whole program, so they are reported like allocation errors: alone, once the others are fixed. Spec 13 lists only allocation, code generation and layout as later stages.
-- **110: "1 error" ends the text output too** (spec 13: "Text output ends with the number of errors"), as Clang does; every error example in the skill now ends with it. `tern bench` prints the count only when there are several errors, so its one-error lines are as before.
-- **111: errors that keep no fix sentence** (`FixSentenceTests.NoFix`): the parser's "Expected X, found Y" (it names what is expected), "Expected an expression, found X", "Expected T, found a number", an error's text passed on with a note, and the program's own assert message. Also "Expected u16, found bool" (two types that do not convert) has no suggestion: the fix depends on what was meant. Agree, or should these get one?
+- **112: "Each module in the order it is first imported" is the loader's order, depth first.** A module's own imports are loaded (and their errors sorted) right after it, before the main file's next import: with `import a`, `import b` in the main file and `import c` in `a`, the order is main, a, c, b. The other reading (main's imports first, then theirs) would need a second pass. Keep?
+- **113: A missing import is reported at every use.** `text.put('A')` twice with no `import text` gives two "'text' is not declared" errors, since `text` is an undeclared name (decision 107), though one line fixes both. Keep, or report a missing module once per file?
+
+Questions 107-111 were settled on 2026-11-12 (decisions.md): 107 and 108 changed and are built in the M23 follow-up; 109-111 as built.
 
 Questions 104-106 were settled on 2026-11-11 (decisions.md) and are built in M22 follow-up 2. Questions 100-103 were settled on 2026-11-11 (decisions.md): as built; the additions (addresses and the calling block's `.label` as labels, the call's location in `tern --json`) are in the M22 follow-up. Questions 94-99 were settled on 2026-11-11 (decisions.md): 96, 98 and 99 as built; 94 (real constants), 95 (`offset()`) and 97 (`repeat()`) and the `for` direction rule are the M22 follow-up. Questions 89-93 were settled on 2026-11-10 (decisions.md): as built, except 92, built at the start of M22. Question 88 was settled on 2026-11-09 (as built). Questions 86 and 87 were settled on 2026-11-09 and are built. Questions 79-85 were settled on 2026-11-09 and are built. Questions 76-78 were settled on 2026-11-08 (decisions.md), as built.
 
