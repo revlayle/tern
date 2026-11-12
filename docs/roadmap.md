@@ -504,6 +504,17 @@ Tests: a program with errors in several statements, functions and modules report
 
 Done when: the tests above pass, every error test's first error is unchanged, and the errors without a fix sentence are fixed or listed.
 
+## M23 follow-up (before the warnings analysis)
+
+Spec: 13. Decision 2026-11-12 (M23 questions 107-111). On a branch from `main`.
+
+- **Errors sorted by place** (question 108): the main file first, then each module in the order it is first imported; within a file by line and column; errors at the same place keep the order found. `--max-errors n` keeps the first `n` after sorting, with the note. Text, `tern --json`, `tern run` and `tern bench` give the same order. Tests whose first error changes are updated to the new first error; the error each test is about must still be reported.
+- **An undeclared name is reported at every use** (question 107): `update()` called three times with only `fn updte()` declared gives three errors, each with "Check the spelling, or declare it"; the same for an undeclared variable, type or module member. A name whose declaration failed (`var e: Enmy`) still gives one error, at its declaration.
+
+Tests: in `SeveralErrorsTests`, the order for errors found out of source order (a global's type after a function's parameter, lexer and parser errors of one file, two modules), `--max-errors 2` on that program, and the three calls above (three errors, at their lines).
+
+Done when: the tests pass and the skill's error examples match the new order.
+
 ## Warnings: analysis (spec session, after M23)
 
 Decision 2026-11-12. The compiler reports errors only; it has no warnings. Before any are built, a spec session goes through the language and decides which, if any, there should be, checked against decision 2026-11-07 ("Tern trusts the programmer": deliberate but unusual code, such as a wrapping index, gets no warning). Candidates to weigh: unused variables, functions, constants and imports (the strongest candidate, per the developer: they cost nothing in the binary, since only reachable code is compiled (2.2), but they are code a developer wants to clean up; to settle, which declarations count, since a library module's unused public functions are normal, and how a declaration kept on purpose is marked), an empty constant range (`5..5`; spec 5.1 once promised a warning, never built), a value that never fits its type after constant folding, an unreachable statement. Also to settle: how a warning is shown and turned off, whether `tern --json` gives it as `"severity": "warning"`, and whether warnings can be made errors. The result is a milestone, or a decision to have none.
