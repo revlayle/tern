@@ -298,8 +298,11 @@ if cpu.carry() { finish() }        // bcc skip, nothing more
 
 ### 3.8 Interrupts
 
-`interrupt fn` saves only the registers it changes and ends with `rti`. It is its own root: its memory never overlaps main's. A function called from both main and a handler is an error, unless it has no memory of its own (like `acknowledge` above): an interrupt could stop it halfway, run it again and overwrite its variables. The compiler does not copy the function for you; pick one of these:
+`interrupt fn` saves only the registers it changes and ends with `rti`. It is its own root: its memory never overlaps main's.
 
+**Functions called from main and from a handler.** The compiler allows this, but the function has one set of variables, not one per caller. If the interrupt arrives while main is inside the function, the handler's call overwrites main's parameters, locals and the compiler's hidden temporaries (a 16-bit sum needs one); when the handler returns, main's call goes on with the handler's values. Nothing fails at once: the bug shows only when the interrupt lands inside that function, perhaps once a minute, so plan for it when you write the code. A function with no memory of its own (like `acknowledge` above) is always safe. Otherwise pick one of these:
+
+- **Interrupts off around main's calls.** `asm { sei }`, the call, `asm { cli }`. Simple, but the interrupt waits until `cli`; a raster interrupt delayed this way shows on screen.
 - **`inline fn`.** Each caller gets its own copy of the code, and its variables go in that caller's frame, so main's copy and the handler's never touch each other. Best for small helpers:
   ```
   inline fn next_x(x: u8) -> u8 {      // one copy in main, one in the handler
@@ -311,7 +314,7 @@ if cpu.carry() { finish() }        // bcc skip, nothing more
 - **No memory of its own.** Parameters in registers (`using A`), loop counters with `using X` or `using Y`, no locals: the handler saves the registers, so sharing is safe.
 - **A second function for the handler.** For anything larger. The handler's version is often shorter, since it rarely needs everything main does.
 
-The error tells you what memory the function has (a local, a loop counter, a hidden temporary of a 16-bit sum). One `interrupt fn` called from another becomes a *part* (no saving, ends with `rts`), which is how the library's raster code is combined into one handler you install.
+The listing's frame map shows what memory a function has. One `interrupt fn` called from another becomes a *part* (no saving, ends with `rts`), which is how the library's raster code is combined into one handler you install.
 
 The `c64` module installs handlers: `kernal_off()`, `set_irq(addr(handler))`, `interrupts_on()` (see example 4.3). With the KERNAL left in (needed by the `io` library), `set_kernal_irq(addr(handler))` installs the same kind of handler through `$0314`; the KERNAL's keyboard scan then stops. For a raster interrupt there, call `cia_irqs_off()` first, which turns off the CIA timer interrupts and clears any that are pending.
 
@@ -893,7 +896,7 @@ Tern trusts you and does not add hidden checks. These are deliberate and often u
 - **A `for` loop with a variable step of 0 never ends.** Stepped loops stop when the step carries past the end of the type.
 - **Flags after compiled code are unspecified.** An empty `inline asm fn ... -> bool using carry {}` reads the flag an `asm` block just left, when used right after that block.
 - **`keeps` is a promise** from the routine's documentation; the compiler does not check it.
-- **A function called from main and from a handler** may have loop counters only in registers. The compiler may choose a register for a counter on its own, but adding a call to the loop can change that and make the function an error; `using X` or `using Y` makes it certain.
+- **A function called from main and from a handler has one set of variables.** An interrupt that arrives while main is inside it overwrites them (3.8). Loop counters are in memory unless written `using X` or `using Y`, even if the compiler happens to put one in a register.
 - **When `main` returns**, the program stops in an endless loop and interrupt handlers keep running. There is no return to BASIC, whose zero page the program has used.
 - **A call into an overlay that is not loaded** runs whatever is in the area.
 - **Loading an overlay resets its variables** to their initial values; keep anything that must survive in resident memory. Its zero-page bytes at fixed addresses are not in its file, so the overlay sets them itself. An interrupt handler it installed must be removed before another overlay replaces it.
