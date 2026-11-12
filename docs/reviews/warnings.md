@@ -40,3 +40,13 @@ This matters for the language server (M30), which marks the statement from this 
 - [x] The repository is clean. `RepositoryWarningTests` covers the examples and `src/lib` (with `warnLibrary`). `SkillTests` compiles the skill's programs with `--warnings-as-errors`. Raster's unused `BAND` is removed. Speedcode's comparison routine is `_cycle_plain`. The guide still says `cycle_plain` (question 117, spec session).
 - [x] The skill explains each warning and `_`. The guide's mention belongs to the spec session.
 - [x] `WarningTests` covers every case on the roadmap's list: `0..COUNT` with `COUNT` 0, `if DEBUG { return }`, an inner loop's `break` under `while true`, an `asm` block, a name used only in assembly, a variable only written, the unused-function chain, no warnings with a check error, warnings with an allocation error, the order with errors, the JSON severity, both switches and both together, `run` and `bench`, and the two-roots list.
+
+## Second review (`cedee19`), 2026-11-12
+
+**Ready to merge.** The fix commit takes care of suggestions 1, 2 and 4. Note 3 has gone to the spec session as question 118. The merge of `main` (`c69451d`) only brought in this review file.
+
+- **Suggestion 1, done.** `Start` uses `Leftmost` for an assignment target, which walks `IndexExpr` / `MemberExpr` down to the first token. An `asm` statement uses the new `AsmStmt.KeywordPos`, which the parser sets only on the statement path. An `asm fn` body has no keyword position and keeps `Pos`, but its block is the whole body and never follows another statement. The block's own `Pos` stays its `{`, so asm error positions don't change. `An_unreachable_statement_is_reported_at_its_start` has a row for each kind, plus a nested `buf[pt.a].lo = 2` and a call. Minor: the `Start` summary still describes the old positions ("an assignment's position is its operator's") as a reason, which reads fine.
+- **Suggestion 2, done.** `Bytes(n)` gives "1 byte", and the report test is updated.
+- **Suggestion 4, done.** `ForStmt.VariablePos` comes from the name token. `An_unused_loop_variable_is_reported_at_its_name` checks 3:9. The skill's `tidy.tern` output moved to 10:9, and `SkillTests` passes.
+
+2943 compiler tests and 36 CPU tests pass. Benchmarks are unchanged (1254 / 350780). Every "done when" item above still holds.
