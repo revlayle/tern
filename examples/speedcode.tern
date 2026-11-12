@@ -1,0 +1,156 @@
+// Speedcode: colour bars scroll left across the screen. Every other frame each
+// colour RAM row moves one column left, its first colour wrapping to the end,
+// except the text rows. Two versions of the same routine:
+//
+// - cycle_plain: Tern loops over the rows and the columns, through a pointer.
+// - cycle_unrolled: a generator (a const fn with emit) writes one lda / sta
+//   pair per row inside a loop over the columns, with the row addresses as
+//   constants: no row loop, no pointer, no (p),y.
+//
+// tern bench, on a frame that moves the colours (everything above main is the
+// declarations; run in examples/):
+//   D="$(sed '/^fn main/,$d' speedcode.tern)"
+//   tern bench --decl "$D" --code 'tick = 1; cycle_plain()' --fn cycle_plain
+//   tern bench --decl "$D" --code 'tick = 1; cycle_unrolled()' --fn cycle_unrolled
+//
+//   cycle_plain:     66 bytes, 29,537 cycles
+//   cycle_unrolled: 422 bytes,  8,697 cycles
+// A PAL frame gives the CPU at most about 19,000 cycles, so the plain version
+// cannot move the colours every frame; the unrolled one takes under half a frame,
+// for 356 more bytes.
+//
+// The listing (speedcode.lst) shows each generated instruction under the emit
+// line it came from, with the line of the call.
+//
+// Check it in VICE:
+//   tern examples/speedcode.tern
+//   x64sc -autostart examples/speedcode.prg
+import c64
+import text
+
+const SPEED = 2                    // frames per step
+
+var tick: u8 = SPEED
+var saved: [u8; 25]                // the first colour of each row, while it moves
+
+// The rows that move: all but the text rows 0, 12 and 24.
+const fn rows_except(skip: [int; _]) -> [int; _] {
+    var moving = repeat(0, 25 - len(skip))
+    var n = 0
+    for r in 0..25 {
+        var moves = true
+        for k in 0..len(skip) {
+            if skip[k] == r { moves = false }
+        }
+        if moves {
+            moving[n] = r
+            n += 1
+        }
+    }
+    return moving
+}
+
+data rows: [u8; _] = rows_except([0, 12, 24])
+data row_colors: [ptr u8; 25] = [c64.COLOR + i * 40 for i in 0..25]
+
+fn cycle_plain() {
+    tick -= 1
+    if tick != 0 { return }
+    tick = SPEED
+    for k in 0..len(rows) {
+        var p = row_colors[rows[k]]
+        var first = p[0]
+        for c in 0..39 {
+            p[c] = p[c + 1]
+        }
+        p[39] = first
+    }
+}
+
+// The same work as cycle_plain, unrolled over the rows. 'buffer' is where the
+// first colours are kept (addr() of a variable the compiler places); 'done' is
+// the end of the calling block, where it goes on a frame that does not move.
+const fn cycle_rows(which: [int; _], buffer: label, done: label) {
+    emit {
+        dec tick
+        beq .now
+        jmp done
+    .now:
+        lda #SPEED
+        sta tick
+    }
+    // A loop over the columns for each group of rows. A group has at most 20
+    // rows (6 bytes each), so that bne reaches back to the loop's top. Each
+    // group is finished before the next starts: from line 250 the top group is
+    // done before the next frame is drawn, the bottom one before the beam reaches it.
+    var loops = (len(which) + 19) / 20
+    var per = (len(which) + loops - 1) / loops
+    for first in 0..len(which) step per {
+        var last = min(first + per, len(which))
+        for k in first..last {
+            emit {
+                lda c64.COLOR + which[k] * 40
+                sta buffer + k
+            }
+        }
+        var top = label()          // this loop's top, shared by the emits
+        emit {
+            ldx #0
+        top:
+        }
+        for k in first..last {
+            emit {
+                lda c64.COLOR + which[k] * 40 + 1, x
+                sta c64.COLOR + which[k] * 40, x
+            }
+        }
+        emit {
+            inx
+            cpx #39
+            bne top
+        }
+        for k in first..last {
+            emit {
+                lda buffer + k
+                sta c64.COLOR + which[k] * 40 + 39
+            }
+        }
+    }
+}
+
+asm fn cycle_unrolled() {
+    cycle_rows(rows, addr(saved), .done)
+.done:
+}
+
+data title: [u8; 40] = screen"  SPEEDCODE: ONE LDA / STA PAIR PER ROW "
+data middle: [u8; 40] = screen"     UNROLLED BY A CONST FN AT COMPILE  "
+data bottom: [u8; 40] = screen"  TIME, SO NO ROW LOOP RUNS AT RUN TIME "
+data bands: [u8; 8] = [c64.RED, c64.ORANGE, c64.YELLOW, c64.GREEN, c64.CYAN, c64.BLUE, c64.PURPLE, c64.LIGHT_RED]
+
+fn main() {
+    c64.vic.border = c64.BLACK
+    c64.vic.background = c64.BLACK
+    var screen: ptr u8 = c64.SCREEN
+    for r in 0..25 {
+        var colors = row_colors[r]
+        for c in 0..40 {
+            screen[c] = $A0                 // a reversed space: a block of colour
+            colors[c] = bands[(c >> 1) & 7]
+        }
+        screen += 40
+    }
+    text.put(c64.SCREEN, addr(title), len(title))
+    text.put(c64.SCREEN + 12 * 40, addr(middle), len(middle))
+    text.put(c64.SCREEN + 24 * 40, addr(bottom), len(bottom))
+    for c in 0..40 {
+        row_colors[0][c] = c64.WHITE
+        row_colors[12][c] = c64.WHITE
+        row_colors[24][c] = c64.WHITE
+    }
+    while true {
+        while c64.vic.raster != 250 { }   // below the text area: once per frame
+        cycle_unrolled()
+        while c64.vic.raster == 250 { }
+    }
+}

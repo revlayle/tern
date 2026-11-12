@@ -1,0 +1,57 @@
+// Sine: a ball moves smoothly along a curve, its positions read from two sine
+// tables. A const fn builds the tables while the program compiles, with real
+// numbers and sin(); the program has no sine code, no multiply and no reals at
+// run time, only the bytes of the tables. The ball's shape is computed the same
+// way. The listing (sine.lst) shows main's code and the tables as data.
+//
+// Each table has 256 entries, so a u8 index wraps around the table by itself:
+// x steps 2 entries per frame and y 3, which draws a Lissajous curve.
+//
+// Check it in VICE:
+//   tern examples/sine.tern
+//   x64sc -autostart examples/sine.prg
+import c64
+
+const BLOCK = $0C00 / 64           // sprite pointer for $0C00, in VIC bank 0
+
+// n values of mid + amplitude * sin(angle), one full turn.
+const fn wave(n: int, mid: int, amplitude: real) -> [int; _] {
+    return [round(mid + amplitude * sin(i * TAU / n)) for i in 0..n]
+}
+
+// A filled circle of radius r pixels in a 24 x 21 sprite: 3 bytes per row.
+const fn disc(r: real) -> [int; _] {
+    var t = repeat(0, 63)
+    for row in 0..21 {
+        for col in 0..24 {
+            var dx = col - 11.5
+            var dy = row - 10.0
+            if dx * dx + dy * dy <= r * r {
+                t[row * 3 + col / 8] = t[row * 3 + col / 8] | ($80 >> (col % 8))
+            }
+        }
+    }
+    return t
+}
+
+data xs: [u8; 256] = wave(256, 140, 100.0)   // 40 to 240
+data ys: [u8; 256] = wave(256, 150, 80.0)    // 70 to 230
+data ball: [u8; 63] @ $0C00 = disc(10.5)
+
+var pointer0: u8 @ $07F8
+
+fn main() {
+    pointer0 = BLOCK
+    c64.vic.sprite_color[0] = c64.YELLOW
+    c64.vic.sprite_enable = 1
+    var a: u8 = 0
+    var b: u8 = 0
+    while true {
+        while c64.vic.raster != 250 { }  // below the text area: move the ball once per frame
+        c64.vic.sprite0_x = xs[a]
+        c64.vic.sprite0_y = ys[b]
+        a += 2
+        b += 3
+        while c64.vic.raster == 250 { }
+    }
+}

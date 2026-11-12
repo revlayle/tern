@@ -4,11 +4,20 @@ Owned by the coding session. Updated at the end of every coding session.
 
 ## Current
 
-- **Milestone:** M22 follow-up (roadmap, before M23; decisions 2026-11-11, questions 94-103). All six items are done. The first review (`docs/reviews/m22-followup.md`) had one must-fix item, now fixed, and four suggestions: 2, 4 and 5 done, 3 waits for question 106.
-- **Branch:** `m22-followup`, with `main` merged in (`5b7f1b3`). 2835 compiler tests pass plus 36 CPU tests. No benchmark changed (1254 / 350780); `SkillTests` pass. All examples compile unchanged.
-- **Next step:** `/merge m22-followup` (second review, `2a3bffa` on `main`: ready to merge, no findings). After the merge: the next milestone on the roadmap (`main` now has M22 follow-up 2 and a cleanup milestone before M23). Questions 104-106 below are open.
+- **Milestone:** M22 follow-up 2 (roadmap, before M23; decisions 2026-11-11, questions 104-106). Done and reviewed (`docs/reviews/m22-followup2.md`: ready to merge, two suggestions, both done).
+- **Branch:** `m22-followup2`, with `main` merged in (`95ecb18`). 2861 compiler tests pass plus 36 CPU tests. No benchmark changed (1254 / 350780); `SkillTests` pass.
+- **Next step:** `/merge m22-followup2`. After the merge: the cleanup milestone before M23 (roadmap, "Cleanup: split the large classes"). The spec session writes the guide's section on `const fn` and generators from the two examples.
 
 ## Done
+
+- **M22 follow-up 2, first review** (2026-11-11, `docs/reviews/m22-followup2.md`): ready to merge; both suggestions done (`3f669c5`).
+  - Suggestion 2: the empty check of a down-count to 0 (unsigned `n..0`, signed `n..=0` / `n..0`) comes before `HoldInRegister` loads a variable into the other index register, so `for i in n..0 step -1 using Y { cnt += 1 }` is `ldy n` / `beq`, with no `cpy #$00`. When the body changes the held variable, the check's branches go to a label after its store (`fskip`), since its load was skipped too. Other loops are unchanged.
+  - Suggestion 1: `LoopDirectionTests` runs the other paths of the check for n = 0, 1, 5, 254, 255 (counter in memory, in Y beside a held variable, `(n + 1)` with `cpx #$00`, `step -2`) and a signed down-count beside a held variable.
+
+- **M22 follow-up 2** (2026-11-11, spec 4.1, 5.1, 11; decisions 2026-11-11, questions 104-106).
+  - *`n..=0` counting up* (`7b787a8`, question 104): `Checker.NeverRuns` keeps the error for constant bounds past the end and an unsigned `n..0` (also with a variable step, fix "Use a constant negative step to count down"); an unsigned `n..=0` and `a..=0 step n` compile with no error and run once when the start is 0. The error rows that used `..=0` with a variable start are now `..0` forms. `LoopDirectionTests` runs `n..=0` for 0, 5, 255 (u8, in X, variable step, u16). The skill says what `n..=0` does.
+  - *`for i in n..0 step -1` (n: `u8`)* (`23d5cc9`, question 106): `ldx n` / `beq done`, as spec 11 gives (`CodeGen.GenForLoop`, next to `SignedEmptyCheck`'s case); `lda c` when the counter is in memory. A listing test checks the full shape (M22 follow-up review suggestion 3). No benchmark moved.
+  - *Examples* (`82d5f0c`): `examples/sine.tern` (two sine tables and the ball's shape from const fns with real math; sprite 0 on a Lissajous curve, once per frame) and `examples/speedcode.tern` (colour bars on all rows but three text rows; `cycle_plain` against `cycle_unrolled`, a generator using `label()`, `addr(saved)` and the block's `.done`). The unrolled rows are in loops of at most 20 (a `bne` reaches back), and each group saves, moves and restores its rows before the next, so the beam never draws a row half moved. `tern bench`: 66 bytes / 29,537 cycles against 422 / 8,697 (commands in the header: a module cannot have `main`, so the bench passes everything above `main` as `--decl`). `CompileTimeExampleTests` (tables and shape against C# `Math`, per-frame sprite writes on the stand-in VIC-II, the colour model at each call and where the beam reaches each group, plain and unrolled agree, the listing's emit lines). Both checked in VICE (screenshots).
 
 - **M22 follow-up, second review** (2026-11-11, `docs/reviews/m22-followup.md` on `main`): ready to merge. Its note, a range written over two lines quoted with the line break, is done: `Parser.TokenText` makes a line break and its indentation one space (`LoopDirectionTests`).
 
@@ -497,7 +506,6 @@ Including `jsr` and `rts`; from the tests.
 - M22: an initial value that mixes `addr()` with compile-time code (`addr(buf) + round(1.5)`) is an error: the whole expression goes to the interpreter, which cannot take addresses. Write the offset as an int constant first.
 - M22: inside an expression computed by the interpreter, typed constants lose their type (`const W: u8 = 40`, then `const K = round(W * 1.5)` is an untyped constant). The value is exact either way.
 - M22: a struct field's array cannot take a compile-time array (`FieldBytes` wants a list literal); a table of structs cannot be built by a const fn (structs are not compile-time values, spec 4.1).
-- `for i in n..0 step -1 using X` (n: `u8`) compiles to `ldx n` / `cpx #$00` / `bcc done` / `beq done`, where spec 11 gives `ldx n` / `beq done`: `CodeGen.CounterBranch` emits the "less or equal" test as `bcc` + `beq`, and `bcc` after `cpx #0` is never taken (4 bytes, 4 cycles once per loop). The same on `main` before the follow-up (it is not from the direction change). Fixing it may move benchmarks.
 - M22: an asm operand outside a generator cannot call a const fn or a built-in (`lda #round(1.5)` is an error, as in any runtime code); declare a constant. Inside `emit` operands it works.
 
 - `.gitignore` covers `examples/*.prg` (and `.lst`, `.vs`) but not the subfolder `examples/plugins/`, so building the plug-in example leaves untracked `.prg`, `.lst`, `.vs`, `.lines`, `.d64` and generated `*_api.tern` files there (`level_api.tern` is the hand-written one). `.gitignore` belongs to no session in `docs/workflow.md`; the spec session could add `examples/plugins/*` patterns.
@@ -551,11 +559,7 @@ Not bugs; things to improve, mostly in M7 (optimizer).
 
 ## Questions for the spec session
 
-- **104 (provisional):** a loop with a variable `step` always counts up, so `255..=0 step n` and an unsigned `a..=0 step n` get the new "counts up, so it never runs" error, with the fix "Use a constant negative step to count down" (a variable step cannot be negative). Spec 5.1 names the error only for loops without `step`. Is the error wanted here too?
-- **105 (provisional):** `calledFrom` is in every `tern --json` diagnostic, `null` when the error is not in a const fn or generated code, as `suggestion` is `null` without a fix. Spec 4.1 says only "a field of its own".
-- **106:** `for i in n..0 step -1` (n: `u8`) does not match spec 11's row (see Known limitations): fix the code generator, or should the row show the check?
-
-Questions 100-103 were settled on 2026-11-11 (decisions.md): as built; the additions (addresses and the calling block's `.label` as labels, the call's location in `tern --json`) are in the M22 follow-up. Questions 94-99 were settled on 2026-11-11 (decisions.md): 96, 98 and 99 as built; 94 (real constants), 95 (`offset()`) and 97 (`repeat()`) and the `for` direction rule are the M22 follow-up. Questions 89-93 were settled on 2026-11-10 (decisions.md): as built, except 92, built at the start of M22. Question 88 was settled on 2026-11-09 (as built). Questions 86 and 87 were settled on 2026-11-09 and are built. Questions 79-85 were settled on 2026-11-09 and are built. Questions 76-78 were settled on 2026-11-08 (decisions.md), as built.
+Questions 104-106 were settled on 2026-11-11 (decisions.md) and are built in M22 follow-up 2. Questions 100-103 were settled on 2026-11-11 (decisions.md): as built; the additions (addresses and the calling block's `.label` as labels, the call's location in `tern --json`) are in the M22 follow-up. Questions 94-99 were settled on 2026-11-11 (decisions.md): 96, 98 and 99 as built; 94 (real constants), 95 (`offset()`) and 97 (`repeat()`) and the `for` direction rule are the M22 follow-up. Questions 89-93 were settled on 2026-11-10 (decisions.md): as built, except 92, built at the start of M22. Question 88 was settled on 2026-11-09 (as built). Questions 86 and 87 were settled on 2026-11-09 and are built. Questions 79-85 were settled on 2026-11-09 and are built. Questions 76-78 were settled on 2026-11-08 (decisions.md), as built.
 
 Questions 1-63 and 65-75 are settled (decisions.md; 44, 45 and 59-63 on 2026-11-07, 65-75 on 2026-11-08). Question 64 was withdrawn.
 

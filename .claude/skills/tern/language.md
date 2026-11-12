@@ -345,7 +345,8 @@ log $08BE [u8; 16] (10 bytes):
 - There is no C-style `for (;;)` and no `do`/`until`. `a..b` excludes `b`, `a..=b` includes it.
 - `for` bounds are evaluated once, and the counter is read-only in the body. A counter is `u8`
   (`u16` if a bound needs it). It counts up unless a negative `step` is written: `9..=0` and an
-  unsigned `n..0` are errors, written `9..=0 step -1`, `n..0 step -1`. A negative constant or a
+  unsigned `n..0` are errors, written `9..=0 step -1`, `n..0 step -1`; an unsigned `n..=0` counts
+  up too, so it runs once when `n` is 0 and never otherwise. A negative constant or a
   signed bound makes it `i8` (`i16` if the bounds do not fit): `for i in -10..10`,
   `for i in n..=0 step -1` with `n: i8`. A signed counter takes
   only a constant step, and an unsigned variable bound must be converted (`-5..n as i8`).
