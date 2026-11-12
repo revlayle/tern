@@ -111,9 +111,9 @@ Screen ($0400, 40 x 25):
   but there is no automatic narrowing.
 
 An error gives the file, line and column, what is wrong and how to fix it. One compile reports
-every error it finds, in the order found, then their number, so fix them all before compiling
-again (`--max-errors n` stops after `n`). A name whose declaration has an error adds no errors
-where it is used. Errors found when the program is laid out (zero page full, recursion, an
+every error it finds, sorted by file (the main file first), line and column, then their number,
+so fix them all before compiling again (`--max-errors n` reports the first `n`). A name whose
+declaration has an error adds no errors where it is used. Errors found when the program is laid out (zero page full, recursion, an
 overlap) come one at a time, once there are no others. With `--json` each error is an entry in
 `diagnostics`, the fix is a separate `suggestion`, and for an error inside a `const fn` or
 generated code, `calledFrom` is the line that called it (`null` otherwise):
