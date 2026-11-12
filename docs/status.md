@@ -4,11 +4,17 @@ Owned by the coding session. Updated at the end of every coding session.
 
 ## Current
 
-- **Milestone:** M23: several errors per compile (spec 13, decision 2026-11-12). Done, not reviewed yet.
-- **Branch:** `m23-errors`, from `main` at `aa45421` (cleanup merged). 2889 compiler tests pass plus 36 CPU tests. No benchmark changed (1254 / 350780); `SkillTests` pass (outputs rewritten).
-- **Next step:** `/review m23-errors`. Questions 107-111 below are provisional choices for the spec session. After M23: the warnings analysis (spec session), then M24.
+- **Milestone:** M23: several errors per compile (spec 13, decision 2026-11-12). Done and reviewed (`docs/reviews/m23.md`: ready to merge, four suggestions, all done).
+- **Branch:** `m23-errors`, from `main` at `aa45421` (cleanup merged), with `main` merged in again for the review. 2892 compiler tests pass plus 36 CPU tests. No benchmark changed (1254 / 350780); `SkillTests` pass.
+- **Next step:** `/merge m23-errors` (or a second look at the suggestions first). Questions 107-111 below are provisional choices for the spec session. After M23: the warnings analysis (spec session), then M24.
 
 ## Done
+
+- **M23, first review** (2026-11-12, `docs/reviews/m23.md`): ready to merge; all four suggestions done.
+  - Suggestion 4 (`ad3ec5e`): the "Going on after an error" section moved to the end of `Checker.cs`, so the `EntriesRoot` summary is on its constant again. Moved code only.
+  - Suggestion 1 (`6408b1d`): `pub fn helper()` and `let count` break their names: `Parser.DeclaredName` skips one word before `fn`/`var`/`const`/`data`/`struct` and takes the name after `let`, and the skip after a top-level error stops at such a line (`StartsCurrentDeclaration`). The error for the word itself is unchanged (habit errors would be a spec change).
+  - Suggestion 2 (`9aa54ca`): after an unclosed `(`, a line that starts no further right than the failed statement ends the skip, and after an error ends a statement in `ExpectEndOfStatement` (`_statementColumn`, restored when a block ends). Programs without errors parse as before.
+  - Suggestion 3 (`4cd2b19`): a local with a written type is declared with it when its initial value fails, so later statements using it are checked. One without a written type stays broken.
 
 - **M23: several errors per compile** (2026-11-12, branch `m23-errors`). Three commits.
   - *Recovery* (`91c98f4`). `Syntax/ErrorList.cs`: the errors of a compile in the order found (the same message at the same place once), `ErrorLimitReached` for `--max-errors`, and `FollowOnError`, which stops a statement with no error of its own. `TernCompiler.Compile(..., maxErrors)` throws the first error; `CompileError.All` has every one and `MoreNotReported` says the limit stopped it. Without an `ErrorList`, `Parser.Parse`, `Lexer.Tokenize`, `ModuleLoader.Load` and `Checker.Check` throw the first error as before.
@@ -523,7 +529,7 @@ Including `jsr` and `rts`; from the tests.
 ## Known limitations and technical debt
 
 - M23: after an error in a `for` or `match` header, its body is not checked (an `if`/`while` body is). An error in an `asm` block, `match` arm, struct or memory block skips the rest of it: one error each.
-- M23: an unclosed `(` or `[` makes the parser skip to the `}` that closes the block, since the lexer gives no line breaks inside brackets.
+- M23: after an unclosed `(` or `[`, the lines of the statement that start further right than it are skipped with it (the lexer gives no line breaks inside brackets).
 - M23: a function whose signature has an error is not checked; its body's errors appear once the signature is fixed.
 - M23: a module that cannot be loaded is reported at each file that imports it.
 - M23: `tern --json` does not say that `--max-errors` left errors out (its format is kept); the text output does.
