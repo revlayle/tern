@@ -404,6 +404,14 @@ public static class TernCompiler
             report.AppendLine($"Export table at ${exportTable:X4}:");
             foreach (var (name, address) in entries) report.AppendLine($"  ${address:X4}  {name}");
         }
+        // Information, not a warning (spec 8.1): a call from one root can overwrite another root's call in progress.
+        var shared = program.Functions.Where(f => f.Roots.Count > 1 && !f.IsInline && f.FrameVariables.Sum(v => v.Type.Size) > 0).ToList();
+        if (shared.Count > 0)
+        {
+            report.AppendLine("Functions with memory reachable from two roots:");
+            foreach (var f in shared)
+                report.AppendLine($"  {f.Name} ({f.FrameVariables.Sum(v => v.Type.Size)} bytes): {string.Join(", ", f.Roots.OrderBy(program.Functions.IndexOf).Select(r => r.Name))}");
+        }
         report.AppendLine("Zero page:");
         report.Append(plan.ZeroPageMap);
 

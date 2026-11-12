@@ -410,6 +410,42 @@ public sealed class WarningTests : IDisposable
             """));
     }
 
+    // ---------- The report's functions with memory reachable from two roots ----------
+
+    [Fact]
+    public void The_report_lists_functions_with_memory_reachable_from_two_roots()
+    {
+        // f has a local and is called from main and both handlers; g has no memory, and k one root.
+        var report = TernCompiler.Compile("""
+            var v: u8
+            fn f() {
+                var t = v
+                v = t + 1
+            }
+            fn g() { v = 1 }
+            fn k() {
+                var u = v
+                v = u + 2
+            }
+            interrupt fn h1() {
+                f()
+                g()
+            }
+            interrupt fn h2() { f() }
+            fn main() {
+                f()
+                g()
+                k()
+            }
+            """).Report.Split('\n').Select(l => l.TrimEnd('\r')).ToList();
+        int at = report.IndexOf("Functions with memory reachable from two roots:");
+        Assert.True(at >= 0, string.Join("\n", report));
+        Assert.Equal("  f (1 bytes): main, h1, h2", report[at + 1]);
+        Assert.Equal("Zero page:", report[at + 2]);
+
+        Assert.DoesNotContain("two roots", TernCompiler.Compile("fn main() { }").Report);
+    }
+
     // ---------- When they are reported ----------
 
     [Fact]
