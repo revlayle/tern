@@ -1,6 +1,6 @@
 # Tern user guide
 
-A quick guide to the Tern language and compiler as built today (through milestone M19 part 1). The full rules are in `docs/spec-v0.md`; this guide shows how to use them. Every example here compiles with the current compiler.
+A quick guide to the Tern language and compiler as built today (through milestone M22 and its follow-ups). The full rules are in `docs/spec-v0.md`; this guide shows how to use them. Every example here compiles with the current compiler.
 
 ## 1. What Tern is
 
@@ -30,10 +30,11 @@ For `game.tern` the compiler writes, next to the source (or the `-o` path):
 | `game.prg` | The C64 program, loading at `$0801` with a `SYS` line |
 | `game.lst` | Listing: every source line with its addresses, bytes and cycle counts |
 | `game.vs` | VICE label file; load it in the VICE monitor with `ll "game.vs"` |
-| `game_api.tern` | Only for a binary without `main` (section 3.11): the module a host imports |
+| `game.lines` | The bytes, cycles and addresses of each source line, for tools |
+| `game_api.tern` | Only for a binary without `main`, or a program with an export table (section 3.11): the module others import |
 | `level1.prg`, ... | One file per overlay module (section 3.12), named after the module |
 
-It also prints a report: where code and variables went, and the zero-page map. Errors look like `game.tern:12:5: error: ...` and say how to fix the problem.
+It also prints a report: where code and variables went, and the zero-page map. Errors look like `game.tern:12:5: error: ...` and say how to fix the problem. `tern --json game.tern` gives the same result as JSON, for editors and coding agents: each diagnostic has its file, line, column, message, the fix as `suggestion`, and `calledFrom` for an error inside compile-time code (3.14). `tern run` and `tern bench` run a program in the built-in emulator (7.11).
 
 Run the result in VICE:
 
@@ -83,6 +84,8 @@ fn main()
 | `ptr T` | 2 | Pointer to `T` |
 | `[T; N]` | | Array, up to 256 elements |
 
+Compile-time code has two more types, `int` and `real`, which never reach the 6502 (3.14).
+
 - All arithmetic **wraps**, and there is no integer promotion: `u8 + u8` is a `u8`.
 - `u8` mixed with `u16` widens to `u16`. Narrowing needs `as`: `x = big as u8` keeps the low byte.
 - Mixing signed and unsigned is an error; cast one side.
@@ -105,7 +108,7 @@ fn main() {
 ```
 
 - Shifts need a constant count. `>>` on a signed value keeps the sign and rounds down (`-3 >> 1` is `-2`).
-- Literals: `200`, `$C000`, `0b1010_0101`, `'A'`, `"TEXT"`, `true`. A literal takes its type from where it is used, and one that does not fit is an error.
+- Literals: `200`, `$C000`, `0b1010_0101`, `'A'`, `"TEXT"`, `true`. A literal takes its type from where it is used, and one that does not fit is an error. Real numbers (`1.5`, `2e3`) exist only in compile-time code (3.14).
 - Strings are PETSCII by default; a prefix picks another encoding: `screen"HELLO"` gives screen codes for writing straight to screen memory, `petscii_mixed"Hello"` the lower-case set. Strings have no terminator unless you write one (`"HI\0"`).
 
 ### 3.3 Declarations
@@ -174,6 +177,8 @@ fn main() {
 
 The last line is the one place where a constant and a variable of the same type differ: a runtime `~` works on its operand's 8 bits and then widens. To clear bits of a `u16` with a variable mask, widen the mask first: `w & ~(m as u16)`.
 
+A constant may also hold a real number (`const SCALE = 1.5`, `const K = PI / 128`), with no type written, for use in compile-time code only (3.14). A constant never holds an array: a table the program reads is `data`.
+
 ### 3.4 Arrays, structs and pointers
 
 **Arrays** are indexed with a `u8`, which compiles to `abs,X` or `abs,Y`. An array of 16-bit values is stored as two tables, low bytes and high bytes, so `a[i]` stays one `lda a_lo,x` / `lda a_hi,x`. Write `linear var` for the usual interleaved layout when hardware or assembly needs it.
@@ -215,8 +220,10 @@ while lives != 0 { ... }
 while true { ... }                 // the endless loop; leave with break or return
 
 for i in 0..10 { ... }             // 0 to 9
-for i in 9..=0 { ... }             // 9 down to 0
+for i in 9..=0 step -1 { ... }     // 9 down to 0
+for i in n..0 step -1 { ... }      // n down to 1
 for x in 0..40 step 8 { ... }      // 0, 8, 16, 24, 32
+for i in -10..10 { ... }           // a signed counter: i8
 for i in 0..len using X { ... }    // the counter lives in X
 for _ in 0..10 { ... }             // repeat 10 times
 
@@ -236,6 +243,8 @@ indexed match op & 3 {             // a jump table: the value is not checked
 ```
 
 - `for` bounds are evaluated once, and the loop variable is read-only in the body. The compiler picks the loop shape (counting down with `dex` / `bne` when it can).
+- **A loop counts up unless it has a negative `step`.** The bounds never decide the direction, so `for i in 9..=0` is an error ("'9..=0' counts up, so it never runs. Write 'step -1' to count down"), as is an unsigned `n..0`, which can never run either. A loop whose variables decide whether it runs is allowed: `for i in n..=0` runs once when `n` is 0, and not at all otherwise.
+- The counter is a `u8` unless the range needs more: `u16` for larger bounds, `i8` or `i16` when a bound is negative or signed. A step may be a `u8` variable when the counter is a `u8` that counts up (`for m in (n << 1)..=255 step n`); a step that is 0 at runtime never ends the loop.
 - `match` works on `u8` and `i8`. A plain `match` is a chain of compares, tested in source order. `indexed match` is a jump table over the span from the lowest pattern value to the highest; a value outside the span is not checked, so list every value that can occur or mask the value (`op & 3`). There is no fall-through. Which to choose: section 7.8.
 - `&&`, `||`, `!` are logical (on `bool`, short-circuit); `&`, `|`, `^`, `~` are bitwise. `x += 1` on memory is `inc x`.
 
@@ -248,7 +257,7 @@ inline fn acknowledge() { c64.vic.irq_status = 1 }
 ```
 
 - Parameters without `using` are fixed memory in the function; the caller stores the arguments straight into them and calls. `using A`, `X`, `Y` (or a pair `AX`, `AY`, `XY` for 16 bits) passes them in registers.
-- Results come back in A (8 bits), A and X (16 bits) or the carry (`bool`). Other placements can be written: `-> u8 using Y`, `-> bool using zero`.
+- Results come back in A (8 bits), A and X (16 bits) or the carry (`bool`). Other placements can be written: `-> u8 using Y`, `-> u16 using XY`, `-> bool using zero` or `negative`. `-> bool using overflow` (the V flag) is for `asm fn`s and routines at a fixed address only, since no instruction sets V on its own.
 - `inline fn` copies the body into each caller.
 - Recursion is a compile error. Naturally recursive algorithms use an array as an explicit stack.
 
@@ -280,6 +289,13 @@ inline asm fn fire_pressed() -> bool using zero {
 if fire_pressed() { shoot() }      // lda #$10 / bit $DC00 / bne skip
 ```
 
+An empty body reads the flag that the code before it left, at no cost. That is defined only right after an `asm` block: the `cpu` module has `carry()`, `zero()`, `negative()` and `overflow()` for it.
+
+```
+asm { jsr read_byte }              // carry set at the end of the file
+if cpu.carry() { finish() }        // bcc skip, nothing more
+```
+
 ### 3.8 Interrupts
 
 `interrupt fn` saves only the registers it changes and ends with `rti`. It is its own root: its memory never overlaps main's. A function called from both main and a handler is an error, unless it has no memory of its own (like `acknowledge` above). One `interrupt fn` called from another becomes a *part* (no saving, ends with `rts`), which is how the library's raster code is combined into one handler you install.
@@ -309,7 +325,8 @@ asm fn fill(value: u8 using A, count: u8 using X) {
 }
 ```
 
-- Operands may name Tern variables, constants, arrays, struct fields (`sta c64.vic.border`) and functions. `#name.lo` / `#name.hi` take the bytes of an address (not `<` / `>`).
+- Operands may name Tern variables, constants, arrays, struct fields (`sta c64.vic.border`) and functions. `#name.lo` / `#name.hi` take the bytes of an address (not `<` / `>`). Through a pointer, `ldy #offset(Enemy.hp)` / `lda (e),y` names the field's offset instead of hard-coding it.
+- A line may call a generator, a `const fn` that writes instructions in its place (3.14).
 - Labels starting with `.` are local to the block. `;` is not a comment here; use `//`.
 - The compiler works out which registers and variables a block uses and works around it. It never changes your instructions.
 - An `asm fn` (or `inline asm fn`) body may start with `var` lines for its work bytes, with no initial value and no `@`. They are the function's own locals, in its frame, so they share memory with functions that never run at the same time; a pointer used as `(p),y` goes in zero page. An `asm { }` statement has none: declare the variable before the block.
@@ -373,11 +390,11 @@ data ball: [u8; 63] @ $2000 = [ ... ]   // loaded with the program, at that addr
 A `reserved` range is also the plain way to keep memory for your own use. Name its start once and point into it:
 
 ```
+const MAP: u16 = $4000              // constants may stand above the block (or anywhere below)
+
 memory {
     MAP..=MAP + $07FF  reserved     // 2 KB, never touched by the compiler or startup
 }
-
-const MAP: u16 = $4000              // below the block for now; constants above it are planned
 
 var p: ptr u8 = (MAP + 256) as ptr u8
 p[44] = 1                           // byte 300 of the map: sta (p),y
@@ -418,7 +435,139 @@ import level2 @ levels
 
 ### 3.13 Built-ins
 
-`addr(x)` (pointer to a variable, field or array; address of a function), `sizeof(T)`, `len(a)` (array length, at compile time).
+| Built-in | Meaning |
+|---|---|
+| `addr(x)` | Pointer to a variable, field or array; address of a function |
+| `sizeof(T)` | Size of a type in bytes |
+| `len(a)` | Length of an array or string, a constant |
+| `offset(T.field)` | Offset of a field from the start of a struct, a constant: `offset(Enemy.pos.x)` |
+| `include_bytes("file")` | A file's bytes as the initial value of `data`, path relative to the source |
+| `repeat(v, n)` | An array of `n` copies of `v`, in compile-time code only: `data spaces: [u8; 40] = repeat($20, 40)` |
+
+The math functions of compile-time code are in 3.14.
+
+### 3.14 Compile-time code: `const fn` and generators
+
+A `const fn` is a function the compiler runs while it compiles. Only its result goes into the program; the function never becomes 6502 code. Use it to build lookup tables, and, as a *generator*, to write assembly whose shape depends on parameters. From `examples/sine.tern`:
+
+```
+import c64
+
+// n values of mid + amplitude * sin(angle), one full turn.
+const fn wave(n: int, mid: int, amplitude: real) -> [int; _] {
+    return [round(mid + amplitude * sin(i * TAU / n)) for i in 0..n]
+}
+
+data xs: [u8; 256] = wave(256, 140, 100.0)       // 40 to 240
+data ys: [u8; _] = wave(256, 150, 80.0)          // [u8; _]: the length from the array
+data rows: [ptr u8; 25] = [c64.SCREEN + i * 40 for i in 0..25]
+
+fn main() {
+    var a: u8 = 0
+    while true {
+        c64.vic.sprite0_x = xs[a]                // an indexed load from plain bytes
+        a += 2
+    }
+}
+```
+
+The program has no sine code, no multiply and no reals: `xs` is 256 bytes in the `.prg`, as if typed in by hand.
+
+**Types.** Compile-time code has its own types, which do not exist at runtime:
+
+- `int`, a signed 64-bit whole number. It never wraps: going outside the range is an error. Write `& $FF` where you want 8-bit behavior.
+- `real`, a 64-bit double. `1.5`, `0.25` and `2e3` are real literals (`0..25` is still a range). Functions: `sin`, `cos`, `tan`, `atan2`, `sqrt`, `pow`, `exp`, `log`, `log2`, `abs`, `min`, `max` (angles in radians), and the constants `PI` and `TAU`. Division by zero, and `sqrt` or `log` of a negative number, are errors, so no NaN reaches a table.
+- `bool`, arrays of these, and `label` (for generators, below).
+
+A runtime type (`u8`, a pointer, a struct) in a `const fn` is an error; arguments widen into `int`, so a `const COUNT: u8` passes in as an `int`. A value is checked where it leaves compile time: each element must fit its table's type, as a constant must fit (3.3).
+
+An `int` becomes a `real` where one is expected (`i * 1.5`), but `int / int` stays whole-number division. A `real` never becomes an `int` by itself: write `round(x)` (halves away from zero), `floor`, `ceil` or `trunc`, so the rounding in a table is your choice. `as` does not round.
+
+**Arrays** have a length fixed when they are made: a list built with `for`, or `repeat(value, count)`. `len(t)` gives the length, and `t[i] = v` sets an element. The list's range has the forms of a `for` loop (`0..n`, `9..=0 step -1`, `step k`); there is one `for`, no filter and no nesting, and anything more is a `const fn` with ordinary loops. A `const fn` returns an array as `[int; _]`, and a table takes it with a written length, which is checked, or with `[T; _]`. Lists and `repeat` also work directly in a declaration, as `rows` above shows. A `const fn` can use every statement:
+
+```
+// A filled circle of radius r in a 24 x 21 sprite: 3 bytes per row.
+const fn disc(r: real) -> [int; _] {
+    var t = repeat(0, 63)
+    for row in 0..21 {
+        for col in 0..24 {
+            var dx = col - 11.5
+            var dy = row - 10.0
+            if dx * dx + dy * dy <= r * r {
+                t[row * 3 + col / 8] = t[row * 3 + col / 8] | ($80 >> (col % 8))
+            }
+        }
+    }
+    return t
+}
+
+data ball: [u8; 63] @ $0C00 = disc(10.5)
+```
+
+**Where it runs.** Compile-time code runs in declarations only: a `const` (also one inside a function), `data`, and the initial value of a global `var`. It never runs in statements, so a `const fn` call, a list built with `for`, `repeat` or a real number in runtime code is an error. In an `asm` block too: `lda #round(1.5)` is an error; declare a constant and use its name.
+
+**What it reads:** constants, module parameters, `sizeof`, `offset`, and `data` tables element by element, including `include_bytes` tables, so one table can be built from another or from a file. Not a `var`, whose value is known only at runtime, and not `addr()`, since addresses are decided after compile-time code runs (generators can still use them, below).
+
+- A `const fn` may live in a module and be shared between programs: `import tables`, then `data sine: [u8; _] = tables.sine(256)`.
+- A `const fn` may call itself, up to 200 calls deep. Runtime code has no recursion only because the 6502 has no room for stack frames; a `const fn` never runs there.
+- Each declaration may take 10,000,000 steps (a statement or a loop pass). A loop that never ends is an error naming the function, not a hang.
+- An error inside a `const fn` is reported at its line, with "(called from main.tern:5)", the declaration that ran it. `tern --json` gives that place as `calledFrom`.
+- Structs and strings are not compile-time values, so a `const fn` cannot build a table of struct literals.
+
+**Generators.** A `const fn` with no return value may `emit` instructions. It is called on a line of its own in an `asm` block or `asm fn`, and what it emits goes there, so loops, `if`s and parameters decide the code's shape: unrolled copies, plotters, sprite clearing. A shortened version of `examples/speedcode.tern`:
+
+```
+import c64
+
+var saved: [u8; 8]
+
+// Rows 1 to 8 of colour RAM move one column left; each row's first colour goes to the end.
+const fn shift_rows(rows: [int; _], buffer: label) {
+    for k in 0..len(rows) {
+        emit {
+            lda c64.COLOR + rows[k] * 40
+            sta buffer + k
+        }
+    }
+    var top = label()
+    emit {
+        ldx #0
+    top:
+    }
+    for k in 0..len(rows) {
+        emit {
+            lda c64.COLOR + rows[k] * 40 + 1, x
+            sta c64.COLOR + rows[k] * 40, x
+        }
+    }
+    emit {
+        inx
+        cpx #39
+        bne top
+    }
+    for k in 0..len(rows) {
+        emit {
+            lda buffer + k
+            sta c64.COLOR + rows[k] * 40 + 39
+        }
+    }
+}
+
+asm fn shift_colors() {
+    shift_rows([1, 2, 3, 4, 5, 6, 7, 8], addr(saved))
+}
+```
+
+There is one loop over the columns, with a `lda` / `sta` pair per row inside and the row addresses as constants: no row loop, no pointer, no `(p),y`.
+
+- **Instructions, not text.** An `emit` is parsed like an `asm` block when the `const fn` is read, so a typo is reported even if that `emit` never runs. Its operands are compile-time expressions that may use the generator's variables and parameters. Tern names in it (variables, `data`, functions, `c64.COLOR`) are bound in the generator's module.
+- **Arguments** are compile-time values. A program variable is not one: name it in the `emit` text, or pass its address.
+- **Labels.** A `.label` inside one `emit` is new each time that `emit` runs, so a loop may emit `.skip:` safely. A label shared between fragments is a `label` value, from one of three places: `label()` makes a new one, which `name:` in an `emit` places once (`top` above); `addr(name)` of a global, `data` or function passes an address the compiler places (`addr(saved)`); and a `.label` of the calling block, written on the call line (`cycle_rows(rows, addr(saved), .done)` in the example), lets the generated code jump to it. In an operand a label is used alone, plus or minus an `int`, or as `.lo` / `.hi`; its number cannot be read in the `const fn`, since it is decided when the program is placed.
+- **The result is ordinary assembly**: the compiler works out its registers and never changes it. The listing shows the call line, then each generated instruction under its `emit` line, marked "(generated by line 38)". An error in the generated code, such as a branch out of range, is reported at the `emit` line with "(generated by the call at main.tern:38)".
+- A generator may call other generators and may live in a module. A `const fn` that returns a value cannot emit, and a generator cannot return a value.
+- There are no macros: Tern statements are never generated, only assembly.
+
+When to unroll with a generator, and what it costs, is in 7.9.
 
 ## 4. Examples
 
@@ -698,7 +847,7 @@ fn show(ch: u8 using A) @ $0903 keeps X, Y
 
 The full example, with a second level and the commands for a disk image, is in `examples/plugins/`.
 
-More in `examples/`: `library.tern` (KERNAL printing, numbers), `structs.tern`, `arcade.tern` (32-bit and BCD scores, `sin8`, random sound), `scroller.tern` (eight-way scrolling under 24 multiplexed sprites), `sprite_data.tern`, `player.tern` with `player_host.tern`, `levels.tern` (overlays), `plugins/` (levels as plug-ins).
+More in `examples/`: `library.tern` (KERNAL printing, numbers), `kernal.tern` (KERNAL routines at fixed addresses), `structs.tern`, `arcade.tern` (32-bit and BCD scores, `sin8`, random sound), `scroller.tern` (eight-way scrolling under 24 multiplexed sprites), `sprite_data.tern`, `kernal_irq.tern` (a raster split with the KERNAL left in), `highscore.tern` (saving and loading a file with `io`), `player.tern` with `player_host.tern`, `levels.tern` (overlays), `plugins/` (levels as plug-ins), `sine.tern` (sine tables and a sprite shape from `const fn`s, 3.14), `speedcode.tern` (a generator against a plain loop, 7.9).
 
 ## 5. Standard library
 
@@ -710,7 +859,8 @@ More in `examples/`: `library.tern` (KERNAL printing, numbers), `structs.tern`, 
 | `wide` | 24- and 32-bit unsigned numbers (`U24`, `U32`): add, subtract, compare, multiply, divide, decimal and hex output |
 | `bcd` | Packed decimal counters of 1-4 bytes, for scores: add, subtract, compare, digits |
 | `random` | 8- and 16-bit xorshift, `below(n)` |
-| `c64` | Screen and color addresses, the 16 colors, KERNAL `chrout`/`print`/`getin`/`cursor`, `load` (for overlays), register structs `vic`, `sid`, `cia1`, `cia2`, `sprite_xy` (the sprite positions as an array), interrupt setup |
+| `cpu` | `carry()`, `zero()`, `negative()`, `overflow()`: the flags an `asm` block left, at no cost (3.7) |
+| `c64` | Screen and color addresses, the 16 colors, KERNAL `chrout`/`print`/`getin`/`cursor`, `load` (for overlays), register structs `vic`, `sid`, `cia1`, `cia2`, `sprite_xy` (the sprite positions as an array), interrupt setup (`kernal_off`, `set_irq`, `set_kernal_irq`, `cia_irqs_off`, `interrupts_on`) |
 | `sprites` (C64) | Sprite multiplexer, 8 to 64 sprites, optional flicker |
 | `scroll` (C64) | Smooth eight-way character scrolling with two screens |
 | `io` (C64) | Device I/O through the KERNAL: load and save whole files, sequential files, the drive's command channel and status; needs the KERNAL banked in |
@@ -723,23 +873,28 @@ Tern trusts you and does not add hidden checks. These are deliberate and often u
 
 - **Everything wraps, including indexes.** With `head = 255`, `buf[head + 1]` is `buf[0]`, so a 256-byte ring buffer needs no masking.
 - **Indexes are not checked.** An index past the end of an array reads or writes whatever is there, and the optimizer assumes it does not happen. Write across variables on purpose through a pointer.
-- **Signed `>>` rounds down**, not toward zero.
+- **Signed `>>` rounds down**, not toward zero. On negative constants, `/` rounds toward zero and `%` takes the sign of the left operand (`-7 / 2` is -3, `-7 % 2` is -1), as `math.divs8` does at runtime.
+- **A loop's direction comes from its step**, never its bounds (3.5). `for i in n..=0` counts up: it runs once when `n` is 0 and not at all otherwise, with no warning.
+- **A fixed address outside the platform's I/O areas is ordinary memory.** `var reg: u8 @ $C000` may be kept in a register and a read of it removed; hardware the platform does not list, such as a cartridge register, needs `volatile`.
 - **Calls in one statement run left to right**, as do reads of `volatile` memory: in `(rand() + 1) << 2 | rand()` the left `rand()` runs first, and in `a[f()] = g()` the index's call runs first. One case is left open: a variable that a call in the same statement changes. In `x = seed + next()` where `next` changes `seed`, either value of `seed` may be added; put the call or the variable in a local first.
 - **A `for` loop with a variable step of 0 never ends.** Stepped loops stop when the step carries past the end of the type.
 - **Flags after compiled code are unspecified.** An empty `inline asm fn ... -> bool using carry {}` reads the flag an `asm` block just left, when used right after that block.
 - **`keeps` is a promise** from the routine's documentation; the compiler does not check it.
+- **A function called from main and from a handler** may have loop counters only in registers. The compiler may choose a register for a counter on its own, but adding a call to the loop can change that and make the function an error; `using X` or `using Y` makes it certain.
+- **When `main` returns**, the program stops in an endless loop and interrupt handlers keep running. There is no return to BASIC, whose zero page the program has used.
 - **A call into an overlay that is not loaded** runs whatever is in the area.
-- **Loading an overlay resets its variables** to their initial values; keep anything that must survive in resident memory.
+- **Loading an overlay resets its variables** to their initial values; keep anything that must survive in resident memory. Its zero-page bytes at fixed addresses are not in its file, so the overlay sets them itself. An interrupt handler it installed must be removed before another overlay replaces it.
 - **A binary's entries are one root.** The host must not call one entry from an interrupt while another is running.
 - **A plug-in's memory is checked only against its own `memory` block**, not against the game's or another slot's. Keep each slot, and each slot's zero page, apart in the interface modules, and reserve them in the game.
 - **A game's export table has gaps of zeros** when its routines are not packed: a call into a gap stops at a `brk`.
 - **The game's exported functions are called from outside**, so the compiler cannot see when they run (an unknown root, as for `addr()`). Globals they share with the rest of the game are always read from memory, and a plug-in must not call them from an interrupt while the game is in one of them.
 - **Division by zero** in the library gives an unspecified result.
 - **`indexed match` does not check its value.** Outside the span of its patterns it jumps through whatever bytes follow its tables; `_` catches only values inside the span. A plain `match` skips values it does not list.
+- **Compile-time `int` never wraps; runtime numbers always do.** The same expression in a `const fn` and in a function can give different results: write `& $FF` in the `const fn` where you want the 8-bit one (3.14).
 
 ## 7. Writing fast Tern
 
-Each rule here was measured with `tern bench` (7.10) on the current compiler; the percentages are cycles saved in the example or benchmark named (`tests/benchmarks/variants.md` has the benchmark pairs). They describe this compiler, not the language: as the optimizer improves, a rule may stop paying, so measure when it matters.
+Each rule here was measured with `tern bench` (7.11) on the current compiler; the percentages are cycles saved in the example or benchmark named (`tests/benchmarks/variants.md` has the benchmark pairs). They describe this compiler, not the language: as the optimizer improves, a rule may stop paying, so measure when it matters.
 
 ### 7.1 Arrays before pointers
 
@@ -819,7 +974,18 @@ A plain `match` tests its values in source order, so put the most common first. 
 
 `indexed match` does not check its value (section 6): list every value that can occur, or mask it into the span (`indexed match op & 15` with patterns 0 to 15). `_` catches only the values inside the span that no pattern lists.
 
-### 7.9 What not to rewrite
+### 7.9 Unroll a per-frame loop with a generator
+
+The compiler never unrolls a loop by itself. When a loop must finish within a frame and does not, a generator (3.14) can write it out: the work stays the same, and the loop counters, pointer setup and `(p),y` go. In `examples/speedcode.tern`, moving 22 rows of colour RAM one column left:
+
+| Version | Bytes | Cycles |
+|---|--:|--:|
+| `cycle_plain`: loops over rows and columns, through a pointer | 66 | 29,537 |
+| `cycle_unrolled`: a generator, one `lda` / `sta` pair per row in one column loop | 422 | 8,697 |
+
+A PAL frame leaves the CPU about 19,000 cycles, so only the unrolled version moves the colours every frame, for 356 more bytes. Unroll only what must be fast: the bytes grow with every row. A branch reaches at most 128 bytes back, so the example emits a column loop for each group of up to 20 rows.
+
+### 7.10 What not to rewrite
 
 The optimizer already does these, so write the plain form:
 
@@ -831,7 +997,7 @@ The optimizer already does these, so write the plain form:
 
 The `bubble.direct` (comparing the elements, no locals) and `bubble.minus` (`i - 1` instead of `i + 1`) forms of the `bubble` benchmark are not faster than the plain one.
 
-### 7.10 Measuring
+### 7.11 Measuring
 
 `tern bench` runs two or more versions in the built-in emulator and prints the bytes and cycles of each (`tern` is `dotnet run --project src/Tern.Cli --`):
 
@@ -853,13 +1019,13 @@ tern run game.tern --profile                      // the cycles of each function
 
 ### Next
 
-- **`const fn` and code generators** (M22). Functions that run at compile time to build lookup tables, with 64-bit `int` and `real` (double) math, and `[expr for i in range]` lists: `data sine: [u8; _] = [round(128 + 127 * sin(i * TAU / 256)) for i in 0..256]`. A generator can `emit` assembly, to produce unrolled "speedcode" whose shape depends on parameters.
+- **Doc comments (`///`) and a language server** (M23) that shows errors, types and costs in your editor.
 
 ### Later highlights
 
-- **Doc comments (`///`) and a language server** (M23) that shows errors, types and costs in your editor.
-- **Floats as a library** (M24).
+- **Floats as a library** (M24), with its constants and tables built by `const fn`s.
 - **A full developer guide**, growing out of this one, with an example for each machine-level behavior.
+- Not scheduled yet: calls through function variables (`var handler: fn() targets [idle, walk]`), import paths with subfolders and aliases, `@ align(n)` placement, and a generator that also returns a value (such as the cycles of the code it emitted).
 
 ### New platforms (last)
 
