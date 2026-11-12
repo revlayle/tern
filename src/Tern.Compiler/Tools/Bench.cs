@@ -49,6 +49,13 @@ public sealed record BenchResult(
     bool Returned, string Stop, IReadOnlyList<VariableInfo> Memory, IReadOnlyList<(string What, string Value)> Results,
     IReadOnlyList<IndexError> IndexErrors)
 {
+    /// <summary>Every error of a variant that did not compile (spec 13), <see cref="Error"/> first.</summary>
+    public IReadOnlyList<Diagnostic> Errors { get => _errors ?? (Error is null ? [] : [Error]); init => _errors = value; }
+    private readonly IReadOnlyList<Diagnostic>? _errors;
+    /// <summary><c>--max-errors</c> (<see cref="MaxErrors"/>) stopped the compile: more errors were not reported.</summary>
+    public bool MoreErrors { get; init; }
+    public int MaxErrors { get; init; }
+
     public long CyclesPerCall => Calls == 0 ? 0 : Cycles / Calls;
     public int ZeroPageBytes => Memory.Where(v => v.Address < 0x100).Sum(v => v.Size);
     public int OtherBytes => Memory.Where(v => v.Address >= 0x100).Sum(v => v.Size);
@@ -57,23 +64,29 @@ public sealed record BenchResult(
 /// <summary><c>tern bench</c>: compiles and runs each variant and compares bytes, cycles and memory.</summary>
 public static class Bench
 {
-    public static BenchResult Measure(BenchVariant variant, string? function, IReadOnlyList<string> dumps, RunOptions? options = null)
+    /// <param name="maxErrors">Stop compiling after this many errors (<c>--max-errors</c>); null for no limit.</param>
+    public static BenchResult Measure(BenchVariant variant, string? function, IReadOnlyList<string> dumps, RunOptions? options = null, int? maxErrors = null)
     {
         string measured = function ?? "main";
         CompileResult program;
         try
         {
-            program = TernCompiler.Compile(variant.Source, sourcePath: variant.Path);
+            program = TernCompiler.Compile(variant.Source, sourcePath: variant.Path, maxErrors: maxErrors);
         }
         catch (CompileError e)
         {
-            var d = Diagnostic.From(e, variant.Name);
-            if (variant.Path is null && e.Pos.File is null)
+            // Every error found (spec 13); a snippet's lines are its own.
+            var all = e.All.Select(x =>
             {
-                var (file, line) = variant.Place(e.Pos.Line);
-                d = d with { File = file, Line = line };
-            }
-            return Failed(d);
+                var d = Diagnostic.From(x, variant.Name);
+                if (variant.Path is null && x.Pos.File is null)
+                {
+                    var (file, line) = variant.Place(x.Pos.Line);
+                    d = d with { File = file, Line = line };
+                }
+                return d;
+            }).ToList();
+            return Failed(all[0]) with { Errors = all, MoreErrors = e.MoreNotReported, MaxErrors = maxErrors ?? 0 };
         }
         var section = program.Sections.FirstOrDefault(s => s.Name == measured);
         if (section is null && program.DeclaredFunctions.Contains(measured))
@@ -126,10 +139,17 @@ public static class Bench
         sb.AppendLine($"{"variant".PadRight(width)}  {"program",7}  {fn + " bytes",10}  {"calls",6}  {"cycles",9}  {"per call",8}  {"zp",4}  {"other",5}");
         foreach (var r in results)
         {
-            if (r.Error is { } e)
+            if (r.Error is not null)
             {
-                string where = e.Line <= 0 ? "" : e.File == r.Variant ? $"line {e.Line}:{e.Column}: " : $"{e.File}, line {e.Line}:{e.Column}: ";
-                sb.AppendLine($"{r.Variant.PadRight(width)}  error: {where}{e.Message}{(e.Suggestion is null ? "" : " " + e.Suggestion)}");
+                // One line per error, then their number when there are several.
+                for (int i = 0; i < r.Errors.Count; i++)
+                {
+                    var e = r.Errors[i];
+                    string where = e.Line <= 0 ? "" : e.File == r.Variant ? $"line {e.Line}:{e.Column}: " : $"{e.File}, line {e.Line}:{e.Column}: ";
+                    sb.AppendLine($"{(i == 0 ? r.Variant : "").PadRight(width)}  error: {where}{e.Message}{(e.Suggestion is null ? "" : " " + e.Suggestion)}");
+                }
+                if (r.Errors.Count > 1 || r.MoreErrors)
+                    sb.AppendLine($"{"".PadRight(width)}  {Diagnostic.Count(r.Errors.Count, r.MoreErrors, r.MaxErrors)}");
                 continue;
             }
             sb.AppendLine($"{r.Variant.PadRight(width)}  {r.ProgramBytes,7}  {r.FunctionBytes,10}  {r.Calls,6}  {r.Cycles,9}  {r.CyclesPerCall,8}  {r.ZeroPageBytes,4}  {r.OtherBytes,5}"
@@ -173,6 +193,7 @@ public static class Bench
             {
                 variant = r.Variant,
                 error = r.Error,
+                errors = r.Errors,
                 function = r.Function,
                 programBytes = r.ProgramBytes,
                 functionBytes = r.FunctionBytes,

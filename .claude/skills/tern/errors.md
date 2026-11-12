@@ -1,6 +1,7 @@
 # Common compile errors and their fixes
 
 Each error says what is wrong and then how to fix it; `tern --json` gives the fix as `suggestion`.
+One compile lists every error it finds, so a file with several mistakes needs one pass.
 These are the mistakes most likely when coming from C, Rust or Go. Each example is a program that
 fails, the error `tern` prints, and the fix.
 
@@ -19,6 +20,7 @@ fn main() {
 
 ```text
 example.tern:5:18: error: '*' only works on constants. At runtime use a library function (mul8, div8, ...), or shifts for powers of two
+1 error
 ```
 
 Fix: `var w: u16 = row` then `offset = (w << 5) + (w << 3)`, or `math.mul8(row, 40)`, or a table.
@@ -36,6 +38,7 @@ fn main() {
 
 ```text
 example.tern:5:14: error: The shift count must be a constant. Use shl8/shr8 for a variable count
+1 error
 ```
 
 Fix: `math.shl8(x, n)`, or a `match` on `n` with constant shifts.
@@ -53,6 +56,7 @@ fn main() {
 
 ```text
 example.tern:5:11: error: Cannot mix signed and unsigned (u8 and i8); convert one side with 'as'
+1 error
 ```
 
 Fix: `x = x + (speed as u8)` (the same bits, so this adds -2 with wrapping).
@@ -70,6 +74,7 @@ fn main() {
 
 ```text
 example.tern:5:13: error: Expected u8, found u16. Convert with 'as u8'
+1 error
 ```
 
 Fix: `small = big as u8` (the low byte) or `big.lo`.
@@ -85,6 +90,7 @@ fn main() {
 
 ```text
 example.tern:1:13: error: 300 does not fit in u8 (0 to 255)
+1 error
 ```
 
 Next to a variable, a literal takes the variable's type, and the error names it:
@@ -100,6 +106,7 @@ fn main() {
 
 ```text
 example.tern:5:13: error: 300 does not fit in u8 (0 to 255), the type of 'x', which it is combined with. Convert 'x' with 'as u16'
+1 error
 ```
 
 Fix: `w = x as u16 + 300`. A sum of constants alone is computed exactly and needs no `as`
@@ -116,6 +123,7 @@ fn main() {
 
 ```text
 example.tern:1:16: error: '%' does not start a binary number. Write binary numbers as 0b0000_1111
+1 error
 ```
 
 Hex is `$0F`.
@@ -133,6 +141,7 @@ fn main() {
 
 ```text
 example.tern:5:14: error: A condition must be bool, not u8. Compare it, e.g. 'x != 0'
+1 error
 ```
 
 Fix: `if flags & 4 != 0`. Unlike C, `&`, `|` and `^` bind tighter than the compares, so this is
@@ -150,6 +159,7 @@ fn main() {
 
 ```text
 example.tern:4:6: error: Tern has no '++'. Write 'n += 1'
+1 error
 ```
 
 `n += 1` is one `inc` on memory. `a++b` is not this error: between two operands it is `a + (+b)`.
@@ -167,6 +177,7 @@ fn main() {
 
 ```text
 example.tern:2:5: error: Local variable 'count' needs an initial value
+1 error
 ```
 
 Words like `data`, `match`, `using` and `in` are keywords, and `indexed` is one in some places
@@ -182,6 +193,8 @@ fn main() {
 
 ```text
 example.tern:1:4: error: Expected function name, found 'match', which is a keyword. Use another name
+example.tern:4:11: error: Expected an expression, found ')'
+2 errors
 ```
 
 A name from a module without the module name, or without the import:
@@ -196,6 +209,7 @@ fn main() {
 
 ```text
 example.tern:4:5: error: 'vic' is not declared. To use the module vic, add 'import vic' at the top of the file
+1 error
 ```
 
 Fix: `c64.vic.border = 0`.
@@ -213,6 +227,7 @@ fn main() {
 
 ```text
 example.tern:1:19: error: An array of u16 has at most 256 elements. Only a global var or data of u8 or i8 may be longer (spec 3.2), and it is used through a pointer
+1 error
 ```
 
 Fix: two arrays, or a byte buffer reached through a pointer.
@@ -230,6 +245,7 @@ fn main() {
 
 ```text
 example.tern:5:8: error: 'map' has 1000 elements, too many for a u8 index. Read it through a pointer: addr(map)
+1 error
 ```
 
 Fix: `var p: ptr u8 = addr(map) + 512` then `p[i]`.
@@ -246,6 +262,7 @@ fn main() {
 
 ```text
 example.tern:4:5: error: Tern has no '*' to read through a pointer. Write 'p[0]' for the value p points to
+1 error
 ```
 
 There is no dereference operator: `p[0]` is the byte `p` points to, `p[1]` the next one.
@@ -264,6 +281,7 @@ fn main() {
 
 ```text
 example.tern:6:5: error: Structs are never copied, so a struct cannot be assigned. Assign its fields one by one, or copy the memory with mem.copy
+1 error
 ```
 
 Fix: copy the fields (`a.x = b.x`), or `mem.copy(addr(a), addr(b), sizeof(Point))`.
@@ -286,6 +304,7 @@ fn main() {
 
 ```text
 example.tern:3:1: error: Recursion is not allowed: count -> count
+1 error
 ```
 
 Fix: a loop, with an array and an index as the stack if the algorithm needs one.
@@ -304,6 +323,7 @@ fn main() {
 
 ```text
 example.tern:6:5: error: The loop body calls a function, which can change X. Remove 'using X', or call only routines that keep X
+1 error
 ```
 
 Fix: leave out `using X` (the compiler still puts the counter in a register when it can), or write
@@ -333,6 +353,7 @@ fn main() {
 
 ```text
 example.tern:6:1: error: 'add' is called from main and from the interrupt handler 'irq'. An interrupt can stop it halfway and run it again, which would overwrite its memory: the parameter 'x' in memory. Only a function with no memory of its own can be shared between main and interrupt handlers. Use a copy for each
+1 error
 ```
 
 Fix: give each side its own function, or make it an `inline fn`: its parameters then go in each
@@ -360,6 +381,7 @@ fn main() {
 
 ```text
 example.tern:6:1: error: 'add' is called from main and from the interrupt handler 'irq'. An interrupt can stop it halfway and run it again, which would overwrite its memory: the parameter 'x', which it keeps in memory (it arrives in A). Only a function with no memory of its own can be shared between main and interrupt handlers. Use a copy for each
+1 error
 ```
 
 The `inline fn` version compiles:
@@ -406,6 +428,7 @@ fn main() {
 
 ```text
 example.tern:7:11: error: 'math.mul8' (called from main) and 'math.mul8' (called from the interrupt handler 'irq') both use 'math.w0', a private variable of its module. An interrupt could change it while the other is using it. Call functions of this module from only main or only one interrupt handler
+1 error
 ```
 
 Fix: do the multiply on one side only (a table, or shifts), or copy the routine into your own
@@ -429,6 +452,7 @@ fn main() {
 
 ```text
 example.tern:6:10: error: A range in a match includes its end: write 'low..=high'
+1 error
 ```
 
 `match` on a `u16`:
@@ -447,6 +471,7 @@ fn main() {
 
 ```text
 example.tern:5:11: error: 'match' on a 16-bit value is not supported yet. Match on .lo or .hi, or use if / else if
+1 error
 ```
 
 Fix: match on `w.hi` and `w.lo`, or use `if`.
@@ -468,6 +493,7 @@ fn main() {
 
 ```text
 example.tern:5:21: error: ';' is not used in assembly: write one instruction per line, and comments with //
+1 error
 ```
 
 Fix: `// one`.
@@ -486,6 +512,7 @@ fn main() {
 
 ```text
 example.tern:5:14: error: An address has two bytes: write #name.lo or #name.hi
+1 error
 ```
 
 Fix: `lda #msg.lo` / `ldx #msg.hi`.

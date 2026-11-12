@@ -32,7 +32,7 @@ the compiler is. The standard library is in `lib/` next to it.
 | Command | What it does |
 |---|---|
 | `tern game.tern` | compile: writes `game.prg`, `game.lst` (listing: every source line with its addresses, bytes and cycles), `game.vs` (VICE labels), `game.lines` (bytes and cycles per source line) and prints the memory report |
-| `tern --json game.tern` | the same, with the result and any error as JSON: `file`, `line`, `column`, `message`, `suggestion` |
+| `tern --json game.tern` | the same, with the result and every error as JSON: `file`, `line`, `column`, `message`, `suggestion` |
 | `tern run game.tern` | compile and run in the built-in emulator until `main` returns; `--dump name` shows a variable, `--screen` the screen as text, `--profile` the cycles of each function and source line; `--set '$DC00=$7B'` writes a byte before the run |
 | `tern bench a.tern b.tern` | run each version and compare bytes and cycles; `--fn f` measures one function (a module's function with its module: `--fn ship.move`); `--code '...'` measures statements as the body of `main`, after `--decl '...'` lines |
 
@@ -110,9 +110,13 @@ Screen ($0400, 40 x 25):
 - `i as u16` widens: `total += i` with `i: u8` and `total: u16` also works (widening is automatic),
   but there is no automatic narrowing.
 
-An error gives the file, line and column, what is wrong and how to fix it. With `--json` the fix is
-a separate `suggestion`, and for an error inside a `const fn` or generated code, `calledFrom` is the
-line that called it (`null` otherwise):
+An error gives the file, line and column, what is wrong and how to fix it. One compile reports
+every error it finds, in the order found, then their number, so fix them all before compiling
+again (`--max-errors n` stops after `n`). A name whose declaration has an error adds no errors
+where it is used. Errors found when the program is laid out (zero page full, recursion, an
+overlap) come one at a time, once there are no others. With `--json` each error is an entry in
+`diagnostics`, the fix is a separate `suggestion`, and for an error inside a `const fn` or
+generated code, `calledFrom` is the line that called it (`null` otherwise):
 
 ```tern error
 // broken.tern
@@ -121,11 +125,14 @@ var small: u8
 
 fn main() {
     small = total
+    total = true
 }
 ```
 
 ```text
 broken.tern:6:13: error: Expected u8, found u16. Convert with 'as u8'
+broken.tern:7:13: error: Expected u16, found bool
+2 errors
 ```
 
 ```console
@@ -142,6 +149,15 @@ $ tern --json broken.tern
       "severity": "error",
       "message": "Expected u8, found u16.",
       "suggestion": "Convert with 'as u8'",
+      "calledFrom": null
+    },
+    {
+      "file": "broken.tern",
+      "line": 7,
+      "column": 13,
+      "severity": "error",
+      "message": "Expected u16, found bool",
+      "suggestion": null,
       "calledFrom": null
     }
   ]

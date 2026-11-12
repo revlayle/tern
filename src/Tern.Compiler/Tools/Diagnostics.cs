@@ -40,6 +40,11 @@ public sealed record Diagnostic(string File, int Line, int Column, string Severi
         };
     }
 
+    /// <summary>The line that ends the text output of a failed compile: "3 errors" (spec 13).</summary>
+    /// <param name="more">--max-errors stopped the compile before every error was found.</param>
+    public static string Count(int count, bool more, int maxErrors) =>
+        (count == 1 ? "1 error" : $"{count} errors") + (more ? $"; more errors were not reported (--max-errors {maxErrors})" : "");
+
     /// <summary>Splits an error's text before the first sentence that tells how to fix it.</summary>
     public static (string Message, string? Suggestion) Split(string text)
     {

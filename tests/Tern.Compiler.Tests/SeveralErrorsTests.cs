@@ -1,4 +1,5 @@
 using Tern.Compiler.Syntax;
+using Tern.Compiler.Tools;
 
 namespace Tern.Compiler.Tests;
 
@@ -365,6 +366,73 @@ public sealed class SeveralErrorsTests : IDisposable
         Assert.Contains("Recursion is not allowed", e.Description);
         e = Assert.Throws<CompileError>(() => TernCompiler.Compile("var x: u8\nfn a() { b() }\nfn b() { a() }\nfn main() {\n a()\n x = true\n}"));
         Assert.Equal(["Expected u8, found bool"], e.All.Select(x => x.Description));
+    }
+
+    // ---------- The tools ----------
+
+    private string File3Errors()
+    {
+        var path = Path.Combine(_dir.FullName, "three.tern");
+        File.WriteAllText(path, "var b: u8\nfn main() {\n    b = true\n    b = 300\n    b = )\n}\n");
+        return path;
+    }
+
+    private static (int Code, string Output, string Error) Tern(params string[] args)
+    {
+        var (output, error) = (new StringWriter(), new StringWriter());
+        int code = Cli.Run(args, output, error);
+        return (code, output.ToString(), error.ToString());
+    }
+
+    [Fact]
+    public void Tern_prints_every_error_then_their_number()
+    {
+        var path = File3Errors();
+        var (code, _, error) = Tern(path);
+        Assert.Equal(1, code);
+        Assert.Equal([
+            $"{path}:5:9: error: Expected an expression, found ')'",
+            $"{path}:3:9: error: Expected u8, found bool",
+            $"{path}:4:9: error: 300 does not fit in u8 (0 to 255)",
+            "3 errors",
+        ], error.TrimEnd().Split(Environment.NewLine));
+
+        (_, _, error) = Tern("--max-errors", "2", path);
+        Assert.EndsWith("2 errors; more errors were not reported (--max-errors 2)", error.TrimEnd());
+        Assert.Equal(3, error.TrimEnd().Split(Environment.NewLine).Length);
+    }
+
+    [Fact]
+    public void Tern_json_lists_every_error_in_diagnostics()
+    {
+        var (code, output, _) = Tern("--json", File3Errors());
+        Assert.Equal(1, code);
+        using var json = System.Text.Json.JsonDocument.Parse(output);
+        Assert.False(json.RootElement.GetProperty("ok").GetBoolean());
+        Assert.Equal([5, 3, 4], json.RootElement.GetProperty("diagnostics").EnumerateArray().Select(d => d.GetProperty("line").GetInt32()));
+    }
+
+    [Fact]
+    public void Tern_run_and_bench_report_every_error()
+    {
+        var path = File3Errors();
+        var (code, _, error) = Tern("run", path, "--max-errors", "5");
+        Assert.Equal(1, code);
+        Assert.EndsWith("3 errors", error.TrimEnd());
+
+        (code, var output, _) = Tern("bench", path, "--code", "var x: u8 = true; var y: u8 = 300");
+        Assert.Equal(1, code);
+        var lines = output.Split(Environment.NewLine);
+        Assert.Contains(lines, l => l.StartsWith("three.tern") && l.Contains("line 5:9: Expected an expression"));
+        Assert.Contains(lines, l => l.TrimStart().StartsWith("error: ") && l.Contains("line 4:9: 300 does not fit in u8"));
+        Assert.Contains(lines, l => l.Trim() == "3 errors");
+        Assert.Contains(lines, l => l.Trim() == "2 errors");
+
+        (_, output, _) = Tern("bench", "--json", "--max-errors", "1", path);
+        using var json = System.Text.Json.JsonDocument.Parse(output);
+        var variant = json.RootElement.GetProperty("variants")[0];
+        Assert.Equal(1, variant.GetProperty("errors").GetArrayLength());
+        Assert.Equal(5, variant.GetProperty("error").GetProperty("line").GetInt32());
     }
 
     [Fact]
