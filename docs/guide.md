@@ -1031,7 +1031,7 @@ tern run game.tern --profile                      // the cycles of each function
 
 - Atari 8-bit
 - Apple II
-- NES, with ROM banks (`@ bank(n)`) and calls between banks
+- NES, with ROM banks placed like overlays (on the import) and calls into them
 - 65C02 CPU and the Commander X16
 - Commodore 128 in native mode, after the first release (C64 programs already run in its C64 mode)
 
