@@ -298,7 +298,20 @@ if cpu.carry() { finish() }        // bcc skip, nothing more
 
 ### 3.8 Interrupts
 
-`interrupt fn` saves only the registers it changes and ends with `rti`. It is its own root: its memory never overlaps main's. A function called from both main and a handler is an error, unless it has no memory of its own (like `acknowledge` above). One `interrupt fn` called from another becomes a *part* (no saving, ends with `rts`), which is how the library's raster code is combined into one handler you install.
+`interrupt fn` saves only the registers it changes and ends with `rti`. It is its own root: its memory never overlaps main's. A function called from both main and a handler is an error, unless it has no memory of its own (like `acknowledge` above): an interrupt could stop it halfway, run it again and overwrite its variables. The compiler does not copy the function for you; pick one of these:
+
+- **`inline fn`.** Each caller gets its own copy of the code, and its variables go in that caller's frame, so main's copy and the handler's never touch each other. Best for small helpers:
+  ```
+  inline fn next_x(x: u8) -> u8 {      // one copy in main, one in the handler
+      var t = x + 1
+      if t >= 160 { t = 0 }
+      return t
+  }
+  ```
+- **No memory of its own.** Parameters in registers (`using A`), loop counters with `using X` or `using Y`, no locals: the handler saves the registers, so sharing is safe.
+- **A second function for the handler.** For anything larger. The handler's version is often shorter, since it rarely needs everything main does.
+
+The error tells you what memory the function has (a local, a loop counter, a hidden temporary of a 16-bit sum). One `interrupt fn` called from another becomes a *part* (no saving, ends with `rts`), which is how the library's raster code is combined into one handler you install.
 
 The `c64` module installs handlers: `kernal_off()`, `set_irq(addr(handler))`, `interrupts_on()` (see example 4.3). With the KERNAL left in (needed by the `io` library), `set_kernal_irq(addr(handler))` installs the same kind of handler through `$0314`; the KERNAL's keyboard scan then stops. For a raster interrupt there, call `cia_irqs_off()` first, which turns off the CIA timer interrupts and clears any that are pending.
 
