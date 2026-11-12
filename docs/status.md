@@ -4,11 +4,20 @@ Owned by the coding session. Updated at the end of every coding session.
 
 ## Current
 
-- **Milestone:** M22 follow-up 2 (roadmap, before M23; decisions 2026-11-11, questions 104-106). Done and reviewed (`docs/reviews/m22-followup2.md`: ready to merge, two suggestions, both done).
-- **Branch:** `m22-followup2`, with `main` merged in (`95ecb18`). 2861 compiler tests pass plus 36 CPU tests. No benchmark changed (1254 / 350780); `SkillTests` pass.
-- **Next step:** `/merge m22-followup2`. After the merge: the cleanup milestone before M23 (roadmap, "Cleanup: split the large classes"). The spec session writes the guide's section on `const fn` and generators from the two examples.
+- **Milestone:** Cleanup: split the large classes (roadmap, before M23). Done and reviewed (`docs/reviews/cleanup-split.md`: ready to merge, one suggestion, done).
+- **Branch:** `cleanup-split`, from `main` at `2a816df` (M22 follow-up 2 merged), with `main` merged in again for the review. 2861 compiler tests pass plus 36 CPU tests, the same as before. No benchmark changed (1254 / 350780); `SkillTests` pass.
+- **Next step:** `/merge cleanup-split`, before any other branch is opened. After the merge: M23 (doc comments and a language server). The spec session writes the guide's section on `const fn` and generators from the two examples.
 
 ## Done
+
+- **Cleanup, first review** (2026-11-11, `docs/reviews/cleanup-split.md`): ready to merge. Suggestion 1 done: `.gitignore` ignores the `.lines` files `tern` writes, in `examples/` and `tests/benchmarks/` (both levels), beside the `.prg`, `.lst` and `.vs` entries.
+
+- **Cleanup: split the large classes** (2026-11-11, branch `cleanup-split`, one commit per class). Code moved along the existing `// ---------- Section ----------` markers into partial class files; the only new lines are each file's usings, namespace, a one-line `<summary>` (as in `Checker.Asm.cs`), the class line and its braces, and `partial` on the original class line. `git diff --color-moved=plain main..cleanup-split -- src` shows every other line as moved. All 19 examples (16 programs; `level1`, `level2` and `player_api` only compile as part of another program) compile to the same `.prg`, `.lst`, `.vs` and `.lines` bytes as before the split. Largest file in `src/` now: `Checker.Declarations.cs`, 931 lines.
+  - `CodeGen.cs` 3,492 -> 567 (fields, emission helpers, functions, tree queries): `.Statements` (statements, assignment) 696, `.Expressions` (8-bit, 16-bit) 775, `.Conditions` 334, `.Calls` (pointers, calls, assembly) 369, `.Loops` (`for`) 806.
+  - `Checker.cs` 2,795 -> 358 (`CheckedProgram`, fields, entry points): `.Declarations` 931, `.Bodies` 450, `.Expressions` 639, `.TypeRules` (type rules, call graph) 445.
+  - `Optimizer.cs` 1,233 -> 34 (`Run`, `Improve`): `.DeadStores` 790, `.Registers` (register contents, bit test and shift) 429.
+  - `Parser.cs` 1,209 -> 106 (token helpers): `.Declarations` 502, `.Statements` (statements, assembly) 346, `.Expressions` 279.
+  - Older entries below still name `Optimizer.cs` and other files as they were then.
 
 - **M22 follow-up 2, first review** (2026-11-11, `docs/reviews/m22-followup2.md`): ready to merge; both suggestions done (`3f669c5`).
   - Suggestion 2: the empty check of a down-count to 0 (unsigned `n..0`, signed `n..=0` / `n..0`) comes before `HoldInRegister` loads a variable into the other index register, so `for i in n..0 step -1 using Y { cnt += 1 }` is `ldy n` / `beq`, with no `cpy #$00`. When the body changes the held variable, the check's branches go to a label after its store (`fskip`), since its load was skipped too. Other loops are unchanged.

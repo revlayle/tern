@@ -6,9 +6,11 @@ TestResults/
 examples/*.prg
 examples/*.lst
 examples/*.vs
+examples/*.lines
 tests/benchmarks/*.prg
 tests/benchmarks/*.lst
 tests/benchmarks/*.vs
+tests/benchmarks/*.lines
 tests/benchmarks/*/*.prg
 tests/benchmarks/*/*.lbl
 tests/benchmarks/*/*.map
@@ -16,3 +18,4 @@ tests/benchmarks/*/*.bin
 examples/player_api.tern
 tests/benchmarks/*/*.lst
 tests/benchmarks/*/*.vs
+tests/benchmarks/*/*.lines
