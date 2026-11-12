@@ -504,6 +504,10 @@ Tests: a program with errors in several statements, functions and modules report
 
 Done when: the tests above pass, every error test's first error is unchanged, and the errors without a fix sentence are fixed or listed.
 
+## Warnings: analysis (spec session, after M23)
+
+Decision 2026-11-12. The compiler reports errors only; it has no warnings. Before any are built, a spec session goes through the language and decides which, if any, there should be, checked against decision 2026-11-07 ("Tern trusts the programmer": deliberate but unusual code, such as a wrapping index, gets no warning). Candidates to weigh: an empty constant range (`5..5`; spec 5.1 once promised a warning, never built), unused variables, functions and imports, a value that never fits its type after constant folding, an unreachable statement. Also to settle: how a warning is shown and turned off, whether `tern --json` gives it as `"severity": "warning"`, and whether warnings can be made errors. The result is a milestone, or a decision to have none.
+
 ## M24: Floats as a library
 
 Decision 2026-11-08. A portable library module with a 4-byte format, built on `wide`; no language change. After M22, so `const fn` with `real` can build float constants and tables. Scope settled by a spec session before coding: the format (IEEE 754 single, or a layout closer to the 6502's needs, e.g. exponent byte plus 24-bit mantissa), the value type (a 4-byte struct), the operations (add, subtract, multiply, divide, compare, conversion to and from integers, to text), and how a `const fn` turns a `real` into the format's bytes.
