@@ -314,6 +314,23 @@ public sealed class SeveralErrorsTests : IDisposable
     }
 
     [Fact]
+    public void A_local_with_a_written_type_keeps_it_when_its_initial_value_fails()
+    {
+        // Review M23, finding 3: k = 999 was not reported, since k was broken with e.
+        var errors = Errors("""
+            struct Enemy { x: u8, hp: u8 }
+            var e: Enmy
+            fn main() {
+                var k: u8 = e.x
+                k = 999
+                var j = e.hp
+                j = 999
+            }
+            """);
+        Assert.Equal(["2: Unknown type 'Enmy'", "5: 999 does not fit in u8 (0 to 255)"], errors);
+    }
+
+    [Fact]
     public void A_const_fn_with_a_syntax_error_is_dropped_and_its_calls_add_no_errors()
     {
         var errors = Errors("""

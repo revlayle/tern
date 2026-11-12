@@ -120,23 +120,36 @@ public sealed partial class Checker
         decl.Symbol = v;
         ApplyPlacement(decl, v, allowAddress: false);
 
-        if (inAsmFn && decl.Init is not null)
-            throw new CompileError(decl.Init.Pos, $"'{decl.Name}' in an asm fn has no initial value: the assembly sets it. Remove the value and store it in the assembly");
-        if (decl.Init is null)
+        try
         {
-            if (!type.IsArray && !type.IsStruct && !inAsmFn)
-                throw new CompileError(decl.Pos, $"Local variable '{decl.Name}' needs an initial value. Write one: var {decl.Name}: {type} = 0");
+            if (inAsmFn && decl.Init is not null)
+                throw new CompileError(decl.Init.Pos, $"'{decl.Name}' in an asm fn has no initial value: the assembly sets it. Remove the value and store it in the assembly");
+            if (decl.Init is null)
+            {
+                if (!type.IsArray && !type.IsStruct && !inAsmFn)
+                    throw new CompileError(decl.Pos, $"Local variable '{decl.Name}' needs an initial value. Write one: var {decl.Name}: {type} = 0");
+            }
+            else
+            {
+                if (decl.Init is StructLiteralExpr lit) throw StructLiteralInCode(lit, decl.Name);
+                if (type.IsStruct || type.IsStructArray)
+                    throw new CompileError(decl.Init.Pos, "A struct cannot have an initial value. Assign its fields");
+                if (type.IsArray && IsCompileTimeArray(decl.Init)) CheckExpr(decl.Init);
+                if (type.IsArray) throw new CompileError(decl.Init.Pos, "Local arrays cannot have initial values yet. Assign the elements, or use a global or data");
+                CheckExpr(decl.Init);
+                Coerce(decl.Init, type);
+                v.Weight += Weight();
+            }
         }
-        else
+        catch (Exception e) when (_errors is not null && decl.TypeSyntax is not null && e is CompileError or FollowOnError)
         {
-            if (decl.Init is StructLiteralExpr lit) throw StructLiteralInCode(lit, decl.Name);
-            if (type.IsStruct || type.IsStructArray)
-                throw new CompileError(decl.Init.Pos, "A struct cannot have an initial value. Assign its fields");
-            if (type.IsArray && IsCompileTimeArray(decl.Init)) CheckExpr(decl.Init);
-            if (type.IsArray) throw new CompileError(decl.Init.Pos, "Local arrays cannot have initial values yet. Assign the elements, or use a global or data");
-            CheckExpr(decl.Init);
-            Coerce(decl.Init, type);
-            v.Weight += Weight();
+            // Its type is written, so only the initial value is wrong: its uses still check (spec 13).
+            if (Lookup(decl.Name, demand: false) is null or ErrorSymbol)
+            {
+                Declare(v);
+                _function!.FrameVariables.Add(v);
+            }
+            throw;
         }
         Declare(v);
         _function!.FrameVariables.Add(v);
