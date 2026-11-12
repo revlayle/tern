@@ -13,7 +13,7 @@ public class SkillCollection;
 /// <list type="bullet">
 /// <item>a <c>```tern</c> block is written to the file its first line names (<c>// name.tern</c>), or
 /// <c>example.tern</c> (a name may have a folder: <c>// alt/ship.tern</c>); with <c>fn main</c> or <c>export</c> it
-/// must compile, otherwise it is a module, which a program compiled after it (a block or a command) must import. A <c>```tern error</c> block must not compile, and the <c>```text</c> block after it
+/// must compile with no warnings, otherwise it is a module, which a program compiled after it (a block or a command) must import. A <c>```tern error</c> block must not compile, and the <c>```text</c> block after it
 /// is what <c>tern name.tern</c> prints.</item>
 /// <item>a <c>```console</c> block holds commands (<c>$ tern ...</c>) each followed by its output; a line
 /// <c>...</c> stands for any number of lines.</item>
@@ -110,7 +110,8 @@ public class SkillTests
                     }
                     else if (program)
                     {
-                        var (code, output) = Tern(["tern", name]);
+                        // The skill's programs have no warnings (roadmap "Warnings").
+                        var (code, output) = Tern(["tern", "--warnings-as-errors", name]);
                         if (code != 0) problems.Add($"{where}: {name} does not compile:\n{string.Join("\n", output)}");
                         else { lastProgram = name; Compiled(name); }
                     }

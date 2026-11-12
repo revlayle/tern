@@ -129,7 +129,8 @@ public static class RunReport
         Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
     };
 
-    public static string Json(RunResult run, IReadOnlyList<MemoryDump> dumps, bool screen, IReadOnlyList<LineTable.Row>? profile) =>
+    /// <param name="warnings">The program's warnings (spec 13).</param>
+    public static string Json(RunResult run, IReadOnlyList<MemoryDump> dumps, bool screen, IReadOnlyList<LineTable.Row>? profile, IReadOnlyList<Diagnostic>? warnings = null) =>
         JsonSerializer.Serialize(new
         {
             ok = true,
@@ -157,6 +158,7 @@ public static class RunReport
                 file = r.File, line = r.Line, source = r.Source, bytes = r.Bytes, cycles = r.Cycles, moreCycles = r.MoreCycles,
                 runs = r.Runs, runCycles = r.Executed,
             }),
+            diagnostics = warnings ?? [],
         }, Options);
 
     private static string Capitalize(string s) => s.Length == 0 ? s : char.ToUpperInvariant(s[0]) + s[1..];

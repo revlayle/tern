@@ -71,7 +71,8 @@ public static class Bench
         CompileResult program;
         try
         {
-            program = TernCompiler.Compile(variant.Source, sourcePath: variant.Path, maxErrors: maxErrors);
+            // No warnings: compared snippets often leave values unused on purpose (spec 13).
+            program = TernCompiler.Compile(variant.Source, sourcePath: variant.Path, maxErrors: maxErrors, warnings: WarningMode.Off);
         }
         catch (CompileError e)
         {
