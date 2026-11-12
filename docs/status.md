@@ -4,11 +4,13 @@ Owned by the coding session. Updated at the end of every coding session.
 
 ## Current
 
-- **Milestone:** Cleanup: split the large classes (roadmap, before M23). Done, not yet reviewed.
-- **Branch:** `cleanup-split`, from `main` at `2a816df` (M22 follow-up 2 merged). 2861 compiler tests pass plus 36 CPU tests, the same as before. No benchmark changed (1254 / 350780); `SkillTests` pass.
-- **Next step:** `/review cleanup-split`, then merge it before any other branch is opened. After the merge: M23 (doc comments and a language server). The spec session writes the guide's section on `const fn` and generators from the two examples.
+- **Milestone:** Cleanup: split the large classes (roadmap, before M23). Done and reviewed (`docs/reviews/cleanup-split.md`: ready to merge, one suggestion, done).
+- **Branch:** `cleanup-split`, from `main` at `2a816df` (M22 follow-up 2 merged), with `main` merged in again for the review. 2861 compiler tests pass plus 36 CPU tests, the same as before. No benchmark changed (1254 / 350780); `SkillTests` pass.
+- **Next step:** `/merge cleanup-split`, before any other branch is opened. After the merge: M23 (doc comments and a language server). The spec session writes the guide's section on `const fn` and generators from the two examples.
 
 ## Done
+
+- **Cleanup, first review** (2026-11-11, `docs/reviews/cleanup-split.md`): ready to merge. Suggestion 1 done: `.gitignore` ignores the `.lines` files `tern` writes, in `examples/` and `tests/benchmarks/` (both levels), beside the `.prg`, `.lst` and `.vs` entries.
 
 - **Cleanup: split the large classes** (2026-11-11, branch `cleanup-split`, one commit per class). Code moved along the existing `// ---------- Section ----------` markers into partial class files; the only new lines are each file's usings, namespace, a one-line `<summary>` (as in `Checker.Asm.cs`), the class line and its braces, and `partial` on the original class line. `git diff --color-moved=plain main..cleanup-split -- src` shows every other line as moved. All 19 examples (16 programs; `level1`, `level2` and `player_api` only compile as part of another program) compile to the same `.prg`, `.lst`, `.vs` and `.lines` bytes as before the split. Largest file in `src/` now: `Checker.Declarations.cs`, 931 lines.
   - `CodeGen.cs` 3,492 -> 567 (fields, emission helpers, functions, tree queries): `.Statements` (statements, assignment) 696, `.Expressions` (8-bit, 16-bit) 775, `.Conditions` 334, `.Calls` (pointers, calls, assembly) 369, `.Loops` (`for`) 806.
