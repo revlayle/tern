@@ -4,11 +4,16 @@ Owned by the coding session. Updated at the end of every coding session.
 
 ## Current
 
-- **Milestone:** M23 follow-up (roadmap "M23 follow-up (before warnings)"; spec 13, 8.1; decisions 107, 108 and "a function may be called from main and from a handler", 2026-11-12). Done; not reviewed yet.
-- **Branch:** `m23-followup`, from `main` at `1f9426d` (M23 merged, the warnings decision in). 2895 compiler tests pass plus 36 CPU tests. No benchmark changed (1254 / 350780); `SkillTests` pass.
-- **Next step:** `/review` of `m23-followup`. Questions 112-113 below are provisional choices for the spec session. After this: the Warnings milestone (roadmap "Warnings"), then `implements`, encodings, M24.
+- **Milestone:** M23 follow-up (roadmap "M23 follow-up (before warnings)"; spec 13, 8.1; decisions 107, 108, 112, 113 and "a function may be called from main and from a handler", 2026-11-12). Done and reviewed (`docs/reviews/m23-followup.md`: ready to merge, three suggestions, all done).
+- **Branch:** `m23-followup`, from `main` at `1f9426d`, with `main` merged in again for the review (`33d568d`). 2896 compiler tests pass plus 36 CPU tests. No benchmark changed (1254 / 350780); `SkillTests` pass.
+- **Next step:** `/merge m23-followup`. After this: the Warnings milestone (roadmap "Warnings"), then `implements`, encodings, M24.
 
 ## Done
+
+- **M23 follow-up, first review** (2026-11-12, `docs/reviews/m23-followup.md`): ready to merge; all three suggestions done.
+  - Suggestion 1 (`23653db`): `OutOfOrderErrors` has `zeta` import `beta`, so the errors come main, zeta, beta, alpha: only the depth-first order of decision 112 passes.
+  - Suggestion 2 (`1239982`): `AssertFrameOverlapsNoOther` also reads the named frame variables in RAM (`CompileResult.Variables`); a new test with 40-byte local arrays in main, `m2`, the handler and a shared function checks the RAM frames. It fails with the allocator as before.
+  - Suggestion 3 (`304ac6a`): the `ErrorSymbol` summary is wrapped.
 
 - **M23 follow-up** (2026-11-12, branch `m23-followup`). Three commits.
   - Errors sorted by place (`25f7658`, decision 108): `ErrorList` collects every error and sorts them when it throws: the main file, then modules in the loader's order (`ErrorList.AddFile`, called as each file is loaded), then line and column; errors at the same place keep the order found. `--max-errors n` keeps the first `n` after sorting, so the checks now always run to the end (`ErrorLimitReached` is gone). Help text and skill updated.
@@ -595,10 +600,7 @@ Not bugs; things to improve, mostly in M7 (optimizer).
 
 ## Questions for the spec session
 
-Questions 112-113 come from the M23 follow-up; each is built as described, provisionally.
-
-- **112: "Each module in the order it is first imported" is the loader's order, depth first.** A module's own imports are loaded (and their errors sorted) right after it, before the main file's next import: with `import a`, `import b` in the main file and `import c` in `a`, the order is main, a, c, b. The other reading (main's imports first, then theirs) would need a second pass. Keep?
-- **113: A missing import is reported at every use.** `text.put('A')` twice with no `import text` gives two "'text' is not declared" errors, since `text` is an undeclared name (decision 107), though one line fixes both. Keep, or report a missing module once per file?
+Questions 112-113 were settled on 2026-11-12 (decisions.md): as built.
 
 Questions 107-111 were settled on 2026-11-12 (decisions.md): 107 and 108 changed and are built in the M23 follow-up; 109-111 as built.
 
