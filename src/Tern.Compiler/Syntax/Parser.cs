@@ -106,17 +106,24 @@ public sealed partial class Parser
         int braces = BracesOpen(from);
         while (!At(TokenKind.Eof))
         {
-            if (braces == 0 && _pos > from && StartsDeclaration(Current) && Current.Pos.Line != _tokens[_pos - 1].Pos.Line) return;
+            if (braces == 0 && _pos > from && StartsCurrentDeclaration() && Current.Pos.Line != _tokens[_pos - 1].Pos.Line) return;
             var t = Advance();
             if (t.Kind == TokenKind.LBrace) braces++;
             else if (t.Kind == TokenKind.RBrace) braces = Math.Max(0, braces - 1);
         }
     }
 
-    private static bool StartsDeclaration(Token t) => t.Kind is TokenKind.Const or TokenKind.Var or TokenKind.Data or TokenKind.Fn
-        or TokenKind.Struct or TokenKind.Private or TokenKind.Interrupt or TokenKind.Inline or TokenKind.Noinit or TokenKind.Volatile
-        or TokenKind.Linear or TokenKind.Asm or TokenKind.Assert or TokenKind.Export or TokenKind.Import or TokenKind.Module
-        || t is { Kind: TokenKind.Identifier, Text: "indexed" or "memory" };
+    /// <summary>Whether the current token starts a top-level declaration, also with a word from another language (pub fn, let x).</summary>
+    private bool StartsCurrentDeclaration()
+    {
+        Token t = Current, next = PeekAt(1);
+        return t.Kind is TokenKind.Const or TokenKind.Var or TokenKind.Data or TokenKind.Fn
+            or TokenKind.Struct or TokenKind.Private or TokenKind.Interrupt or TokenKind.Inline or TokenKind.Noinit or TokenKind.Volatile
+            or TokenKind.Linear or TokenKind.Asm or TokenKind.Assert or TokenKind.Export or TokenKind.Import or TokenKind.Module
+            || t is { Kind: TokenKind.Identifier, Text: "indexed" or "memory" }
+            || t.Kind == TokenKind.Identifier && next.Kind is TokenKind.Fn or TokenKind.Var or TokenKind.Const or TokenKind.Data or TokenKind.Struct
+            || t is { Kind: TokenKind.Identifier, Text: "let" } && next.Kind == TokenKind.Identifier;
+    }
 
     /// <summary>The name declared (or the module imported) by the declaration or statement at token <paramref name="from"/>, or null.</summary>
     private (string Name, SourcePos Pos)? DeclaredName(int from)
@@ -125,6 +132,11 @@ public sealed partial class Parser
         while (_tokens[k].Kind is TokenKind.Private or TokenKind.Noinit or TokenKind.Volatile or TokenKind.Inline or TokenKind.Interrupt
                or TokenKind.Linear or TokenKind.Asm || _tokens[k] is { Kind: TokenKind.Identifier, Text: "indexed" })
             k++;
+        // A word from another language before the keyword (pub fn, async fn), or 'let name'.
+        if (_tokens[k].Kind == TokenKind.Identifier && _tokens[k + 1].Kind is TokenKind.Fn or TokenKind.Var or TokenKind.Const or TokenKind.Data or TokenKind.Struct)
+            k++;
+        else if (_tokens[k] is { Kind: TokenKind.Identifier, Text: "let" } && _tokens[k + 1].Kind == TokenKind.Identifier)
+            return (_tokens[k + 1].Text, _tokens[k + 1].Pos);
         if (_tokens[k].Kind is not (TokenKind.Const or TokenKind.Var or TokenKind.Data or TokenKind.Fn or TokenKind.Struct or TokenKind.Import)) return null;
         if (_tokens[k].Kind == TokenKind.Const && _tokens[k + 1].Kind == TokenKind.Fn) k++;
         var name = _tokens[k + 1];
@@ -211,7 +223,7 @@ public sealed partial class Parser
         if (At(TokenKind.RBrace) || At(TokenKind.Eof)) return;
         // After an unclosed ( or [, which was reported, the lexer gives no line breaks: a declaration
         // starting a new line ends the statement (spec 13).
-        if (_failures > 0 && StartsDeclaration(Current) && Current.Pos.Line != _tokens[_pos - 1].Pos.Line) return;
+        if (_failures > 0 && StartsCurrentDeclaration() && Current.Pos.Line != _tokens[_pos - 1].Pos.Line) return;
         throw new CompileError(Current.Pos, $"Expected end of statement, found {Describe(Current)}. Put each statement on its own line, or separate them with ';'");
     }
 }

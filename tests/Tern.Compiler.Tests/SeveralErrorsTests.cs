@@ -170,6 +170,28 @@ public sealed class SeveralErrorsTests : IDisposable
     }
 
     [Fact]
+    public void A_declaration_with_a_word_from_another_language_breaks_its_name()
+    {
+        // Review M23, finding 1: pub fn and let gave an error at every use of the name.
+        var errors = Errors("""
+            var g: u8 = 0
+            pub fn helper() {
+                g = 1
+            }
+            let count: u8 = 0
+            fn main() {
+                helper()
+                count = 2
+                let n = 5
+                n = 6
+                g = 300
+            }
+            """);
+        Assert.Equal(["2", "5", "9", "11"], errors.Select(e => e.Split(':')[0]));
+        Assert.Equal("11: 300 does not fit in u8 (0 to 255)", errors[3]);
+    }
+
+    [Fact]
     public void A_semicolon_in_brackets_does_not_end_the_skipped_statement()
     {
         var errors = Errors("""
