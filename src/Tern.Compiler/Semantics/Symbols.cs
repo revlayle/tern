@@ -118,6 +118,12 @@ public sealed class ConstSymbol(string name, SourcePos pos, TernType type, long 
     public HashSet<string> UsedParameters { get; init; } = [];
 }
 
+/// <summary>
+/// A name whose declaration had an error, which was reported (spec 13), or a name reported as not
+/// declared. It accepts every use: looking it up stops the statement with no error of its own.
+/// </summary>
+public sealed class ErrorSymbol(string name, SourcePos pos) : Symbol(name, pos);
+
 /// <summary>A <c>const fn</c> (spec 4.1): run by the compile-time interpreter, never compiled.</summary>
 public sealed class ConstFnSymbol(string name, SourcePos pos, FnDecl declaration) : Symbol(name, pos)
 {
@@ -138,7 +144,7 @@ public sealed class StructSymbol(string name, SourcePos pos, StructDecl declarat
     /// <summary>Filled when the struct is laid out.</summary>
     public List<StructField> Fields { get; } = [];
     public int Size { get; set; }
-    /// <summary>0 = not laid out, 1 = being laid out, 2 = done.</summary>
+    /// <summary>0 = not laid out, 1 = being laid out, 2 = done, 3 = failed with an error (spec 13).</summary>
     public int LayoutState { get; set; }
     public TernType Type => _type ??= TernType.StructOf(this);
     private TernType? _type;

@@ -27,6 +27,7 @@ public sealed partial class Checker
     private void LayOut(StructSymbol s)
     {
         if (s.LayoutState == 2) return;
+        if (s.LayoutState == 3) throw new FollowOnError();
         // Its field types and offsets are names of its own module, also when another one uses it first.
         if (s.Module is { } home && home != _module && s.LayoutState == 0)
         {
@@ -36,36 +37,44 @@ public sealed partial class Checker
         if (s.LayoutState == 1)
             throw new CompileError(s.Pos, $"Struct '{s.Name}' contains itself, so its size would be endless. Use a pointer: ptr {s.Name}");
         s.LayoutState = 1;
-        var decl = s.Declaration;
-        if (decl.Fields.Count == 0) throw new CompileError(decl.Pos, $"Struct '{s.Name}' has no fields");
-
-        int next = 0;
-        foreach (var f in decl.Fields)
+        try
         {
-            if (f.Name != "_" && s.Field(f.Name) is { } twice)
-                throw new CompileError(f.Pos, $"Field '{f.Name}' is declared twice in '{s.Name}' (first at {twice.Pos})");
-            var type = ResolveType(f.Type);
-            if (type.IsArray && type.Element!.IsStruct)
-                throw new CompileError(f.Pos, "A field cannot be an array of structs yet. Use an array of structs outside the struct, or a pointer");
-            int offset = next;
-            if (f.Offset is not null)
+            var decl = s.Declaration;
+            if (decl.Fields.Count == 0) throw new CompileError(decl.Pos, $"Struct '{s.Name}' has no fields");
+
+            int next = 0;
+            foreach (var f in decl.Fields)
             {
-                CheckExpr(f.Offset);
-                if (f.Offset.ConstValue is not long o)
-                    throw new CompileError(f.Offset.Pos, "A field offset must be known at compile time");
-                if (o < 0 || o > 0xFFFF) throw new CompileError(f.Offset.Pos, $"Field offset {o} is outside memory");
-                offset = (int)o;
+                if (f.Name != "_" && s.Field(f.Name) is { } twice)
+                    throw new CompileError(f.Pos, $"Field '{f.Name}' is declared twice in '{s.Name}' (first at {twice.Pos})");
+                var type = ResolveType(f.Type);
+                if (type.IsArray && type.Element!.IsStruct)
+                    throw new CompileError(f.Pos, "A field cannot be an array of structs yet. Use an array of structs outside the struct, or a pointer");
+                int offset = next;
+                if (f.Offset is not null)
+                {
+                    CheckExpr(f.Offset);
+                    if (f.Offset.ConstValue is not long o)
+                        throw new CompileError(f.Offset.Pos, "A field offset must be known at compile time");
+                    if (o < 0 || o > 0xFFFF) throw new CompileError(f.Offset.Pos, $"Field offset {o} is outside memory");
+                    offset = (int)o;
+                }
+                foreach (var other in s.Fields)
+                    if (offset < other.Offset + other.Type.Size && other.Offset < offset + type.Size)
+                        throw new CompileError(f.Pos,
+                            $"Field '{f.Name}' (offset {offset}, {type.Size} byte(s)) overlaps field '{other.Name}' (offset {other.Offset}, {other.Type.Size} byte(s))");
+                s.Fields.Add(new StructField(f.Name, f.Pos, type, offset));
+                next = offset + type.Size;
+                s.Size = Math.Max(s.Size, next);
             }
-            foreach (var other in s.Fields)
-                if (offset < other.Offset + other.Type.Size && other.Offset < offset + type.Size)
-                    throw new CompileError(f.Pos,
-                        $"Field '{f.Name}' (offset {offset}, {type.Size} byte(s)) overlaps field '{other.Name}' (offset {other.Offset}, {other.Type.Size} byte(s))");
-            s.Fields.Add(new StructField(f.Name, f.Pos, type, offset));
-            next = offset + type.Size;
-            s.Size = Math.Max(s.Size, next);
+            if (s.Size > 0xFFFF) throw new CompileError(decl.Pos, $"Struct '{s.Name}' is {s.Size} bytes, more than memory");
+            s.LayoutState = 2;
         }
-        if (s.Size > 0xFFFF) throw new CompileError(decl.Pos, $"Struct '{s.Name}' is {s.Size} bytes, more than memory");
-        s.LayoutState = 2;
+        catch (Exception e) when (e is CompileError or FollowOnError)
+        {
+            s.LayoutState = 3;   // reported; its uses add no errors (spec 13)
+            throw;
+        }
     }
 
     /// <summary>

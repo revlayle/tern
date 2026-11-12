@@ -12,16 +12,124 @@ public sealed partial class Parser
     private readonly string _source;
     private readonly List<int> _lineStarts = [0];
 
-    private Parser(List<Token> tokens, string source)
+    /// <summary>Where errors go; null: the first error is thrown and parsing stops.</summary>
+    private readonly ErrorList? _errors;
+
+    private Parser(List<Token> tokens, string source, ErrorList? errors)
     {
         _tokens = tokens;
         _source = source;
+        _errors = errors;
         for (int i = 0; i < source.Length; i++)
             if (source[i] == '\n') _lineStarts.Add(i + 1);
     }
 
     /// <param name="file">The source file, for positions in error messages and the listing.</param>
-    public static ProgramSyntax Parse(string source, string? file = null) => new Parser(Lexer.Tokenize(source, file), source).ParseProgram();
+    /// <param name="errors">
+    /// Takes every error; after one, parsing goes on at the next statement or declaration (spec 13).
+    /// Null: the first error is thrown.
+    /// </param>
+    public static ProgramSyntax Parse(string source, string? file = null, ErrorList? errors = null) =>
+        new Parser(Lexer.Tokenize(source, file, errors is null ? null : errors.Add), source, errors).ParseProgram();
+
+    // ---------- Going on after an error (spec 13) ----------
+
+    /// <summary>Statements and declarations dropped for an error, also one that was not reported.</summary>
+    private int _failures;
+    /// <summary>An error was found at the end of the file (a block not closed): the blocks around it are not reported too.</summary>
+    private bool _unclosedReported;
+
+    /// <summary>True for the errors the parser goes on after; false when there is no error list.</summary>
+    private bool Recovers(Exception e) => _errors is not null && e is CompileError or FollowOnError;
+
+    /// <summary>
+    /// Reports the error of the statement or declaration that started at token <paramref name="from"/>.
+    /// Not when its tokens include one where the lexer found an error, which was reported already.
+    /// </summary>
+    private void Fail(Exception e, int from)
+    {
+        _failures++;
+        _inAsm = false;
+        if (At(TokenKind.Eof)) _unclosedReported = true;
+        for (int k = from; k <= Math.Min(_pos, _tokens.Count - 1); k++)
+            if (_tokens[k].Kind == TokenKind.Error) return;
+        if (e is CompileError error) _errors!.Add(error);
+    }
+
+    /// <summary>Braces opened and not closed from token <paramref name="from"/> to the current one.</summary>
+    private int BracesOpen(int from)
+    {
+        int braces = 0;
+        for (int k = from; k < _pos; k++)
+            braces += _tokens[k].Kind switch { TokenKind.LBrace => 1, TokenKind.RBrace => -1, _ => 0 };
+        return Math.Max(0, braces);
+    }
+
+    /// <summary>
+    /// After an error in a statement that started at <paramref name="from"/>: skips to the end of it, the
+    /// next line break or ';' outside the braces it opened, or to the '}' that closes the block.
+    /// </summary>
+    private void SkipStatement(int from)
+    {
+        int braces = BracesOpen(from);
+        // A ';' inside ( ) or [ ] is part of the statement ([u8; 4]). The lexer gives no line breaks there.
+        int brackets = 0;
+        for (int k = from; k < _pos; k++)
+            brackets = _tokens[k].Kind switch
+            {
+                TokenKind.LParen or TokenKind.LBracket => brackets + 1,
+                TokenKind.RParen or TokenKind.RBracket => Math.Max(0, brackets - 1),
+                TokenKind.LBrace or TokenKind.RBrace => 0,
+                _ => brackets,
+            };
+        while (!At(TokenKind.Eof))
+        {
+            if (braces == 0 && At(TokenKind.RBrace)) return;
+            var t = Advance();
+            if (t.Kind is TokenKind.LParen or TokenKind.LBracket) brackets++;
+            else if (t.Kind is TokenKind.RParen or TokenKind.RBracket) brackets = Math.Max(0, brackets - 1);
+            else if (t.Kind is TokenKind.LBrace or TokenKind.RBrace)
+            {
+                braces += t.Kind == TokenKind.LBrace ? 1 : -1;
+                brackets = 0;
+            }
+            else if (braces == 0 && (t.Kind == TokenKind.Newline || t.Kind == TokenKind.Semicolon && brackets == 0)) return;
+        }
+    }
+
+    /// <summary>
+    /// After an error in a top-level declaration that started at <paramref name="from"/>: skips to the
+    /// next line, outside any braces, that starts a declaration.
+    /// </summary>
+    private void SkipDeclaration(int from)
+    {
+        int braces = BracesOpen(from);
+        while (!At(TokenKind.Eof))
+        {
+            if (braces == 0 && _pos > from && StartsDeclaration(Current) && Current.Pos.Line != _tokens[_pos - 1].Pos.Line) return;
+            var t = Advance();
+            if (t.Kind == TokenKind.LBrace) braces++;
+            else if (t.Kind == TokenKind.RBrace) braces = Math.Max(0, braces - 1);
+        }
+    }
+
+    private static bool StartsDeclaration(Token t) => t.Kind is TokenKind.Const or TokenKind.Var or TokenKind.Data or TokenKind.Fn
+        or TokenKind.Struct or TokenKind.Private or TokenKind.Interrupt or TokenKind.Inline or TokenKind.Noinit or TokenKind.Volatile
+        or TokenKind.Linear or TokenKind.Asm or TokenKind.Assert or TokenKind.Export or TokenKind.Import or TokenKind.Module
+        || t is { Kind: TokenKind.Identifier, Text: "indexed" or "memory" };
+
+    /// <summary>The name declared (or the module imported) by the declaration or statement at token <paramref name="from"/>, or null.</summary>
+    private (string Name, SourcePos Pos)? DeclaredName(int from)
+    {
+        int k = from;
+        while (_tokens[k].Kind is TokenKind.Private or TokenKind.Noinit or TokenKind.Volatile or TokenKind.Inline or TokenKind.Interrupt
+               or TokenKind.Linear or TokenKind.Asm || _tokens[k] is { Kind: TokenKind.Identifier, Text: "indexed" })
+            k++;
+        if (_tokens[k].Kind is not (TokenKind.Const or TokenKind.Var or TokenKind.Data or TokenKind.Fn or TokenKind.Struct or TokenKind.Import)) return null;
+        if (_tokens[k].Kind == TokenKind.Const && _tokens[k + 1].Kind == TokenKind.Fn) k++;
+        var name = _tokens[k + 1];
+        return name.Kind == TokenKind.Identifier ? (name.Text, name.Pos) : null;
+    }
 
     /// <summary>Modules imported by this file. <c>name.member</c> after one of them is a qualified name.</summary>
     private readonly HashSet<string> _modules = [];
@@ -101,6 +209,9 @@ public sealed partial class Parser
     {
         if (At(TokenKind.Newline) || At(TokenKind.Semicolon)) { _pos++; return; }
         if (At(TokenKind.RBrace) || At(TokenKind.Eof)) return;
+        // After an unclosed ( or [, which was reported, the lexer gives no line breaks: a declaration
+        // starting a new line ends the statement (spec 13).
+        if (_failures > 0 && StartsDeclaration(Current) && Current.Pos.Line != _tokens[_pos - 1].Pos.Line) return;
         throw new CompileError(Current.Pos, $"Expected end of statement, found {Describe(Current)}");
     }
 }

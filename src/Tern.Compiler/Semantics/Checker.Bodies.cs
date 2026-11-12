@@ -36,14 +36,25 @@ public sealed partial class Checker
     private void CheckBlock(BlockStmt block, bool newScope = true)
     {
         if (newScope) _scopes.Add(new Dictionary<string, Symbol>());
-        foreach (var s in block.Statements) CheckStmt(s);
+        foreach (var s in block.Statements)
+        {
+            // At most one error per statement (spec 13). A local whose declaration failed accepts every use.
+            if (!Recover(() => CheckStmt(s)) && s is VarDecl or ConstDecl && DeclaredName(s) is var name && Lookup(name, demand: false) is null)
+                _scopes[^1][name] = new ErrorSymbol(name, s.Pos);
+        }
         if (newScope) _scopes.RemoveAt(_scopes.Count - 1);
     }
+
+    private static string DeclaredName(Stmt s) => s switch { VarDecl v => v.Name, ConstDecl c => c.Name, _ => "" };
 
     private void CheckStmt(Stmt stmt)
     {
         switch (stmt)
         {
+            case ErrorStmt e:
+                // A syntax error, reported by the parser.
+                if (e.Name is { } broken && Lookup(broken, demand: false) is null) _scopes[^1][broken] = new ErrorSymbol(broken, e.Pos);
+                break;
             case VarDecl v: CheckLocal(v); break;
             case ConstDecl c: DeclareConst(c); break;
             case AssignStmt a: CheckAssign(a); break;
@@ -57,7 +68,8 @@ public sealed partial class Checker
             {
                 // A constant condition compiles only the branch taken: calls, variables and addresses in the
                 // other one are checked but not recorded, so what only it uses is left out of the program (spec 2.2).
-                CheckCondition(i.Condition);
+                // After an error in the condition, the branches are still checked (spec 13).
+                Recover(() => CheckCondition(i.Condition));
                 bool wasDead = _dead;
                 _dead = wasDead || i.Condition.ConstValue == 0;
                 CheckBlock(i.Then);
@@ -68,7 +80,7 @@ public sealed partial class Checker
             }
             case WhileStmt w:
             {
-                CheckCondition(w.Condition);
+                Recover(() => CheckCondition(w.Condition));
                 bool wasDead = _dead;
                 _dead = wasDead || w.Condition.ConstValue == 0;
                 _loopDepth++;
@@ -424,6 +436,7 @@ public sealed partial class Checker
     private static bool AlwaysReturns(Stmt stmt) => stmt switch
     {
         ReturnStmt => true,
+        ErrorStmt => true,   // a syntax error, reported: maybe the return (spec 13)
         BlockStmt { Code: [.., var last] } => AlwaysReturns(last),
         IfStmt i => i.Else is not null && AlwaysReturns(i.Then) && AlwaysReturns(i.Else),
         WhileStmt w => w.Condition.ConstValue == 1 && !ContainsBreak(w.Body),

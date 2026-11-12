@@ -9,6 +9,8 @@ public sealed partial class Checker
 
     /// <summary>0: the main file's memory block is not evaluated yet, 1: being evaluated, 2: done.</summary>
     private int _memoryState;
+    /// <summary>The memory block had an error (reported): placing a variable in one of its regions adds none.</summary>
+    private bool _memoryFailed;
 
     /// <summary>
     /// Evaluates the main file's memory block, once: at the main file's turn, or before, when a constant
@@ -20,8 +22,10 @@ public sealed partial class Checker
         if (_memoryState == 1)
             throw new CompileError(_module.Syntax.Memory!.Pos, "The memory block depends on itself: a constant it uses needs a variable placed in one of its regions. Give that constant a value that does not use the variable");
         _memoryState = 1;
-        if (_module.Syntax.Memory is { } memory) _layout = EvaluateMemory(memory);
-        _memoryState = 2;
+        // After an error the default layout is kept, and the block is not evaluated again (spec 13).
+        try { if (_module.Syntax.Memory is { } memory) _layout = EvaluateMemory(memory); }
+        catch (Exception e) when (e is CompileError or FollowOnError) { _memoryFailed = true; throw; }
+        finally { _memoryState = 2; }
     }
 
     private MemoryLayout EvaluateMemory(MemoryDecl memory)
@@ -41,7 +45,8 @@ public sealed partial class Checker
         var scope = _scopes.Count > 0 ? _scopes[^1] : _module.Scope;
         if (_module.Imports.ContainsKey(name))
             throw new CompileError(symbol.Pos, $"'{name}' is the name of an imported module; choose another name");
-        if (Lookup(name, demand: false) is { } existing)
+        // A name reported as not declared, used before this declaration, is now declared (spec 13).
+        if (Lookup(name, demand: false) is { } existing and not ErrorSymbol)
             throw new CompileError(symbol.Pos, $"'{name}' is already declared at {existing.Pos}");
         scope[name] = symbol;
     }
@@ -53,17 +58,25 @@ public sealed partial class Checker
     /// <param name="demand">Declare a constant that is not declared yet (<see cref="Demand"/>).</param>
     private Symbol? Lookup(string name, bool demand = true)
     {
-        int dot = name.IndexOf('.');
-        if (dot > 0)
+        var found = Find();
+        // A name whose declaration had an error, or an import that did: the error was reported (spec 13).
+        if (demand && found is ErrorSymbol) throw new FollowOnError();
+        return found;
+
+        Symbol? Find()
         {
-            if (!_module.Imports.TryGetValue(name[..dot], out var module)) return null;
-            string member = name[(dot + 1)..];
-            if (module.Syntax.PrivateNames.Contains(member)) return null;
-            return module.Scope.GetValueOrDefault(member) ?? (demand ? Demand(module, member) : null);
+            int dot = name.IndexOf('.');
+            if (dot > 0)
+            {
+                if (!_module.Imports.TryGetValue(name[..dot], out var module)) return _module.Scope.GetValueOrDefault(name[..dot]) as ErrorSymbol;
+                string member = name[(dot + 1)..];
+                if (module.Syntax.PrivateNames.Contains(member)) return null;
+                return module.Scope.GetValueOrDefault(member) ?? (demand ? Demand(module, member) : null);
+            }
+            for (int i = _scopes.Count - 1; i >= 0; i--)
+                if (_scopes[i].TryGetValue(name, out var s)) return s;
+            return _module.Scope.GetValueOrDefault(name) ?? (demand ? Demand(_module, name) : null);
         }
-        for (int i = _scopes.Count - 1; i >= 0; i--)
-            if (_scopes[i].TryGetValue(name, out var s)) return s;
-        return _module.Scope.GetValueOrDefault(name) ?? (demand ? Demand(_module, name) : null);
     }
 
     /// <summary>The constants and globals being declared, innermost last, to find a value that depends on itself.</summary>
@@ -130,7 +143,7 @@ public sealed partial class Checker
         if (_module.Imports.ContainsKey(name))
             return new CompileError(pos, $"'{name}' is a module; use the names in it as {name}.name");
         int dot = name.IndexOf('.');
-        if (dot <= 0) return new CompileError(pos, $"'{name}' is not declared");
+        if (dot <= 0) return new CompileError(pos, $"'{name}' is not declared") { Undeclared = name };
         // s.a() where s is declared: a field or member, not a function in a module.
         switch (Lookup(name[..dot]))
         {
@@ -166,7 +179,7 @@ public sealed partial class Checker
 
     /// <summary><c>text.put</c> where <c>text</c> is not declared: most likely a missing import.</summary>
     private static CompileError MissingImport(string module, SourcePos pos) =>
-        new(pos, $"'{module}' is not declared. To use the module {module}, add 'import {module}' at the top of the file");
+        new(pos, $"'{module}' is not declared. To use the module {module}, add 'import {module}' at the top of the file") { Undeclared = module };
 
     /// <summary>Reports <c>name.member</c> where <c>name</c> is not declared as a missing import.</summary>
     private void CheckMemberTarget(MemberExpr m)
@@ -493,6 +506,11 @@ public sealed partial class Checker
     {
         StartDeclaring(decl.Name, decl);
         try { DeclareGlobalValue(decl); }
+        catch
+        {
+            decl.Symbol = null;   // not declared: tried again at its module's turn, to break its name (spec 13)
+            throw;
+        }
         finally { _declaring.RemoveAt(_declaring.Count - 1); }
     }
 
@@ -653,7 +671,10 @@ public sealed partial class Checker
                 var addr = decl.Placement.Address!;
                 // Only a region name needs the memory block; a constant address does not.
                 if (addr is NameExpr placed && _module.Syntax.Memory?.Lines.Any(l => l.Kind == "region" && l.Name == placed.Name) == true)
+{
                     EnsureMemoryLayout();
+                    if (_memoryFailed) throw new FollowOnError();
+                }
                 if (addr is NameExpr region && _layout.Regions.ContainsKey(region.Name) && Lookup(region.Name) is null)
                 {
                     v.Region = region.Name;

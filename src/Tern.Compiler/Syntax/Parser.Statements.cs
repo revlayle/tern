@@ -16,8 +16,22 @@ public sealed partial class Parser
         SkipTerminators();
         while (!At(TokenKind.RBrace))
         {
-            if (At(TokenKind.Eof)) throw new CompileError(start.Pos, "Block is not closed with '}'");
-            statements.Add(ParseStatement());
+            if (At(TokenKind.Eof))
+            {
+                if (_unclosedReported) throw new FollowOnError();
+                throw new CompileError(start.Pos, "Block is not closed with '}'");
+            }
+            int from = _pos;
+            try { statements.Add(ParseStatement()); }
+            catch (Exception e) when (Recovers(e))
+            {
+                Fail(e, from);
+                // A line starting with '==' belongs to the statement before, which the checker would report too.
+                if (_pos == from && statements.Count > 0 && LeadingOperator() is not null)
+                    statements[^1] = new ErrorStmt(statements[^1].Pos, statements[^1] switch { VarDecl v => v.Name, ConstDecl c => c.Name, _ => null });
+                statements.Add(new ErrorStmt(_tokens[from].Pos, DeclaredName(from)?.Name));
+                SkipStatement(from);
+            }
             SkipTerminators();
         }
         Advance();

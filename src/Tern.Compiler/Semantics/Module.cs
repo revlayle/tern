@@ -33,7 +33,8 @@ public sealed class Module
 public static class ModuleLoader
 {
     /// <returns>All files, each module before the files that import it; the main file is last.</returns>
-    public static List<Module> Load(string source, string? sourcePath, Platform platform, string libraryDirectory)
+    /// <param name="errors">Takes every error, and the loader goes on without a module it cannot load (spec 13). Null: the first error is thrown.</param>
+    public static List<Module> Load(string source, string? sourcePath, Platform platform, string libraryDirectory, ErrorList? errors = null)
     {
         var main = new Module
         {
@@ -41,7 +42,7 @@ public static class ModuleLoader
             Path = sourcePath,
             Directory = System.IO.Path.GetDirectoryName(System.IO.Path.GetFullPath(sourcePath ?? "x")) ?? ".",
             Source = source,
-            Syntax = Parser.Parse(source, sourcePath),
+            Syntax = Parser.Parse(source, sourcePath, errors),
         };
         var loaded = new Dictionary<string, Module>();
         var order = new List<Module>();
@@ -49,6 +50,20 @@ public static class ModuleLoader
         void Visit(Module m)
         {
             foreach (var import in m.Syntax.Imports)
+            {
+                try { Import(m, import); }
+                catch (CompileError e) when (errors is not null)
+                {
+                    // Uses of the module add no errors of their own.
+                    errors.Add(e);
+                    m.Syntax.BrokenNames.Add((import.Name, import.Pos));
+                }
+            }
+            order.Add(m);
+        }
+
+        void Import(Module m, ImportDecl import)
+        {
             {
                 if (import.Area is not null && !m.IsMain)
                     throw new CompileError(import.AreaPos,
@@ -79,7 +94,7 @@ public static class ModuleLoader
                         Path = path,
                         Directory = System.IO.Path.GetDirectoryName(path)!,
                         Source = text,
-                        Syntax = Parser.Parse(text, path),
+                        Syntax = Parser.Parse(text, path, errors),
                     };
                     // Registered before its imports are visited, so modules may import each other.
                     loaded[import.Name] = module;
@@ -88,7 +103,6 @@ public static class ModuleLoader
                 if (m.IsMain) module.ImportedBy = import;
                 m.Imports[import.Name] = module;
             }
-            order.Add(m);
         }
 
         Visit(main);

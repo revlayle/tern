@@ -16,11 +16,26 @@ public sealed partial class Parser
         var imports = new List<ImportDecl>();
         var structs = new List<StructDecl>();
         var constFns = new List<FnDecl>();
+        var brokenNames = new List<(string, SourcePos)>();
+
+        // Parses one declaration. After an error, its name (if it got that far) is broken, and parsing
+        // goes on at the next declaration (spec 13).
+        void Recover(Action parse)
+        {
+            int from = _pos;
+            try { parse(); }
+            catch (Exception e) when (Recovers(e))
+            {
+                Fail(e, from);
+                if (DeclaredName(from) is { } broken) brokenNames.Add(broken);
+                SkipDeclaration(from);
+            }
+        }
 
         var asserts = new List<AssertDecl>();
         SkipTerminators();
         ModuleHeader? header = null;
-        if (At(TokenKind.Module))
+        if (At(TokenKind.Module)) Recover(() =>
         {
             var kw = Advance();
             var hname = Expect(TokenKind.Identifier, "the module name after 'module'");
@@ -38,49 +53,55 @@ public sealed partial class Parser
             Expect(TokenKind.RParen, "')'");
             header = new ModuleHeader(kw.Pos, hname.Text, parameters);
             ExpectEndOfStatement();
-            SkipTerminators();
-        }
+        });
+        SkipTerminators();
         while (At(TokenKind.Import))
         {
-            Advance();
-            var name = Expect(TokenKind.Identifier, "a module name after 'import'");
-            if (!_modules.Add(name.Text))
-                throw new CompileError(name.Pos, $"'{name.Text}' is imported twice");
-            var args = new List<ImportArg>();
-            if (Accept(TokenKind.LParen))
+            Recover(() =>
             {
-                while (!At(TokenKind.RParen))
+                Advance();
+                var name = Expect(TokenKind.Identifier, "a module name after 'import'");
+                if (!_modules.Add(name.Text))
+                    throw new CompileError(name.Pos, $"'{name.Text}' is imported twice");
+                var args = new List<ImportArg>();
+                if (Accept(TokenKind.LParen))
                 {
-                    var aname = Expect(TokenKind.Identifier, "a parameter name");
-                    Expect(TokenKind.Eq, "'= value' after the parameter name");
-                    args.Add(new ImportArg(aname.Pos, aname.Text, ParseExpr()));
-                    if (!Accept(TokenKind.Comma)) break;
+                    while (!At(TokenKind.RParen))
+                    {
+                        var aname = Expect(TokenKind.Identifier, "a parameter name");
+                        Expect(TokenKind.Eq, "'= value' after the parameter name");
+                        args.Add(new ImportArg(aname.Pos, aname.Text, ParseExpr()));
+                        if (!Accept(TokenKind.Comma)) break;
+                    }
+                    Expect(TokenKind.RParen, "')'");
                 }
-                Expect(TokenKind.RParen, "')'");
-            }
-            string? area = null;
-            var areaPos = default(SourcePos);
-            if (Accept(TokenKind.At))
-            {
-                var areaName = Expect(TokenKind.Identifier, "the name of an overlay area after '@'");
-                area = areaName.Text;
-                areaPos = areaName.Pos;
-            }
-            imports.Add(new ImportDecl(name.Pos, name.Text) { Args = args, Area = area, AreaPos = areaPos });
-            ExpectEndOfStatement();
+                string? area = null;
+                var areaPos = default(SourcePos);
+                if (Accept(TokenKind.At))
+                {
+                    var areaName = Expect(TokenKind.Identifier, "the name of an overlay area after '@'");
+                    area = areaName.Text;
+                    areaPos = areaName.Pos;
+                }
+                imports.Add(new ImportDecl(name.Pos, name.Text) { Args = args, Area = area, AreaPos = areaPos });
+                ExpectEndOfStatement();
+            });
             SkipTerminators();
         }
         // Constants may come before the memory block, so its ranges can use them (spec 8.4).
         while (At(TokenKind.Const))
         {
-            if (PeekAt(1).Kind == TokenKind.Fn) constFns.Add(ParseConstFn());
-            else consts.Add(ParseConst());
+            Recover(() =>
+            {
+                if (PeekAt(1).Kind == TokenKind.Fn) constFns.Add(ParseConstFnWhole());
+                else consts.Add(ParseConst());
+            });
             SkipTerminators();
         }
         MemoryDecl? memory = null;
         if (IsMemoryBlock())
         {
-            memory = ParseMemory();
+            Recover(() => memory = ParseMemory());
             SkipTerminators();
         }
         var exports = new List<ExportName>();
@@ -88,19 +109,31 @@ public sealed partial class Parser
         var privateNames = new HashSet<string>();
         while (!At(TokenKind.Eof))
         {
-            if (At(TokenKind.Private))
+            Recover(() =>
             {
-                var p = Advance();
-                if (!(Current.Kind is TokenKind.Const or TokenKind.Var or TokenKind.Linear or TokenKind.Struct or TokenKind.Data or TokenKind.Fn
-                      or TokenKind.Interrupt or TokenKind.Noinit or TokenKind.Volatile or TokenKind.Inline || IsIndexedWord() || (At(TokenKind.Asm) && PeekAt(1).Kind == TokenKind.Fn)))
-                    throw new CompileError(p.Pos, $"'private' goes before a declaration (const, var, data, struct or fn); found {Describe(Current)}");
-                privateNames.Add(ParseDeclaration());
-            }
-            else
-                ParseDeclaration();
+                if (At(TokenKind.Private))
+                {
+                    var p = Advance();
+                    if (!(Current.Kind is TokenKind.Const or TokenKind.Var or TokenKind.Linear or TokenKind.Struct or TokenKind.Data or TokenKind.Fn
+                          or TokenKind.Interrupt or TokenKind.Noinit or TokenKind.Volatile or TokenKind.Inline || IsIndexedWord() || (At(TokenKind.Asm) && PeekAt(1).Kind == TokenKind.Fn)))
+                        throw new CompileError(p.Pos, $"'private' goes before a declaration (const, var, data, struct or fn); found {Describe(Current)}");
+                    privateNames.Add(ParseDeclaration());
+                }
+                else
+                    ParseDeclaration();
+            });
             SkipTerminators();
         }
-        return new ProgramSyntax(consts, globals, functions) { Header = header, Asserts = asserts, Imports = imports, Memory = memory, Exports = exports, ExportTable = exportTable, Structs = structs, PrivateNames = privateNames, ConstFns = constFns };
+        return new ProgramSyntax(consts, globals, functions) { Header = header, Asserts = asserts, Imports = imports, Memory = memory, Exports = exports, ExportTable = exportTable, Structs = structs, PrivateNames = privateNames, ConstFns = constFns, BrokenNames = brokenNames, HasSyntaxErrors = _failures > 0 };
+
+        // A const fn with an error in its body is dropped whole, since its body would run at compile time.
+        FnDecl ParseConstFnWhole()
+        {
+            int failures = _failures;
+            var d = ParseConstFn();
+            if (_failures > failures) throw new FollowOnError();
+            return d;
+        }
 
         // Parses one top-level declaration and returns its name.
         string ParseDeclaration()
@@ -151,7 +184,7 @@ public sealed partial class Parser
                     throw new CompileError(Current.Pos, "The memory block goes after the imports and constants, before other declarations, and there is only one");
                 case TokenKind.Identifier when IsIndexedWord():
                 { var d = ParseIndexedVar(); globals.Add(d); return d.Name; }
-                case TokenKind.Const when PeekAt(1).Kind == TokenKind.Fn: { var d = ParseConstFn(); constFns.Add(d); return d.Name; }
+                case TokenKind.Const when PeekAt(1).Kind == TokenKind.Fn: { var d = ParseConstFnWhole(); constFns.Add(d); return d.Name; }
                 case TokenKind.Const: { var d = ParseConst(); consts.Add(d); return d.Name; }
                 case TokenKind.Var: { var d = ParseVar(); globals.Add(d); return d.Name; }
                 case TokenKind.Linear: { var d = ParseLinearVar(); globals.Add(d); return d.Name; }
