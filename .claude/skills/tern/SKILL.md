@@ -32,7 +32,7 @@ the compiler is. The standard library is in `lib/` next to it.
 | Command | What it does |
 |---|---|
 | `tern game.tern` | compile: writes `game.prg`, `game.lst` (listing: every source line with its addresses, bytes and cycles), `game.vs` (VICE labels), `game.lines` (bytes and cycles per source line) and prints the memory report |
-| `tern --json game.tern` | the same, with the result and every error as JSON: `file`, `line`, `column`, `message`, `suggestion` |
+| `tern --json game.tern` | the same, with the result and every error and warning as JSON: `file`, `line`, `column`, `severity`, `message`, `suggestion` |
 | `tern run game.tern` | compile and run in the built-in emulator until `main` returns; `--dump name` shows a variable, `--screen` the screen as text, `--profile` the cycles of each function and source line; `--set '$DC00=$7B'` writes a byte before the run |
 | `tern bench a.tern b.tern` | run each version and compare bytes and cycles; `--fn f` measures one function (a module's function with its module: `--fn ship.move`); `--code '...'` measures statements as the body of `main`, after `--decl '...'` lines |
 
@@ -164,6 +164,57 @@ $ tern --json broken.tern
 }
 ```
 
+Warnings are for code that does nothing; they never stop the build:
+
+```tern warning
+// tidy.tern
+import text
+
+var score: u8
+
+fn old_draw() { }
+
+fn main() {
+    var temp: u8 = 0
+    for i in 0..3 { score += 1 }
+    return
+    score = 0
+}
+```
+
+```text
+tidy.tern:2:8: warning: 'text' is imported but not used. Remove the import
+tidy.tern:6:1: warning: 'old_draw' is never used. Remove it, or start its name with '_' to keep it
+tidy.tern:9:5: warning: 'temp' is never used. Remove it, or start its name with '_' to keep it
+tidy.tern:10:5: warning: 'i' is never used. Write '_' as the loop variable
+tidy.tern:12:5: warning: This statement is never reached, since the 'return' on line 11 ends the function. Remove it
+5 warnings
+...
+```
+
+- **Unused local**: a local, `const` or `for` variable that is never read. One that is only
+  written (`x = 1`, `x += 1`, `buf[i] = 0`) counts as unused.
+- **Unused declaration**: a function, global, constant, `data`, struct or `const fn` of the main
+  file, or a `private` one of a module, named nowhere in the program (Tern code or assembly). A
+  use inside an unused function counts, so removing one function can bring a warning for what only
+  it used. `main`, exports, globals at a fixed address (`@ $D020`, `@ zp`), parameters, fields and
+  public module declarations are never warned, nor is anything in the library.
+- **Unused import**: a file imports a module and names nothing of it. An import that sets module
+  parameters (`import sprites(COUNT = 40)`) is not warned.
+- **Unreachable statement**: one after `return`, `break`, `continue`, a `while true` with no `break`
+  of its own, or an `if`/`else` (a `match` with `_`) none of whose branches finishes. Conditions are
+  not evaluated: `if DEBUG { return }` finishes, and so does an `asm` block. One warning per block.
+
+A name starting with `_` (`var _spare: u8`, `fn _dump()`) is kept on purpose and never warned. Warnings
+come only when there are no check errors, listed by place with any later error ("1 error, 2
+warnings"); `--max-errors` counts errors only. With `--json` a warning has `"severity": "warning"`,
+and `ok` stays true. `--no-warnings` turns them off, `--warnings-as-errors` makes each an error that
+stops the build. `tern run` reports them; `tern bench` does not.
+
+The report printed after a compile also lists the functions with memory reachable from two roots,
+with their roots: information, not a warning (see "A function reached from `main` and from an
+interrupt handler" in section 3).
+
 Where the cycles go: `--profile` lists each function, and each source line with its bytes, the
 cycles of its instructions once each (`+` when a branch or page crossing can add more), how often it
 ran and the cycles it took in the run. The same table without the run counts is in `count.lines`.
@@ -212,7 +263,8 @@ Functions (cycles include the functions they call):
 - **A function reached from `main` and from an interrupt handler** (two roots) compiles, with one
   frame for both: if the interrupt lands while main is inside it, main's call goes on with the
   handler's values. Call it in main with interrupts off, make it an `inline fn`, give it no memory
-  of its own, or write a second one for the handler. A global used by both becomes volatile. A
+  of its own, or write a second one for the handler. The report lists such functions under
+  "Functions with memory reachable from two roots". A global used by both becomes volatile. A
   module's `private` variable used from both is an error: `math.mul8`'s work bytes and `random`'s
   state are private, so a handler cannot call them while main does.
 - **Inside `for ... using X`, only routines that keep X may be called** (`keeps X`); likewise Y.

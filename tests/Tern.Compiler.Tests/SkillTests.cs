@@ -14,7 +14,8 @@ public class SkillCollection;
 /// <item>a <c>```tern</c> block is written to the file its first line names (<c>// name.tern</c>), or
 /// <c>example.tern</c> (a name may have a folder: <c>// alt/ship.tern</c>); with <c>fn main</c> or <c>export</c> it
 /// must compile with no warnings, otherwise it is a module, which a program compiled after it (a block or a command) must import. A <c>```tern error</c> block must not compile, and the <c>```text</c> block after it
-/// is what <c>tern name.tern</c> prints.</item>
+/// is what <c>tern name.tern</c> prints. A <c>```tern warning</c> block must compile with warnings, and the <c>```text</c>
+/// block after it is what <c>tern name.tern</c> prints.</item>
 /// <item>a <c>```console</c> block holds commands (<c>$ tern ...</c>) each followed by its output; a line
 /// <c>...</c> stands for any number of lines.</item>
 /// <item>a <c>```lst</c> block's lines appear one after another in the listing of the last program compiled.</item>
@@ -98,7 +99,7 @@ public class SkillTests
                     File.WriteAllText(name, string.Join("\n", block.Lines) + "\n");
                     string text = string.Join("\n", block.Lines);
                     bool program = Regex.IsMatch(text, @"^\s*fn main\(", RegexOptions.Multiline) || Regex.IsMatch(text, @"^\s*export\b", RegexOptions.Multiline);
-                    if (!program && block.Info != "tern error") modules[Path.GetFullPath(name)] = where;
+                    if (!program && block.Info is not ("tern error" or "tern warning")) modules[Path.GetFullPath(name)] = where;
                     if (block.Info == "tern error")
                     {
                         var (code, output) = Tern(["tern", name]);
@@ -106,6 +107,20 @@ public class SkillTests
                         if (code == 0) problems.Add($"{where}: {name} compiles, but the block is marked 'tern error'");
                         else if (next is null || next.Language != "text") problems.Add($"{where}: a 'tern error' block needs a 'text' block after it with the error; it is:\n{string.Join("\n", output)}");
                         else Compare(next, output);
+                        if (next?.Language == "text") b++;
+                    }
+                    else if (block.Info == "tern warning")
+                    {
+                        var (code, output) = Tern(["tern", name]);
+                        var next = b + 1 < blocks.Count ? blocks[b + 1] : null;
+                        if (code != 0 || !output.Any(l => l.Contains(": warning: "))) problems.Add($"{where}: a 'tern warning' block must compile with warnings; it gives:\n{string.Join("\n", output)}");
+                        else if (next is null || next.Language != "text") problems.Add($"{where}: a 'tern warning' block needs a 'text' block after it with the output; it is:\n{string.Join("\n", output)}");
+                        else
+                        {
+                            Compare(next, output);
+                            lastProgram = name;
+                            Compiled(name);
+                        }
                         if (next?.Language == "text") b++;
                     }
                     else if (program)

@@ -316,10 +316,13 @@ public sealed partial class Checker
                 Inner(statements[i], warn);
                 if (Ends(statements[i]) is not { } why) continue;
                 if (i + 1 < statements.Count)
-                    warn(statements[i + 1].Pos, $"This statement is never reached, since {why}. Remove it");
+                    warn(Start(statements[i + 1]), $"This statement is never reached, since {why}. Remove it");
                 return;
             }
         }
+
+        /// <summary>Where a statement starts: an assignment's position is its operator's.</summary>
+        private static SourcePos Start(Stmt s) => s is AssignStmt a ? a.Target.Pos : s.Pos;
 
         /// <summary>Checks the blocks inside a statement.</summary>
         private static void Inner(Stmt s, Action<SourcePos, string> warn)
