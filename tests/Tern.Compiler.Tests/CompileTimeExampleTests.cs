@@ -111,7 +111,7 @@ public sealed class CompileTimeExampleTests
                 {{routine}}()
             }
             """;
-        var plain = Run.Program(Program("cycle_plain"));
+        var plain = Run.Program(Program("_cycle_plain"));
         var unrolled = Run.Program(Program("cycle_unrolled"));
         Assert.Equal(plain.Ram.Bytes.AsSpan(0xD800, 1000).ToArray(), unrolled.Ram.Bytes.AsSpan(0xD800, 1000).ToArray());
         for (int row = 0; row < 25; row++)

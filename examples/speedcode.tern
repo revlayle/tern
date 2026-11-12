@@ -2,7 +2,8 @@
 // colour RAM row moves one column left, its first colour wrapping to the end,
 // except the text rows. Two versions of the same routine:
 //
-// - cycle_plain: Tern loops over the rows and the columns, through a pointer.
+// - _cycle_plain: Tern loops over the rows and the columns, through a pointer.
+//   main does not call it; the '_' keeps it without a warning (unused), for comparison.
 // - cycle_unrolled: a generator (a const fn with emit) writes one lda / sta
 //   pair per row inside a loop over the columns, with the row addresses as
 //   constants: no row loop, no pointer, no (p),y.
@@ -10,10 +11,10 @@
 // tern bench, on a frame that moves the colours (everything above main is the
 // declarations; run in examples/):
 //   D="$(sed '/^fn main/,$d' speedcode.tern)"
-//   tern bench --decl "$D" --code 'tick = 1; cycle_plain()' --fn cycle_plain
+//   tern bench --decl "$D" --code 'tick = 1; _cycle_plain()' --fn _cycle_plain
 //   tern bench --decl "$D" --code 'tick = 1; cycle_unrolled()' --fn cycle_unrolled
 //
-//   cycle_plain:     66 bytes, 29,537 cycles
+//   _cycle_plain:    66 bytes, 29,537 cycles
 //   cycle_unrolled: 422 bytes,  8,697 cycles
 // A PAL frame gives the CPU at most about 19,000 cycles, so the plain version
 // cannot move the colours every frame; the unrolled one takes under half a frame,
@@ -53,7 +54,7 @@ const fn rows_except(skip: [int; _]) -> [int; _] {
 data rows: [u8; _] = rows_except([0, 12, 24])
 data row_colors: [ptr u8; 25] = [c64.COLOR + i * 40 for i in 0..25]
 
-fn cycle_plain() {
+fn _cycle_plain() {
     tick -= 1
     if tick != 0 { return }
     tick = SPEED
@@ -67,7 +68,7 @@ fn cycle_plain() {
     }
 }
 
-// The same work as cycle_plain, unrolled over the rows. 'buffer' is where the
+// The same work as _cycle_plain, unrolled over the rows. 'buffer' is where the
 // first colours are kept (addr() of a variable the compiler places); 'done' is
 // the end of the calling block, where it goes on a frame that does not move.
 const fn cycle_rows(which: [int; _], buffer: label, done: label) {

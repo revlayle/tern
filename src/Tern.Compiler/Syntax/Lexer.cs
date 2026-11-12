@@ -25,6 +25,16 @@ public sealed class CompileError(SourcePos pos, string message) : Exception($"{p
 
     /// <summary><c>--max-errors</c> stopped the compile: more errors were not reported.</summary>
     public bool MoreNotReported { get; internal set; }
+
+    /// <summary>A warning (spec 13): code that does nothing. Never thrown; it does not stop the build.</summary>
+    public bool IsWarning { get; init; }
+
+    /// <summary>
+    /// The errors in <see cref="All"/> and the warnings found before a later stage failed, sorted by
+    /// place (spec 13). Just <see cref="All"/> when there are no warnings.
+    /// </summary>
+    public IReadOnlyList<CompileError> WithWarnings { get => _withWarnings ?? All; internal set => _withWarnings = value; }
+    private IReadOnlyList<CompileError>? _withWarnings;
 }
 
 public enum TokenKind

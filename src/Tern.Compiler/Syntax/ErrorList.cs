@@ -24,15 +24,17 @@ public sealed class ErrorList(int? max = null)
         if (_seen.Add((e.Pos, e.Description))) _errors.Add(e);
     }
 
+    /// <summary>Errors or warnings sorted by place. A file not noted (none today) goes last; the same place keeps the order given.</summary>
+    public List<CompileError> Sort(IEnumerable<CompileError> errors) => errors
+        .OrderBy(e => _files.TryGetValue(e.Pos.File ?? "", out int i) ? i : int.MaxValue)
+        .ThenBy(e => e.Pos.Line).ThenBy(e => e.Pos.Column)
+        .ToList();
+
     /// <summary>Throws the first error, carrying all of them in order, if there is any.</summary>
     public void ThrowIfAny()
     {
         if (_errors.Count == 0) return;
-        // A file not noted (none today) goes last. OrderBy is stable: the same place keeps the order found.
-        var sorted = _errors
-            .OrderBy(e => _files.TryGetValue(e.Pos.File ?? "", out int i) ? i : int.MaxValue)
-            .ThenBy(e => e.Pos.Line).ThenBy(e => e.Pos.Column)
-            .ToList();
+        var sorted = Sort(_errors);
         bool more = max is int m && sorted.Count > m;
         if (more) sorted.RemoveRange(max!.Value, sorted.Count - max.Value);
         var first = sorted[0];

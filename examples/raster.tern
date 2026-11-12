@@ -16,7 +16,6 @@ import c64
 import text
 
 const FIRST_LINE = 50
-const BAND = 24
 
 var band: u8
 var frames: u8
