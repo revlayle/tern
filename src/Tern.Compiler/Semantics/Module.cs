@@ -33,7 +33,8 @@ public sealed class Module
 public static class ModuleLoader
 {
     /// <returns>All files, each module before the files that import it; the main file is last.</returns>
-    public static List<Module> Load(string source, string? sourcePath, Platform platform, string libraryDirectory)
+    /// <param name="errors">Takes every error, and the loader goes on without a module it cannot load (spec 13). Null: the first error is thrown.</param>
+    public static List<Module> Load(string source, string? sourcePath, Platform platform, string libraryDirectory, ErrorList? errors = null)
     {
         var main = new Module
         {
@@ -41,7 +42,7 @@ public static class ModuleLoader
             Path = sourcePath,
             Directory = System.IO.Path.GetDirectoryName(System.IO.Path.GetFullPath(sourcePath ?? "x")) ?? ".",
             Source = source,
-            Syntax = Parser.Parse(source, sourcePath),
+            Syntax = Parser.Parse(source, sourcePath, errors),
         };
         var loaded = new Dictionary<string, Module>();
         var order = new List<Module>();
@@ -49,6 +50,20 @@ public static class ModuleLoader
         void Visit(Module m)
         {
             foreach (var import in m.Syntax.Imports)
+            {
+                try { Import(m, import); }
+                catch (CompileError e) when (errors is not null)
+                {
+                    // Uses of the module add no errors of their own.
+                    errors.Add(e);
+                    m.Syntax.BrokenNames.Add((import.Name, import.Pos));
+                }
+            }
+            order.Add(m);
+        }
+
+        void Import(Module m, ImportDecl import)
+        {
             {
                 if (import.Area is not null && !m.IsMain)
                     throw new CompileError(import.AreaPos,
@@ -79,7 +94,7 @@ public static class ModuleLoader
                         Path = path,
                         Directory = System.IO.Path.GetDirectoryName(path)!,
                         Source = text,
-                        Syntax = Parser.Parse(text, path),
+                        Syntax = Parser.Parse(text, path, errors),
                     };
                     // Registered before its imports are visited, so modules may import each other.
                     loaded[import.Name] = module;
@@ -88,7 +103,6 @@ public static class ModuleLoader
                 if (m.IsMain) module.ImportedBy = import;
                 m.Imports[import.Name] = module;
             }
-            order.Add(m);
         }
 
         Visit(main);
@@ -134,10 +148,10 @@ public static class ModuleLoader
             foreach (var dir in System.IO.Directory.GetDirectories(library))
                 if (File.Exists(System.IO.Path.Combine(dir, file)))
                     throw new CompileError(import.Pos,
-                        $"'{import.Name}' is a module for the {System.IO.Path.GetFileName(dir)} platform; this program is compiled for {platform.Name}");
+                        $"'{import.Name}' is a module for the {System.IO.Path.GetFileName(dir)} platform; this program is compiled for {platform.Name}. Remove the import, or use a module for {platform.Name}");
 
         throw new CompileError(import.Pos,
-            $"Cannot find module '{import.Name}': there is no {file} in the library ({library}) or in {importer.Directory}");
+            $"Cannot find module '{import.Name}': there is no {file} in the library ({library}) or in {importer.Directory}. Check the spelling, or put {file} next to the importing file");
     }
 
     /// <summary>Whether a folder is the library or one of its platform folders.</summary>

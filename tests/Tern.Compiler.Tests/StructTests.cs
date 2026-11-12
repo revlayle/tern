@@ -586,7 +586,7 @@ public class StructTests
     [InlineData(P + "fn f() -> Point { }\nfn main() { }", "A function cannot return a struct")]
     [InlineData(P + "var ps: [Point; 4]\nvar n: u8\nfn main() { n = ps[1] }", "A struct cannot be used as a value")]
     // Fields
-    [InlineData(P + "var a: Point\nfn main() { a.z = 1 }", "Struct 'Point' has no field 'z'. Its fields: x, y")]
+    [InlineData(P + "var a: Point\nfn main() { a.z = 1 }", "Struct 'Point' has no field 'z'. Use one of its fields: x, y")]
     [InlineData(P + "var p: ptr Point\nfn main() { p.z = 1 }", "Struct 'Point' has no field 'z'")]
     [InlineData(P + "var p: ptr u8\nfn main() { p.x = 1 }", "Unknown member '.x'")]
     [InlineData(E + "var a: Enemy\nfn main() { a.name[4] = 1 }", "Index 4 is past the end of 'a.name'")]

@@ -26,9 +26,9 @@ public sealed record Diagnostic(string File, int Line, int Column, string Severi
     /// </summary>
     private static readonly HashSet<string> FixVerbs = new(StringComparer.OrdinalIgnoreCase)
     {
-        "Add", "Assign", "Call", "Change", "Check", "Choose", "Compare", "Convert", "Declare", "Export", "Fill", "Free", "Give",
-        "Import", "Install", "Join", "Keep", "Leave", "Make", "Mark", "Match", "Move", "Pass", "Place", "Prefer", "Put",
-        "Read", "Remove", "Rename", "Replace", "Return", "Set", "Split", "Store", "Take", "Use", "Write",
+        "Add", "Assign", "Call", "Change", "Check", "Choose", "Compare", "Convert", "Declare", "Define", "Export", "Fill", "Free", "Give",
+        "Import", "Install", "Join", "Keep", "Leave", "Make", "Mark", "Match", "Move", "Name", "Pass", "Place", "Prefer", "Put",
+        "Read", "Remove", "Rename", "Replace", "Return", "Separate", "Set", "Split", "Start", "Store", "Take", "Use", "Write",
     };
 
     public static Diagnostic From(CompileError e, string defaultFile)
@@ -39,6 +39,11 @@ public sealed record Diagnostic(string File, int Line, int Column, string Severi
             CalledFrom = e.CalledFrom is { } call ? new Location(call.File ?? defaultFile, call.Line, call.Column) : null,
         };
     }
+
+    /// <summary>The line that ends the text output of a failed compile: "3 errors" (spec 13).</summary>
+    /// <param name="more">--max-errors stopped the compile before every error was found.</param>
+    public static string Count(int count, bool more, int maxErrors) =>
+        (count == 1 ? "1 error" : $"{count} errors") + (more ? $"; more errors were not reported (--max-errors {maxErrors})" : "");
 
     /// <summary>Splits an error's text before the first sentence that tells how to fix it.</summary>
     public static (string Message, string? Suggestion) Split(string text)

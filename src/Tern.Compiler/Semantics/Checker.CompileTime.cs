@@ -31,7 +31,7 @@ public sealed partial class Checker : ICompileTimeHost
             if (p.UsingRegister is not null)
                 throw new CompileError(p.Pos, $"A const fn runs at compile time, so '{p.Name}' is in no register. Remove 'using {p.UsingRegister}'");
             if (fn.Parameters.Any(x => x.Name == p.Name))
-                throw new CompileError(p.Pos, $"Parameter '{p.Name}' is declared twice");
+                throw new CompileError(p.Pos, $"Parameter '{p.Name}' is declared twice. Rename one of them");
             fn.Parameters.Add((p.Name, ConstFnType(p.Type)));
         }
         if (decl.ReturnUsing is not null)
@@ -116,7 +116,7 @@ public sealed partial class Checker : ICompileTimeHost
                 case AssignStmt: break;
                 case ExprStmt e:
                     if (e.Expr is not CallExpr)
-                        throw new CompileError(e.Pos, "Only a function call can be used as a statement");
+                        throw new CompileError(e.Pos, "Only a function call can be used as a statement. Assign the value to a variable, or remove it");
                     break;
                 case BlockStmt b: Block(b); break;
                 case IfStmt i:
@@ -142,13 +142,13 @@ public sealed partial class Checker : ICompileTimeHost
                     foreach (var arm in m.Arms) Block(arm.Body);
                     break;
                 case BreakStmt or ContinueStmt:
-                    if (_loops == 0) throw new CompileError(s.Pos, "'break' and 'continue' must be inside a loop");
+                    if (_loops == 0) throw new CompileError(s.Pos, "'break' and 'continue' must be inside a loop. Use 'return' to leave the function");
                     break;
                 case ReturnStmt r:
                     if (fn.ReturnType is null && r.Value is not null)
                         throw new CompileError(r.Pos, $"'{fn.Name}' returns no value. Remove the value, or give it a return type, e.g. 'const fn {fn.Declaration.Name}(...) -> int'");
                     if (fn.ReturnType is { } t && r.Value is null)
-                        throw new CompileError(r.Pos, $"'{fn.Name}' must return {Interpreter.Describe(t)} value");
+                        throw new CompileError(r.Pos, $"'{fn.Name}' must return {Interpreter.Describe(t)} value. Write the value after 'return'");
                     break;
                 case EmitStmt e:
                     if (fn.ReturnType is not null)
@@ -161,7 +161,7 @@ public sealed partial class Checker : ICompileTimeHost
                 case AsmStmt a:
                     throw new CompileError(a.Pos, "A const fn runs at compile time, so it cannot run assembly. Use 'emit { ... }' to generate assembly where the const fn is called");
                 default:
-                    throw new CompileError(s.Pos, "This statement cannot run at compile time");
+                    throw new CompileError(s.Pos, "This statement cannot run at compile time. Remove it from the const fn");
             }
         }
     }
@@ -194,7 +194,7 @@ public sealed partial class Checker : ICompileTimeHost
             $"{c.Name}() works only at compile time. Use it in a constant, in data, in a global's initial value or in a const fn"),
         NameExpr n => new CompileError(e.Pos,
             $"'{n.Name}' is a real number, which exists only at compile time. Use it in a constant or a const fn, e.g. 'const {n.Name}_40 = round({n.Name} * 40)'"),
-        _ => new CompileError(e.Pos, "This value exists only at compile time"),
+        _ => new CompileError(e.Pos, "This value exists only at compile time. Use it in a const, data or a const fn"),
     };
 
     /// <summary>
@@ -291,7 +291,7 @@ public sealed partial class Checker : ICompileTimeHost
         };
 
     private CtArray CompileTimeArray(Expr e) => CompileTimeValue(e) as CtArray
-        ?? throw new CompileError(e.Pos, "This value is not an array");
+        ?? throw new CompileError(e.Pos, "This value is not an array. Use a list, a string or a const fn that returns an array");
 
     /// <summary>
     /// A compile-time array as the bytes of a table (spec 4.1): the length is checked, and each element
@@ -300,7 +300,7 @@ public sealed partial class Checker : ICompileTimeHost
     private static byte[] ArrayBytes(CtArray array, TernType type, SourcePos pos)
     {
         if (array.Items.Length != type.Length)
-            throw new CompileError(pos, $"Expected {type.Length} values, found {array.Items.Length}");
+            throw new CompileError(pos, $"Expected {type.Length} values, found {array.Items.Length}. Change the length to {array.Items.Length}, or write '_' to take it from the value");
         var element = type.Element!;
         if (!element.IsScalar)
             throw new CompileError(pos, $"A compile-time array holds numbers or bools, so it cannot fill a table of {element}. Use a table of numbers");
@@ -311,7 +311,7 @@ public sealed partial class Checker : ICompileTimeHost
             var item = array.Items[k];
             if (element.Kind == TypeKind.Bool)
                 value = item is CtBool b ? (b.Value ? 1 : 0)
-                    : throw new CompileError(pos, $"Element {k} is {Interpreter.Describe(item.Type)}, but the table holds bool");
+                    : throw new CompileError(pos, $"Element {k} is {Interpreter.Describe(item.Type)}, but the table holds bool. Use true and false");
             else
             {
                 value = item switch
@@ -319,10 +319,10 @@ public sealed partial class Checker : ICompileTimeHost
                     CtInt i => i.Value,
                     CtReal r => throw new CompileError(pos,
                         $"Element {k} is the real number {r}, which needs rounding to fit in {element}. Use round(x), floor(x), ceil(x) or trunc(x)"),
-                    _ => throw new CompileError(pos, $"Element {k} is {Interpreter.Describe(item.Type)}, but the table holds {element}"),
+                    _ => throw new CompileError(pos, $"Element {k} is {Interpreter.Describe(item.Type)}, but the table holds {element}. Use round() or floor() for a real number"),
                 };
                 if (value < element.MinValue || value > element.MaxValue)
-                    throw new CompileError(pos, $"Element {k} is {value}, which does not fit in {element} ({element.MinValue} to {element.MaxValue})");
+                    throw new CompileError(pos, $"Element {k} is {value}, which does not fit in {element} ({element.MinValue} to {element.MaxValue}). Use '& $FF' to keep the low byte, or a wider element type");
             }
             bytes.Add((byte)value);
             if (element.Size == 2) bytes.Add((byte)(value >> 8));
@@ -346,7 +346,7 @@ public sealed partial class Checker : ICompileTimeHost
         switch (LookupIn(module, name))
         {
             case null when FunctionDeclaredIn(module ?? _module, name):
-                throw new CompileError(pos, $"'{name}' is a function, not a value");
+                throw new CompileError(pos, $"'{name}' is a function, not a value. Use addr({name}) for its address");
             case null: return null;
             case ConstSymbol { Real: { } real }: return new CtReal(real);
             case ConstSymbol c: return c.Type.Kind == TypeKind.Bool ? CtBool.Of(c.Value != 0) : new CtInt(c.Value);
@@ -358,9 +358,9 @@ public sealed partial class Checker : ICompileTimeHost
             case ConstFnSymbol:
                 throw new CompileError(pos, $"'{name}' is a const fn; call it with ()");
             case FunctionSymbol:
-                throw new CompileError(pos, $"'{name}' is a function, not a value");
+                throw new CompileError(pos, $"'{name}' is a function, not a value. Use addr({name}) for its address");
             default:
-                throw new CompileError(pos, $"'{name}' is a struct type, not a value");
+                throw new CompileError(pos, $"'{name}' is a struct type, not a value. Use sizeof({name}) for its size");
         }
     }
 
@@ -371,7 +371,7 @@ public sealed partial class Checker : ICompileTimeHost
         null => null,
         ConstFnSymbol f => f,
         FunctionSymbol => throw new CompileError(pos, $"'{name}' runs on the 6502, so compile-time code cannot call it. Use a const fn"),
-        var other => throw new CompileError(pos, $"'{name}' is a {KindName(other)}, not a function"),
+        var other => throw new CompileError(pos, $"'{name}' is a {KindName(other)}, not a function. Remove the ()"),
     };
 
     /// <summary>Whether <paramref name="name"/> (perhaps <c>module.name</c>) is a function of the program, declared or not yet.</summary>

@@ -196,7 +196,7 @@ public sealed class ModuleTests : IDisposable
             DefaultEncoding = Platform.C64.DefaultEncoding,
         };
         var e = Assert.Throws<CompileError>(() => CompileMain("import hw\nfn main() { }", other));
-        Assert.Equal("'hw' is a module for the c64 platform; this program is compiled for other", e.Description);
+        Assert.Equal("'hw' is a module for the c64 platform; this program is compiled for other. Remove the import, or use a module for other", e.Description);
     }
 
     [Fact]
@@ -241,7 +241,7 @@ public sealed class ModuleTests : IDisposable
     {
         Write(Src, "bad.tern", "fn f() {\n    x = 1\n}");
         var e = Assert.Throws<CompileError>(() => CompileMain("import bad\nfn main() { }"));
-        Assert.Equal("'x' is not declared", e.Description);
+        Assert.Equal("'x' is not declared. Check the spelling, or declare it", e.Description);
         Assert.Equal(new SourcePos(2, 5, Path.Combine(Src, "bad.tern")), e.Pos);
         Assert.StartsWith("bad.tern:2:5", e.Message);
     }
@@ -266,10 +266,10 @@ public sealed class ModuleTests : IDisposable
     [InlineData("import withmain\nfn main() { }", "Only the program's main file has 'fn main()'; 'withmain' is a module")]
     [InlineData("import util", "The program has no 'fn main()'")]
     // A missing import (review M4, finding 1).
-    [InlineData("fn main() { text.put(1, 2, 3) }", "'text' is not declared. To use the module text, add 'import text' at the top of the file")]
-    [InlineData("var x: u16\nfn main() { x = c64.SCREEN }", "'c64' is not declared. To use the module c64, add 'import c64' at the top of the file")]
-    [InlineData("fn main() { asm {\n jsr c64.chrout\n } }", "'c64' is not declared. To use the module c64, add 'import c64' at the top of the file")]
-    [InlineData("import util\nvar v: u8\nfn main() { v = other.f() }", "'other' is not declared. To use the module other, add 'import other'")]
+    [InlineData("fn main() { text.put(1, 2, 3) }", "'text' is not declared. Add 'import text' at the top of the file to use the module text")]
+    [InlineData("var x: u16\nfn main() { x = c64.SCREEN }", "'c64' is not declared. Add 'import c64' at the top of the file to use the module c64")]
+    [InlineData("fn main() { asm {\n jsr c64.chrout\n } }", "'c64' is not declared. Add 'import c64' at the top of the file to use the module c64")]
+    [InlineData("import util\nvar v: u8\nfn main() { v = other.f() }", "'other' is not declared. Add 'import other'")]
     [InlineData("var v: u8\nfn main() { v = nothing.lo }", "'nothing' is not declared")]
     public void Reports_errors(string source, string expected)
     {
@@ -385,7 +385,7 @@ public sealed class ModuleTests : IDisposable
         Write(Src, "b.tern", "const V = 1");
         Write(Src, "c.tern", "fn g() -> u8 { return b.V }");
         var e = Assert.Throws<CompileError>(() => CompileMain("import a\nimport c\nfn main() { }"));
-        Assert.Equal("'b' is not declared. To use the module b, add 'import b' at the top of the file", e.Description);
+        Assert.Equal("'b' is not declared. Add 'import b' at the top of the file to use the module b", e.Description);
     }
 
     [Fact]
@@ -423,11 +423,11 @@ public sealed class ModuleTests : IDisposable
     {
         Write(Lib, "m.tern", "var v: u8\nstruct S { x: u8 }");
         var e = Assert.Throws<CompileError>(() => CompileMain("import m\nstruct T { x: u8 @ m.v }\nfn main() { }"));
-        Assert.Equal("A field offset must be known at compile time", e.Description);
+        Assert.Equal("A field offset must be known at compile time. Use a number or a constant", e.Description);
         e = Assert.Throws<CompileError>(() => CompileMain("import m\nvar t: m.T\nfn main() { }"));
-        Assert.Equal("'m.T' is not declared", e.Description);
+        Assert.Equal("'m.T' is not declared. Check the spelling, or declare it in m", e.Description);
         e = Assert.Throws<CompileError>(() => CompileMain("var t: m.S\nfn main() { }"));
-        Assert.Equal("'m' is not declared. To use the module m, add 'import m' at the top of the file", e.Description);
+        Assert.Equal("'m' is not declared. Add 'import m' at the top of the file to use the module m", e.Description);
     }
 
     private const string Secret = """
@@ -496,7 +496,7 @@ public sealed class ModuleTests : IDisposable
     public void Private_goes_before_a_declaration()
     {
         var e = Assert.Throws<CompileError>(() => CompileMain("private import util\nfn main() { }"));
-        Assert.Equal("'private' goes before a declaration (const, var, data, struct or fn); found 'import'", e.Description);
+        Assert.Equal("'private' goes before a declaration (const, var, data, struct or fn); found 'import'. Write it at the start of the declaration it hides", e.Description);
     }
 
     [Fact]
@@ -516,7 +516,7 @@ public sealed class ModuleTests : IDisposable
         Write(Src, "secret.tern", Secret);
         Write(Src, "other.tern", "import secret\nfn go() { secret.helper() }");
         var e = Assert.Throws<CompileError>(() => CompileMain("import other\nfn main() { other.go() }"));
-        Assert.Equal("'secret.helper' is private to the module secret; only code in secret can use it", e.Description);
+        Assert.Equal("'secret.helper' is private to the module secret; only code in secret can use it. Remove 'private' there, or use another of its functions", e.Description);
         Assert.Equal("other.tern", Path.GetFileName(e.Pos.File));
     }
 }

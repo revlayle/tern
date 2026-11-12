@@ -92,7 +92,7 @@ public static class Allocator
             if (ZpNeeded() <= zpCapacity) return;
             var users = string.Join(", ", inZp.Select(v => $"{v.QualifiedName} ({v.Type.Size})"));
             throw new CompileError(added.First().Pos,
-                $"Zero page is full: {what} need {ZpNeeded()} bytes, {zpCapacity} are free. Users: {users}");
+                $"Zero page is full: {what} need {ZpNeeded()} bytes, {zpCapacity} are free. Users: {users}. Remove '@ zp' from some of them");
         }
         Require(placeable.Where(v => v.RequireZeroPage), "'@ zp' variables");
         Require(placeable.Where(v => v.ForcedZeroPage && !v.RequireZeroPage),

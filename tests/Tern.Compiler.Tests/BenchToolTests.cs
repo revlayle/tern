@@ -180,7 +180,7 @@ public class BenchToolTests
         Assert.Equal("variant   program  main bytes   calls     cycles  per call    zp  other", lines[0]);
         Assert.Matches(@"^code 1 +\d+ +\d+ +1 +\d+ +\d+ +0 +16$", lines[1]);
         Assert.Matches(@"^code 2 +\d+ +\d+ +1 +\d+ +\d+ +0 +16$", lines[2]);
-        Assert.Equal("code 3    error: line 1:8: 'q' is not declared", lines[3]);
+        Assert.Equal("code 3    error: line 1:8: 'q' is not declared. Check the spelling, or declare it", lines[3]);
         Assert.StartsWith("Memory (zp: zero page bytes", lines[4]);
         Assert.Matches(@"^  code 1: a \$[0-9A-F]{4} \[u8; 16\]$", lines[5]);
         Assert.Equal("Results:", lines[7]);

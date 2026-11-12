@@ -4,11 +4,27 @@ Owned by the coding session. Updated at the end of every coding session.
 
 ## Current
 
-- **Milestone:** Cleanup: split the large classes (roadmap, before M23). Done and reviewed (`docs/reviews/cleanup-split.md`: ready to merge, one suggestion, done).
-- **Branch:** `cleanup-split`, from `main` at `2a816df` (M22 follow-up 2 merged), with `main` merged in again for the review. 2861 compiler tests pass plus 36 CPU tests, the same as before. No benchmark changed (1254 / 350780); `SkillTests` pass.
-- **Next step:** `/merge cleanup-split`, before any other branch is opened. After the merge: M23 (doc comments and a language server). The spec session writes the guide's section on `const fn` and generators from the two examples.
+- **Milestone:** M23: several errors per compile (spec 13, decision 2026-11-12). Done and reviewed (`docs/reviews/m23.md`: ready to merge, four suggestions, all done).
+- **Branch:** `m23-errors`, from `main` at `aa45421` (cleanup merged), with `main` merged in again for the review. 2892 compiler tests pass plus 36 CPU tests. No benchmark changed (1254 / 350780); `SkillTests` pass.
+- **Next step:** `/merge m23-errors` (or a second look at the suggestions first). Questions 107-111 below are provisional choices for the spec session. After M23: the warnings analysis (spec session), then M24.
 
 ## Done
+
+- **M23, first review** (2026-11-12, `docs/reviews/m23.md`): ready to merge; all four suggestions done.
+  - Suggestion 4 (`ad3ec5e`): the "Going on after an error" section moved to the end of `Checker.cs`, so the `EntriesRoot` summary is on its constant again. Moved code only.
+  - Suggestion 1 (`6408b1d`): `pub fn helper()` and `let count` break their names: `Parser.DeclaredName` skips one word before `fn`/`var`/`const`/`data`/`struct` and takes the name after `let`, and the skip after a top-level error stops at such a line (`StartsCurrentDeclaration`). The error for the word itself is unchanged (habit errors would be a spec change).
+  - Suggestion 2 (`9aa54ca`): after an unclosed `(`, a line that starts no further right than the failed statement ends the skip, and after an error ends a statement in `ExpectEndOfStatement` (`_statementColumn`, restored when a block ends). Programs without errors parse as before.
+  - Suggestion 3 (`4cd2b19`): a local with a written type is declared with it when its initial value fails, so later statements using it are checked. One without a written type stays broken.
+
+- **M23: several errors per compile** (2026-11-12, branch `m23-errors`). Three commits.
+  - *Recovery* (`91c98f4`). `Syntax/ErrorList.cs`: the errors of a compile in the order found (the same message at the same place once), `ErrorLimitReached` for `--max-errors`, and `FollowOnError`, which stops a statement with no error of its own. `TernCompiler.Compile(..., maxErrors)` throws the first error; `CompileError.All` has every one and `MoreNotReported` says the limit stopped it. Without an `ErrorList`, `Parser.Parse`, `Lexer.Tokenize`, `ModuleLoader.Load` and `Checker.Check` throw the first error as before.
+    - Lexer: after an error, the rest of the line is skipped and an `Error` token left; the parser drops the statement holding it without an error of its own.
+    - Parser (`Parser.cs`, "Going on after an error"): a failed statement becomes an `ErrorStmt` (with the name of a `var`/`const` it declares), and parsing goes on after the next line break or `;` outside the braces the statement opened (`;` inside `( )`/`[ ]` does not count), or at the `}` that closes the block. A failed top-level declaration is skipped to the next line, outside braces, that starts a declaration; its name (and a failed import's) goes into `ProgramSyntax.BrokenNames`. A `const fn` with an error in its body is dropped whole. "Block is not closed" is reported once (not again for each block around it). After an error, a line that starts a declaration ends the statement before it (an unclosed `(` stops the lexer's line breaks). A line starting with `==` also drops the statement before it, which the checker would report too. `HasSyntaxErrors` silences "The program has no 'fn main()'".
+    - Module loader: an import that cannot be loaded is reported, and its name broken.
+    - Checker: `Recover` runs each declaration and statement check, reports its error and restores the state (scopes, loop registers, `_dead`, the module and function). `Declaring` also breaks the declaration's name: an `ErrorSymbol` in the file's scope, which `Lookup` turns into a `FollowOnError`. The same for a local, a failed import's module name, module parameters after a failed parameter value, and a name reported as not declared ("'x' is not declared" and "'f' is not a function" for an undeclared call), so each such name is reported once. A struct whose layout failed (`LayoutState` 3) and the regions of a failed memory block add no errors. Functions whose declaration failed are not checked. An `if`/`while` condition is checked on its own, so the branches are checked after an error in it. The call graph (recursion, roots, shared functions), lowering, allocation, code generation and layout run only without errors, and report one error.
+  - *Tools* (`c53c7f7`). Text output lists each error, then "3 errors" ("; more errors were not reported (--max-errors n)" when the limit stopped it). `--json` keeps its format, one entry per error. `--max-errors n` for `tern`, `tern run` and `tern bench`. `tern bench` lists every error of a variant (and their number when several); its JSON keeps `error` (the first) and adds `errors`. The skill says one compile lists every error, and its `broken.tern` has two.
+  - *Fix sentences* (`407a382`). `FixSentenceTests` reads every message in `src/Tern.Compiler` (`new CompileError(pos, ...)`, the interpreter's `Error(pos, ...)`, each `?:` branch on its own) and fails for one without a suggestion unless it is in `NoFix` with the reason. 317 had none: about 290 got a fix sentence; `Define`, `Name`, `Separate` and `Start` are new fix verbs; some fixes were reworded to start a sentence. `NoFix`: another error's text passed on with a note, the program's assert message, the parser's "Expected X, found Y" and "Expected an expression", "Expected T, found a number".
+  - Tests: `SeveralErrorsTests` (26: the roadmap's cases, syntax recovery, lexer errors, broken names of each kind, the CLI, `run` and `bench`), `FixSentenceTests` (2). Every existing error test gets its error first; tests quoting the old wording were updated.
 
 - **Cleanup, first review** (2026-11-11, `docs/reviews/cleanup-split.md`): ready to merge. Suggestion 1 done: `.gitignore` ignores the `.lines` files `tern` writes, in `examples/` and `tests/benchmarks/` (both levels), beside the `.prg`, `.lst` and `.vs` entries.
 
@@ -512,6 +528,11 @@ Including `jsr` and `rts`; from the tests.
 
 ## Known limitations and technical debt
 
+- M23: after an error in a `for` or `match` header, its body is not checked (an `if`/`while` body is). An error in an `asm` block, `match` arm, struct or memory block skips the rest of it: one error each.
+- M23: after an unclosed `(` or `[`, the lines of the statement that start further right than it are skipped with it (the lexer gives no line breaks inside brackets).
+- M23: a function whose signature has an error is not checked; its body's errors appear once the signature is fixed.
+- M23: a module that cannot be loaded is reported at each file that imports it.
+- M23: `tern --json` does not say that `--max-errors` left errors out (its format is kept); the text output does.
 - M22: an initial value that mixes `addr()` with compile-time code (`addr(buf) + round(1.5)`) is an error: the whole expression goes to the interpreter, which cannot take addresses. Write the offset as an int constant first.
 - M22: inside an expression computed by the interpreter, typed constants lose their type (`const W: u8 = 40`, then `const K = round(W * 1.5)` is an untyped constant). The value is exact either way.
 - M22: a struct field's array cannot take a compile-time array (`FieldBytes` wants a list literal); a table of structs cannot be built by a const fn (structs are not compile-time values, spec 4.1).
@@ -567,6 +588,14 @@ Not bugs; things to improve, mostly in M7 (optimizer).
 - `w = addr(map) - 1` (or `+`) into a 16-bit variable stores `addr(map)` and then subtracts at run time; `CodeGen.AddressBytes` could make it two `lda #` / `sta` pairs, as it already does for `.lo` / `.hi`.
 
 ## Questions for the spec session
+
+Questions 107-111 come from M23; each is built as described, provisionally.
+
+- **107: "A misspelled function name in its declaration gives one error"** (roadmap M23 tests). Read as: `fn updte()` with calls to `update()` gives one error, at the first call ("'update' is not a function"), not one per call. Built for every name reported as not declared: later uses in the same file add no errors. Is that the intended reading? (Also: an undeclared call still says "is not a function", now with "Check the spelling, or declare it".)
+- **108: "In the order found" is the checker's order, not the source order.** The checker declares constants, then functions, then globals, then checks bodies, so `var e: Enmy` on line 2 comes after `fn hit(p: ptr Enmy)` on line 4; lexer errors of a file come before its parser errors. Sorting by file and line would read more naturally; spec 13 says "in the order found". Keep, or sort?
+- **109: The call graph runs only without errors.** Recursion, two roots and the shared-function checks need the whole program, so they are reported like allocation errors: alone, once the others are fixed. Spec 13 lists only allocation, code generation and layout as later stages.
+- **110: "1 error" ends the text output too** (spec 13: "Text output ends with the number of errors"), as Clang does; every error example in the skill now ends with it. `tern bench` prints the count only when there are several errors, so its one-error lines are as before.
+- **111: errors that keep no fix sentence** (`FixSentenceTests.NoFix`): the parser's "Expected X, found Y" (it names what is expected), "Expected an expression, found X", "Expected T, found a number", an error's text passed on with a note, and the program's own assert message. Also "Expected u16, found bool" (two types that do not convert) has no suggestion: the fix depends on what was meant. Agree, or should these get one?
 
 Questions 104-106 were settled on 2026-11-11 (decisions.md) and are built in M22 follow-up 2. Questions 100-103 were settled on 2026-11-11 (decisions.md): as built; the additions (addresses and the calling block's `.label` as labels, the call's location in `tern --json`) are in the M22 follow-up. Questions 94-99 were settled on 2026-11-11 (decisions.md): 96, 98 and 99 as built; 94 (real constants), 95 (`offset()`) and 97 (`repeat()`) and the `for` direction rule are the M22 follow-up. Questions 89-93 were settled on 2026-11-10 (decisions.md): as built, except 92, built at the start of M22. Question 88 was settled on 2026-11-09 (as built). Questions 86 and 87 were settled on 2026-11-09 and are built. Questions 79-85 were settled on 2026-11-09 and are built. Questions 76-78 were settled on 2026-11-08 (decisions.md), as built.
 

@@ -126,7 +126,7 @@ public sealed partial class Interpreter
                 return new CtInt(m.Member == "lo" ? v & 0xFF : (v >> 8) & 0xFF);
             }
             case MemberExpr m:
-                throw Error(m.Pos, $"Unknown member '.{m.Member}'. In a const fn, use .lo and .hi of a number");
+                throw Error(m.Pos, $"Unknown member '.{m.Member}'. Use .lo and .hi of a number in a const fn");
             case CastExpr c:
                 throw Error(c.Pos, "'as' converts runtime types, which a const fn does not have. Use '& $FF' for 8-bit behavior, or round(x), floor(x), ceil(x) or trunc(x) for a real");
             case ArrayLiteralExpr a: return MakeArray(a.Elements.Select(Eval).ToList(), a.Elements.Select(x => x.Pos).ToList(), a.Pos);
@@ -139,7 +139,7 @@ public sealed partial class Interpreter
                     throw Error(l.Pos, $"'{l.Name}' is not a label of this block. Use a label the block places, e.g. '{l.Name}:'");
                 return new CtLabel(0, l.Pos) { BlockLabel = l.Name };
             default:
-                throw Error(e.Pos, "This is not a compile-time value");
+                throw Error(e.Pos, "This is not a compile-time value. Use numbers, reals, bools, arrays, constants and const fn calls");
         }
     }
 
@@ -151,7 +151,7 @@ public sealed partial class Interpreter
         {
             "PI" => new CtReal(Math.PI),
             "TAU" => new CtReal(Math.Tau),
-            _ => throw Error(n.Pos, $"'{n.Name}' is not declared"),
+            _ => throw Error(n.Pos, $"'{n.Name}' is not declared. Check the spelling, or declare it"),
         };
     }
 
@@ -269,9 +269,9 @@ public sealed partial class Interpreter
             case TokenKind.Plus when v is CtInt or CtReal: return v;
             case TokenKind.Tilde when v is CtInt i: return new CtInt(~i.Value);
             case TokenKind.Tilde:
-                throw Error(u.Pos, $"'~' needs an int, not {Describe(v.Type)}");
+                throw Error(u.Pos, $"'~' needs an int, not {Describe(v.Type)}. Use round() or floor() to make a real an int");
             default:
-                throw Error(u.Pos, $"'{(u.Op == TokenKind.Minus ? "-" : "+")}' needs a number, not {Describe(v.Type)}");
+                throw Error(u.Pos, $"'{(u.Op == TokenKind.Minus ? "-" : "+")}' needs a number, not {Describe(v.Type)}. Use '!' to negate a bool");
         }
     }
 
@@ -317,7 +317,7 @@ public sealed partial class Interpreter
                 case TokenKind.Greater: return CtBool.Of(l > r);
                 case TokenKind.GreaterEq: return CtBool.Of(l >= r);
                 case TokenKind.Slash or TokenKind.Percent when r == 0:
-                    throw Error(pos, "Division by zero");
+                    throw Error(pos, "Division by zero. Check the divisor");
                 case TokenKind.Shl or TokenKind.Shr when r is < 0 or > 63:
                     throw Error(pos, $"The shift count is {r}. Use a count from 0 to 63");
             }
@@ -339,7 +339,7 @@ public sealed partial class Interpreter
             case TokenKind.Minus: result = a - b; break;
             case TokenKind.Star: result = a * b; break;
             case TokenKind.Slash:
-                if (b == 0) throw Error(pos, "Division by zero");
+                if (b == 0) throw Error(pos, "Division by zero. Check the divisor");
                 result = a / b;
                 break;
             default:
@@ -361,7 +361,7 @@ public sealed partial class Interpreter
     {
         CtInt i => i.Value,
         CtReal => throw Error(pos, $"{what} is a real here, but needs an int. Use round(x), floor(x), ceil(x) or trunc(x)"),
-        _ => throw Error(pos, $"{what} is {Describe(v.Type)} here, but needs an int"),
+        _ => throw Error(pos, $"{what} is {Describe(v.Type)} here, but needs an int. Use round() or floor() to make a real an int"),
     };
 
     private bool Bool(CtValue v, SourcePos pos, string what) => v is CtBool b ? b.Value
@@ -400,7 +400,7 @@ public sealed partial class Interpreter
                 return new CtArray(a.Items.Select(x => Convert(x, type.Element, pos, $"An element of {char.ToLowerInvariant(what[0])}{what[1..]}")).ToArray(), type.Element);
         }
         if (v.Type.Kind != type.Kind)
-            throw Error(pos, $"{what} is {Describe(v.Type)}, but {Describe(type)} is expected");
+            throw Error(pos, $"{what} is {Describe(v.Type)}, but {Describe(type)} is expected. Change the value, or the declared type");
         return v.Copy();
     }
 
@@ -409,7 +409,7 @@ public sealed partial class Interpreter
     private CtValue Call(CallExpr c, bool statement)
     {
         if (!c.Name.Contains('.') && FindSlot(c.Name) is not null)
-            throw Error(c.Pos, $"'{c.Name}' is a variable, not a function");
+            throw Error(c.Pos, $"'{c.Name}' is a variable, not a function. Remove the ()");
         if (_host.ConstFn(Top.Module, c.Name, c.Pos) is { } fn)
         {
             var result = CallConstFn(fn, c, statement);
@@ -422,10 +422,10 @@ public sealed partial class Interpreter
             case "len":
             {
                 if (c.Args.Count != 1) throw Error(c.Pos, "len() takes one array. Pass the array, e.g. len(t)");
-                return Eval(c.Args[0]) is CtArray a ? new CtInt(a.Items.Length) : throw Error(c.Pos, "len() needs an array");
+                return Eval(c.Args[0]) is CtArray a ? new CtInt(a.Items.Length) : throw Error(c.Pos, "len() needs an array. Use sizeof() for the size of a type");
             }
             case "sizeof":
-                if (c.Args is not [NameExpr type]) throw Error(c.Pos, "sizeof() takes one type name, e.g. sizeof(Enemy)");
+                if (c.Args is not [NameExpr type]) throw Error(c.Pos, "sizeof() takes one type name. Write e.g. sizeof(Enemy)");
                 return new CtInt(_host.SizeOf(Top.Module, type.Name, type.Pos));
             case "offset":
                 return new CtInt(_host.OffsetOf(Top.Module, c));
@@ -442,7 +442,7 @@ public sealed partial class Interpreter
             case "include_bytes":
                 throw Error(c.Pos, "include_bytes() can only be the value of data. Declare the data, and read it in the const fn");
         }
-        if (!Builtins.Contains(c.Name)) throw Error(c.Pos, $"'{c.Name}' is not declared");
+        if (!Builtins.Contains(c.Name)) throw Error(c.Pos, $"'{c.Name}' is not declared. Check the spelling, or declare it as a const fn");
         return Builtin(c);
     }
 
@@ -451,7 +451,7 @@ public sealed partial class Interpreter
         var args = c.Args.Select(Eval).ToList();
         void Count(int n)
         {
-            if (args.Count != n) throw Error(c.Pos, $"{c.Name}() takes {n} argument{(n == 1 ? "" : "s")}, not {args.Count}");
+            if (args.Count != n) throw Error(c.Pos, $"{c.Name}() takes {n} argument{(n == 1 ? "" : "s")}, not {args.Count}. Pass {n}");
         }
         double Arg(int k) => args[k] is CtInt or CtReal ? Real(args[k])
             : throw Error(c.Args[k].Pos, $"{c.Name}() needs a number, not {Describe(args[k].Type)}");
@@ -493,7 +493,7 @@ public sealed partial class Interpreter
                 return Result(Math.Abs(Arg(0)));
             case "min" or "max":
             {
-                if (args.Count < 2) throw Error(c.Pos, $"{c.Name}() takes two or more numbers");
+                if (args.Count < 2) throw Error(c.Pos, $"{c.Name}() takes two or more numbers. Pass at least two");
                 for (int k = 0; k < args.Count; k++) Arg(k);
                 if (args.All(a => a is CtInt))
                 {
@@ -667,7 +667,7 @@ public sealed partial class Interpreter
                 Emit(e);
                 return Flow.Normal;
             default:
-                throw Error(s.Pos, "This statement cannot run at compile time");
+                throw Error(s.Pos, "This statement cannot run at compile time. Remove it from the const fn");
         }
     }
 
@@ -677,7 +677,7 @@ public sealed partial class Interpreter
         var root = a.Target;
         while (root is IndexExpr ix) root = ix.Target;
         if (root is not NameExpr name)
-            throw Error(a.Target.Pos, "A const fn assigns only its own variables and their elements");
+            throw Error(a.Target.Pos, "A const fn assigns only its own variables and their elements. Declare a variable in the const fn, and return its value");
         var slot = FindSlot(name.Name);
         if (slot is null)
         {
@@ -737,7 +737,7 @@ public sealed partial class Interpreter
         if (fn is null)
             throw new CompileError(call.Pos, Builtins.Contains(call.Name) || call.Name is "len" or "sizeof" or "offset" or "addr"
                 ? $"{call.Name}() is not a generator. Name a const fn that emits assembly on this line, or use the value in an operand"
-                : $"'{call.Name}' is not declared");
+                : $"'{call.Name}' is not declared. Check the spelling, or declare it as a const fn");
         if (fn.ReturnType is not null)
             throw new CompileError(call.Pos, $"'{fn.Name}' returns a value, so it is not a generator, which emits assembly. Use its value in an operand, e.g. 'lda #{call.Name}(...)'");
         interpreter.CallConstFn(fn, call, statement: true);
@@ -842,7 +842,7 @@ public sealed partial class Interpreter
             case CtReal:
                 throw Error(e.Pos, "This operand is a real. Use round(x), floor(x), ceil(x) or trunc(x)");
             case var v:
-                throw Error(e.Pos, $"This operand is {Describe(v.Type)}, but an instruction takes a number, an address or a label");
+                throw Error(e.Pos, $"This operand is {Describe(v.Type)}, but an instruction takes a number, an address or a label. Use round() for a real number");
         }
     }
 

@@ -13,13 +13,30 @@ public sealed partial class Parser
         SkipBreaksBeforeBrace();
         var start = Expect(TokenKind.LBrace, "'{'");
         var statements = new List<Stmt>();
+        int outerColumn = _statementColumn;
         SkipTerminators();
         while (!At(TokenKind.RBrace))
         {
-            if (At(TokenKind.Eof)) throw new CompileError(start.Pos, "Block is not closed with '}'");
-            statements.Add(ParseStatement());
+            if (At(TokenKind.Eof))
+            {
+                if (_unclosedReported) throw new FollowOnError();
+                throw new CompileError(start.Pos, "Block is not closed with '}'. Add '}' where it ends");
+            }
+            int from = _pos;
+            _statementColumn = Current.Pos.Column;
+            try { statements.Add(ParseStatement()); }
+            catch (Exception e) when (Recovers(e))
+            {
+                Fail(e, from);
+                // A line starting with '==' belongs to the statement before, which the checker would report too.
+                if (_pos == from && statements.Count > 0 && LeadingOperator() is not null)
+                    statements[^1] = new ErrorStmt(statements[^1].Pos, statements[^1] switch { VarDecl v => v.Name, ConstDecl c => c.Name, _ => null });
+                statements.Add(new ErrorStmt(_tokens[from].Pos, DeclaredName(from)?.Name));
+                SkipStatement(from);
+            }
             SkipTerminators();
         }
+        _statementColumn = outerColumn;
         Advance();
         return new BlockStmt(start.Pos, statements);
     }
@@ -30,7 +47,7 @@ public sealed partial class Parser
         {
             case TokenKind.Var: return ParseVar();
             case TokenKind.Const when PeekAt(1).Kind == TokenKind.Fn:
-                throw new CompileError(Current.Pos, "'const fn' must be declared outside functions");
+                throw new CompileError(Current.Pos, "'const fn' must be declared outside functions. Move it to the top level of the file");
             case TokenKind.Const: return ParseConst();
             case TokenKind.Identifier when _inConstFn && Current.Text == "emit" && PeekAt(1).Kind == TokenKind.LBrace:
             {
@@ -38,12 +55,12 @@ public sealed partial class Parser
                 return new EmitStmt(t.Pos, ParseAsmBody(emit: true));
             }
             case TokenKind.Linear when PeekAt(1).Kind == TokenKind.Data:
-                throw new CompileError(PeekAt(1).Pos, "'data' must be declared outside functions");
+                throw new CompileError(PeekAt(1).Pos, "'data' must be declared outside functions. Move it to the top level of the file");
             case TokenKind.Linear: return ParseLinearVar();
             case TokenKind.Identifier when IsIndexedWord(): return ParseIndexedVar();
-            case TokenKind.Struct: throw new CompileError(Current.Pos, "A struct must be declared outside functions");
+            case TokenKind.Struct: throw new CompileError(Current.Pos, "A struct must be declared outside functions. Move it to the top level of the file");
             case TokenKind.Private:
-                throw new CompileError(Current.Pos, "'private' is only for top-level declarations; names inside a function are always private to it");
+                throw new CompileError(Current.Pos, "'private' is only for top-level declarations; names inside a function are always private to it. Remove 'private'");
             case TokenKind.If: return ParseIf();
             case TokenKind.While:
             {
@@ -76,21 +93,21 @@ public sealed partial class Parser
                 return new ReturnStmt(t.Pos, value);
             }
             case TokenKind.LBrace: return ParseBlock();
-            case TokenKind.Data: throw new CompileError(Current.Pos, "'data' must be declared outside functions");
+            case TokenKind.Data: throw new CompileError(Current.Pos, "'data' must be declared outside functions. Move it to the top level of the file");
             case TokenKind.Asm when PeekAt(1).Kind == TokenKind.Fn:
-                throw new CompileError(Current.Pos, "'asm fn' must be declared outside functions");
+                throw new CompileError(Current.Pos, "'asm fn' must be declared outside functions. Move it to the top level of the file");
             case TokenKind.Interrupt:
-                throw new CompileError(Current.Pos, "'interrupt fn' must be declared outside functions");
+                throw new CompileError(Current.Pos, "'interrupt fn' must be declared outside functions. Move it to the top level of the file");
             case TokenKind.Assert:
                 throw new CompileError(Current.Pos, "'assert' is a top-level declaration checked at compile time; put it outside the function");
             case TokenKind.Module:
-                throw new CompileError(Current.Pos, "'module' must be the first line of the file, outside functions");
+                throw new CompileError(Current.Pos, "'module' must be the first line of the file, outside functions. Move it there");
             case TokenKind.Noinit:
-                throw new CompileError(Current.Pos, "'noinit' is for global variables; local variables are never zeroed");
+                throw new CompileError(Current.Pos, "'noinit' is for global variables; local variables are never zeroed. Remove 'noinit'");
             case TokenKind.Volatile:
-                throw new CompileError(Current.Pos, "'volatile' is for global variables; nothing else can change a local variable");
+                throw new CompileError(Current.Pos, "'volatile' is for global variables; nothing else can change a local variable. Remove 'volatile'");
             case TokenKind.Inline:
-                throw new CompileError(Current.Pos, "'inline fn' must be declared outside functions");
+                throw new CompileError(Current.Pos, "'inline fn' must be declared outside functions. Move it to the top level of the file");
             case TokenKind.Asm:
                 Advance();
                 return ParseAsmBody();
@@ -140,7 +157,7 @@ public sealed partial class Parser
         SkipTerminators();
         while (!Accept(TokenKind.RBrace))
         {
-            if (At(TokenKind.Eof)) throw new CompileError(open.Pos, "'match' is not closed with '}'");
+            if (At(TokenKind.Eof)) throw new CompileError(open.Pos, "'match' is not closed with '}'. Add '}' after its last arm");
             var armPos = Current.Pos;
             var patterns = new List<MatchPattern>();
             bool isDefault = false;
@@ -150,7 +167,7 @@ public sealed partial class Parser
                 {
                     var underscore = Advance();
                     if (patterns.Count > 0 || At(TokenKind.Comma))
-                        throw new CompileError(underscore.Pos, "'_' matches every value, so it must be alone in its arm: '_ => ...'");
+                        throw new CompileError(underscore.Pos, "'_' matches every value, so it must be alone in its arm. Write '_ => ...' on its own");
                     isDefault = true;
                     break;
                 }
@@ -158,7 +175,7 @@ public sealed partial class Parser
                 Expr? high = null;
                 if (Accept(TokenKind.DotDotEq)) high = ParseExpr();
                 else if (At(TokenKind.DotDot))
-                    throw new CompileError(Current.Pos, "A range in a match includes its end: write 'low..=high'");
+                    throw new CompileError(Current.Pos, "A range in a match includes its end. Write 'low..=high'");
                 patterns.Add(new MatchPattern(low.Pos, low, high));
             } while (Accept(TokenKind.Comma));
             Expect(TokenKind.FatArrow, "'=>' after the match pattern");
@@ -171,7 +188,7 @@ public sealed partial class Parser
             else
             {
                 if (At(TokenKind.Newline) || At(TokenKind.RBrace))
-                    throw new CompileError(Current.Pos, "Expected a statement or '{ }' after '=>'");
+                    throw new CompileError(Current.Pos, "Expected a statement or '{ }' after '=>'. Write what the arm does, or '{ }' to do nothing");
                 var stmt = ParseStatement();
                 body = new BlockStmt(stmt.Pos, [stmt]);
             }
@@ -191,7 +208,7 @@ public sealed partial class Parser
         bool inclusive;
         if (Accept(TokenKind.DotDotEq)) inclusive = true;
         else if (Accept(TokenKind.DotDot)) inclusive = false;
-        else throw new CompileError(Current.Pos, $"Expected '..' or '..=', found {Describe(Current)}");
+        else throw new CompileError(Current.Pos, $"Expected '..' or '..=', found {Describe(Current)}. Write a range as first..last, or first..=last to include the last value");
         var to = ParseHeaderExpr();
         string range = TokenText(rangeStart, _pos);
         // 'step' is a keyword only here, right after the range (spec 13); elsewhere it is a name.
@@ -224,7 +241,7 @@ public sealed partial class Parser
         {
             while (Accept(TokenKind.Newline)) { }
             if (At(TokenKind.RBrace)) break;
-            if (At(TokenKind.Eof)) throw new CompileError(start.Pos, "asm block is not closed with '}'");
+            if (At(TokenKind.Eof)) throw new CompileError(start.Pos, "asm block is not closed with '}'. Add '}' after its last line");
             if (At(TokenKind.Var))
             {
                 if (!isFn || lines.Count > 0)
@@ -252,7 +269,7 @@ public sealed partial class Parser
                 continue;
             }
             if (At(TokenKind.Colon))
-                throw new CompileError(word.Pos, $"Labels in assembly start with '.', e.g. .{word.Text}:");
+                throw new CompileError(word.Pos, $"Labels in assembly start with '.'. Write .{word.Text}:");
             if (!Enum.TryParse<Mnemonic>(word.Text, ignoreCase: true, out var mnemonic) || !Enum.IsDefined(mnemonic))
             {
                 // A generator call on a line of its own: copy_rows(...) or tables.copy_rows(...) (spec 4.1).
@@ -264,14 +281,14 @@ public sealed partial class Parser
                     lines.Add(new AsmGeneratorCall(call.Pos, (CallExpr)call));
                 }
                 else
-                    throw new CompileError(word.Pos, $"Unknown instruction '{word.Text}'");
+                    throw new CompileError(word.Pos, $"Unknown instruction '{word.Text}'. Use a 6502 mnemonic such as lda, sta or jmp, or write a label as .name:");
             }
             else
                 lines.Add(ParseAsmInstruction(word.Pos, mnemonic));
 
             if (Accept(TokenKind.Newline) || At(TokenKind.RBrace)) continue;
             if (At(TokenKind.Semicolon)) throw SemicolonInAsm();
-            throw new CompileError(Current.Pos, $"Expected the end of the line after the instruction, found {Describe(Current)}");
+            throw new CompileError(Current.Pos, $"Expected the end of the line after the instruction, found {Describe(Current)}. Put each instruction on its own line");
         }
         Advance();
         _inAsm = false;
@@ -291,7 +308,7 @@ public sealed partial class Parser
         if (Accept(TokenKind.Hash))
         {
             if (At(TokenKind.Less) || At(TokenKind.Greater))
-                throw new CompileError(Current.Pos, "Write the bytes of an address with .lo and .hi, e.g. #name.lo and #name.hi");
+                throw new CompileError(Current.Pos, "An immediate operand is one byte, and an address has two. Write #name.lo or #name.hi");
             return new AsmInstruction(pos, m, AsmForm.Immediate, ParseExpr(), null);
         }
 
@@ -331,7 +348,7 @@ public sealed partial class Parser
             {
                 "x" or "X" => Register.X,
                 "y" or "Y" => Register.Y,
-                _ => throw new CompileError(r.Pos, $"Expected x or y after ',', found '{r.Text}'"),
+                _ => throw new CompileError(r.Pos, $"Expected x or y after ',', found '{r.Text}'. Write ',x' or ',y'"),
             };
         }
         return new AsmInstruction(pos, m, AsmForm.Direct, operand, index);
@@ -341,6 +358,6 @@ public sealed partial class Parser
     {
         var r = Expect(TokenKind.Identifier, $"{reg.ToString().ToLowerInvariant()} in {form}");
         if (!string.Equals(r.Text, reg.ToString(), StringComparison.OrdinalIgnoreCase))
-            throw new CompileError(r.Pos, $"Expected {reg.ToString().ToLowerInvariant()} in {form}, found '{r.Text}'");
+            throw new CompileError(r.Pos, $"Expected {reg.ToString().ToLowerInvariant()} in {form}, found '{r.Text}'. Write {form}");
     }
 }

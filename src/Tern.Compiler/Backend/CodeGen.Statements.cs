@@ -517,7 +517,7 @@ public sealed partial class CodeGen
         }
 
         if (ContainsCall(target))
-            throw new CompileError(a.Pos, "Compound assignment to an element whose index calls a function is not supported");
+            throw new CompileError(a.Pos, "Compound assignment to an element whose index calls a function is not supported. Store the index in a variable first");
 
         // p[i] op= v: read, change and write the element with one Y load.
         if (target is IndexExpr pix && IsPointerIndex(pix) && pix.Type.Size == 1

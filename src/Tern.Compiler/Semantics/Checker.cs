@@ -46,22 +46,32 @@ public sealed partial class Checker
 
     private MemoryLayout _layout;
 
-    private Checker(Platform platform)
+    private Checker(Platform platform, ErrorList? errors)
     {
         _platform = platform;
+        _errors = errors;
         _layout = MemoryLayout.Default(platform);
     }
 
     /// <param name="modules">The main file and its modules, each module before the files that import it.</param>
-    public static CheckedProgram Check(List<Module> modules, Platform platform) => new Checker(platform).Run(modules);
+    /// <param name="errors">
+    /// Takes every error found by the checks, which go on at the next statement or declaration (spec 13);
+    /// if there is any, the first is thrown, carrying all, before the call graph is worked out. Null: the first error is thrown.
+    /// </param>
+    public static CheckedProgram Check(List<Module> modules, Platform platform, ErrorList? errors = null) => new Checker(platform, errors).Run(modules);
 
     private CheckedProgram Run(List<Module> modules)
     {
+        // Names whose declaration (or import) had a syntax error: their uses add no errors (spec 13).
+        foreach (var module in modules)
+            foreach (var (name, pos) in module.Syntax.BrokenNames)
+                module.Scope.TryAdd(name, new ErrorSymbol(name, pos));
+
         // Const fns first: declaring one needs no other declaration, and constants of any file may call them (spec 4.1).
         foreach (var module in modules)
         {
             _module = module;
-            foreach (var f in module.Syntax.ConstFns) DeclareConstFn(f);
+            foreach (var f in module.Syntax.ConstFns) Declaring(f.Name, f.Pos, () => DeclareConstFn(f));
         }
 
         // Struct names and module parameters of every file first, so that a constant can be worked out
@@ -71,9 +81,11 @@ public sealed partial class Checker
             _module = module;
             var program = module.Syntax;
             if (!module.IsMain && program.Functions.FirstOrDefault(f => f.Name == "main") is { } wrongMain)
-                throw new CompileError(wrongMain.Pos, $"Only the program's main file has 'fn main()'; '{module.Name}' is a module");
-            foreach (var s in program.Structs) DeclareStruct(s);
-            DeclareParameters(module, modules[^1]);
+                Recover(() => throw new CompileError(wrongMain.Pos, $"Only the program's main file has 'fn main()'; '{module.Name}' is a module. Rename the function"));
+            foreach (var s in program.Structs) Declaring(s.Name, s.Pos, () => DeclareStruct(s));
+            // After an error, the parameters not declared yet accept every use.
+            if (!Recover(() => DeclareParameters(module, modules[^1])))
+                foreach (var p in program.Header?.Parameters ?? []) module.Scope.TryAdd(p.Name, new ErrorSymbol(p.Name, p.Pos));
         }
 
         // Declarations file by file. A constant (or, for len(), a global) that another declaration
@@ -82,38 +94,43 @@ public sealed partial class Checker
         {
             _module = module;
             var program = module.Syntax;
-            foreach (var c in program.Consts) DeclareConst(c);
+            foreach (var c in program.Consts) Declaring(c.Name, c.Pos, () => DeclareConst(c));
             if (!module.IsMain && program.Memory is { } wrongMemory)
-                throw new CompileError(wrongMemory.Pos, $"Only the program's main file may have a memory block, since it describes the whole program; '{module.Name}' is a module");
+                Recover(() => throw new CompileError(wrongMemory.Pos, $"Only the program's main file may have a memory block, since it describes the whole program; '{module.Name}' is a module. Move the block to the main file"));
             if (!module.IsMain && program.Exports.Count > 0)
-                throw new CompileError(program.Exports[0].Pos, $"Only the program's main file may export functions; '{module.Name}' is a module");
-            if (module.IsMain) EnsureMemoryLayout();
-            foreach (var s in program.Structs) LayOut((StructSymbol)module.Scope[s.Name]);
-            foreach (var f in program.Functions) DeclareFunction(f);
-            foreach (var g in program.Globals.Where(g => g.Symbol is null)) DeclareGlobal(g);
+                Recover(() => throw new CompileError(program.Exports[0].Pos, $"Only the program's main file may export functions; '{module.Name}' is a module. Move the 'export' line to the main file"));
+            if (module.IsMain) Recover(EnsureMemoryLayout);
+            foreach (var s in program.Structs)
+                if (module.Scope.GetValueOrDefault(s.Name) is StructSymbol st && st.Declaration == s)
+                    Declaring(s.Name, s.Pos, () => LayOut(st));
+            foreach (var f in program.Functions)
+                if (!Declaring(f.Name, f.Pos, () => DeclareFunction(f))) _brokenFunctions.Add(f);
+            foreach (var g in program.Globals.Where(g => g.Symbol is null)) Declaring(g.Name, g.Pos, () => DeclareGlobal(g));
             // Initial values with addresses after all of the file's globals, so they can name globals declared below.
             // Only this file's: a global declared early for another module's constant waits for its own
             // module's turn, when the functions and globals it names are declared.
-            foreach (var (decl, v, _) in _addressInits.Where(a => a.Module == module).ToList()) v.InitialBytes = ConstantBytes(decl.Init!, v.Type, v);
+            foreach (var (decl, v, _) in _addressInits.Where(a => a.Module == module).ToList())
+                Declaring(decl.Name, decl.Pos, () => v.InitialBytes = ConstantBytes(decl.Init!, v.Type, v));
             _addressInits.RemoveAll(a => a.Module == module);
             // After the globals, so that a variable named as an address gets the right error.
-            foreach (var f in program.Functions.Where(f => f.Address is not null)) DeclareRoutine(f, f.Symbol!);
-            foreach (var a in program.Asserts) CheckAssert(a, module);
+            foreach (var f in program.Functions.Where(f => f.Address is not null && !_brokenFunctions.Contains(f)))
+                if (!Declaring(f.Name, f.Pos, () => DeclareRoutine(f, f.Symbol!))) _brokenFunctions.Add(f);
+            foreach (var a in program.Asserts) Recover(() => CheckAssert(a, module));
             module.Declared = true;
         }
 
         // "@ name" means a region or an address, never either depending on other declarations (spec 8.4).
         foreach (var line in modules[^1].Syntax.Memory?.Lines.Where(l => l.Kind == "region") ?? [])
-            if (modules[^1].Scope.TryGetValue(line.Name!, out var clash) || modules[^1].Imports.ContainsKey(line.Name!))
-                throw new CompileError(line.Pos,
-                    $"The region '{line.Name}' has the name of {(clash is null ? "an imported module" : $"a {KindName(clash)} of the main file (line {clash.Pos.Line})")}, so '@ {line.Name}' would be ambiguous. Rename the region");
+            if (modules[^1].Scope.TryGetValue(line.Name!, out var clash) && clash is not ErrorSymbol || modules[^1].Imports.ContainsKey(line.Name!))
+                Recover(() => throw new CompileError(line.Pos,
+                    $"The region '{line.Name}' has the name of {(clash is null ? "an imported module" : $"a {KindName(clash)} of the main file (line {clash.Pos.Line})")}, so '@ {line.Name}' would be ambiguous. Rename the region"));
 
         foreach (var import in modules[^1].Syntax.Imports.Where(i => i.Area is not null))
         {
             if (_layout.Overlays.ContainsKey(import.Area!)) continue;
-            throw new CompileError(import.AreaPos, _layout.Regions.ContainsKey(import.Area!)
-                ? $"'{import.Area}' is a region, not an overlay area; '@' on an import names an area declared with 'overlay {import.Area}' in the memory block"
-                : $"The memory block has no overlay area '{import.Area}'. Add a line 'first..=last overlay {import.Area}' to it");
+            Recover(() => throw new CompileError(import.AreaPos, _layout.Regions.ContainsKey(import.Area!)
+                ? $"'{import.Area}' is a region, not an overlay area; '@' on an import names an area declared with 'overlay {import.Area}' in the memory block. Use the name of an overlay area"
+                : $"The memory block has no overlay area '{import.Area}'. Add a line 'first..=last overlay {import.Area}' to it"));
         }
 
         foreach (var g in _globals)
@@ -128,67 +145,79 @@ public sealed partial class Checker
         var exports = new List<FunctionSymbol>();
         var exportedAs = new Dictionary<FunctionSymbol, FunctionSymbol>();
         int? exportTable = null;
-        FunctionSymbol main;
-        bool hasMain = mainModule.Scope.TryGetValue("main", out var mainSymbol) && mainSymbol is FunctionSymbol;
-        if (mainModule.Syntax.ExportTable is { } table)
+        FunctionSymbol main = null!;
+        Recover(() =>
         {
-            // export f, g @ $0900 in a program with main (spec 12.3).
-            if (!hasMain)
-                throw new CompileError(table.Pos,
-                    "A binary's jump table is at the start of its first program area, so its 'export' line has no address. Remove the '@' and the address, or add 'fn main()' for a program whose table plug-ins call");
-            exportTable = ExportTableAddress(table, mainModule);
-        }
-        if (mainModule.Syntax.Exports.Count > 0 && exportTable is null)
-        {
-            // A binary for another program to call (spec 12.3): its entries are one root.
-            if (hasMain)
-                throw new CompileError(mainModule.Syntax.Exports[0].Pos,
-                    "A program with 'main' cannot export functions without an address: 'export' alone builds a binary for another program to call, which has no 'main'. Give the table an address for plug-ins to call ('export f @ $0900'), or remove 'main'");
-            if (ExportedModule(mainModule) is { } api)
+            // A main whose declaration had an error: the checks below would report it missing.
+            if (mainModule.Scope.GetValueOrDefault("main") is ErrorSymbol) throw new FollowOnError();
+            bool hasMain = mainModule.Scope.TryGetValue("main", out var mainSymbol) && mainSymbol is FunctionSymbol;
+            if (mainModule.Syntax.ExportTable is { } table)
             {
-                exportedAs = MatchInterface(mainModule, api);
-                exports = exportedAs.Keys.OrderBy(f => exportedAs[f].FixedAddress).ToList();
+                // export f, g @ $0900 in a program with main (spec 12.3).
+                if (!hasMain)
+                    throw new CompileError(table.Pos,
+                        "A binary's jump table is at the start of its first program area, so its 'export' line has no address. Remove the '@' and the address, or add 'fn main()' for a program whose table plug-ins call");
+                exportTable = ExportTableAddress(table, mainModule);
+            }
+            if (mainModule.Syntax.Exports.Count > 0 && exportTable is null)
+            {
+                // A binary for another program to call (spec 12.3): its entries are one root.
+                if (hasMain)
+                    throw new CompileError(mainModule.Syntax.Exports[0].Pos,
+                        "A program with 'main' cannot export functions without an address: 'export' alone builds a binary for another program to call, which has no 'main'. Give the table an address for plug-ins to call ('export f @ $0900'), or remove 'main'");
+                if (ExportedModule(mainModule) is { } api)
+                {
+                    exportedAs = MatchInterface(mainModule, api);
+                    exports = exportedAs.Keys.OrderBy(f => exportedAs[f].FixedAddress).ToList();
+                }
+                else
+                    exports = ResolveExports(mainModule);
+                main = new FunctionSymbol(EntriesRoot, mainModule.Syntax.Exports[0].Pos);
+                foreach (var e in exports) main.Callees.Add(e);
             }
             else
-                exports = ResolveExports(mainModule);
-            main = new FunctionSymbol(EntriesRoot, mainModule.Syntax.Exports[0].Pos);
-            foreach (var e in exports) main.Callees.Add(e);
-        }
-        else
-        {
-            if (!mainModule.Scope.TryGetValue("main", out var m) || m is not FunctionSymbol realMain)
-                throw new CompileError(new SourcePos(1, 1, mainModule.Path),
-                    "The program has no 'fn main()'. A binary for another program to call has an 'export' line instead");
-            main = realMain;
-            if (main.Parameters.Count > 0 || main.ReturnType.Kind != TypeKind.Void)
-                throw new CompileError(main.Pos, "'main' must have no parameters and no return value");
-            if (main.FixedAddress is not null)
-                throw new CompileError(main.Pos, "'main' must have a body");
-            if (main.IsInterrupt)
-                throw new CompileError(main.Pos, "'main' cannot be an interrupt handler; give the handler another name");
-            if (main.IsInline)
-                throw new CompileError(main.Pos, "'main' cannot be inline: nothing calls it");
-            if (exportTable is not null)
             {
-                if (ExportedModule(mainModule) is { } api)
-                    throw new CompileError(mainModule.Syntax.Exports[0].Pos,
-                        $"'export {api.Name}' builds a binary that plugs into {api.Name}'s jump table, which a program with 'main' does not. Write the program's own functions instead: 'export f, g @ address'");
-                // Plug-ins call the entries, so their callers are unknown, as for functions whose address is taken (6.5).
-                exports = ResolveExports(mainModule, inProgram: true);
-                foreach (var e in exports)
+                if (!mainModule.Scope.TryGetValue("main", out var m) || m is not FunctionSymbol realMain)
                 {
-                    e.AddressTaken = true;
-                    main.UsedAddresses.Add(e);
+                    // main may be in a declaration the parser dropped.
+                    if (mainModule.Syntax.HasSyntaxErrors) throw new FollowOnError();
+                    throw new CompileError(new SourcePos(1, 1, mainModule.Path),
+                        "The program has no 'fn main()'. Add 'fn main() { }', or an 'export' line for a binary that another program calls");
+                }
+                main = realMain;
+                if (main.Parameters.Count > 0 || main.ReturnType.Kind != TypeKind.Void)
+                    throw new CompileError(main.Pos, "'main' must have no parameters and no return value. Remove them");
+                if (main.FixedAddress is not null)
+                    throw new CompileError(main.Pos, "'main' must have a body. Remove the address and write the body");
+                if (main.IsInterrupt)
+                    throw new CompileError(main.Pos, "'main' cannot be an interrupt handler; give the handler another name");
+                if (main.IsInline)
+                    throw new CompileError(main.Pos, "'main' cannot be inline: nothing calls it. Remove 'inline'");
+                if (exportTable is not null)
+                {
+                    if (ExportedModule(mainModule) is { } api)
+                        throw new CompileError(mainModule.Syntax.Exports[0].Pos,
+                            $"'export {api.Name}' builds a binary that plugs into {api.Name}'s jump table, which a program with 'main' does not. Write the program's own functions instead: 'export f, g @ address'");
+                    // Plug-ins call the entries, so their callers are unknown, as for functions whose address is taken (6.5).
+                    exports = ResolveExports(mainModule, inProgram: true);
+                    foreach (var e in exports)
+                    {
+                        e.AddressTaken = true;
+                        main.UsedAddresses.Add(e);
+                    }
                 }
             }
-        }
+        });
 
         foreach (var module in modules)
         {
             _module = module;
-            foreach (var f in module.Syntax.Functions.Where(f => f.Address is null)) CheckFunctionBody(f);
+            foreach (var f in module.Syntax.Functions.Where(f => f.Address is null && !_brokenFunctions.Contains(f))) Recover(() => CheckFunctionBody(f));
         }
-        CheckInlineCallsBetweenOverlays();
+        Recover(CheckInlineCallsBetweenOverlays);
+        // The call graph and what follows need a program without errors (spec 13).
+        _errors?.ThrowIfAny();
+
         // Struct fields become plain variables, arrays and pointers for the code generator.
         foreach (var module in modules)
             foreach (var f in module.Syntax.Functions) Lowering.Apply(f.Body);
@@ -225,14 +254,15 @@ public sealed partial class Checker
         var result = new List<FunctionSymbol>();
         foreach (var e in mainModule.Syntax.Exports)
         {
+            if (mainModule.Scope.GetValueOrDefault(e.Name) is ErrorSymbol) throw new FollowOnError();
             if (!mainModule.Scope.TryGetValue(e.Name, out var symbol) || symbol is not FunctionSymbol f)
-                throw new CompileError(e.Pos, mainModule.Scope.ContainsKey(e.Name) ? $"'{e.Name}' is not a function, so it cannot be exported" : $"'{e.Name}' is not declared; 'export' names functions of the main file");
+                throw new CompileError(e.Pos, mainModule.Scope.ContainsKey(e.Name) ? $"'{e.Name}' is not a function, so it cannot be exported. Remove it from the export line" : $"'{e.Name}' is not declared; 'export' names functions of the main file. Declare it there, or remove it from the export line");
             if (e.Name == "setup" && !inProgram)
                 throw new CompileError(e.Pos, "'setup' is the name of the binary's startup entry (entry 0 of the jump table). Rename the function");
             if (e.Name == "main")
                 throw new CompileError(e.Pos, "'main' is where the program starts; plug-ins cannot call it. Remove it from the export line");
             if (result.Contains(f))
-                throw new CompileError(e.Pos, $"'{e.Name}' is exported twice");
+                throw new CompileError(e.Pos, $"'{e.Name}' is exported twice. Remove one");
             CheckExportable(f, e.Name, e.Pos, inProgram ? "a plug-in" : "the caller of a binary");
             result.Add(f);
         }
@@ -247,7 +277,7 @@ public sealed partial class Checker
         if (f.IsInline)
             throw new CompileError(pos, $"'{name}' is inline: it has no code of its own to put in the jump table. Remove 'inline'");
         if (f.FixedAddress is not null)
-            throw new CompileError(pos, $"'{name}' is a routine at a fixed address, not part of this binary");
+            throw new CompileError(pos, $"'{name}' is a routine at a fixed address, not part of this binary. Remove it from the export line");
         if (f.Parameters.FirstOrDefault(p => p.PassedIn is null) is { } memoryParam)
             throw new CompileError(pos,
                 $"'{name}' takes '{memoryParam.Name}' in memory, which {caller} cannot set. Pass it in a register ({memoryParam.Name}: {memoryParam.Type} using A)");
@@ -297,7 +327,7 @@ public sealed partial class Checker
 
         if (routines.FirstOrDefault(r => r.Name == "setup").Routine is not { } setup)
             throw new CompileError(pos,
-                $"{api.Name} has no 'setup' routine. The host calls setup first, at entry 0 of the jump table: declare 'fn setup() @ ${start:X4}' in {api.Name}");
+                $"{api.Name} has no 'setup' routine. The host calls setup first, at entry 0 of the jump table. Declare 'fn setup() @ ${start:X4}' in {api.Name}");
         if (setup.FixedAddress != start)
             throw new CompileError(pos,
                 $"'{api.Name}.setup' is at ${setup.FixedAddress:X4}, but setup is entry 0 of the jump table, at the start of the binary's first program area (${start:X4}). " +
@@ -354,5 +384,59 @@ public sealed partial class Checker
     {
         if (_binaryData.TryGetValue(v, out var own))
             throw new CompileError(pos, $"'{v.QualifiedName}' is this binary's data '{own}'. Use '{own}'");
+    }
+
+    // ---------- Going on after an error (spec 13) ----------
+
+    /// <summary>Where errors go; null: the first error is thrown and checking stops.</summary>
+    private readonly ErrorList? _errors;
+    /// <summary>Functions whose declaration had an error: their bodies are not checked.</summary>
+    private readonly HashSet<FnDecl> _brokenFunctions = [];
+
+    /// <summary>
+    /// Runs the check of one declaration or statement. On an error, reports it and returns false, with
+    /// the checker's state as before; a use of a broken name (<see cref="FollowOnError"/>) is not reported.
+    /// A name reported as not declared is then declared in the file, so its other uses add no errors.
+    /// </summary>
+    private bool Recover(Action check)
+    {
+        if (_errors is null)
+        {
+            check();
+            return true;
+        }
+        var (module, function, loopDepth, dead, scopes, longBytes, listLength) = (_module, _function, _loopDepth, _dead, _scopes.Count, _allowLongBytes, _listLength);
+        var registers = _loopRegisters.ToList();
+        var loopMax = _loopMax.ToList();
+        try
+        {
+            check();
+            return true;
+        }
+        catch (CompileError e)
+        {
+            _errors.Add(e);
+            if (e.Undeclared is { } name && e.Pos.File == module.Path) module.Scope.TryAdd(name, new ErrorSymbol(name, e.Pos));
+        }
+        catch (FollowOnError) { }
+        (_module, _function, _loopDepth, _dead, _allowLongBytes, _listLength) = (module, function, loopDepth, dead, longBytes, listLength);
+        if (_scopes.Count > scopes) _scopes.RemoveRange(scopes, _scopes.Count - scopes);
+        _loopRegisters.Clear();
+        _loopRegisters.UnionWith(registers);
+        _loopMax.Clear();
+        foreach (var (v, max) in loopMax) _loopMax[v] = max;
+        return false;
+    }
+
+    /// <summary>
+    /// Runs the check of a top-level declaration of <paramref name="name"/>. After an error, the name
+    /// is broken: its uses add no errors. Not when the error was that another declaration has the name.
+    /// </summary>
+    private bool Declaring(string name, SourcePos pos, Action declare)
+    {
+        var module = _module;
+        if (Recover(declare)) return true;
+        if (!module.Scope.TryGetValue(name, out var s) || s.Pos == pos) module.Scope[name] = new ErrorSymbol(name, pos);
+        return false;
     }
 }

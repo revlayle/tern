@@ -551,7 +551,7 @@ public sealed class GeneratorTests : IDisposable
     {
         // The emit never runs, since nothing calls the generator, but its typo is reported.
         var e = Error("const fn g() {\n    if false {\n        emit {\n            lda #1\n            sta1 $0400\n        }\n    }\n}\nfn main() { }");
-        Assert.Equal("Unknown instruction 'sta1'", e.Description);
+        Assert.Equal("Unknown instruction 'sta1'. Use a 6502 mnemonic such as lda, sta or jmp, or write a label as .name:", e.Description);
         Assert.Equal(5, e.Pos.Line);
     }
 }

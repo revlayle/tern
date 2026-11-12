@@ -44,7 +44,7 @@ public sealed partial class Parser
             SkipNewlines();
             while (!Accept(TokenKind.RBrace))
             {
-                if (At(TokenKind.Eof)) throw new CompileError(open.Pos, $"The struct literal '{name} {{' is not closed with '}}'");
+                if (At(TokenKind.Eof)) throw new CompileError(open.Pos, $"The struct literal '{name} {{' is not closed with '}}'. Add '}}' after its last field");
                 var field = Expect(TokenKind.Identifier, "field name");
                 if (At(TokenKind.Colon))
                     throw new CompileError(Current.Pos,
@@ -52,7 +52,7 @@ public sealed partial class Parser
                 Expect(TokenKind.Eq, $"'=' and the value of '{field.Text}'");
                 fields.Add(new FieldValue(field.Pos, field.Text, ParseExpr()));
                 if (!Accept(TokenKind.Comma) && !At(TokenKind.Newline) && !At(TokenKind.RBrace))
-                    throw new CompileError(Current.Pos, $"Expected ',' or '}}' after the value of '{field.Text}', found {Describe(Current)}");
+                    throw new CompileError(Current.Pos, $"Expected ',' or '}}' after the value of '{field.Text}', found {Describe(Current)}. Separate the fields with ',' or a line break");
                 SkipNewlines();
             }
             return new StructLiteralExpr(pos, name, fields);
@@ -146,7 +146,7 @@ public sealed partial class Parser
         bool inclusive;
         if (Accept(TokenKind.DotDotEq)) inclusive = true;
         else if (Accept(TokenKind.DotDot)) inclusive = false;
-        else throw new CompileError(Current.Pos, $"Expected '..' or '..=', found {Describe(Current)}");
+        else throw new CompileError(Current.Pos, $"Expected '..' or '..=', found {Describe(Current)}. Write a range as first..last, or first..=last to include the last value");
         var to = ParseExpr();
         string range = TokenText(rangeStart, _pos);
         Expr? step = null;

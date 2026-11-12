@@ -265,7 +265,7 @@ public class DataTests
     [InlineData("data d = \"A{\"\nfn main() { }", "'{' has no code in the petscii encoding")]
     [InlineData("data d = screen\"A\\n\"\nfn main() { }", "'\\n' has no code in the screen encoding")]
     [InlineData("var c: u8 = petscii_mixed'π'\nfn main() { }", "'π' has no code in the petscii_mixed encoding")]
-    [InlineData("data d = ascii\"A\"\nfn main() { }", "Unknown encoding 'ascii'. Known encodings: petscii, petscii_mixed, screen, screen_mixed")]
+    [InlineData("data d = ascii\"A\"\nfn main() { }", "Unknown encoding 'ascii'. Use one of: petscii, petscii_mixed, screen, screen_mixed")]
     [InlineData("var c: u8\nfn main() { c = scren'A' }", "Unknown encoding 'scren'")]
     [InlineData("data d = include_bytes(screen\"x\")\nfn main() { }", "takes a file name in quotes")]
     [InlineData("data d = \"A\\q\"\nfn main() { }", "Unknown escape '\\q'")]
@@ -399,7 +399,7 @@ public class DataTests
     [InlineData("var t: [u16; _] = \"AB\"\nfn main() { }", "This value is a [u8; 2] array, but 't' is [u16; 2]")]
     [InlineData("data d: [u8; _] = []\nfn main() { }", "Array length must be 1 to 256, not 0")]
     [InlineData("var d: [u8; _] = [1, 2, 300]\nfn main() { }", "300 does not fit in u8")]
-    [InlineData("data d = [1, 2, 3]\nfn main() { }", "Data arrays need a written type, e.g. data d: [u8; _] = [...], where '_' takes the length from the list")]
+    [InlineData("data d = [1, 2, 3]\nfn main() { }", "Data arrays need a written type. Write data d: [u8; _] = [...], where '_' takes the length from the list")]
     public void Underscore_length_errors(string source, string expected)
     {
         var e = Assert.Throws<CompileError>(() => TernCompiler.Compile(source));

@@ -15,11 +15,26 @@ public sealed class CompileError(SourcePos pos, string message) : Exception($"{p
     /// called the generator (spec 4.1), which the message names too. <c>tern --json</c> gives it as a field.
     /// </summary>
     public SourcePos? CalledFrom { get; init; }
+
+    /// <summary>
+    /// Every error of the compile, this one first (spec 13: one run reports every error it finds).
+    /// Just this one for an error of a later stage, which are reported one at a time.
+    /// </summary>
+    public IReadOnlyList<CompileError> All { get => _all ?? [this]; internal set => _all = value; }
+    private IReadOnlyList<CompileError>? _all;
+
+    /// <summary><c>--max-errors</c> stopped the compile: more errors were not reported.</summary>
+    public bool MoreNotReported { get; internal set; }
+
+    /// <summary>For "'x' is not declared": the name, so its later uses in the module add no errors.</summary>
+    internal string? Undeclared { get; init; }
 }
 
 public enum TokenKind
 {
     Identifier, Number, Newline, Eof,
+    /// <summary>Where the lexer found an error and skipped the rest of the line (spec 13): no rule accepts it.</summary>
+    Error,
     /// <summary>A real literal such as <c>1.5</c> or <c>2e3</c> (spec 4.1): Text holds its digits.</summary>
     Real,
     /// <summary>Text holds the character, after escapes. <see cref="Token.Encoding"/> holds a prefix such as <c>screen</c>.</summary>
@@ -97,10 +112,13 @@ public static class Lexer
     private static bool EndsStatement(TokenKind kind) => kind is
         TokenKind.Identifier or TokenKind.Number or TokenKind.Real or TokenKind.Char or TokenKind.String or TokenKind.RParen or TokenKind.RBracket or
         TokenKind.RBrace or TokenKind.True or TokenKind.False or TokenKind.Return or
-        TokenKind.Break or TokenKind.Continue or TokenKind.Zp;
+        TokenKind.Break or TokenKind.Continue or TokenKind.Zp or TokenKind.Error;
 
     /// <param name="file">The source file, for positions in error messages and the listing.</param>
-    public static List<Token> Tokenize(string source, string? file = null)
+    /// <param name="report">
+    /// Takes each error, after which the rest of its line is skipped (spec 13). Null: the first error is thrown.
+    /// </param>
+    public static List<Token> Tokenize(string source, string? file = null, Action<CompileError>? report = null)
     {
         var tokens = new List<Token>();
         int i = 0, line = 1, lineStart = 0;
@@ -158,6 +176,25 @@ public static class Lexer
 
         while (i < source.Length)
         {
+            try { Next(); }
+            catch (CompileError e) when (report is not null)
+            {
+                report(e);
+                while (i < source.Length && source[i] != '\n') i++;
+                // The parser drops the statement with this token, and its own errors there.
+                tokens.Add(new Token(TokenKind.Error, "", 0, e.Pos));
+                nesting = 0;
+            }
+        }
+
+        if (tokens.Count > 0 && EndsStatement(tokens[^1].Kind))
+            Add(TokenKind.Newline, "\\n", 0, i);
+        tokens.Add(new Token(TokenKind.Eof, "", 0, Pos(i)));
+        return tokens;
+
+        // Reads one token, or skips a line break, spaces or a comment.
+        void Next()
+        {
             char c = source[i];
 
             if (c == '\n')
@@ -167,14 +204,14 @@ public static class Lexer
                 i++;
                 line++;
                 lineStart = i;
-                continue;
+                return;
             }
-            if (char.IsWhiteSpace(c)) { i++; continue; }
+            if (char.IsWhiteSpace(c)) { i++; return; }
 
             if (c == '/' && Peek(source, i + 1) == '/')
             {
                 while (i < source.Length && source[i] != '\n') i++;
-                continue;
+                return;
             }
             if (c == '/' && Peek(source, i + 1) == '*')
             {
@@ -185,15 +222,15 @@ public static class Lexer
                     if (source[i] == '\n') { line++; lineStart = i + 1; }
                     i++;
                 }
-                if (i >= source.Length) throw new CompileError(start, "Unterminated block comment");
+                if (i >= source.Length) throw new CompileError(start, "Unterminated block comment. Add '*/' where the comment ends");
                 i += 2;
-                continue;
+                return;
             }
 
             if (c == '"' || c == '\'')
             {
                 AddQuoted(i, null);
-                continue;
+                return;
             }
 
             if (char.IsLetter(c) || c == '_')
@@ -206,10 +243,10 @@ public static class Lexer
                 if (Peek(source, i) is '"' or '\'' && !Keywords.ContainsKey(word))
                 {
                     AddQuoted(start, word);
-                    continue;
+                    return;
                 }
                 Add(Keywords.TryGetValue(word, out var kw) ? kw : TokenKind.Identifier, word, 0, start);
-                continue;
+                return;
             }
 
             if (char.IsDigit(c) || (c == '$' && IsHexDigit(Peek(source, i + 1))))
@@ -229,24 +266,24 @@ public static class Lexer
                         throw new CompileError(Pos(start), $"The real number {text} is too large. Use a value below 1.7e308");
                     i = realEnd;
                     Add(TokenKind.Real, text, 0, start);
-                    continue;
+                    return;
                 }
                 while (i < source.Length && (IsHexDigit(source[i]) || source[i] == '_')) i++;
                 string digits = source[digitsStart..i].Replace("_", "");
                 if (digits.Length == 0)
-                    throw new CompileError(Pos(start), "Number has no digits");
+                    throw new CompileError(Pos(start), "Number has no digits. Write digits after '$' or '0b', e.g. $FF or 0b1010");
                 long value = 0;
                 foreach (char d in digits)
                 {
                     int dv = Convert.ToInt32(d.ToString(), 16);
-                    if (dv >= radix) throw new CompileError(Pos(start), $"Invalid digit '{d}' in number {source[start..i]}");
+                    if (dv >= radix) throw new CompileError(Pos(start), $"Invalid digit '{d}' in number {source[start..i]}. Use 0-9 in a decimal number, 0-9 and A-F after '$', 0 and 1 after '0b'");
                     // Spec 2.1: up to 2^63 - 1. Checked before the step, so the sum never overflows.
                     if (value > (long.MaxValue - dv) / radix)
                         throw new CompileError(Pos(start), "Number is too large. Use a value up to $7FFFFFFFFFFFFFFF (9223372036854775807)");
                     value = value * radix + dv;
                 }
                 Add(TokenKind.Number, source[start..i], value, start);
-                continue;
+                return;
             }
 
             // C's n++ / n-- at the end of a statement or before a closing bracket (spec 13). Elsewhere
@@ -271,13 +308,8 @@ public static class Lexer
                 }
             }
             if (!matched)
-                throw new CompileError(Pos(i), $"Unexpected character '{c}'");
+                throw new CompileError(Pos(i), $"Unexpected character '{c}'. Remove it, or put it in a string or a comment");
         }
-
-        if (tokens.Count > 0 && EndsStatement(tokens[^1].Kind))
-            Add(TokenKind.Newline, "\\n", 0, i);
-        tokens.Add(new Token(TokenKind.Eof, "", 0, Pos(i)));
-        return tokens;
     }
 
     /// <summary>Reads a quoted char or string literal starting at the quote, and decodes its escapes.</summary>
@@ -290,7 +322,7 @@ public static class Lexer
         while (true)
         {
             if (i >= source.Length || source[i] == '\n')
-                throw new CompileError(pos, quote == '"' ? "String is not closed with '\"'" : "Character literal is not closed with '''");
+                throw new CompileError(pos, quote == '"' ? "String is not closed with '\"'. Add '\"' at its end, on the same line" : "Character literal is not closed with '''. Add ''' after the character");
             char c = source[i++];
             if (c == quote) return sb.ToString();
             if (c != '\\')

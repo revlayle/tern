@@ -11,7 +11,7 @@ public static class Cli
 {
     public const string Usage = """
         Usage:
-          tern [--json] <file.tern> [-o <output.prg>]
+          tern [--json] [--max-errors <n>] <file.tern> [-o <output.prg>]
           tern run <file.tern> [options]
           tern bench [options] <file.tern>... | --code <statements>...
 
@@ -28,6 +28,10 @@ public static class Cli
           --json           print the result as JSON: ok, the files written, the report's
                            lines, and diagnostics (file, line, column, severity, message,
                            suggestion)
+          --max-errors <n> stop after n errors; without it, every error found is reported
+
+        Errors are listed in the order found, then their number. Errors of the later stages
+        (memory allocation, code generation, layout) come only when there are no others.
 
         tern run <file.tern> compiles the program and runs it in the built-in emulator until
         main returns, then prints the cycles taken and the registers. Memory is plain RAM (no
@@ -45,6 +49,7 @@ public static class Cli
                            may be given more than once
           --screen         show the screen at $0400 as text
           --profile        show the cycles of each function and each source line
+          --max-errors <n> as for tern <file.tern>
           --json           print the result as JSON
 
         tern bench compiles and runs each variant (as tern run does) and compares them:
@@ -59,7 +64,7 @@ public static class Cli
           --fn <name>      measure this function instead of main
           --dump <what>    show a value after each run, to check the variants agree (as for
                            tern run)
-          --cycles <n>, --irq <n>, --set <a>=<v>, --json  as for tern run
+          --cycles <n>, --irq <n>, --set <a>=<v>, --max-errors <n>, --json  as for tern run
         """;
 
     /// <summary>Runs one <c>tern</c> command; returns the process exit code.</summary>
@@ -82,18 +87,20 @@ public static class Cli
         int CompileCommand(string[] arguments)
         {
             bool json = false;
+            int maxErrors = 0;
             string? input = null, outputPath = null;
             for (int i = 0; i < arguments.Length; i++)
             {
                 if (arguments[i] == "--json") json = true;
                 else if (arguments[i] == "-o" && i + 1 < arguments.Length) outputPath = arguments[++i];
+                else if (arguments[i] == "--max-errors" && i + 1 < arguments.Length && int.TryParse(arguments[i + 1], out maxErrors) && maxErrors > 0) i++;
                 else if (input is null && !arguments[i].StartsWith('-')) input = arguments[i];
                 else return Usage1($"Unknown argument: {arguments[i]}");
             }
             if (input is null) return Usage1("No source file given");
             outputPath ??= Path.ChangeExtension(input, ".prg");
 
-            var result = CompileFile(input, json);
+            var result = CompileFile(input, json, maxErrors);
             if (result is null) return 1;
             var files = new List<string>();
             void Write(string path, Action<string> write)
@@ -127,6 +134,7 @@ public static class Cli
         int RunCommand(string[] arguments)
         {
             bool json = false, screen = false, profile = false;
+            int maxErrors = 0;
             string? input = null;
             long cycles = new RunOptions().MaxCycles, irq = 0;
             var dumps = new List<string>();
@@ -146,12 +154,13 @@ public static class Cli
                 else if (a == "--dump" && hasValue) dumps.Add(arguments[++i]);
                 else if (a == "--cycles" && hasValue && long.TryParse(arguments[i + 1], out cycles) && cycles > 0) i++;
                 else if (a == "--irq" && hasValue && long.TryParse(arguments[i + 1], out irq) && irq > 0) i++;
+                else if (a == "--max-errors" && hasValue && int.TryParse(arguments[i + 1], out maxErrors) && maxErrors > 0) i++;
                 else if (input is null && !a.StartsWith('-')) input = a;
                 else return Usage1($"Unknown or incomplete argument: {a}");
             }
             if (input is null) return Usage1("No source file given");
 
-            var program = CompileFile(input, json);
+            var program = CompileFile(input, json, maxErrors);
             if (program is null) return 1;
             List<MemoryDump> parsed;
             try { parsed = dumps.Select(d => MemoryDump.Parse(d, program)).ToList(); }
@@ -169,6 +178,7 @@ public static class Cli
         int BenchCommand(string[] arguments)
         {
             bool json = false;
+            int maxErrors = 0;
             string? function = null;
             long cycles = new RunOptions().MaxCycles, irq = 0;
             var declarations = new List<string>();
@@ -191,6 +201,7 @@ public static class Cli
                 else if (a == "--dump" && hasValue) dumps.Add(arguments[++i]);
                 else if (a == "--cycles" && hasValue && long.TryParse(arguments[i + 1], out cycles) && cycles > 0) i++;
                 else if (a == "--irq" && hasValue && long.TryParse(arguments[i + 1], out irq) && irq > 0) i++;
+                else if (a == "--max-errors" && hasValue && int.TryParse(arguments[i + 1], out maxErrors) && maxErrors > 0) i++;
                 else if (!a.StartsWith('-')) variants.Add((a, null));
                 else return Usage1($"Unknown or incomplete argument: {a}");
             }
@@ -211,7 +222,7 @@ public static class Cli
                     try { variant = new BenchVariant(name, File.ReadAllText(path!), path); }
                     catch (IOException e) { return Fail(json, new Diagnostic(path!, 0, 0, "error", $"Cannot read {path}: {e.Message}", null), $"Cannot read {path}: {e.Message}"); }
                 }
-                results.Add(Bench.Measure(variant, function, dumps, new RunOptions { MaxCycles = cycles, IrqEvery = irq, Sets = sets }));
+                results.Add(Bench.Measure(variant, function, dumps, new RunOptions { MaxCycles = cycles, IrqEvery = irq, Sets = sets }, maxErrors > 0 ? maxErrors : null));
             }
             output.Write(json ? Bench.Json(results) + Environment.NewLine : Bench.Text(results));
             return results.All(r => r.Error is null && r.Returned && r.IndexErrors.Count == 0) ? 0 : 1;
@@ -219,7 +230,7 @@ public static class Cli
 
         // ---------- shared ----------
 
-        CompileResult? CompileFile(string input, bool json)
+        CompileResult? CompileFile(string input, bool json, int maxErrors)
         {
             string source;
             try
@@ -234,11 +245,18 @@ public static class Cli
             }
             try
             {
-                return TernCompiler.Compile(source, sourcePath: input);
+                return TernCompiler.Compile(source, sourcePath: input, maxErrors: maxErrors > 0 ? maxErrors : null);
             }
             catch (CompileError e)
             {
-                Fail(json, Diagnostic.From(e, input), e.Description);
+                // Every error found (spec 13); the text ends with their number.
+                var all = e.All.Select(x => Diagnostic.From(x, input)).ToList();
+                if (json) output.WriteLine(Diagnostic.ToJson(false, [], null, all));
+                else
+                {
+                    for (int i = 0; i < all.Count; i++) error.WriteLine($"{all[i].File}:{all[i].Line}:{all[i].Column}: error: {e.All[i].Description}");
+                    error.WriteLine(Diagnostic.Count(all.Count, e.MoreNotReported, maxErrors));
+                }
                 return null;
             }
         }

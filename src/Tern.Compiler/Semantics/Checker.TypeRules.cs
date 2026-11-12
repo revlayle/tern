@@ -26,7 +26,7 @@ public sealed partial class Checker
         if (v >= 0 && v <= 65535) return TernType.U16;
         if (v >= -128 && v < 0) return TernType.I8;
         if (v >= -32768 && v < 0) return TernType.I16;
-        throw new CompileError(e.Pos, $"{v} does not fit in 16 bits");
+        throw new CompileError(e.Pos, $"{v} does not fit in 16 bits. Use a value from -32768 to 65535");
     }
 
     /// <summary>Makes two operands the same type, applying the automatic conversions.</summary>
@@ -55,7 +55,7 @@ public sealed partial class Checker
     private static TernType TypedOperationType(TernType lt, TernType rt, SourcePos pos)
     {
         if (!lt.IsInteger || !rt.IsInteger)
-            throw new CompileError(pos, $"Cannot combine {lt} and {rt}");
+            throw new CompileError(pos, $"Cannot combine {lt} and {rt}. Convert one side with 'as'");
         if (lt.IsSigned != rt.IsSigned)
             throw new CompileError(pos, $"Cannot mix signed and unsigned ({lt} and {rt}); convert one side with 'as'");
         return lt.Size >= rt.Size ? lt : rt;
@@ -67,7 +67,7 @@ public sealed partial class Checker
         var source = e.Type;
         if (source.Kind == TypeKind.Error) return;
         if (source.Kind == TypeKind.Void)
-            throw new CompileError(e.Pos, "This function call does not return a value");
+            throw new CompileError(e.Pos, "This function call does not return a value. Call it as a statement on its own");
         if (source.IsStruct)
             throw new CompileError(e.Pos, $"A struct cannot be used as a value, since structs are never copied. Use one of its fields, or a pointer: addr(...) gives a ptr {source}");
 
@@ -82,7 +82,7 @@ public sealed partial class Checker
             if (e.IsBitPattern && v < 0 && !target.IsSigned)
                 throw new CompileError(e.Pos, $"'~' gives {v} here, a pattern wider than {target}: the value before '~' has bits above {target}. Use a value that fits in {target} before '~'");
             if (v < target.MinValue || v > target.MaxValue)
-                throw new CompileError(e.Pos, $"{v} does not fit in {target} ({target.MinValue} to {target.MaxValue})");
+                throw new CompileError(e.Pos, $"{v} does not fit in {target} ({target.MinValue} to {target.MaxValue}). Use a value in that range, or a wider type");
             e.Type = target;
             return;
         }
@@ -281,7 +281,7 @@ public sealed partial class Checker
         if (f.Parameters.Count > 0 || f.ReturnType.Kind != TypeKind.Void)
             throw new CompileError(f.Pos,
                 $"'{f.Name}' has {(f.Parameters.Count > 0 ? "parameters" : "a return value")}, so it can only be called as a part of another interrupt fn. " +
-                "An interrupt handler takes no parameters and returns no value: the CPU calls it, not your code");
+                "An interrupt handler takes no parameters and returns no value: the CPU calls it, not your code. Remove them, or call it only from an interrupt fn");
     }
 
     private static string DescribeRoot(FunctionSymbol root) =>
@@ -429,7 +429,7 @@ public sealed partial class Checker
                 if (state.GetValueOrDefault(callee) == 1)
                 {
                     var cycle = path.Reverse().SkipWhile(x => x != callee).Select(x => x.Name).Append(callee.Name);
-                    throw new CompileError(callee.Pos, $"Recursion is not allowed: {string.Join(" -> ", cycle)}");
+                    throw new CompileError(callee.Pos, $"Recursion is not allowed: {string.Join(" -> ", cycle)}. Use a loop instead, with an array as the stack if needed");
                 }
                 if (state.GetValueOrDefault(callee) == 0) Visit(callee);
             }

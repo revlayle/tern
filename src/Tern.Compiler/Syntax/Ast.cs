@@ -261,6 +261,15 @@ public sealed class ForStmt(
 }
 public sealed class BreakStmt(SourcePos pos) : Stmt(pos);
 
+/// <summary>
+/// A statement with a syntax error, which was reported (spec 13). <see cref="Name"/> is the name it
+/// declares (<c>var x = )</c>), or null: the checker declares it so that its uses add no errors.
+/// </summary>
+public sealed class ErrorStmt(SourcePos pos, string? name) : Stmt(pos)
+{
+    public string? Name { get; } = name;
+}
+
 /// <summary><c>match subject { 0 => a()  1, 2 => b()  3..=7 => { ... }  _ => c() }</c></summary>
 public sealed class MatchStmt(SourcePos pos, Expr subject, List<MatchArm> arms) : Stmt(pos)
 {
@@ -502,6 +511,13 @@ public sealed class ProgramSyntax(List<ConstDecl> consts, List<VarDecl> globals,
     public List<FnDecl> Functions { get; } = functions;
     /// <summary>The <c>const fn</c> declarations (spec 4.1), apart from <see cref="Functions"/>: they are never compiled.</summary>
     public List<FnDecl> ConstFns { get; init; } = [];
+    /// <summary>
+    /// Top-level names whose declaration had a syntax error, and imports that did (spec 13): the checker
+    /// declares them so that their uses add no errors. The declarations are not in the other lists.
+    /// </summary>
+    public List<(string Name, SourcePos Pos)> BrokenNames { get; init; } = [];
+    /// <summary>The parser dropped a statement or declaration for an error (spec 13): a missing declaration may be in it.</summary>
+    public bool HasSyntaxErrors { get; init; }
 }
 
 /// <summary>The <c>memory { ... }</c> block of the main file.</summary>

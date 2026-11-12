@@ -175,7 +175,7 @@ public static class Assembler
             }
             var free = MemoryLayout.Subtract(areas, fixedRanges);
             if (free.Count == 0)
-                throw new CompileError(new SourcePos(1, 1), $"No program area is left: the data placed with '@' fills {MemoryLayout.List(areas)}");
+                throw new CompileError(new SourcePos(1, 1), $"No program area is left: the data placed with '@' fills {MemoryLayout.List(areas)}. Move some of the data, or make an area larger");
             var used = free.Select(a => a.First).ToArray();
             var names = free.Select(_ => new List<string>()).ToArray();
 
@@ -290,7 +290,7 @@ public static class Assembler
                 if (x.Overlay is not null && y.Overlay is not null && x.Overlay != y.Overlay) continue;
                 if (x.Address < y.Address + y.Size && y.Address < x.Address + x.Size)
                     throw new CompileError(new SourcePos(1, 1),
-                        $"'{x.Name}' ({new AddressRange(x.Address, x.Address + x.Size - 1)}) and '{y.Name}' ({new AddressRange(y.Address, y.Address + y.Size - 1)}) are placed at overlapping addresses");
+                        $"'{x.Name}' ({new AddressRange(x.Address, x.Address + x.Size - 1)}) and '{y.Name}' ({new AddressRange(y.Address, y.Address + y.Size - 1)}) are placed at overlapping addresses. Move one of them");
             }
 
         beforeEncode?.Invoke();
@@ -440,7 +440,7 @@ public static class Assembler
         });
         return new CompileError(new SourcePos(1, 1),
             $"{(what == "the variables" ? "The variables need" : $"'{what}' needs")} {size} bytes, and no program area has room for them in one piece " +
-            $"(code is never split across areas). Areas: {string.Join("; ", areas)}");
+            $"(code is never split across areas). Areas: {string.Join("; ", areas)}. Make an area larger, or split the code into smaller functions");
     }
 
     /// <summary>Uses a zero-page mode when the operand is a zero-page address and the instruction has one.</summary>

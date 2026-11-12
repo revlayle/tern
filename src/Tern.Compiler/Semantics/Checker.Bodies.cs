@@ -27,7 +27,7 @@ public sealed partial class Checker
                         $"'{ins.Mnemonic.ToString().ToLowerInvariant()}' in an inline asm fn would end the function that calls it, since the code is copied there. Remove it: the code simply runs on after the copy");
 
         if (_function.ReturnType.Kind != TypeKind.Void && !decl.IsAsm && !AlwaysReturns(decl.Body))
-            throw new CompileError(decl.Pos, $"'{decl.Name}' can reach its end without returning a value");
+            throw new CompileError(decl.Pos, $"'{decl.Name}' can reach its end without returning a value. Add a 'return' at the end");
 
         _scopes.Clear();
         _function = null;
@@ -36,20 +36,31 @@ public sealed partial class Checker
     private void CheckBlock(BlockStmt block, bool newScope = true)
     {
         if (newScope) _scopes.Add(new Dictionary<string, Symbol>());
-        foreach (var s in block.Statements) CheckStmt(s);
+        foreach (var s in block.Statements)
+        {
+            // At most one error per statement (spec 13). A local whose declaration failed accepts every use.
+            if (!Recover(() => CheckStmt(s)) && s is VarDecl or ConstDecl && DeclaredName(s) is var name && Lookup(name, demand: false) is null)
+                _scopes[^1][name] = new ErrorSymbol(name, s.Pos);
+        }
         if (newScope) _scopes.RemoveAt(_scopes.Count - 1);
     }
+
+    private static string DeclaredName(Stmt s) => s switch { VarDecl v => v.Name, ConstDecl c => c.Name, _ => "" };
 
     private void CheckStmt(Stmt stmt)
     {
         switch (stmt)
         {
+            case ErrorStmt e:
+                // A syntax error, reported by the parser.
+                if (e.Name is { } broken && Lookup(broken, demand: false) is null) _scopes[^1][broken] = new ErrorSymbol(broken, e.Pos);
+                break;
             case VarDecl v: CheckLocal(v); break;
             case ConstDecl c: DeclareConst(c); break;
             case AssignStmt a: CheckAssign(a); break;
             case ExprStmt e:
                 if (e.Expr is not CallExpr)
-                    throw new CompileError(e.Pos, "Only a function call can be used as a statement");
+                    throw new CompileError(e.Pos, "Only a function call can be used as a statement. Assign the value to a variable, or remove it");
                 CheckExpr(e.Expr);
                 break;
             case BlockStmt b: CheckBlock(b); break;
@@ -57,7 +68,8 @@ public sealed partial class Checker
             {
                 // A constant condition compiles only the branch taken: calls, variables and addresses in the
                 // other one are checked but not recorded, so what only it uses is left out of the program (spec 2.2).
-                CheckCondition(i.Condition);
+                // After an error in the condition, the branches are still checked (spec 13).
+                Recover(() => CheckCondition(i.Condition));
                 bool wasDead = _dead;
                 _dead = wasDead || i.Condition.ConstValue == 0;
                 CheckBlock(i.Then);
@@ -68,7 +80,7 @@ public sealed partial class Checker
             }
             case WhileStmt w:
             {
-                CheckCondition(w.Condition);
+                Recover(() => CheckCondition(w.Condition));
                 bool wasDead = _dead;
                 _dead = wasDead || w.Condition.ConstValue == 0;
                 _loopDepth++;
@@ -81,17 +93,17 @@ public sealed partial class Checker
             case MatchStmt m: CheckMatch(m); break;
             case AsmStmt a: CheckAsm(a); break;
             case BreakStmt or ContinueStmt:
-                if (_loopDepth == 0) throw new CompileError(stmt.Pos, "'break' and 'continue' must be inside a loop");
+                if (_loopDepth == 0) throw new CompileError(stmt.Pos, "'break' and 'continue' must be inside a loop. Use 'return' to leave the function");
                 break;
             case ReturnStmt r:
                 var ret = _function!.ReturnType;
                 if (ret.Kind == TypeKind.Void)
                 {
-                    if (r.Value is not null) throw new CompileError(r.Pos, $"'{_function.Name}' does not return a value");
+                    if (r.Value is not null) throw new CompileError(r.Pos, $"'{_function.Name}' does not return a value. Remove the value, or give the function a return type");
                 }
                 else
                 {
-                    if (r.Value is null) throw new CompileError(r.Pos, $"'{_function.Name}' must return a {ret} value");
+                    if (r.Value is null) throw new CompileError(r.Pos, $"'{_function.Name}' must return a {ret} value. Write the value after 'return'");
                     CheckExpr(r.Value);
                     Coerce(r.Value, ret);
                 }
@@ -108,23 +120,36 @@ public sealed partial class Checker
         decl.Symbol = v;
         ApplyPlacement(decl, v, allowAddress: false);
 
-        if (inAsmFn && decl.Init is not null)
-            throw new CompileError(decl.Init.Pos, $"'{decl.Name}' in an asm fn has no initial value: the assembly sets it. Remove the value and store it in the assembly");
-        if (decl.Init is null)
+        try
         {
-            if (!type.IsArray && !type.IsStruct && !inAsmFn)
-                throw new CompileError(decl.Pos, $"Local variable '{decl.Name}' needs an initial value");
+            if (inAsmFn && decl.Init is not null)
+                throw new CompileError(decl.Init.Pos, $"'{decl.Name}' in an asm fn has no initial value: the assembly sets it. Remove the value and store it in the assembly");
+            if (decl.Init is null)
+            {
+                if (!type.IsArray && !type.IsStruct && !inAsmFn)
+                    throw new CompileError(decl.Pos, $"Local variable '{decl.Name}' needs an initial value. Write one: var {decl.Name}: {type} = 0");
+            }
+            else
+            {
+                if (decl.Init is StructLiteralExpr lit) throw StructLiteralInCode(lit, decl.Name);
+                if (type.IsStruct || type.IsStructArray)
+                    throw new CompileError(decl.Init.Pos, "A struct cannot have an initial value. Assign its fields");
+                if (type.IsArray && IsCompileTimeArray(decl.Init)) CheckExpr(decl.Init);
+                if (type.IsArray) throw new CompileError(decl.Init.Pos, "Local arrays cannot have initial values yet. Assign the elements, or use a global or data");
+                CheckExpr(decl.Init);
+                Coerce(decl.Init, type);
+                v.Weight += Weight();
+            }
         }
-        else
+        catch (Exception e) when (_errors is not null && decl.TypeSyntax is not null && e is CompileError or FollowOnError)
         {
-            if (decl.Init is StructLiteralExpr lit) throw StructLiteralInCode(lit, decl.Name);
-            if (type.IsStruct || type.IsStructArray)
-                throw new CompileError(decl.Init.Pos, "A struct cannot have an initial value. Assign its fields");
-            if (type.IsArray && IsCompileTimeArray(decl.Init)) CheckExpr(decl.Init);
-            if (type.IsArray) throw new CompileError(decl.Init.Pos, "Local arrays cannot have initial values yet");
-            CheckExpr(decl.Init);
-            Coerce(decl.Init, type);
-            v.Weight += Weight();
+            // Its type is written, so only the initial value is wrong: its uses still check (spec 13).
+            if (Lookup(decl.Name, demand: false) is null or ErrorSymbol)
+            {
+                Declare(v);
+                _function!.FrameVariables.Add(v);
+            }
+            throw;
         }
         Declare(v);
         _function!.FrameVariables.Add(v);
@@ -138,9 +163,9 @@ public sealed partial class Checker
         if (target.Type.IsStruct)
             throw new CompileError(target.Pos, "Structs are never copied, so a struct cannot be assigned. Assign its fields one by one, or copy the memory with mem.copy");
         if (!IsAssignable(target))
-            throw new CompileError(target.Pos, "The left side of an assignment must be a variable, an array element, a field, or .lo/.hi of one");
+            throw new CompileError(target.Pos, "The left side of an assignment must be a variable, an array element, a field, or .lo/.hi of one. Assign to one of those");
         if (!target.Type.IsScalar)
-            throw new CompileError(target.Pos, "Whole arrays cannot be assigned");
+            throw new CompileError(target.Pos, "Whole arrays cannot be assigned. Assign the elements in a loop, or copy the memory with mem.copy");
 
         CheckExpr(a.Value);
         if (a.Op == TokenKind.Eq)
@@ -151,12 +176,12 @@ public sealed partial class Checker
         if (target.Type.IsPointer)
         {
             if (a.Op is not (TokenKind.PlusEq or TokenKind.MinusEq))
-                throw new CompileError(a.Pos, $"'{OpText(a.Op)}' does not work on pointers; only '+=' and '-=' do");
+                throw new CompileError(a.Pos, $"'{OpText(a.Op)}' does not work on pointers; only '+=' and '-=' do. Convert the pointer with 'as u16' for other operators");
             CheckPointerOffset(a.Value);
             return;
         }
         if (!target.Type.IsInteger)
-            throw new CompileError(a.Pos, $"'{OpText(a.Op)}' needs a number on the left");
+            throw new CompileError(a.Pos, $"'{OpText(a.Op)}' needs a number on the left. Use a number variable, or '=' with the whole value");
         if (a.Op is TokenKind.ShlEq or TokenKind.ShrEq)
             CheckShiftCount(a.Value, target.Type);
         else
@@ -192,12 +217,12 @@ public sealed partial class Checker
         switch (Unwrap(e))
         {
             case NameExpr { Symbol: VariableSymbol v }:
-                if (v.IsData) throw new CompileError(e.Pos, $"'{v.Name}' is data, which is read-only");
-                if (v.ReadOnly) throw new CompileError(e.Pos, $"Loop variable '{v.Name}' cannot be changed inside the loop");
+                if (v.IsData) throw new CompileError(e.Pos, $"'{v.Name}' is data, which is read-only. Declare it with 'var' to change it");
+                if (v.ReadOnly) throw new CompileError(e.Pos, $"Loop variable '{v.Name}' cannot be changed inside the loop. Use a 'while' loop to change the counter yourself");
                 return true;
             case IndexExpr ix:
                 if (Unwrap(ix.Target) is NameExpr { Symbol: { IsData: true } d })
-                    throw new CompileError(e.Pos, $"'{d.Storage.Name}' is data, which is read-only");
+                    throw new CompileError(e.Pos, $"'{d.Storage.Name}' is data, which is read-only. Declare it with 'var' to change it");
                 return true;
             case MemberExpr m:
                 return Unwrap(m.Target) is NameExpr or IndexExpr && IsAssignable(m.Target);
@@ -213,7 +238,7 @@ public sealed partial class Checker
         foreach (var bound in new[] { f.From, f.To })
         {
             if (!(bound.Type.IsInteger || bound.Type.Kind == TypeKind.IntLiteral))
-                throw new CompileError(bound.Pos, "Loop bounds must be numbers");
+                throw new CompileError(bound.Pos, "Loop bounds must be numbers. Use integer values, or convert with 'as'");
             // A typed constant gives the counter its type, as a variable of that type would.
             if (bound is { Type.Kind: TypeKind.IntLiteral, ConstType: { } typed }) Coerce(bound, typed);
         }
@@ -251,11 +276,11 @@ public sealed partial class Checker
         else if (f.Step is not null)
         {
             if (f.Step.ConstValue is not long step || step == 0)
-                throw new CompileError(f.Step.Pos, "'step' must be a non-zero constant, or a u8 variable in a loop that counts up with a u8 counter");
+                throw new CompileError(f.Step.Pos, "'step' must be a non-zero constant, or a u8 variable in a loop that counts up with a u8 counter. Use one of those");
             if (Math.Abs(step) > 127)
-                throw new CompileError(f.Step.Pos, "'step' must be between -127 and 127");
+                throw new CompileError(f.Step.Pos, "'step' must be between -127 and 127. Use a smaller step, or a 'while' loop");
             if (from is not null && to is not null && from != to && (to > from) != (step > 0))
-                throw new CompileError(f.Step.Pos, $"A step of {step} goes the wrong way from {from} to {to}");
+                throw new CompileError(f.Step.Pos, $"A step of {step} goes the wrong way from {from} to {to}. Change the sign of the step, or swap the bounds");
             f.StepValue = (int)step;
         }
         else
@@ -269,12 +294,12 @@ public sealed partial class Checker
         if (f.UsingRegister is { } reg)
         {
             if (reg is not (Register.X or Register.Y))
-                throw new CompileError(f.Pos, "A loop variable can only use X or Y");
+                throw new CompileError(f.Pos, "A loop variable can only use X or Y. Write 'using X' or 'using Y'");
             if (type.Size != 1)
                 throw new CompileError(f.Pos,
                     $"{(type.IsSigned ? "An" : "A")} {type} loop variable does not fit in {reg}. Remove 'using {reg}', or use bounds that fit in {(type.IsSigned ? "an i8" : "a u8")}");
             if (!_loopRegisters.Add(reg))
-                throw new CompileError(f.Pos, $"{reg} is already used by an enclosing loop");
+                throw new CompileError(f.Pos, $"{reg} is already used by an enclosing loop. Use the other index register, or leave out 'using'");
             if (ContainsCall(f.Body, reg))
                 throw new CompileError(f.Pos,
                     $"The loop body calls a function, which can change {reg}. Remove 'using {reg}', or call only routines that keep {reg}");
@@ -320,7 +345,7 @@ public sealed partial class Checker
     {
         var step = f.Step!;
         if (step.Type.IsSigned)
-            throw new CompileError(step.Pos, $"A variable step must be a u8, but this is {step.Type}: a variable step cannot be negative");
+            throw new CompileError(step.Pos, $"A variable step must be a u8, but this is {step.Type}: a variable step cannot be negative. Use a constant negative step to count down");
         if (step.Type.Size != 1)
             throw new CompileError(step.Pos, $"A variable step must be a u8, but this is {step.Type}. Convert with 'as u8' if it always fits");
         if (counter.Size != 1 || counter.IsSigned)
@@ -359,7 +384,7 @@ public sealed partial class Checker
         if (type.Kind is TypeKind.U16 or TypeKind.I16)
             throw new CompileError(m.Subject.Pos, "'match' on a 16-bit value is not supported yet. Match on .lo or .hi, or use if / else if");
         if (type.Kind is not (TypeKind.U8 or TypeKind.I8))
-            throw new CompileError(m.Subject.Pos, $"'match' needs a u8 or i8 value, not {type}");
+            throw new CompileError(m.Subject.Pos, $"'match' needs a u8 or i8 value, not {type}. Convert it with 'as u8', or use if / else if");
         int bias = type.IsSigned ? 128 : 0;
 
         // Which arm matches each value, to find values matched twice.
@@ -379,14 +404,14 @@ public sealed partial class Checker
                 for (int v = p.From; v <= p.To; v++)
                 {
                     if (owner[v] is { } first)
-                        throw new CompileError(p.Pos, $"{v - bias} is already matched at {first.Pos}; each value may appear in one pattern only");
+                        throw new CompileError(p.Pos, $"{v - bias} is already matched at {first.Pos}; each value may appear in one pattern only. Remove it from one of the patterns");
                     owner[v] = p;
                 }
             }
             CheckBlock(arm.Body);
         }
         if (m.IsIndexed && m.Arms.All(a => a.IsDefault))
-            throw new CompileError(m.Pos, "An 'indexed match' needs at least one pattern besides '_': its table covers the values from the lowest pattern to the highest");
+            throw new CompileError(m.Pos, "An 'indexed match' needs at least one pattern besides '_': its table covers the values from the lowest pattern to the highest. Add a pattern, or remove 'indexed'");
     }
 
     /// <summary>A constant in a match pattern, as a value of the subject's type.</summary>
@@ -394,7 +419,7 @@ public sealed partial class Checker
     {
         CheckExpr(e);
         if (e.ConstValue is not long v)
-            throw new CompileError(e.Pos, "A match pattern must be a constant: a number, a character or a const");
+            throw new CompileError(e.Pos, "A match pattern must be a constant: a number, a character or a const. Use if / else if to compare with a variable");
         Coerce(e, type);
         return v;
     }
@@ -424,6 +449,7 @@ public sealed partial class Checker
     private static bool AlwaysReturns(Stmt stmt) => stmt switch
     {
         ReturnStmt => true,
+        ErrorStmt => true,   // a syntax error, reported: maybe the return (spec 13)
         BlockStmt { Code: [.., var last] } => AlwaysReturns(last),
         IfStmt i => i.Else is not null && AlwaysReturns(i.Then) && AlwaysReturns(i.Else),
         WhileStmt w => w.Condition.ConstValue == 1 && !ContainsBreak(w.Body),

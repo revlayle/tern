@@ -309,9 +309,9 @@ public class RecordIndexTests
 
     [Theory]
     [InlineData("linear var list: [Odd; 4]\nvar i: u8\nfn main() { i = list[i].a }",
-        "'list' has records of 5 bytes, and a variable index into a linear array needs 1, 2, 4 or 8. Pad Odd with '_' fields to 8 bytes (e.g. _: [u8; 3]), or declare the array 'indexed var list' to use a table of 4 bytes")]
+        "'list' has records of 5 bytes, and a variable index into a linear array needs 1, 2, 4 or 8. Add '_' fields to Odd to make it 8 bytes (e.g. _: [u8; 3]), or declare the array 'indexed var list' to use a table of 4 bytes")]
     [InlineData("linear var list: [Pair; 130]\nvar i: u8\nfn main() { i = list[i].x }", "more than the 256 an 8-bit offset reaches")]
-    [InlineData("linear var list: [Pair; 130]\nvar i: u8\nfn main() { i = list[i].x }", "Step through it with a pointer: p = p + sizeof(Pair)")]
+    [InlineData("linear var list: [Pair; 130]\nvar i: u8\nfn main() { i = list[i].x }", "Use a pointer to step through it: p = p + sizeof(Pair)")]
     [InlineData("linear var list: [Pair; 4]\nvar i: u8\nfn main() { i = list[4].x }", "Index 4 is past the end of 'list'")]
     [InlineData("indexed var list: [Pair; 130]\nfn main() { }", "An indexed array is at most 256 bytes")]
     [InlineData("indexed var list: [u8; 10]\nfn main() { }", "'indexed' is for arrays of structs")]

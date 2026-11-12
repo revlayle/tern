@@ -57,7 +57,7 @@ public sealed class MemoryLayout
         foreach (var (line, first, last) in lines)
         {
             if (first < 0 || last > 0xFFFF)
-                throw new CompileError(line.Pos, $"The range ${first:X}..=${last:X} is outside memory ($0000-$FFFF)");
+                throw new CompileError(line.Pos, $"The range ${first:X}..=${last:X} is outside memory ($0000-$FFFF). Use addresses in that range");
             if (first > last)
                 throw new CompileError(line.Pos, $"The range starts at ${first:X4} and ends at ${last:X4}, before its start. Write the lower address first");
             var range = new AddressRange((int)first, (int)last);
@@ -66,7 +66,7 @@ public sealed class MemoryLayout
                 case "program": program.Add(range); break;
                 case "zeropage":
                     if (last > 0xFF)
-                        throw new CompileError(line.Pos, $"A zeropage range must lie in $00-$FF; {range} does not");
+                        throw new CompileError(line.Pos, $"A zeropage range must lie in $00-$FF; {range} does not. Use addresses below $100");
                     zeroPage.Add(range);
                     break;
                 case "reserved": reserved.Add(range); break;
@@ -85,7 +85,7 @@ public sealed class MemoryLayout
                 foreach (var (other, otherLine) in claimed)
                     if (range.Overlaps(other))
                         throw new CompileError(line.Pos,
-                            $"{range} ({Describe(line)}) overlaps {other} ({Describe(otherLine)}, line {otherLine.Pos.Line}). Ranges may not overlap, except volatile ones");
+                            $"{range} ({Describe(line)}) overlaps {other} ({Describe(otherLine)}, line {otherLine.Pos.Line}). Ranges may not overlap, except volatile ones. Move one of them");
                 claimed.Add((range, line));
             }
         }

@@ -165,7 +165,7 @@ public sealed partial class CodeGen
     private Register FreeIndexRegister(SourcePos pos) =>
         !_reserved.Contains(Register.X) ? Register.X
         : !_reserved.Contains(Register.Y) ? Register.Y
-        : throw new CompileError(pos, "No free index register: X and Y are both used by loop variables");
+        : throw new CompileError(pos, "No free index register: X and Y are both used by loop variables. Remove 'using' from one of the loops");
 
     // ---------- Functions ----------
 
