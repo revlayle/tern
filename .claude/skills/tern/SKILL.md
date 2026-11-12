@@ -209,10 +209,12 @@ Functions (cycles include the functions they call):
 - **Structs are never copied, passed, returned or compared.** Pass a pointer or an index.
 - **`using` puts a value in a register or flag:** `fn plot(x: u8 using X)`, `for i in 0..8 using Y`,
   `-> bool using carry`. A plain parameter is fixed memory the caller stores into.
-- **A function reached from `main` and from an interrupt handler** (two roots) is an error unless it
-  has no memory of its own (no memory parameters, locals or temporaries). A global used by both
-  becomes volatile. A module's `private` variable used from both is an error too: `math.mul8`'s
-  work bytes and `random`'s state are private, so a handler cannot call them while main does.
+- **A function reached from `main` and from an interrupt handler** (two roots) compiles, with one
+  frame for both: if the interrupt lands while main is inside it, main's call goes on with the
+  handler's values. Call it in main with interrupts off, make it an `inline fn`, give it no memory
+  of its own, or write a second one for the handler. A global used by both becomes volatile. A
+  module's `private` variable used from both is an error: `math.mul8`'s work bytes and `random`'s
+  state are private, so a handler cannot call them while main does.
 - **Inside `for ... using X`, only routines that keep X may be called** (`keeps X`); likewise Y.
 - **A `bool` can live in a flag.** `-> bool using carry` returns in the carry; an `inline asm fn`
   with a flag result tests a flag its instructions set, with no call. After compiled code the flags

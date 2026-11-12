@@ -199,8 +199,8 @@ public sealed partial class Checker
     /// The functions reachable from main, then from each interrupt handler, then from each function
     /// whose address is taken; callers first. Handlers are roots: those of the main file, and those
     /// a compiled function names (to install them). Each function records the roots it is reached
-    /// from (<see cref="FunctionSymbol.Roots"/>); whether it may be shared between them is checked
-    /// after code generation, when its temporaries are known (<see cref="CheckSharedFunctions"/>).
+    /// from (<see cref="FunctionSymbol.Roots"/>); one reached from two roots gets a frame that
+    /// overlaps no other (spec 8.1).
     /// </summary>
     private static List<FunctionSymbol> OrderRoots(FunctionSymbol main, Module mainModule)
     {
@@ -286,39 +286,6 @@ public sealed partial class Checker
 
     private static string DescribeRoot(FunctionSymbol root) =>
         root.IsInterrupt ? $"the interrupt handler '{root.Name}'" : root.Name == EntriesRoot ? "the binary's entries" : "main";
-
-    /// <summary>
-    /// A function reached from two roots (main and a handler, or two handlers) may run again while
-    /// it is stopped halfway by an interrupt, so it must have no memory of its own: no memory
-    /// parameters, locals or temporaries (spec 8.1). Its callees are reached from both roots too,
-    /// so they are checked the same way. Runs after code generation, which creates the temporaries.
-    /// </summary>
-    public static void CheckSharedFunctions(CheckedProgram program)
-    {
-        foreach (var f in program.Functions)
-        {
-            if (f.Roots.Count < 2 || f.FrameVariables.Count == 0) continue;
-            var roots = f.Roots.OrderBy(r => r.IsInterrupt).ThenBy(r => r.Pos.File).ThenBy(r => r.Pos.Line).ToList();
-            var v = f.FrameVariables[0];
-            string memory = v.InlineOf is { } inlined
-                ? $"the {(v.Kind == VariableKind.Temp ? "hidden temporary" : $"variable '{v.Name[(inlined.Name.Length + 1)..]}'")} of the inline function '{inlined.Name}', which is copied into it"
-                : v.Kind switch
-            {
-                VariableKind.Temp => $"a hidden temporary for the code at line {v.Pos.Line} (e.g. for 16-bit arithmetic or an argument)",
-                VariableKind.Parameter when v.PassedIn is { } reg => $"the parameter '{v.Name}', which it keeps in memory (it arrives in {reg})",
-                VariableKind.Parameter => $"the parameter '{v.Name}' in memory",
-                _ when v.IsLoopCounter => v.Name.StartsWith("_loop") ? $"the counter of the loop at line {v.Pos.Line}" : $"the counter '{v.Name}' of the loop at line {v.Pos.Line}",
-                _ => $"the local variable '{v.Name}'",
-            };
-            // Only 'using X' / 'using Y' guarantees a counter is not memory (spec 8.1).
-            string fix = v.IsLoopCounter && v.InlineOf is null
-                ? $"Write 'using X' or 'using Y' on the loop at line {v.Pos.Line}, which keeps its counter in a register, or use a copy for each"
-                : "Use a copy for each";
-            throw new CompileError(f.Pos,
-                $"'{f.Name}' is called from {DescribeRoot(roots[0])} and from {DescribeRoot(roots[1])}. An interrupt can stop it halfway and run it again, " +
-                $"which would overwrite its memory: {memory}. Only a function with no memory of its own can be shared between main and interrupt handlers. {fix}");
-        }
-    }
 
     /// <summary>
     /// A module's private global used from two roots (main and a handler, or two handlers) is an

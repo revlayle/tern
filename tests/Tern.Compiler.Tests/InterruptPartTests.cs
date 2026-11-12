@@ -183,7 +183,7 @@ public sealed class InterruptPartTests : IDisposable
     }
 
     [Fact]
-    public void A_part_reached_from_two_handlers_may_have_no_memory_of_its_own()
+    public void A_part_reached_from_two_handlers_may_have_memory_of_its_own()
     {
         // No memory: allowed.
         Run.Program("""
@@ -194,18 +194,25 @@ public sealed class InterruptPartTests : IDisposable
             interrupt fn h2() { p() }
             fn main() { }
             """);
-        // With a local: an error, as for any function with memory.
-        var e = Fail("""
+        // With a local: allowed too, in a frame that overlaps no frame of either handler (spec 8.1).
+        InterruptTests.AssertFrameOverlapsNoOther(TernCompiler.Compile("""
             var x: u8
             interrupt fn p() {
                 var t: u8 = x
                 x = t + 1
             }
-            interrupt fn h1() { p() }
-            interrupt fn h2() { p() }
+            interrupt fn h1() {
+                var a: u8 = x
+                p()
+                x = a
+            }
+            interrupt fn h2() {
+                var b: u8 = x
+                p()
+                x = b
+            }
             fn main() { }
-            """);
-        Assert.Contains("called from the interrupt handler", e.Description);
+            """), "p");
     }
 
     [Fact]

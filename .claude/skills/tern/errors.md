@@ -330,61 +330,13 @@ Fix: leave out `using X` (the compiler still puts the counter in a register when
 the work in the loop without a call. A call to an `inline fn` counts as a call here too. Only
 routines declared with `keeps X` (KERNAL routines) may be called in such a loop.
 
-A function called from main and from an interrupt handler, with memory of its own:
-
-```tern error
-import c64
-
-var a: u8
-var b: u8
-
-fn add(x: u8, y: u8) -> u8 { return x + y }
-
-interrupt fn irq() {
-    c64.vic.irq_status = 1
-    b = add(b, 1)
-}
-
-fn main() {
-    c64.set_irq(addr(irq))
-    a = add(a, 2)
-}
-```
-
-```text
-example.tern:6:1: error: 'add' is called from main and from the interrupt handler 'irq'. An interrupt can stop it halfway and run it again, which would overwrite its memory: the parameter 'x' in memory. Only a function with no memory of its own can be shared between main and interrupt handlers. Use a copy for each
-1 error
-```
-
-Fix: give each side its own function, or make it an `inline fn`: its parameters then go in each
-caller's frame. Register parameters alone are not enough when the body needs a value in memory, as
-`x + y` does:
-
-```tern error
-import c64
-
-var a: u8
-var b: u8
-
-fn add(x: u8 using A, y: u8 using X) -> u8 { return x + y }
-
-interrupt fn irq() {
-    c64.vic.irq_status = 1
-    b = add(b, 1)
-}
-
-fn main() {
-    c64.set_irq(addr(irq))
-    a = add(a, 2)
-}
-```
-
-```text
-example.tern:6:1: error: 'add' is called from main and from the interrupt handler 'irq'. An interrupt can stop it halfway and run it again, which would overwrite its memory: the parameter 'x', which it keeps in memory (it arrives in A). Only a function with no memory of its own can be shared between main and interrupt handlers. Use a copy for each
-1 error
-```
-
-The `inline fn` version compiles:
+A function called from main and from an interrupt handler is not an error, even with memory of its
+own (memory parameters, locals, temporaries): it has one frame, shared by both sides, which overlaps
+no other frame. If the interrupt lands while main is inside it, the handler's call overwrites that
+memory and main's call goes on with the handler's values. Preventing that is the program's job: call
+it in main only with interrupts off (`sei` ... `cli`), make it an `inline fn` (each caller has its
+own variables), give it no memory of its own (register parameters, `using X` loops), or write a
+second function for the handler. The `inline fn` version:
 
 ```tern
 // shared.tern
@@ -406,7 +358,8 @@ fn main() {
 }
 ```
 
-The same for a library routine whose work bytes are `private`:
+A library routine whose work bytes are `private` is an error when called from both sides, since
+you cannot see that memory being shared:
 
 ```tern error
 import c64

@@ -75,7 +75,6 @@ public static class TernCompiler
 
         var gen = new CodeGen(program);
         var functionCode = gen.GenerateFunctions();
-        Checker.CheckSharedFunctions(program);
         // Indexed arrays placed so that they do not cross a page, with the variables starting on one;
         // if the program areas have no room for that, the variables are placed one after another (F12).
         RamPlan plan = null!;

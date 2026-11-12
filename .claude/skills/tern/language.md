@@ -584,8 +584,9 @@ band $0002 u8 = 3 ($03)
 
 - `interrupt fn` saves only the registers it changes and ends with `rti`. It is its own root: its
   memory never overlaps main's.
-- A function called from main and from a handler must have no memory of its own; a global used by
-  both is volatile.
+- A function called from main and from a handler has one frame for both: the handler's call
+  overwrites the memory of a call in main that it interrupts (turn interrupts off around main's
+  call, or use an `inline fn`). A global used by both is volatile.
 - An `interrupt fn` called from another one is a *part* (no saving, `rts`): this is how library
   raster code (`sprites.raster()`, `scroll.top()`) goes into your own handler.
 - `tern run --irq n` raises an IRQ every n cycles through `$FFFE`.
