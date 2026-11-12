@@ -496,11 +496,11 @@ Spec: 13 ("Several errors per compile"). Decision 2026-11-12. No language change
 - **Parser:** after a syntax error, go on at the next statement at the same brace depth, or at the next top-level declaration. The coding session decides how lines inside `( )` and `[ ]` are skipped.
 - **Checker:** at most one error per statement or declaration, then go on. A name whose declaration failed (unknown type, bad initializer, bad signature) is declared with an error type that accepts every use, so it causes no follow-on errors.
 - Allocation, code generation and layout run only when the checks found no error; their errors stay one at a time.
-- At most 20 errors; past that, "more errors were not reported". Text output ends with the count ("3 errors"); `tern --json` keeps its format, with several entries in `diagnostics`. `tern run` and `tern bench` report the same list.
+- No limit on the number of errors by default; `--max-errors n` stops after `n`, with "more errors were not reported". Text output ends with the count ("3 errors"); `tern --json` keeps its format, with several entries in `diagnostics`. `tern run` and `tern bench` report the same list.
 - **Errors without a fix sentence:** a test runs every error test's message through `Diagnostic.Split` and lists those with no suggestion (e.g. "300 does not fit in u8 (0 to 255)"). Each gets a fix sentence, or is listed in the test as having none that helps, with the reason.
 - The skill says that `tern --json` lists several errors, so an agent can fix them in one pass.
 
-Tests: a program with errors in several statements, functions and modules reports each once; a misspelled type, a misspelled function name in its declaration and a bad initializer each give one error, with no follow-on errors at their uses; a syntax error followed by a type error reports both; 25 errors report 20 and the note; an allocation error is still reported alone. Every existing error test still gets its error first.
+Tests: a program with errors in several statements, functions and modules reports each once; a misspelled type, a misspelled function name in its declaration and a bad initializer each give one error, with no follow-on errors at their uses; a syntax error followed by a type error reports both; 25 errors report all 25, and with `--max-errors 5` report 5 and the note; an allocation error is still reported alone. Every existing error test still gets its error first.
 
 Done when: the tests above pass, every error test's first error is unchanged, and the errors without a fix sentence are fixed or listed.
 

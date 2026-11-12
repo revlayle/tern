@@ -1019,7 +1019,7 @@ tern run game.tern --profile                      // the cycles of each function
 
 ### Next
 
-- **Several errors per compile** (M23): one run reports every error it can, up to 20, not only the first.
+- **Several errors per compile** (M23): one run reports every error it finds, not only the first (`--max-errors n` to stop after `n`).
 
 ### Later highlights
 
