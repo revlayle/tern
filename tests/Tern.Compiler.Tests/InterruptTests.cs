@@ -415,18 +415,22 @@ public class InterruptTests
         Assert.Equal(new byte[] { 1, 2, 0x34, 0x32 }, r.Ram.Bytes[r.Address("shown")..(r.Address("shown") + 4)]); // "AB", "42"
     }
 
-    /// <summary>Frame variables in the report's zero-page map, temporaries included: name, first and last address.</summary>
-    private static List<(string Name, int First, int Last)> ZeroPageFrames(CompileResult result) =>
+    /// <summary>
+    /// Frame variables: name, first and last address. The report's zero-page map has the temporaries too;
+    /// <see cref="CompileResult.Variables"/> has the named ones in zero page and in RAM.
+    /// </summary>
+    private static List<(string Name, int First, int Last)> Frames(CompileResult result) =>
         result.Report.Split('\n').Select(l => l.Trim()).SkipWhile(l => l != "Zero page:").Skip(1).TakeWhile(l => l.StartsWith('$'))
             .Select(l => l.Split(' ', StringSplitOptions.RemoveEmptyEntries))
             .Where(p => p[2].Contains('.'))
             .Select(p => (p[2], Convert.ToInt32(p[0][1..], 16), Convert.ToInt32(p[0][1..], 16) + int.Parse(p[1]) - 1))
+            .Concat(result.Variables.Values.Where(v => v.Function is not null).Select(v => (v.Name, v.Address, v.Address + v.Size - 1)))
             .ToList();
 
     /// <summary>The frame of <paramref name="function"/> is not empty and shares memory with no other function's frame.</summary>
     internal static void AssertFrameOverlapsNoOther(CompileResult result, string function)
     {
-        var frames = ZeroPageFrames(result);
+        var frames = Frames(result);
         var own = frames.Where(v => v.Name.StartsWith(function + ".")).ToList();
         Assert.NotEmpty(own);
         foreach (var o in own)
@@ -449,6 +453,36 @@ public class InterruptTests
     public void A_function_with_memory_may_be_called_from_two_roots(string source, string function)
     {
         AssertFrameOverlapsNoOther(TernCompiler.Compile(source), function);
+    }
+
+    [Fact]
+    public void A_frame_in_ram_shared_by_two_roots_overlaps_no_other()
+    {
+        // Review M23 follow-up, finding 2: frames in RAM are placed the same way as in zero page.
+        var result = TernCompiler.Compile("""
+            var v: u8
+            fn s() {
+                var a: [u8; 40]
+                a[1] = v
+            }
+            fn m2() {
+                var b: [u8; 40]
+                b[1] = v
+            }
+            interrupt fn h() {
+                var c: [u8; 40]
+                c[1] = v
+                s()
+            }
+            fn main() {
+                var d: [u8; 40]
+                d[1] = v
+                m2()
+                s()
+            }
+            """);
+        Assert.All(new[] { "s.a", "m2.b", "h.c", "main.d" }, n => Assert.True(result.Variables[n].Address >= 0x100, $"{n} is in zero page"));
+        AssertFrameOverlapsNoOther(result, "s");
     }
 
     [Fact]
