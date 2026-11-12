@@ -28,3 +28,13 @@
 - [x] The skill's two-roots examples (`errors.md`) and rules (`SKILL.md`, `language.md`) are updated. The private-variable error and its example stay.
 - [x] `SeveralErrorsTests`: errors found out of source order (a global's type after a function's parameter, lexer and parser errors of one file, two modules), `--max-errors 2` on that program, and the three calls.
 - [x] The tests pass, and the skill's error examples match the new order (`SkillTests`).
+
+## Second review (`516e8ac`), 2026-11-12
+
+**Ready to merge.** All three suggestions are done, with no code change besides a comment. `main` is merged into the branch. 2896 compiler tests and 36 CPU tests pass, and `BenchmarkTests` and `SkillTests` pass with no baseline change.
+
+- **Suggestion 1** (`23653db`): `zeta` now imports `beta`, and the expected order is main, zeta, beta, alpha. That order holds only under the depth-first reading of decision 112.
+- **Suggestion 2** (`1239982`): `AssertFrameOverlapsNoOther` now also reads `CompileResult.Variables`, which lists named frame variables in RAM as well as zero page, under qualified names such as `s.a`, so the `function + "."` match finds them. A new test puts four 40-byte local arrays in RAM (it checks that each address is `$0100` or above) and checks that the shared function's frame overlaps none of them. A variable in zero page appears twice in the list. That is harmless: an entry is only compared with other functions' entries.
+- **Suggestion 3** (`304ac6a`): the `ErrorSymbol` summary is wrapped.
+
+No new findings.
