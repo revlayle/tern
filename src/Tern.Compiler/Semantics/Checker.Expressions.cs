@@ -560,7 +560,7 @@ public sealed partial class Checker
         }
         if (symbol is null && c.Name.Contains('.')) throw NotDeclared(c.Name, c.Pos);
         if (symbol is not FunctionSymbol fn)
-            throw new CompileError(c.Pos, symbol is null ? $"'{c.Name}' is not a function. Check the spelling, or declare it" : $"'{c.Name}' is not a function. Remove the ()") { Undeclared = symbol is null ? c.Name : null };
+            throw new CompileError(c.Pos, symbol is null ? $"'{c.Name}' is not a function. Check the spelling, or declare it" : $"'{c.Name}' is not a function. Remove the ()");
         if (fn.IsInterrupt)
         {
             if (_function is not { IsInterrupt: true })

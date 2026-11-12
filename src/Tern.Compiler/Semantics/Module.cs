@@ -36,6 +36,7 @@ public static class ModuleLoader
     /// <param name="errors">Takes every error, and the loader goes on without a module it cannot load (spec 13). Null: the first error is thrown.</param>
     public static List<Module> Load(string source, string? sourcePath, Platform platform, string libraryDirectory, ErrorList? errors = null)
     {
+        errors?.AddFile(sourcePath);
         var main = new Module
         {
             Name = "",
@@ -88,6 +89,7 @@ public static class ModuleLoader
                     }
                     if (IsMainFile(path)) throw MainImported();
                     var text = File.ReadAllText(path);
+                    errors?.AddFile(path);
                     module = new Module
                     {
                         Name = import.Name,

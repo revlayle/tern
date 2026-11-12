@@ -396,7 +396,7 @@ public sealed partial class Checker
     /// <summary>
     /// Runs the check of one declaration or statement. On an error, reports it and returns false, with
     /// the checker's state as before; a use of a broken name (<see cref="FollowOnError"/>) is not reported.
-    /// A name reported as not declared is then declared in the file, so its other uses add no errors.
+    /// A name that is not declared stays so: each use is reported (spec 13, decision 107).
     /// </summary>
     private bool Recover(Action check)
     {
@@ -416,7 +416,6 @@ public sealed partial class Checker
         catch (CompileError e)
         {
             _errors.Add(e);
-            if (e.Undeclared is { } name && e.Pos.File == module.Path) module.Scope.TryAdd(name, new ErrorSymbol(name, e.Pos));
         }
         catch (FollowOnError) { }
         (_module, _function, _loopDepth, _dead, _allowLongBytes, _listLength) = (module, function, loopDepth, dead, longBytes, listLength);

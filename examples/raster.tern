@@ -25,7 +25,7 @@ data title = screen"RASTER BARS   FRAME $"
 
 // Tells the VIC-II the raster interrupt was handled (and clears one that is
 // pending). Main and the handler both call it: it has no memory of its own, so
-// it may be shared.
+// sharing it is safe.
 inline fn acknowledge() { c64.vic.irq_status = 1 }
 
 interrupt fn raster() {

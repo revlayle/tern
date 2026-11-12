@@ -16,14 +16,13 @@ public class DiagnosticTests
     [Fact]
     public void An_error_gives_its_place_what_is_wrong_and_the_fix()
     {
-        var d = Error("var v: u8\nfn f(n: u8) { v = n }\ninterrupt fn h() { f(1) }\nfn main() { f(2) }");
+        var d = Error("var v: u8\nfn main() {\n    v = 300\n}");
         Assert.Equal("game.tern", d.File);
-        Assert.Equal(2, d.Line);
-        Assert.Equal(1, d.Column);
+        Assert.Equal(3, d.Line);
+        Assert.Equal(9, d.Column);
         Assert.Equal("error", d.Severity);
-        Assert.StartsWith("'f' is called from main and from the interrupt handler 'h'.", d.Message);
-        Assert.EndsWith("shared between main and interrupt handlers.", d.Message);
-        Assert.Equal("Use a copy for each", d.Suggestion);
+        Assert.Equal("300 does not fit in u8 (0 to 255).", d.Message);
+        Assert.Equal("Use a value in that range, or a wider type", d.Suggestion);
     }
 
     [Fact]

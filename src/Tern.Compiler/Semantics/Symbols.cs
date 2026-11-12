@@ -119,8 +119,8 @@ public sealed class ConstSymbol(string name, SourcePos pos, TernType type, long 
 }
 
 /// <summary>
-/// A name whose declaration had an error, which was reported (spec 13), or a name reported as not
-/// declared. It accepts every use: looking it up stops the statement with no error of its own.
+/// A name whose declaration had an error, which was reported (spec 13). It accepts every use:
+/// looking it up stops the statement with no error of its own.
 /// </summary>
 public sealed class ErrorSymbol(string name, SourcePos pos) : Symbol(name, pos);
 

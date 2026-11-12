@@ -60,27 +60,21 @@ public static class TernCompiler
 
     /// <param name="sourcePath">The source file's path. <c>include_bytes</c> paths and imports of your own modules are relative to its directory.</param>
     /// <param name="libraryDirectory">Where <c>import</c> looks first; <see cref="DefaultLibraryDirectory"/> if null.</param>
-    /// <param name="maxErrors">Stop after this many errors (<c>--max-errors</c>); null for no limit.</param>
+    /// <param name="maxErrors">Report only the first this many errors (<c>--max-errors</c>); null for no limit.</param>
     /// <exception cref="CompileError">
     /// The first error. Errors found by the parser and the checks are all reported (spec 13): <see cref="CompileError.All"/>
-    /// has them in the order found. Allocation, code generation and layout run only without them, and report one error.
+    /// has them sorted by place. Allocation, code generation and layout run only without them, and report one error.
     /// </exception>
     public static CompileResult Compile(string source, Platform? platform = null, string? sourcePath = null, string? libraryDirectory = null, int? maxErrors = null)
     {
         platform ??= Platform.C64;
 
         var errors = new ErrorList(maxErrors);
-        CheckedProgram program = null!;
-        try
-        {
-            var modules = ModuleLoader.Load(source, sourcePath, platform, libraryDirectory ?? DefaultLibraryDirectory, errors);
-            program = Checker.Check(modules, platform, errors);
-        }
-        catch (ErrorLimitReached) { errors.ThrowIfAny(more: true); }
+        var modules = ModuleLoader.Load(source, sourcePath, platform, libraryDirectory ?? DefaultLibraryDirectory, errors);
+        var program = Checker.Check(modules, platform, errors);
 
         var gen = new CodeGen(program);
         var functionCode = gen.GenerateFunctions();
-        Checker.CheckSharedFunctions(program);
         // Indexed arrays placed so that they do not cross a page, with the variables starting on one;
         // if the program areas have no room for that, the variables are placed one after another (F12).
         RamPlan plan = null!;

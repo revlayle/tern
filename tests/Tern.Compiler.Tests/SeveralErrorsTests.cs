@@ -6,8 +6,8 @@ namespace Tern.Compiler.Tests;
 /// <summary>
 /// Several errors per compile (spec 13): the parser goes on at the next statement or declaration, the
 /// checker reports at most one error per statement or declaration, and a name whose declaration failed
-/// accepts every use. Errors come in the order found: the lexer's and parser's of each file, then the
-/// checker's, which declares constants, then functions, then globals, then checks function bodies.
+/// accepts every use. Errors are sorted by place (decision 108): the main file, then modules in the order
+/// first imported; by line and column within a file.
 /// </summary>
 public sealed class SeveralErrorsTests : IDisposable
 {
@@ -54,13 +54,61 @@ public sealed class SeveralErrorsTests : IDisposable
             }
             """));
         Assert.Equal([
-            "util.tern:3: 300 does not fit in u8 (0 to 255)",
-            "util.tern:4: -1 does not fit in u8 (0 to 255)",
             "5: Expected u8, found u16",
             "6: Expected u8, found bool",
             "10: 'missing' is not a function",
             "11: Expected u8, found u16",
+            "util.tern:3: 300 does not fit in u8 (0 to 255)",
+            "util.tern:4: -1 does not fit in u8 (0 to 255)",
         ], errors);
+    }
+
+    /// <summary>
+    /// Errors found out of source order: the checker declares functions before globals and checks bodies last,
+    /// the lexer and parser run before the checker, and modules are loaded while the main file is parsed.
+    /// zeta imports beta, so beta comes before alpha: the loader's order, depth first (decision 112).
+    /// </summary>
+    private List<string> OutOfOrderErrors(int? maxErrors = null) => Errors("""
+        import zeta
+        import alpha
+        var g: Unknwn
+        fn f(p: Nope) { }
+        fn main() {
+            g = 0b12
+            var x: u8 = true
+            x = )
+        }
+        """, maxErrors, ("zeta", "import beta\nfn z() {\n    var a: u8 = 300\n    a = )\n}\n"), ("alpha", "var q: u8 = 'xy'\nvar r: Bad\n"), ("beta", "var k: u8 = 999\n"));
+
+    [Fact]
+    public void Errors_are_sorted_by_place_main_file_first_then_modules_in_import_order()
+    {
+        Assert.Equal([
+            "3: Unknown type 'Unknwn'",
+            "4: Unknown type 'Nope'",
+            "6: Invalid digit '2' in number 0b12",
+            "7: Expected u8, found bool",
+            "8: Expected an expression, found ')'",
+            "zeta.tern:3: 300 does not fit in u8 (0 to 255)",
+            "zeta.tern:4: Expected an expression, found ')'",
+            "beta.tern:1: 999 does not fit in u8 (0 to 255)",
+            "alpha.tern:1: A character literal holds exactly one character",
+            "alpha.tern:2: Unknown type 'Bad'",
+        ], OutOfOrderErrors());
+    }
+
+    [Fact]
+    public void Max_errors_keeps_the_first_after_sorting()
+    {
+        var e = Assert.Throws<CompileError>(() => TernCompiler.Compile("""
+            var g: Unknwn
+            fn f(p: Nope) { }
+            fn main() { g = )
+            }
+            """, maxErrors: 2));
+        Assert.Equal([1, 2], e.All.Select(x => x.Pos.Line));
+        Assert.True(e.MoreNotReported);
+        Assert.Equal(["3: Unknown type 'Unknwn'", "4: Unknown type 'Nope'"], OutOfOrderErrors(maxErrors: 2));
     }
 
     [Fact]
@@ -79,16 +127,16 @@ public sealed class SeveralErrorsTests : IDisposable
             }
             """);
         Assert.Equal([
-            "4: Unknown type 'Enmy'",
             "2: Unknown type 'Enmy'",
             "3: Unknown type 'Enmy'",
+            "4: Unknown type 'Enmy'",
         ], errors);
     }
 
     [Fact]
-    public void A_misspelled_function_name_in_its_declaration_gives_one_error()
+    public void A_misspelled_function_name_in_its_declaration_gives_an_error_at_every_call()
     {
-        // The calls use the right name: it is reported at the first call, not at every call.
+        // Decision 107: the compiler cannot know whether the declaration or the calls are wrong.
         var errors = Errors("""
             var n: u8
             fn updte() { n += 1 }
@@ -98,11 +146,11 @@ public sealed class SeveralErrorsTests : IDisposable
                 if n > 3 { update() }
             }
             """);
-        Assert.Equal(["4: 'update' is not a function"], errors);
+        Assert.Equal(["4: 'update' is not a function", "5: 'update' is not a function", "6: 'update' is not a function"], errors);
     }
 
     [Fact]
-    public void A_name_that_is_not_declared_is_reported_once()
+    public void A_name_that_is_not_declared_is_reported_at_every_use()
     {
         var errors = Errors("""
             var b: u8
@@ -112,7 +160,27 @@ public sealed class SeveralErrorsTests : IDisposable
             }
             fn other() { b = cnt + 1 }
             """);
-        Assert.Equal(["3: 'cnt' is not declared"], errors);
+        Assert.Equal(["3: 'cnt' is not declared", "4: 'cnt' is not declared", "6: 'cnt' is not declared"], errors);
+    }
+
+    [Fact]
+    public void An_undeclared_type_or_module_member_is_reported_at_every_use()
+    {
+        var errors = Errors("""
+            import util
+            fn main() {
+                var a: Pos
+                var b: Pos
+                util.nope()
+                util.nope()
+            }
+            """, modules: ("util", "fn go() { }\n"));
+        Assert.Equal([
+            "3: Unknown type 'Pos'",
+            "4: Unknown type 'Pos'",
+            "5: 'util.nope' is not declared",
+            "6: 'util.nope' is not declared",
+        ], errors);
     }
 
     [Fact]
@@ -130,8 +198,8 @@ public sealed class SeveralErrorsTests : IDisposable
             }
             """);
         Assert.Equal([
-            "2: Division by zero",
             "1: 300 does not fit in u8 (0 to 255)",
+            "2: Division by zero",
             "7: Expected u8, found bool",
         ], errors);
     }
@@ -208,8 +276,8 @@ public sealed class SeveralErrorsTests : IDisposable
             """);
         Assert.Equal([
             "4: Expected ')', found '='",
-            "8: Expected ')', found 'g'",
             "5: 500 does not fit in u8 (0 to 255)",
+            "8: Expected ')', found 'g'",
             "8: Expected u8, found bool",
         ], errors);
     }
@@ -292,8 +360,8 @@ public sealed class SeveralErrorsTests : IDisposable
             }
             """);
         Assert.Equal(3, errors.Count);
-        Assert.StartsWith("3: ", errors[0]);   // a syntax error: found first
-        Assert.Equal("2: Unknown type 'u9'", errors[1]);
+        Assert.Equal("2: Unknown type 'u9'", errors[0]);
+        Assert.StartsWith("3: ", errors[1]);   // a syntax error
         Assert.Equal("7: Expected u8, found bool", errors[2]);
     }
 
@@ -310,7 +378,7 @@ public sealed class SeveralErrorsTests : IDisposable
                 b = true
             }
             """);
-        Assert.Equal(["4: Expected an expression, found ')'", "3: Expected u8, found bool", "7: Expected u8, found bool"], errors);
+        Assert.Equal(["3: Expected u8, found bool", "4: Expected an expression, found ')'", "7: Expected u8, found bool"], errors);
     }
 
     [Fact]
@@ -363,7 +431,7 @@ public sealed class SeveralErrorsTests : IDisposable
     }
 
     [Fact]
-    public void A_missing_import_is_reported_once()
+    public void A_missing_import_is_reported_at_every_use()
     {
         var errors = Errors("""
             fn main() {
@@ -371,7 +439,7 @@ public sealed class SeveralErrorsTests : IDisposable
                 text.put('B')
             }
             """);
-        Assert.Equal(["2: 'text' is not declared"], errors);
+        Assert.Equal(["2: 'text' is not declared", "3: 'text' is not declared"], errors);
     }
 
     [Fact]
@@ -453,9 +521,9 @@ public sealed class SeveralErrorsTests : IDisposable
         var (code, _, error) = Tern(path);
         Assert.Equal(1, code);
         Assert.Equal([
-            $"{path}:5:9: error: Expected an expression, found ')'",
             $"{path}:3:9: error: Expected u8, found bool",
             $"{path}:4:9: error: 300 does not fit in u8 (0 to 255). Use a value in that range, or a wider type",
+            $"{path}:5:9: error: Expected an expression, found ')'",
             "3 errors",
         ], error.TrimEnd().Split(Environment.NewLine));
 
@@ -471,7 +539,7 @@ public sealed class SeveralErrorsTests : IDisposable
         Assert.Equal(1, code);
         using var json = System.Text.Json.JsonDocument.Parse(output);
         Assert.False(json.RootElement.GetProperty("ok").GetBoolean());
-        Assert.Equal([5, 3, 4], json.RootElement.GetProperty("diagnostics").EnumerateArray().Select(d => d.GetProperty("line").GetInt32()));
+        Assert.Equal([3, 4, 5], json.RootElement.GetProperty("diagnostics").EnumerateArray().Select(d => d.GetProperty("line").GetInt32()));
     }
 
     [Fact]
@@ -485,7 +553,7 @@ public sealed class SeveralErrorsTests : IDisposable
         (code, var output, _) = Tern("bench", path, "--code", "var x: u8 = true; var y: u8 = 300");
         Assert.Equal(1, code);
         var lines = output.Split(Environment.NewLine);
-        Assert.Contains(lines, l => l.StartsWith("three.tern") && l.Contains("line 5:9: Expected an expression"));
+        Assert.Contains(lines, l => l.StartsWith("three.tern") && l.Contains("line 3:9: Expected u8, found bool"));
         Assert.Contains(lines, l => l.TrimStart().StartsWith("error: ") && l.Contains("line 4:9: 300 does not fit in u8"));
         Assert.Contains(lines, l => l.Trim() == "3 errors");
         Assert.Contains(lines, l => l.Trim() == "2 errors");
@@ -494,7 +562,7 @@ public sealed class SeveralErrorsTests : IDisposable
         using var json = System.Text.Json.JsonDocument.Parse(output);
         var variant = json.RootElement.GetProperty("variants")[0];
         Assert.Equal(1, variant.GetProperty("errors").GetArrayLength());
-        Assert.Equal(5, variant.GetProperty("error").GetProperty("line").GetInt32());
+        Assert.Equal(3, variant.GetProperty("error").GetProperty("line").GetInt32());
     }
 
     [Fact]

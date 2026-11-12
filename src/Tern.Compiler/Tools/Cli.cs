@@ -28,9 +28,10 @@ public static class Cli
           --json           print the result as JSON: ok, the files written, the report's
                            lines, and diagnostics (file, line, column, severity, message,
                            suggestion)
-          --max-errors <n> stop after n errors; without it, every error found is reported
+          --max-errors <n> report the first n errors; without it, every error found is reported
 
-        Errors are listed in the order found, then their number. Errors of the later stages
+        Errors are listed by place (the main file first, then modules in the order first
+        imported; by line and column), then their number. Errors of the later stages
         (memory allocation, code generation, layout) come only when there are no others.
 
         tern run <file.tern> compiles the program and runs it in the built-in emulator until

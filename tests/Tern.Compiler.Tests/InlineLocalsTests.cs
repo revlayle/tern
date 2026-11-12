@@ -296,30 +296,46 @@ public class InlineLocalsTests
     [Fact]
     public void A_function_with_memory_called_by_an_inline_function_is_still_shared_between_roots()
     {
-        // The inline function's own variables are now per caller, but what it calls is one function.
-        var e = Assert.Throws<CompileError>(() => TernCompiler.Compile("""
+        // The inline function's own variables are per caller, but what it calls is one function, with
+        // one frame that overlaps no frame of main or the handler (spec 8.1).
+        InterruptTests.AssertFrameOverlapsNoOther(TernCompiler.Compile("""
             var v: u8
             fn g(k: u8) { v = k }
             inline fn f() { g(1) }
-            interrupt fn h() { f() }
-            fn main() { f() }
-            """));
-        Assert.Contains("'g' is called from main and from the interrupt handler 'h'", e.Description);
+            interrupt fn h() {
+                var a: u8 = v
+                f()
+                v = a
+            }
+            fn main() {
+                var b: u8 = v
+                f()
+                v = b
+            }
+            """), "g");
     }
 
     [Fact]
-    public void An_inline_function_with_a_local_in_a_function_shared_by_two_roots_names_the_variable()
+    public void An_inline_function_with_a_local_in_a_function_shared_by_two_roots_is_in_the_shared_frame()
     {
-        var e = Assert.Throws<CompileError>(() => TernCompiler.Compile("""
+        // The inline function's variable is in g's frame, which overlaps no frame of main or the handler.
+        InterruptTests.AssertFrameOverlapsNoOther(TernCompiler.Compile("""
             var v: u8
             inline fn f() {
                 var t = v
                 v = t + 1
             }
             fn g() { f() }
-            interrupt fn h() { g() }
-            fn main() { g() }
-            """));
-        Assert.Contains("the variable 't' of the inline function 'f', which is copied into it", e.Description);
+            interrupt fn h() {
+                var a: u8 = v
+                g()
+                v = a
+            }
+            fn main() {
+                var b: u8 = v
+                g()
+                v = b
+            }
+            """), "g");
     }
 }
