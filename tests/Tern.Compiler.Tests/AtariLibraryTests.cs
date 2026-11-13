@@ -58,6 +58,24 @@ public class AtariLibraryTests
     }
 
     [Fact]
+    public void Print_of_0_characters_prints_nothing()
+    {
+        // Review M25, finding 1: CIO's put bytes with a length of 0 prints the byte in A.
+        var run = Runner.Run(TernCompiler.Compile("""
+            import atari
+            data AB = "AB"
+            fn main() {
+                atari.put('X')
+                atari.print(addr(AB), 0)
+                atari.put('Y')
+                atari.print(addr(AB), 1)
+            }
+            """, Platform.Atari));
+        Assert.True(run.Returned, run.Stop);
+        Assert.Equal("XYA", run.Output);
+    }
+
+    [Fact]
     public void Put_costs_one_call_into_cio()
     {
         var r = TernCompiler.Compile("import atari\nfn main() { atari.put('A') }\n", Platform.Atari);
@@ -101,6 +119,99 @@ public class AtariLibraryTests
         Nmi(r, VbiEntry(vector));
         Nmi(r, VbiEntry(vector));
         Assert.Equal(2, r.U8("frames"));
+    }
+
+    /// <summary>
+    /// Review M25, finding 2: replacing an installed VBI handler. The program installs one handler, then
+    /// another; a vertical blank is raised before each instruction of main in turn, through stand-ins
+    /// for the OS's VBI entry, SETVBV, XITVBV and SYSVBV. Every run must reach the end of main, with the
+    /// interrupt going to the OS or to one of the handlers.
+    /// </summary>
+    [Theory]
+    [InlineData("set_vbi", 0x0224)]
+    [InlineData("set_vbi_immediate", 0x0222)]
+    public void A_vbi_handler_can_be_replaced_while_vertical_blanks_happen(string install, int vector)
+    {
+        var result = TernCompiler.Compile($$"""
+            import atari
+            var first: u8
+            var second: u8
+            fn main() {
+                atari.{{install}}(addr(one))
+                atari.{{install}}(addr(two))
+            }
+            // 300 nops, so that the two handlers' addresses differ in both bytes.
+            const fn pad(n: int) {
+                for i in 0..n {
+                    emit { nop }
+                }
+            }
+            interrupt fn one() {
+                first += 1
+                asm { pad(300) }
+            }
+            interrupt fn two() { second += 1 }
+            """, Platform.Atari);
+        int one = result.Symbols["one"], two = result.Symbols["two"];
+        Assert.True((one & 0xFF) != (two & 0xFF) && (one >> 8) != (two >> 8));
+        int steps = 0;
+        Run(-1, ref steps);
+        for (int at = 0; at < steps; at++)
+        {
+            int ignored = 0;
+            var (ram, cpu) = Run(at, ref ignored);
+            Assert.True(cpu.PC == result.HaltAddress, $"{install}: a VBI before step {at} did not return to main (PC=${cpu.PC:X4})");
+            Assert.InRange(ram.Bytes[result.Symbols["first"]] + ram.Bytes[result.Symbols["second"]], 0, 1);
+        }
+
+        // Runs main, raising a VBI before step `nmiAt` (-1: never); counts the steps.
+        (Ram, Cpu6502) Run(int nmiAt, ref int count)
+        {
+            var ram = new Ram();
+            ram.Load((ushort)result.LoadAddress, result.Image);
+            // The OS: the VBI entry at $E000 pushes A, X, Y and jumps through VVBLKI; SYSVBV ($E45F)
+            // counts the frame at $E010 and goes on through VVBLKD; XITVBV ($E462) pulls and returns.
+            byte[] entry = [0x48, 0x8A, 0x48, 0x98, 0x48, 0x6C, 0x22, 0x02];
+            entry.CopyTo(ram.Bytes, 0xE000);
+            byte[] sysvbv = [0xEE, 0x10, 0xE0, 0x6C, 0x24, 0x02];
+            sysvbv.CopyTo(ram.Bytes, 0xE100);
+            byte[] jumps = [0x4C, 0x00, 0xE1, 0x68, 0xA8, 0x68, 0xAA, 0x68, 0x40];  // $E45F: jmp $E100; $E462: XITVBV
+            jumps.CopyTo(ram.Bytes, 0xE45F);
+            ram.Bytes[0x0222] = 0x5F; ram.Bytes[0x0223] = 0xE4;   // VVBLKI = SYSVBV
+            ram.Bytes[0x0224] = 0x62; ram.Bytes[0x0225] = 0xE4;   // VVBLKD = XITVBV
+            ram.Bytes[0xFFFA] = 0x00; ram.Bytes[0xFFFB] = 0xE0;
+            var cpu = new Cpu6502(ram) { PC = (ushort)result.Entry, SP = 0xFF };
+            bool inVbi = false;
+            int sp = 0;
+            for (int guard = 0; guard < 100_000 && cpu.PC != result.HaltAddress; guard++)
+            {
+                if (inVbi && cpu.SP == sp && ram.Bytes[cpu.PC] != 0x40) inVbi = false;
+                if (!inVbi && count++ == nmiAt)
+                {
+                    sp = cpu.SP;
+                    inVbi = true;
+                    cpu.Nmi();
+                }
+                if (cpu.PC == 0xE45C)
+                {
+                    // SETVBV: Y low, X high into the vector A names; then rts.
+                    int v = cpu.A == 6 ? 0x0222 : 0x0224;
+                    ram.Bytes[v] = cpu.Y;
+                    ram.Bytes[v + 1] = cpu.X;
+                    int ret = ram.Bytes[0x100 + (byte)(cpu.SP + 1)] | ram.Bytes[0x100 + (byte)(cpu.SP + 2)] << 8;
+                    cpu.SP += 2;
+                    cpu.PC = (ushort)(ret + 1);
+                    continue;
+                }
+                if (ram.Bytes[cpu.PC] == 0x00) break;   // brk: a jump into empty memory
+                bool throughVector = ram.Bytes[cpu.PC] == 0x6C && cpu.PC < 0xE000;
+                try { cpu.Step(); }
+                catch (IllegalOpcodeException) { break; }
+                // The library's stub jumps to a handler, never to half of one's address and half of another's.
+                if (throughVector && cpu.PC != one && cpu.PC != two) break;
+            }
+            return (ram, cpu);
+        }
     }
 
     [Fact]
@@ -213,6 +324,7 @@ public class AtariLibraryTests
     [InlineData("atari.display_list(2, 24, $3F00, $3000, 0)", "atari.display_list: the screen crosses a 4 KB boundary. Move it, or split it with a second LMS")]
     [InlineData("atari.display_list(2, 24, $4000, $33F0, 0)", "atari.display_list: the list crosses a 1 KB boundary. Place it at another address")]
     [InlineData("atari.display_list(1, 24, $4000, $3000, 0)", "atari.row_bytes: an ANTIC mode is 2 to 15")]
+    [InlineData("atari.display_list(2, 0, $4000, $3000, 0)", "atari.display_list: a display list has at least 1 row")]
     public void Display_list_errors(string call, string message)
     {
         var e = Assert.Throws<CompileError>(() => TernCompiler.Compile("import atari\ndata list: [u8; _] = " + call + "\nvar n: u8\nfn main() { n = list[0] }\n", Platform.Atari));

@@ -156,8 +156,12 @@ asm fn put(c: u8 using A) {
     jmp CIOV                        // X = 0: IOCB 0
 }
 
-// Print n ATASCII characters through the screen editor (one CIO call).
+// Print n ATASCII characters through the screen editor (one CIO call). Nothing for n = 0: CIO would
+// print the byte in A for a length of 0.
 fn print(text: ptr u8, n: u8) {
+    if n == 0 {
+        return
+    }
     iccom = $0B
     icbuf = text
     iclen = n
@@ -213,9 +217,23 @@ asm fn set_dli(handler: u16 using XY) {
 // through the vector, which then points to a stub that pulls them again and jumps to the handler, so
 // that the handler's rti does what the OS's XITVBV would (about 20 cycles a frame). The OS skips the
 // deferred VBI when it interrupted time-critical I/O.
+//
+// A vertical blank cannot be held off, so the vector goes back to the OS's XITVBV while the
+// handler's address changes: a handler installed before never runs with half of the new address.
+// (The handler then misses at most one frame.)
 asm fn set_vbi(handler: u16 using XY) {
-    stx vbi_deferred
-    sty vbi_deferred+1
+    txa
+    pha
+    tya
+    pha
+    lda #7
+    ldy #XITVBV & $FF
+    ldx #XITVBV >> 8
+    jsr SETVBV
+    pla
+    sta vbi_deferred+1
+    pla
+    sta vbi_deferred
     lda #7
     ldy #deferred_entry.lo
     ldx #deferred_entry.hi
@@ -225,10 +243,21 @@ asm fn set_vbi(handler: u16 using XY) {
 // Install a handler that runs first in every vertical blank: the immediate VBI. The OS's frame work
 // then no longer runs, so the shadow registers are not copied to the chips, the clock stops and
 // keys and controllers are not read. A handler that continues into the OS's frame work (jmp SYSVBV)
-// is written in assembly, with the OS's pushes still on the stack.
+// is written in assembly, with the OS's pushes still on the stack. While the address changes, the
+// vector points to the OS's SYSVBV, as for set_vbi.
 asm fn set_vbi_immediate(handler: u16 using XY) {
-    stx vbi_immediate
-    sty vbi_immediate+1
+    txa
+    pha
+    tya
+    pha
+    lda #6
+    ldy #SYSVBV & $FF
+    ldx #SYSVBV >> 8
+    jsr SETVBV
+    pla
+    sta vbi_immediate+1
+    pla
+    sta vbi_immediate
     lda #6
     ldy #immediate_entry.lo
     ldx #immediate_entry.hi
@@ -300,6 +329,7 @@ const fn row_bytes(mode: int) -> int {
 //
 // The list may not cross a 1 KB boundary, nor the screen a 4 KB one (ANTIC's counters wrap there).
 const fn display_list(mode: int, rows: int, screen: int, at: int, dli: int) -> [int; _] {
+    assert rows >= 1, "atari.display_list: a display list has at least 1 row"
     var size = row_bytes(mode) * rows
     assert screen / 4096 == (screen + size - 1) / 4096, "atari.display_list: the screen crosses a 4 KB boundary. Move it, or split it with a second LMS"
     var list = repeat(0, 3 + rows + 2 + 3)
