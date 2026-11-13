@@ -450,6 +450,8 @@ public sealed class ImportDecl(SourcePos pos, string name) : Node(pos)
     /// <summary>The overlay area in <c>import name @ area</c> (spec 8.5), or null.</summary>
     public string? Area { get; init; }
     public SourcePos AreaPos { get; init; }
+    /// <summary>The interface modules in <c>import name @ area implements a, b</c> (spec 8.5), with their positions.</summary>
+    public List<(string Name, SourcePos Pos)> Implements { get; init; } = [];
 }
 
 /// <summary>One <c>P = value</c> in an import.</summary>

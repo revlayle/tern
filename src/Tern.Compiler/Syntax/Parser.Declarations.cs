@@ -83,7 +83,14 @@ public sealed partial class Parser
                     area = areaName.Text;
                     areaPos = areaName.Pos;
                 }
-                imports.Add(new ImportDecl(name.Pos, name.Text) { Args = args, Area = area, AreaPos = areaPos });
+                var implements = new List<(string, SourcePos)>();
+                if (Accept(TokenKind.Implements))
+                    do
+                    {
+                        var iname = Expect(TokenKind.Identifier, "the name of an interface module after 'implements'");
+                        implements.Add((iname.Text, iname.Pos));
+                    } while (Accept(TokenKind.Comma));
+                imports.Add(new ImportDecl(name.Pos, name.Text) { Args = args, Area = area, AreaPos = areaPos, Implements = implements });
                 ExpectEndOfStatement();
             });
             SkipTerminators();

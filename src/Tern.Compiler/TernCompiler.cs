@@ -187,6 +187,12 @@ public static class TernCompiler
                 items.Add(new Instr(Rts));
             }
             items.AddRange(functionCode);
+            // implements (spec 8.5): a jmp at each interface routine's address, in the overlay's file; its code goes around them.
+            foreach (var entry in program.Implementations)
+            {
+                items.Add(new SectionStart($"{entry.Interface.Name}.{entry.Name}", entry.Routine.FixedAddress, Overlay: entry.Module.Name));
+                items.Add(new Instr(Jmp, Absolute, new LabelOperand(gen.LabelOf(entry.Function))));
+            }
             if (program.ExportTableAddress is int table)
             {
                 // A program's export table: one jmp per function, in the order listed (spec 12.3).
@@ -352,6 +358,17 @@ public static class TernCompiler
             string baseName = sourcePath is null ? "program" : Path.GetFileNameWithoutExtension(sourcePath);
             apiName = baseName + "_api";
             apiModule = BinaryInterface.GenerateTable(baseName + ".prg", apiName, table);
+        }
+
+        if (program.Implementations.Count > 0)
+        {
+            // Code around a call to an interface routine relies on what the routine promises to keep.
+            var use = new RegisterUse(gen, program.Functions);
+            foreach (var entry in program.Implementations)
+                foreach (var reg in entry.Routine.Keeps.OrderBy(r => r))
+                    if (use.Changed(entry.Function).HasFlag(reg switch { Register.A => CpuState.A, Register.X => CpuState.X, _ => CpuState.Y }))
+                        throw new CompileError(entry.Function.Pos,
+                            $"'{entry.Function.Name}' changes {reg}, which '{entry.Interface.Name}.{entry.Name}' promises to keep. Change the function so that it leaves {reg} alone, or remove {reg} from the routine's 'keeps' list");
         }
 
         var overlayFiles = new List<OverlayFile>();

@@ -22,6 +22,8 @@ public sealed class CheckedProgram(
     public int? ExportTableAddress { get; init; }
     /// <summary>A binary without <c>main</c>, which starts with its jump table.</summary>
     public bool IsBinary => Exports.Count > 0 && ExportTableAddress is null;
+    /// <summary>The entries of the overlays' interface tables (<c>implements</c>, spec 8.5).</summary>
+    public List<Implementation> Implementations { get; init; } = [];
 }
 
 /// <summary>
@@ -143,6 +145,8 @@ public sealed partial class Checker
                 : $"The memory block has no overlay area '{import.Area}'. Add a line 'first..=last overlay {import.Area}' to it"));
         }
 
+        var implementations = CheckImplements(modules);
+
         foreach (var g in _globals)
         {
             if (g.FixedAddress is not int fixedAt) continue;
@@ -235,15 +239,17 @@ public sealed partial class Checker
 
         // Only what main and the interrupt handlers can reach goes into the program, so unused parts
         // of a module cost nothing. The main file's globals are all kept.
-        MarkParts(main, mainModule);
-        var reachable = OrderRoots(main, mainModule);
+        // An overlay's interface table points to its functions, so they are compiled even if nothing calls the interface.
+        var tableTargets = implementations.Select(i => i.Function).ToList();
+        MarkParts(main, mainModule, tableTargets);
+        var reachable = OrderRoots(main, mainModule, tableTargets);
         if (exports.Count > 0 && exportTable is null) reachable.Remove(main);   // the root of a binary's entries has no code
         CheckPrivateGlobalsPerRoot(modules, reachable);
         MarkGlobalsUsedFromTwoRoots(reachable);
-        var used = reachable.SelectMany(f => f.UsedGlobals).Concat(mainModule.Scope.Values.OfType<VariableSymbol>()).ToHashSet();
+        var used = reachable.SelectMany(f => f.UsedGlobals).Concat(mainModule.Scope.Values.OfType<VariableSymbol>()).Concat(_tableData).ToHashSet();
         // A kept global keeps the globals whose addresses are in its initial value.
         foreach (var g in used.ToList()) used.UnionWith(GlobalsNamedBy(g.Storage));
-        return new CheckedProgram(modules, _globals.Where(used.Contains).ToList(), reachable, main) { Layout = _layout, Exports = exports, ExportedAs = exportedAs, ExportTableAddress = exportTable };
+        return new CheckedProgram(modules, _globals.Where(used.Contains).ToList(), reachable, main) { Layout = _layout, Exports = exports, ExportedAs = exportedAs, ExportTableAddress = exportTable, Implementations = implementations };
     }
 
     /// <summary>A global and the globals whose addresses are in its initial value, and in theirs (spec 4).</summary>
