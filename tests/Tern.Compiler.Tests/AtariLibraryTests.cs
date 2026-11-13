@@ -323,8 +323,8 @@ public class AtariLibraryTests
     [Theory]
     [InlineData("atari.display_list(2, 24, $3F00, $3000, 0)", "atari.display_list: the screen crosses a 4 KB boundary. Move it, or split it with a second LMS")]
     [InlineData("atari.display_list(2, 24, $4000, $33F0, 0)", "atari.display_list: the list crosses a 1 KB boundary. Place it at another address")]
-    [InlineData("atari.display_list(1, 24, $4000, $3000, 0)", "atari.row_bytes: an ANTIC mode is 2 to 15")]
-    [InlineData("atari.display_list(2, 0, $4000, $3000, 0)", "atari.display_list: a display list has at least 1 row")]
+    [InlineData("atari.display_list(1, 24, $4000, $3000, 0)", "atari.row_bytes: an ANTIC mode is 2 to 15. Use one of the MODE_ constants")]
+    [InlineData("atari.display_list(2, 0, $4000, $3000, 0)", "atari.display_list: a display list has at least 1 row. Give rows from 1 up")]
     public void Display_list_errors(string call, string message)
     {
         var e = Assert.Throws<CompileError>(() => TernCompiler.Compile("import atari\ndata list: [u8; _] = " + call + "\nvar n: u8\nfn main() { n = list[0] }\n", Platform.Atari));
