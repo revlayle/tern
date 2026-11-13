@@ -134,7 +134,7 @@ public sealed partial class Checker
             // Encodings no literal used yet, so that their errors are reported too.
             foreach (var e in program.Encodings)
                 if (module.Scope.GetValueOrDefault(e.Name) is EncodingSymbol es && es.Declaration == e)
-                    Declaring(e.Name, e.Pos, () => Resolve(es));
+                    Declaring(e.Name, e.Pos, () => Resolve(es, e.Pos));
             CheckDefaultEncodingLines(module);
             module.Declared = true;
         }

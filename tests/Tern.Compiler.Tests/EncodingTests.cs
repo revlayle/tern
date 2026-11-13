@@ -334,6 +334,14 @@ public sealed class EncodingTests : IDisposable
     [InlineData("encoding t { 'A' = 1, 'B' = 2, 'A' = 3 }", "'A' is listed twice in the encoding 't', also at line 1. Remove one", 1, 32)]
     [InlineData("encoding t {\n'C' = 1\n'A'..='Z' = 2\n}", "'C' is listed twice in the encoding 't', also at line 2. Remove one", 3, 1)]
     [InlineData("encoding t { 'A'..='Z' = $E7 }", "The range 'A'..='Z' has 26 characters, so from $E7 its bytes pass $FF. Start it at $E6 or lower, or split the range", 1, 14)]
+    [InlineData("encoding t { 'A'..='♥' = 0 }", "The range 'A'..='♥' has 9765 characters, but an encoding has 256 bytes. Split the range", 1, 14)]
+    [InlineData("encoding t { '\\0'..='A' = 0 }", "'\\0' and '\\$NN' are bytes", 1, 14)]
+    [InlineData("encoding tiles { 'A' = 1, 'B' = tiles'A' + 1 }", "The byte of 'B' in the encoding 'tiles' uses 'tiles' itself. Write the byte as a number", 1, 33)]
+    [InlineData("encoding a { 'A' = b'B' }\nencoding b { 'B' = a'A' }", "The byte of 'B' in the encoding 'b' uses the encoding 'a', which needs 'b'. Write the byte as a number", 2, 20)]
+    [InlineData("encoding a: b { }\nencoding b { 'B' = a'A' }", "The byte of 'B' in the encoding 'b' uses the encoding 'a', which needs 'b'", 2, 20)]
+    [InlineData("default encoding tiles\nencoding tiles { 'A' = 1, 'B' = 'A' + 1 }",
+        "The byte of 'B' in the encoding 'tiles' uses a character without a prefix, which is in the default encoding 'tiles', and that needs this byte. Write the byte as a number, or write a prefix before the quote", 2, 33)]
+    [InlineData("default encoding top\nencoding top: tiles { }\nencoding tiles { 'A'..='Z' = 'A' }", "The byte of 'A'..='Z' in the encoding 'tiles' uses a character without a prefix, which is in the default encoding 'top'", 3, 30)]
     [InlineData("encoding t { 'A' = 256 }", "256 is not a byte; an encoding gives each character one byte, $00 to $FF. Use a value in that range", 1, 20)]
     [InlineData("encoding t { 'A' = -1 }", "-1 is not a byte", 1, 20)]
     [InlineData("var v: u8\nencoding t { 'A' = v }", "An encoding's byte must be known at compile time. Use a number or a constant", 2, 20)]
@@ -398,7 +406,62 @@ public sealed class EncodingTests : IDisposable
             data d = font.tilez"A"
             fn main() { }
             """, ("font", Font));
-        Assert.StartsWith("Unknown encoding 'font.tilez'", e.Description);
+        // font's public encodings, not the built-ins or the main file's.
+        Assert.Equal("Unknown encoding 'font.tilez'. Use one of: font.tiles", e.Description);
+
+        e = Error("""
+            import plain
+            data d = plain.tiles"A"
+            fn main() { }
+            """, ("plain", "const X = 1"));
+        Assert.Equal("Unknown encoding 'plain.tiles': the module plain declares no encodings. Check the module name, or declare it in plain", e.Description);
+    }
+
+    // Review finding 1: a byte that needs the program's default while it is being worked out.
+    [Fact]
+    public void A_default_encoding_whose_byte_uses_the_default_is_one_error_not_a_crash()
+    {
+        // The data's literal starts working out the default, which needs tiles, whose 'B' needs the default.
+        var e = Error("""
+            default encoding tiles
+            encoding tiles { 'A' = 1, 'B' = 'A' + 1 }
+            data X = "AB"
+            var out: [u8; 2] @ $C000
+            fn main() { out[0] = X[0]; out[1] = X[1] }
+            """);
+        Assert.Single(e.All);
+        Assert.StartsWith("The byte of 'B' in the encoding 'tiles' uses a character without a prefix, which is in the default encoding 'tiles'", e.Description);
+        Assert.Equal((2, 33), (e.Pos.Line, e.Pos.Column));
+    }
+
+    [Fact]
+    public void A_modules_default_encoding_whose_byte_uses_the_default_is_an_error()
+    {
+        var e = Error("""
+            import fontmod
+            default encoding fontmod.tiles
+            data X = "AB"
+            var out: [u8; 2] @ $C000
+            fn main() { out[0] = X[0]; out[1] = X[1] }
+            """, ("fontmod", "encoding tiles { 'A' = 1, 'B' = 'A' + 1 }"));
+        Assert.Single(e.All);
+        Assert.Equal("The byte of 'B' in the encoding 'tiles' uses a character without a prefix, which is in the default encoding 'fontmod.tiles', and that needs this byte. " +
+            "Write the byte as a number, or write a prefix before the quote", e.Description);
+        Assert.Equal((1, 33), (e.Pos.Line, e.Pos.Column));
+        Assert.EndsWith("fontmod.tern", e.Pos.File);
+    }
+
+    [Fact]
+    public void A_byte_may_use_another_encoding_or_a_prefix_under_a_default()
+    {
+        var r = Program("""
+            default encoding tiles
+            encoding tiles { 'A' = petscii'A' - $40, 'B' = other'B' }
+            encoding other { 'B' = 7 }
+            var out: [u8; 2]
+            fn main() { out[0] = 'A'; out[1] = 'B' }
+            """);
+        Assert.Equal([1, 7], Bytes(r, "out", 2));
     }
 
     [Fact]

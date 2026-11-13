@@ -594,7 +594,7 @@ public sealed partial class Checker
 
     /// <summary>The encoding named by a literal's prefix, or the target's default.</summary>
     private CharEncoding EncodingOf(string? prefix, SourcePos pos) =>
-        prefix is null ? DefaultEncodingFor(_module) : NamedEncoding(prefix, pos);
+        prefix is null ? DefaultEncodingFor(_module, pos) : NamedEncoding(prefix, pos);
 
     private static int Encode(char c, CharEncoding encoding, SourcePos pos)
     {
