@@ -170,8 +170,10 @@ internal sealed class C64Machine(IReadOnlyList<OverlayFile> overlays) : Machine
 /// has a stand-in for IOCB 0, the screen editor, which the OS opens at startup: put bytes ($0B) prints
 /// ICBLL/ICBLH bytes from ICBAL/ICBAH, or the byte in A when the length is 0. On IOCBs 1-7 it reads the
 /// build's own overlay files: open ($03) for reading finds the one whose name, in capitals, follows
-/// the device ("D1:LEVEL1.XEX" opens level1.xex, on any device); any other name fails with $AA, as a
-/// file not on the disk. Get bytes ($07) and close ($0C) work as in CIO. CIO returns the status in Y
+/// the device ("D1:LEVEL1.XEX" opens level1.xex, on any device). A name Atari DOS 2 cannot store
+/// (1-8 letters and digits starting with a letter, an extension of up to 3) fails with $A5, DOS's file
+/// name error, so an overlay named level_1 fails here as on a disk; any other name fails with $AA, as
+/// a file not on the disk. Get bytes ($07) and close ($0C) work as in CIO. CIO returns the status in Y
 /// and ICSTA, negative on an error. SETVBV ($E45C) sets the immediate (A = 6) or deferred (A = 7) VBI
 /// vector to Y (low), X (high).
 /// </summary>
@@ -181,7 +183,7 @@ internal sealed class AtariMachine(IReadOnlyList<OverlayFile> overlays) : Machin
     private const int Ciov = 0xE456, Setvbv = 0xE45C;
     private const int Savmsc = 0x58, Lmargn = 0x52, Rmargn = 0x53, Rowcrs = 0x54, Colcrs = 0x55;
     private const int Iccom = 0x0342, Icsta = 0x0343, Icbal = 0x0344, Icbll = 0x0348, Icax1 = 0x034A;
-    private const int Ok = 1, Eof = 0x88, NotFound = 0xAA, AlreadyOpen = 0x81, NotOpen = 0x85;
+    private const int Ok = 1, Eof = 0x88, NotFound = 0xAA, AlreadyOpen = 0x81, NotOpen = 0x85, BadName = 0xA5;
 
     /// <summary>The overlay file open on each IOCB (1-7) and the next byte to read.</summary>
     private readonly Dictionary<int, (byte[] File, int Pos)> _open = [];
@@ -250,9 +252,11 @@ internal sealed class AtariMachine(IReadOnlyList<OverlayFile> overlays) : Machin
                     var name = new StringBuilder();
                     for (int i = 0; i < 128 && ram.Bytes[(buffer + i) & 0xFFFF] != 0x9B; i++) name.Append((char)ram.Bytes[(buffer + i) & 0xFFFF]);
                     var text = name.ToString();
-                    var file = overlays.FirstOrDefault(o => text.Contains(':') && (o.Name + ".xex").ToUpperInvariant() == text[(text.IndexOf(':') + 1)..]);
+                    string fileName = text[(text.IndexOf(':') + 1)..];
+                    bool dosName = text.Contains(':') && System.Text.RegularExpressions.Regex.IsMatch(fileName, @"^[A-Z][A-Z0-9]{0,7}(\.[A-Z0-9]{0,3})?$");
+                    var file = dosName ? overlays.FirstOrDefault(o => (o.Name + ".xex").ToUpperInvariant() == fileName) : null;
                     _open[x] = (file?.File ?? [], 0);     // as in CIO, the IOCB stays taken after a failed open
-                    if (file is null) status = NotFound;
+                    if (file is null) status = text.Contains(':') && !dosName ? BadName : NotFound;
                     break;
                 }
                 case 0x07:

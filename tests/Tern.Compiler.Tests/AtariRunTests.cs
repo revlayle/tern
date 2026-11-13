@@ -222,11 +222,15 @@ public class AtariRunTests
     }
 
     [Theory]
-    [InlineData("D1:LEVEL9.XEX")]
-    [InlineData("D1:level1.xex")]      // not in capitals
-    [InlineData("D1:LEVEL1")]
-    [InlineData("LEVEL1.XEX")]          // no device
-    public void Load_xex_of_a_name_that_is_not_an_overlay_fails_as_a_missing_file(string name)
+    [InlineData("D1:LEVEL9.XEX", 0xAA)]
+    [InlineData("D1:LEVEL1", 0xAA)]
+    [InlineData("LEVEL1.XEX", 0xAA)]           // no device
+    [InlineData("D1:level1.xex", 0xA5)]        // DOS 2's file name error: not in capitals
+    [InlineData("D1:LEVEL_1.XEX", 0xA5)]       // '_'
+    [InlineData("D1:LEVEL1234.XEX", 0xA5)]     // more than 8 characters
+    [InlineData("D1:LEVEL1.XEXE", 0xA5)]       // an extension of more than 3
+    [InlineData("D1:1LEVEL.XEX", 0xA5)]        // starts with a digit
+    public void Load_xex_of_a_name_that_is_not_an_overlay_fails(string name, int status)
     {
         var (program, run) = RunWithOverlay($$"""
             {{OverlayHeader}}
@@ -241,7 +245,7 @@ public class AtariRunTests
             """);
         Assert.True(run.Returned, run.Stop);
         Assert.Equal(1, run.Ram.Bytes[program.Symbols["failed"]]);
-        Assert.Equal(0xAA, run.Ram.Bytes[program.Symbols["st"]]);
+        Assert.Equal(status, run.Ram.Bytes[program.Symbols["st"]]);
         Assert.Equal(0, run.Ram.Bytes[0x6000]);
     }
 

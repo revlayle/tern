@@ -52,8 +52,9 @@ For the Atari, `tern --target atari game.tern` writes `game.xex` (a load segment
 run address) and `game.lbl` (labels for Altirra, which loads them with `game.xex`) instead of `.prg`
 and `.vs`. Its `tern run` has plain RAM for ANTIC, GTIA, POKEY and PIA, and stand-ins for CIO's put
 bytes on IOCB 0 (the screen editor, which is what `atari.put` and `atari.print` use), for reading the
-build's own overlay files on IOCBs 1-7 (`io.load_xex` of `"D1:LEVEL1.XEX"` reads `level1.xex`; any
-other name fails with `$AA`; opening a file for writing stops the run) and for SETVBV; `--screen`
+build's own overlay files on IOCBs 1-7 (`io.load_xex` of `"D1:LEVEL1.XEX"` reads `level1.xex`; a name
+Atari DOS cannot store, such as an overlay `level_1` or one over 8 characters, fails with `$A5`, so
+keep Atari overlay names to 8 letters and digits; any other name fails with `$AA`; opening a file for writing stops the run) and for SETVBV; `--screen`
 shows the text screen at SAVMSC (`$BC40`, 40 x 24, left margin 2). Display lists, DLIs and files
 show in Altirra: `Altirra64.exe /hardware:800xl /kernel:default /memsize:64K /nobasic /run game.xex`,
 with `/hdpathrw <folder>` for the `H:` device on a folder.
