@@ -55,13 +55,42 @@ public sealed class CharEncoding
         _ => null,
     });
 
+    /// <summary>
+    /// Atari ATASCII: ASCII from space to '_' and 'a' to 'z', '|', the four card suits, and '\n' as
+    /// the end-of-line code $9B. ATASCII has no '{', '}', '~' or '`' (those codes are graphics and
+    /// screen-editor controls).
+    /// </summary>
+    public static readonly CharEncoding Atascii = new("atascii", c => c switch
+    {
+        >= ' ' and <= '_' => c,
+        >= 'a' and <= 'z' => c,
+        '|' => 0x7C,
+        '\n' => 0x9B,
+        '♥' => 0x00,
+        '♣' => 0x10,
+        '♦' => 0x60,
+        '♠' => 0x7B,
+        _ => null,
+    });
+
+    /// <summary>
+    /// Atari internal screen codes (the bytes ANTIC reads from screen memory): ATASCII $20-$5F are
+    /// $00-$3F, $00-$1F are $40-$5F, $60-$7F stay. No '\n'.
+    /// </summary>
+    public static readonly CharEncoding AtariScreen = new("atari_screen", c => c == '\n' ? null : Atascii.Encode(c) switch
+    {
+        < 0x20 and var a => a + 0x40,
+        < 0x60 and var a => a - 0x20,
+        var a => a,
+    });
+
     /// <summary>An encoding the program declares (spec 2.1): <paramref name="codes"/>, then the characters of <paramref name="baseEncoding"/>.</summary>
     public static CharEncoding Declared(string name, CharEncoding? baseEncoding, IReadOnlyDictionary<char, int> codes) =>
         new(name, c => codes.TryGetValue(c, out int code) ? code : baseEncoding?.Encode(c));
 
     /// <summary>The built-in encodings.</summary>
     public static IReadOnlyDictionary<string, CharEncoding> ByName { get; } =
-        new[] { Petscii, PetsciiMixed, Screen, ScreenMixed }.ToDictionary(e => e.Name);
+        new[] { Petscii, PetsciiMixed, Screen, ScreenMixed, Atascii, AtariScreen }.ToDictionary(e => e.Name);
 
     /// <summary>Characters with the same code in both PETSCII character sets.</summary>
     private static int? PetsciiCommon(char c) => c switch
