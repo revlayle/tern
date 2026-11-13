@@ -4,7 +4,16 @@ Reviewed 2026-11-12, branch `encodings` at `2cf9acd` (4 commits from `main` at `
 
 `dotnet test`: 3323 compiler tests pass (plus the CPU tests). No benchmark changed.
 
-## Verdict
+## Re-review (2026-11-12, `c5317e6`)
+
+**Ready to merge.** All three findings are done in `a5b3f4b`; `dotnet test`: 3333 compiler tests pass, no benchmark changed.
+
+- Finding 1: the checker keeps the encoding lines whose byte is being checked (`_checkingLines`), and a use of an encoding or of the default still being worked out from inside one of them is an error at the literal. Checked: the review's program and its module variant (one error each, no crash), the order with no data first (same error), a prefixed self-reference ("uses 'tiles' itself"), a byte of a non-default encoding using an unprefixed character while the default's byte uses that encoding (error at the inner literal), and an unprefixed character under a built-in base (`encoding tiles: screen { 'B' = 'Z' }` as the default: error). 10 new tests cover these.
+- Finding 2: "The range 'A'..='♥' has 9765 characters, but an encoding has 256 bytes. Split the range".
+- Finding 3: "Unknown encoding 'fm2.tilez'. Use one of: fm2.tiles"; for a module with none, "the module mem declares no encodings".
+- Note, no change asked: when a constant is evaluated before the encoding (`const H: u8 = 'Z'`, `default encoding tiles`, `encoding tiles { 'A' = H }`), the error is the constant cycle "'H' depends on itself: H -> H". That is an error, not a crash, but the message does not name the encoding.
+
+## Verdict (first review)
 
 **Not ready to merge.** One must-fix: an encoding whose byte uses an unprefixed literal while it is the program's `default encoding` compiles with no error, and the compiler then crashes in code generation. The rest is in good shape: the syntax, checks, warnings, the `font.tiles"..."` prefix, the example and decision 123 match the spec, and the tests cover every roadmap item.
 
@@ -53,7 +62,7 @@ Roadmap: "the tests and the example pass".
 - [x] Public module encodings as `module.name` prefixes, `private encoding` (question 124) (`A_modules_encoding_is_used_with_the_module_name`, `A_private_encoding_cannot_be_used_outside_its_module`, asm operand)
 - [x] `default encoding` in the main file; program modules follow it, library modules do not (`The_default_encoding_applies_to_...`)
 - [x] Errors: a character listed twice, a range past `$FF`, an unknown base, a second `default encoding` line, `default encoding` outside the main file, a character the encoding lacks (suggesting `\$NN`), `\n` not mapped: each tested (`Reports_errors`, `Default_encoding_outside_the_main_file_is_an_error`)
-- [ ] No crash or missing error for an encoding that uses itself (finding 1)
+- [x] No crash or missing error for an encoding that uses itself (finding 1, fixed in `a5b3f4b`)
 - [x] Non-ASCII characters (`♥`, `é`)
 - [x] Example: `examples/statusline.tern` with `hudfont.tern`, tested in `tern run` and checked in VICE
 - [x] Question 123: an interface module placed in an overlay area is an error at the name after `implements` (two tests in `ImplementsTests`). There are no bank areas yet, so the "or bank area" part has nothing to check.
