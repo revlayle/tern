@@ -508,4 +508,25 @@ public sealed class ModuleTests : IDisposable
         Assert.Equal("'secret.helper' is private to the module secret; only code in secret can use it. Remove 'private' there, or use another of its functions", e.Description);
         Assert.Equal("other.tern", Path.GetFileName(e.Pos.File));
     }
+
+    [Theory]
+    [InlineData("c64")]
+    [InlineData("atari")]
+    public void A_program_may_have_its_own_module_named_digits(string target)
+    {
+        // Review of the M25 follow-up, suggestion 1: text's table is the library module text_digits,
+        // so a common name such as digits stays free for programs.
+        Write(Src, "digits.tern", "const N = 3");
+        var r = TernCompiler.Compile("""
+            import digits
+            import text
+            var x: u8
+            var h: [u8; 2]
+            fn main() {
+                x = digits.N
+                text.hex8(addr(h), x)
+            }
+            """, Platform.ByName(target), Path.Combine(Src, "main.tern"));
+        Assert.Contains("text_digits.DIGITS", r.Symbols.Keys);
+    }
 }

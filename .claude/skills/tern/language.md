@@ -772,6 +772,6 @@ Strings and blocks are passed as a pointer and a length: `text.put(c64.SCREEN, a
 The digits `text`, `wide`, `bcd` and `float` write are `$30`-`$39` (with `-` `$2D` and `.` `$2E`): C64
 screen codes and also ATASCII, so on the Atari print them with `atari.print`; in Atari screen memory
 a digit is `$10`-`$19`. `text.hex8`/`hex16` write A-F as C64 screen codes on the C64 and in ATASCII on
-the Atari (`$41`-`$46`; the table is the module `digits`, which `lib/atari/` replaces).
+the Atari (`$41`-`$46`; the table is the module `text_digits`, which `lib/atari/` replaces).
 The library source is readable Tern in `lib/`; read it for the exact signatures.
 
