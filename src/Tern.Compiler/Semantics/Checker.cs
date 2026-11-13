@@ -79,11 +79,14 @@ public sealed partial class Checker
             foreach (var (name, pos) in module.Syntax.BrokenNames)
                 module.Scope.TryAdd(name, new ErrorSymbol(name, pos));
 
-        // Const fns first: declaring one needs no other declaration, and constants of any file may call them (spec 4.1).
+        // Const fns and encodings first: declaring one needs no other declaration, and constants of any
+        // file may call them or use them in a literal (spec 4.1, 2.1).
+        _mainModule = modules[^1];
         foreach (var module in modules)
         {
             _module = module;
             foreach (var f in module.Syntax.ConstFns) Declaring(f.Name, f.Pos, () => DeclareConstFn(f));
+            foreach (var e in module.Syntax.Encodings) Declaring(e.Name, e.Pos, () => DeclareEncoding(e));
         }
 
         // Struct names and module parameters of every file first, so that a constant can be worked out
@@ -128,6 +131,11 @@ public sealed partial class Checker
             foreach (var f in program.Functions.Where(f => f.Address is not null && !_brokenFunctions.Contains(f)))
                 if (!Declaring(f.Name, f.Pos, () => DeclareRoutine(f, f.Symbol!))) _brokenFunctions.Add(f);
             foreach (var a in program.Asserts) Recover(() => CheckAssert(a, module));
+            // Encodings no literal used yet, so that their errors are reported too.
+            foreach (var e in program.Encodings)
+                if (module.Scope.GetValueOrDefault(e.Name) is EncodingSymbol es && es.Declaration == e)
+                    Declaring(e.Name, e.Pos, () => Resolve(es));
+            CheckDefaultEncodingLines(module);
             module.Declared = true;
         }
 

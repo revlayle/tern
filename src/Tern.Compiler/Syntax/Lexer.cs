@@ -253,6 +253,19 @@ public static class Lexer
                     AddQuoted(start, word);
                     return;
                 }
+                // A module's encoding: font.tiles"HI" (spec 2.1).
+                if (Peek(source, i) == '.' && (char.IsLetter(Peek(source, i + 1)) || Peek(source, i + 1) == '_') && !Keywords.ContainsKey(word))
+                {
+                    int end = i + 1;
+                    while (end < source.Length && (char.IsLetterOrDigit(source[end]) || source[end] == '_')) end++;
+                    string member = source[(i + 1)..end];
+                    if (Peek(source, end) is '"' or '\'' && !Keywords.ContainsKey(member))
+                    {
+                        i = end;
+                        AddQuoted(start, $"{word}.{member}");
+                        return;
+                    }
+                }
                 Add(Keywords.TryGetValue(word, out var kw) ? kw : TokenKind.Identifier, word, 0, start);
                 return;
             }

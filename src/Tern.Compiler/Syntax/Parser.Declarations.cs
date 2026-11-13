@@ -16,6 +16,8 @@ public sealed partial class Parser
         var imports = new List<ImportDecl>();
         var structs = new List<StructDecl>();
         var constFns = new List<FnDecl>();
+        var encodings = new List<EncodingDecl>();
+        var defaultEncodings = new List<DefaultEncoding>();
         var brokenNames = new List<(string, SourcePos)>();
 
         // Parses one declaration. After an error, its name (if it got that far) is broken, and parsing
@@ -122,7 +124,7 @@ public sealed partial class Parser
                 {
                     var p = Advance();
                     if (!(Current.Kind is TokenKind.Const or TokenKind.Var or TokenKind.Linear or TokenKind.Struct or TokenKind.Data or TokenKind.Fn
-                          or TokenKind.Interrupt or TokenKind.Noinit or TokenKind.Volatile or TokenKind.Inline || IsIndexedWord() || (At(TokenKind.Asm) && PeekAt(1).Kind == TokenKind.Fn)))
+                          or TokenKind.Interrupt or TokenKind.Noinit or TokenKind.Volatile or TokenKind.Inline || IsIndexedWord() || IsEncodingWord() || (At(TokenKind.Asm) && PeekAt(1).Kind == TokenKind.Fn)))
                         throw new CompileError(p.Pos, $"'private' goes before a declaration (const, var, data, struct or fn); found {Describe(Current)}. Write it at the start of the declaration it hides");
                     privateNames.Add(ParseDeclaration());
                 }
@@ -131,7 +133,7 @@ public sealed partial class Parser
             });
             SkipTerminators();
         }
-        return new ProgramSyntax(consts, globals, functions) { Header = header, Asserts = asserts, Imports = imports, Memory = memory, Exports = exports, ExportTable = exportTable, Structs = structs, PrivateNames = privateNames, ConstFns = constFns, BrokenNames = brokenNames, HasSyntaxErrors = _failures > 0 };
+        return new ProgramSyntax(consts, globals, functions) { Header = header, Asserts = asserts, Imports = imports, Memory = memory, Exports = exports, ExportTable = exportTable, Structs = structs, PrivateNames = privateNames, ConstFns = constFns, Encodings = encodings, DefaultEncodings = defaultEncodings, BrokenNames = brokenNames, HasSyntaxErrors = _failures > 0 };
 
         // A const fn with an error in its body is dropped whole, since its body would run at compile time.
         FnDecl ParseConstFnWhole()
@@ -191,6 +193,17 @@ public sealed partial class Parser
                     throw new CompileError(Current.Pos, "The memory block goes after the imports and constants, before other declarations, and there is only one. Move it there, or join the two blocks");
                 case TokenKind.Identifier when IsIndexedWord():
                 { var d = ParseIndexedVar(); globals.Add(d); return d.Name; }
+                case TokenKind.Identifier when IsEncodingWord():
+                { var d = ParseEncoding(); encodings.Add(d); return d.Name; }
+                case TokenKind.Identifier when IsDefaultEncoding():
+                {
+                    var word = Advance();
+                    Advance();
+                    var (name, pos) = ParseEncodingName("the name of an encoding after 'default encoding'");
+                    defaultEncodings.Add(new DefaultEncoding(word.Pos, name, pos));
+                    ExpectEndOfStatement();
+                    return "";
+                }
                 case TokenKind.Const when PeekAt(1).Kind == TokenKind.Fn: { var d = ParseConstFnWhole(); constFns.Add(d); return d.Name; }
                 case TokenKind.Const: { var d = ParseConst(); consts.Add(d); return d.Name; }
                 case TokenKind.Var: { var d = ParseVar(); globals.Add(d); return d.Name; }
@@ -339,6 +352,67 @@ public sealed partial class Parser
         }
         ExpectEndOfStatement();
         return new StructDecl(start.Pos, name.Text, fields);
+    }
+
+    /// <summary><c>encoding</c> is a word only at the start of a top-level declaration (spec 2.1), so it is still a usable name elsewhere.</summary>
+    private bool IsEncodingWord() => At(TokenKind.Identifier) && Current.Text == "encoding" && PeekAt(1).Kind == TokenKind.Identifier;
+
+    /// <summary><c>default</c> is a word only before <c>encoding</c> (spec 2.1).</summary>
+    private bool IsDefaultEncoding() => At(TokenKind.Identifier) && Current.Text == "default" && PeekAt(1) is { Kind: TokenKind.Identifier, Text: "encoding" };
+
+    /// <summary>An encoding's name, <c>tiles</c> or <c>font.tiles</c>, and where it starts.</summary>
+    private (string Name, SourcePos Pos) ParseEncodingName(string what)
+    {
+        var first = Expect(TokenKind.Identifier, what);
+        if (!Accept(TokenKind.Dot)) return (first.Text, first.Pos);
+        var member = Expect(TokenKind.Identifier, $"the name of an encoding in {first.Text} after '.'");
+        return ($"{first.Text}.{member.Text}", first.Pos);
+    }
+
+    /// <summary><c>encoding name: base { 'c' = value, 'a'..='z' = value }</c> (spec 2.1).</summary>
+    private EncodingDecl ParseEncoding()
+    {
+        var start = Advance();
+        var name = Expect(TokenKind.Identifier, "the encoding's name");
+        string? baseName = null;
+        var basePos = default(SourcePos);
+        if (Accept(TokenKind.Colon)) (baseName, basePos) = ParseEncodingName("the name of the encoding it is based on after ':'");
+        SkipBreaksBeforeBrace();
+        Expect(TokenKind.LBrace, "'{' after the encoding's name");
+        var entries = new List<EncodingEntry>();
+        while (true)
+        {
+            while (Accept(TokenKind.Newline)) { }
+            if (Accept(TokenKind.RBrace)) break;
+            if (At(TokenKind.Eof) || StartsCurrentDeclaration()) throw new CompileError(start.Pos, $"Encoding '{name.Text}' is not closed with '}}'. Add '}}' after its last line");
+            var first = EntryChar();
+            char last = first.Text[0];
+            if (At(TokenKind.DotDot))
+                throw new CompileError(Current.Pos, "A range of characters includes its last one. Write '..=', as in 'a'..='z'");
+            if (Accept(TokenKind.DotDotEq))
+            {
+                var lastToken = EntryChar();
+                last = lastToken.Text[0];
+                if (last < first.Text[0])
+                    throw new CompileError(first.Pos, $"The range '{first.Text}'..='{lastToken.Text}' goes down. Write the lower character first: '{lastToken.Text}'..='{first.Text}'");
+            }
+            Expect(TokenKind.Eq, "'= byte' after the character");
+            entries.Add(new EncodingEntry(first.Pos, first.Text[0], last, ParseExpr()));
+            if (Accept(TokenKind.Comma) || At(TokenKind.Newline) || At(TokenKind.RBrace)) continue;
+            throw new CompileError(Current.Pos, $"Expected ',' or a line break after the byte, found {Describe(Current)}. Separate the lines with ',' or a line break");
+        }
+        ExpectEndOfStatement();
+        return new EncodingDecl(start.Pos, name.Text, baseName, basePos, entries);
+
+        Token EntryChar()
+        {
+            var t = Expect(TokenKind.Char, "a character in quotes, such as 'A'");
+            if (t.Encoding is not null)
+                throw new CompileError(t.Pos, $"An encoding lists characters, not bytes of another encoding. Remove '{t.Encoding}' before the quote");
+            if (Lexer.IsRawByte(t.Text[0]))
+                throw new CompileError(t.Pos, "'\\0' and '\\$NN' are bytes, not characters, so an encoding has no code to give them. Write a character, such as 'A' or '\\n'");
+            return t;
+        }
     }
 
     /// <summary><c>indexed</c> is a word only before <c>var</c> (spec 3.3), so it is still a usable name elsewhere.</summary>

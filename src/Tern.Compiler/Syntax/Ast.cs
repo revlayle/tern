@@ -497,6 +497,22 @@ public sealed class StructDecl(SourcePos pos, string name, List<FieldSyntax> fie
     public List<FieldSyntax> Fields { get; } = fields;
 }
 
+/// <summary><c>encoding name: base { 'c' = $NN, 'a'..='z' = $NN }</c> (spec 2.1).</summary>
+public sealed class EncodingDecl(SourcePos pos, string name, string? baseName, SourcePos basePos, List<EncodingEntry> entries) : Node(pos)
+{
+    public string Name { get; } = name;
+    /// <summary>The encoding it starts from (<c>screen</c>, <c>font.tiles</c>), or null for none.</summary>
+    public string? BaseName { get; } = baseName;
+    public SourcePos BasePos { get; } = basePos;
+    public List<EncodingEntry> Entries { get; } = entries;
+}
+
+/// <summary>One line of an encoding: <c>'c' = value</c>, or <c>'a'..='z' = value</c> with <paramref name="First"/> before <paramref name="Last"/>.</summary>
+public sealed record EncodingEntry(SourcePos Pos, char First, char Last, Expr Value);
+
+/// <summary><c>default encoding name</c> (spec 2.1), at <paramref name="Pos"/> (the word <c>default</c>); the name at <paramref name="NamePos"/>.</summary>
+public sealed record DefaultEncoding(SourcePos Pos, string Name, SourcePos NamePos);
+
 /// <summary>One source file: a program's main file or a module.</summary>
 public sealed class ProgramSyntax(List<ConstDecl> consts, List<VarDecl> globals, List<FnDecl> functions)
 {
@@ -517,6 +533,9 @@ public sealed class ProgramSyntax(List<ConstDecl> consts, List<VarDecl> globals,
     public List<FnDecl> Functions { get; } = functions;
     /// <summary>The <c>const fn</c> declarations (spec 4.1), apart from <see cref="Functions"/>: they are never compiled.</summary>
     public List<FnDecl> ConstFns { get; init; } = [];
+    public List<EncodingDecl> Encodings { get; init; } = [];
+    /// <summary>The <c>default encoding</c> lines; the checker allows one, in the main file.</summary>
+    public List<DefaultEncoding> DefaultEncodings { get; init; } = [];
     /// <summary>
     /// Top-level names whose declaration had a syntax error, and imports that did (spec 13): the checker
     /// declares them so that their uses add no errors. The declarations are not in the other lists.

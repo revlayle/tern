@@ -175,6 +175,7 @@ public sealed partial class Checker
         ConstSymbol => "constant",
         FunctionSymbol => "function",
         ConstFnSymbol => "const fn",
+        EncodingSymbol => "encoding",
         _ => "struct type",
     };
 
@@ -285,6 +286,11 @@ public sealed partial class Checker
         foreach (var f in scope.Syntax.ConstFns)
         {
             try { DeclareConstFn(f); }
+            catch (CompileError) { }
+        }
+        foreach (var e in scope.Syntax.Encodings)
+        {
+            try { DeclareEncoding(e); }
             catch (CompileError) { }
         }
         foreach (var c in scope.Syntax.Consts)
@@ -587,12 +593,8 @@ public sealed partial class Checker
     }
 
     /// <summary>The encoding named by a literal's prefix, or the target's default.</summary>
-    private CharEncoding EncodingOf(string? prefix, SourcePos pos)
-    {
-        if (prefix is null) return _platform.DefaultEncoding;
-        if (CharEncoding.ByName.TryGetValue(prefix, out var encoding)) return encoding;
-        throw new CompileError(pos, $"Unknown encoding '{prefix}'. Use one of: {string.Join(", ", CharEncoding.ByName.Keys)}");
-    }
+    private CharEncoding EncodingOf(string? prefix, SourcePos pos) =>
+        prefix is null ? DefaultEncodingFor(_module) : NamedEncoding(prefix, pos);
 
     private static int Encode(char c, CharEncoding encoding, SourcePos pos)
     {

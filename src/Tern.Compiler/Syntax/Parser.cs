@@ -131,6 +131,8 @@ public sealed partial class Parser
             or TokenKind.Struct or TokenKind.Private or TokenKind.Interrupt or TokenKind.Inline or TokenKind.Noinit or TokenKind.Volatile
             or TokenKind.Linear or TokenKind.Asm or TokenKind.Assert or TokenKind.Export or TokenKind.Import or TokenKind.Module
             || t is { Kind: TokenKind.Identifier, Text: "indexed" or "memory" }
+            || t is { Kind: TokenKind.Identifier, Text: "encoding" } && next.Kind == TokenKind.Identifier
+            || t is { Kind: TokenKind.Identifier, Text: "default" } && next is { Kind: TokenKind.Identifier, Text: "encoding" }
             || t.Kind == TokenKind.Identifier && next.Kind is TokenKind.Fn or TokenKind.Var or TokenKind.Const or TokenKind.Data or TokenKind.Struct
             || t is { Kind: TokenKind.Identifier, Text: "let" } && next.Kind == TokenKind.Identifier;
     }
@@ -146,6 +148,8 @@ public sealed partial class Parser
         if (_tokens[k].Kind == TokenKind.Identifier && _tokens[k + 1].Kind is TokenKind.Fn or TokenKind.Var or TokenKind.Const or TokenKind.Data or TokenKind.Struct)
             k++;
         else if (_tokens[k] is { Kind: TokenKind.Identifier, Text: "let" } && _tokens[k + 1].Kind == TokenKind.Identifier)
+            return (_tokens[k + 1].Text, _tokens[k + 1].Pos);
+        if (_tokens[k] is { Kind: TokenKind.Identifier, Text: "encoding" } && _tokens[k + 1].Kind == TokenKind.Identifier)
             return (_tokens[k + 1].Text, _tokens[k + 1].Pos);
         if (_tokens[k].Kind is not (TokenKind.Const or TokenKind.Var or TokenKind.Data or TokenKind.Fn or TokenKind.Struct or TokenKind.Import)) return null;
         if (_tokens[k].Kind == TokenKind.Const && _tokens[k + 1].Kind == TokenKind.Fn) k++;

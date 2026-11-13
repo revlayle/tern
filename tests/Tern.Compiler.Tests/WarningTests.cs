@@ -203,6 +203,17 @@ public sealed class WarningTests : IDisposable
     }
 
     [Fact]
+    public void A_constant_used_only_in_a_const_fn_never_called_is_not_warned()
+    {
+        // The const fn itself is kept with '_'; what it names counts as used (spec 13).
+        Assert.Empty(Warnings("""
+            const SIZE = 4
+            const fn _cell(i: int) -> int { return i * SIZE }
+            fn main() { }
+            """));
+    }
+
+    [Fact]
     public void Fixed_address_globals_main_and_exports_are_not_warned()
     {
         Assert.Empty(Warnings("""
