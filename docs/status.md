@@ -4,11 +4,16 @@ Owned by the coding session. Updated at the end of every coding session.
 
 ## Current
 
-- **Milestone:** Overlay interfaces: `implements` (roadmap; spec 8.5 "Interfaces: `implements`"; decision 2026-11-12). Done, ready for `/review`.
-- **Branch:** `implements`, from `main` at `76a378e`. 3265 compiler tests pass plus 36 CPU tests. No benchmark changed (1254 / 350780); `SkillTests` pass (prose only changed).
-- **Next step:** `/review implements`. After this: encodings, M24.
+- **Milestone:** Overlay interfaces: `implements` (roadmap; spec 8.5 "Interfaces: `implements`"; decisions 2026-11-12, 119-122). Done; review findings 1 and 3 done, 2 is question 123. Ready for `/review` again.
+- **Branch:** `implements`, from `main` at `76a378e`, `main` merged in at `c1266da` (the review). 3270 compiler tests pass plus 36 CPU tests. No benchmark changed (1254 / 350780); `SkillTests` pass.
+- **Next step:** `/review implements` (re-review of must-fix 1). After this: encodings, M24.
 
 ## Done
+
+- **`implements`, first review** (2026-11-12, `docs/reviews/implements.md`): not ready to merge, decision 120 not built.
+  - Must-fix 1 (`186771b`): inside a module that implements an interface, the interface's volatile variable matching the module's data is an error, "'level_api.header' is this module's data 'header'. Use 'header'" (decision 120, spec 8.5). `CheckImplements` records each match by module and variable (`_moduleData`); `CheckNotBinaryData`, called from `UseGlobal`, which every use goes through, reports it when the file being checked is that module. Resident code and the interface's own functions keep naming it. Tests: a read with an index, a write, `addr()`, an asm operand (each at the name), and resident code plus an interface helper called from main and from a level.
+  - Suggestion 2 (an interface module placed in an overlay): question 123.
+  - Suggestion 3 (`f2f95a4`): `Allocator.FrameOffsets` puts a routine's offset in a local function `RoutineOffset`; no change in behavior.
 
 - **Overlay interfaces: `implements`** (2026-11-12, branch `implements`). Five commits.
   - *Syntax* (`c813b22`): `implements` is a keyword; `import m @ area implements a, b` fills `ImportDecl.Implements`.
@@ -639,12 +644,11 @@ Not bugs; things to improve, mostly in M7 (optimizer).
 
 ## Questions for the spec session
 
-Open, from `implements` (each built as described, provisional):
+Open, from the review of `implements` (`docs/reviews/implements.md`, suggestion 2):
 
-119. **Where `implements` looks for the interface.** Built: the name must be a module the main file imports ("'x' is not a module the main file imports ... Add 'import x' to the main file"), as in spec 8.5's example. The spec does not say whether a module imported only by another module would do.
-120. **The interface's data name inside an implementing module.** Spec 12.3 makes `level_api.header` an error in a binary that defines `data header` ("Use 'header'"). Built for `implements`: no such rule; inside level1, `header` and `level_api.header` both work (the same bytes). Should the 12.3 rule apply here too?
-121. **An implementation that no interface call reaches** (the interface is never called, or only from code that is not compiled) is compiled, as 8.5 says, as an address-taken function: its frame overlaps no other. Built that way; the report does not list the interface tables (the listing shows each `jmp`). Fine?
-122. **`tern run` and LOAD.** Built: SETNAM/SETLFS/LOAD stand-ins that load the build's own overlay files by module name in capitals (needed to check the example with `tern run`, as the roadmap asks). Spec 13 and the guide's `tern run` text could mention it.
+123. **An interface module placed in an overlay.** `import api @ lv` next to `import l1 @ lv implements api` compiles with no error about the interface. Its routines give no file, so nothing breaks; but helper functions with a body go into an overlay file in the same area, and a level calling one gets "'l1.enter' calls 'api.draw', but the modules l1 and api are both in the overlay area 'lv'", which does not point at the cause. Spec 8.5 says the interface is resident when the main file imports it, but lists no error. Proposed: an error at the `implements` name, "'api' is placed in the overlay area 'lv'; an interface must be resident. Remove '@ lv' from its import". Not built.
+
+Questions 119-122 were settled on 2026-11-12 (decisions.md): 119, 121 and 122 as built; 120 changed (a module names its own data) and is built in the review fixes.
 
 Question 118 was settled on 2026-11-12 (decisions.md) and is built in the `for _` follow-up.
 
