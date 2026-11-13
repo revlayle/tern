@@ -5,10 +5,17 @@ Owned by the coding session. Updated at the end of every coding session.
 ## Current
 
 - **Milestone:** M25 follow-up, Atari `io` and hex letters (roadmap "M25 follow-up"; spec 10.1, 12.2; decision 2026-11-13, questions 131, 132, 136). M25 itself is merged (`a3e8744`).
-- **Branch:** `m25-atari-io`, from `main` at `a3e8744`. All "done when" items are met. 3475 compiler tests pass plus 36 CPU tests. No benchmark changed (1254 / 350780); `SkillTests` pass.
-- **Next step:** `/review m25-atari-io`. The spec session answers questions 138 (the label file's format changed from "as built") and 139 (the `io` module's details). Then M26 (Apple II) starts with its spec session. When the OS-B and XL OS ROM images are registered in Altirra, rerun the Atari examples on them (decision 2026-11-13, question 137).
+- **Branch:** `m25-atari-io`, from `main` at `a3e8744`, `main` merged in (the review, `6a86269`). All "done when" items are met. Review (`docs/reviews/m25-followup.md`): ready to merge; its four suggestions are done. 3484 compiler tests pass plus 36 CPU tests. No benchmark changed (1254 / 350780); `SkillTests` pass.
+- **Next step:** `/merge m25-atari-io`. The spec session answers questions 138 (the label file's format changed from "as built") and 139 (the `io` module's details). Then M26 (Apple II) starts with its spec session. When the OS-B and XL OS ROM images are registered in Altirra, rerun the Atari examples on them (decision 2026-11-13, question 137).
 
 ## Done
+
+- **M25 follow-up review** (2026-11-13, `docs/reviews/m25-followup.md`): ready to merge, four suggestions, all done.
+  - 1 (`3cf5f6e`): the library module `digits` is now `text_digits`, so a program's own `digits.tern` can be imported again. Test `ModuleTests.A_program_may_have_its_own_module_named_digits`.
+  - 2 (`e6a2be2`): `tern run`'s CIO stand-in fails a name Atari DOS 2 cannot store (1-8 letters and digits starting with a letter, an extension of up to 3; lowercase too) with `$A5`, DOS's file name error, so an overlay `level_1` fails as it would on a disk. The skill says to keep Atari overlay names to 8 letters and digits.
+  - 3 (`0e60125`): `io`'s comments and the skill say a status below 128 is success (the disk may give 3, "end of file next"); test `A_status_below_128_other_than_1_is_success`.
+  - 4 (`0e60125`): `load_xex` fails on a segment whose last address is below its first.
+  - The reviewer's note: run `altirra-shot.ps1` from PowerShell, not Git Bash, which rewrites `/tempprofile` and `/hdpathrw` into paths.
 
 - **M25 follow-up: Atari `io` and hex letters** (2026-11-13, branch `m25-atari-io`; questions 131, 132, 136).
   - *Hex letters* (`5009feb`): `text`'s digit table is the module `digits` (`lib/digits.tern`, C64 screen codes); `lib/atari/digits.tern` replaces it with ATASCII, so `text.hex8`/`hex16` (and `wide`'s hex) write `$41`-`$46` on the Atari. C64 bytes unchanged. Tests `AtariLibraryTests.Hex_digits_are_atascii` (hex8, hex16, `wide.hex32`, `dec16s`) and `Hex_digits_print_as_letters`; the C64's are the existing `LibraryTests`.
@@ -754,8 +761,8 @@ Open, from the M25 follow-up (provisional, as built):
      - `close() -> bool`: a write's last bytes reach the disk at close, so a full disk shows there. The C64's `close` returns nothing.
      - Whole files: `load(name, n, dst, max)` (a shorter file is no error) and `save(name, n, src, count)`, a count where the C64's `save` takes `first` and `last` (a KERNAL shape).
      - The overlay loader is `io.load_xex(name, n)`, in `io` rather than `atari` (the C64's is `c64.load`, spec 8.5). It loads every segment, RUNAD and INITAD included, and runs nothing. A file that does not start with `$FF $FF` fails with `status()` `ST_OK`, since CIO has no code for it.
-     - `tern run`'s name rule: the part after the device's `:` must be the overlay's file name in capitals (`"D1:LEVEL1.XEX"`), on any device.
-     - `digits` is now a library module, so `import digits` of a program's own `digits.tern` is an error (2.2: a module may not have a library module's name). Spec 10.1 still says "Hex letters are screen codes too"; on the Atari they are ATASCII.
+     - `tern run`'s name rule: the part after the device's `:` must be the overlay's file name in capitals (`"D1:LEVEL1.XEX"`), on any device. A name DOS 2 cannot store fails with `$A5` (review suggestion 2); the compiler does not warn about an Atari overlay whose name is not a DOS 2 name.
+     - `text_digits` is a new library module (the table `text` writes with), so a program's own `text_digits.tern` cannot be imported (2.2). It is not in spec 10.1's tables. Spec 10.1 still says "Hex letters are screen codes too"; on the Atari they are ATASCII.
 
 Questions 131, 132 and 136 were settled on 2026-11-13 and are built on `m25-atari-io` (136 differently: question 138). Question 135 was settled as built.
 
