@@ -9,7 +9,7 @@
 //
 // Check it in VICE:
 //   tern examples/sine.tern
-//   x64sc -autostart examples/sine.prg
+//   x64sc -autostart examples/c64/sine.prg
 import c64
 
 const BLOCK = $0C00 / 64           // sprite pointer for $0C00, in VIC bank 0

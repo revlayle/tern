@@ -6,12 +6,12 @@
 // functions that never run at the same time.
 //
 // To try it in the built-in emulator (it loads the stages' files itself):
-//   dotnet run --project src/Tern.Cli -- run --target c64 examples/stages.tern --screen
+//   dotnet run --project src/Tern.Cli -- run --target c64 examples/c64/stages.tern --screen
 // In VICE:
-//   dotnet run --project src/Tern.Cli -- --target c64 examples/stages.tern
-//   c1541 -format stages,01 d64 examples/stages.d64 -write examples/stages.prg stages
-//         -write examples/stage1.prg stage1 -write examples/stage2.prg stage2
-//   x64sc -default -warp -autostart examples/stages.d64
+//   dotnet run --project src/Tern.Cli -- --target c64 examples/c64/stages.tern
+//   c1541 -format stages,01 d64 examples/c64/stages.d64 -write examples/c64/stages.prg stages
+//         -write examples/c64/stage1.prg stage1 -write examples/c64/stage2.prg stage2
+//   x64sc -default -warp -autostart examples/c64/stages.d64
 //
 // Result: "FOREST" and the score 5 on the top row, then trees; "LAKE" and 7 in the middle, then water.
 // stage1 is loaded a second time at the end: its file sets 'trees' back to 1, so its score is 5 again.

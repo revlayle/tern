@@ -25,7 +25,7 @@
 //
 // Check it in VICE:
 //   tern examples/speedcode.tern
-//   x64sc -autostart examples/speedcode.prg
+//   x64sc -autostart examples/c64/speedcode.prg
 import c64
 import text
 

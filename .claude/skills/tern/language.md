@@ -20,7 +20,7 @@ Each example is a whole program that compiles. The full rules are in the Tern re
   `encoding hud: screen { '♥' = $53 }` starts from another encoding. A module's encoding is
   `font.tiles"HI"`. `default encoding tiles` in the main file applies it to every unprefixed literal
   of the program's own files (library modules keep PETSCII). A character the encoding lacks is an
-  error; write it as `\$NN`. See `examples/statusline.tern`.
+  error; write it as `\$NN`. See `examples/c64/statusline.tern`.
 
 ## 2. Types and arithmetic
 
@@ -603,7 +603,7 @@ band $0002 u8 = 3 ($03)
   `c64.set_kernal_irq(addr(raster))` instead of `kernal_off` / `set_irq`: it goes through `$0314`,
   and the same `interrupt fn` works. The KERNAL's keyboard scan stops (`getin` sees no keys), and its
   CIA 1 timer interrupt still reaches the handler: turn it off with `c64.cia_irqs_off()` first.
-  `examples/kernal_irq.tern` reads the drive's status while a raster split runs. `tern run` has no
+  `examples/c64/kernal_irq.tern` reads the drive's status while a raster split runs. `tern run` has no
   KERNAL, so check such a program in VICE.
 
 ## 12. Modules
@@ -653,12 +653,12 @@ a $0003 u8 = 21 ($15)
   the interface module `level_api` (routines at fixed addresses inside the area), so resident code
   calls `level_api.update()` and whichever level is loaded answers. Each function must match its
   routine's registers and `keeps`; each `volatile var` of the interface is `data` of the same name,
-  type and address in the module. See `examples/stages.tern`.
+  type and address in the module. See `examples/c64/stages.tern`.
 - Plug-ins: `export level_api` in a binary takes its entries from a hand-written interface module
   (routines at fixed addresses, with `setup` at the start of the binary's first program area, and
   `volatile var`s the binary defines as `data` at the same address); each function must match its
   routine's registers and `keeps`. A program with `main` can give plug-ins a table of its own:
-  `export add_score, show @ $0900` (and `name_api.tern` for them). See `examples/plugins/`.
+  `export add_score, show @ $0900` (and `name_api.tern` for them). See `examples/c64/plugins/`.
 
 ## 13. Compile-time code: `const fn` and generators
 

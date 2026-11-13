@@ -3,9 +3,9 @@
 // The border is blue above line 150 and red below it, and the drive's message is printed.
 //
 // To try it in VICE (a disk image, so that drive 8 answers):
-//   dotnet run --project src/Tern.Cli -- --target c64 examples/kernal_irq.tern
-//   c1541 -format irq,01 d64 examples/kernal_irq.d64 -write examples/kernal_irq.prg kernal_irq
-//   x64sc -default -warp -autostart examples/kernal_irq.d64
+//   dotnet run --project src/Tern.Cli -- --target c64 examples/c64/kernal_irq.tern
+//   c1541 -format irq,01 d64 examples/c64/kernal_irq.d64 -write examples/c64/kernal_irq.prg kernal_irq
+//   x64sc -default -warp -autostart examples/c64/kernal_irq.d64
 //
 // Result: the border is blue at the top and red from line 150 down, and "00, OK,00,00" is printed.
 

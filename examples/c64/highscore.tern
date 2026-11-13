@@ -2,9 +2,9 @@
 // prints it and shows the drive's status message.
 //
 // To try it in VICE (a disk image, so the KERNAL uses drive 8):
-//   dotnet run --project src/Tern.Cli -- --target c64 examples/highscore.tern
-//   c1541 -format scores,01 d64 examples/highscore.d64 -write examples/highscore.prg highscore
-//   x64sc -default -warp -autostart examples/highscore.d64
+//   dotnet run --project src/Tern.Cli -- --target c64 examples/c64/highscore.tern
+//   c1541 -format scores,01 d64 examples/c64/highscore.d64 -write examples/c64/highscore.prg highscore
+//   x64sc -default -warp -autostart examples/c64/highscore.d64
 //
 // Result: the screen shows "SAVED: HIGH SCORE 12340", then "LOADED: HIGH SCORE 12340" (read back
 // from the file SCORES on the disk) and the drive's status "STATUS: 00, OK,00,00". Run it a second

@@ -6,10 +6,10 @@
 // it loads level1, level2 and level1 again from drive 8.
 //
 // To try it in VICE:
-//   dotnet run --project src/Tern.Cli -- --target c64 examples/levels.tern
-//   c1541 -format levels,01 d64 examples/levels.d64 -write examples/levels.prg levels
-//         -write examples/level1.prg level1 -write examples/level2.prg level2
-//   x64sc -default -warp -autostart examples/levels.d64
+//   dotnet run --project src/Tern.Cli -- --target c64 examples/c64/levels.tern
+//   c1541 -format levels,01 d64 examples/c64/levels.d64 -write examples/c64/levels.prg levels
+//         -write examples/c64/level1.prg level1 -write examples/c64/level2.prg level2
+//   x64sc -default -warp -autostart examples/c64/levels.d64
 //
 // Result: the top half of the screen shows 'A' and "4" (level1.lives was 3, then drawn once; the
 // second load of level1 set it back to 3 before the second draw), the bottom half 'B' and "8".

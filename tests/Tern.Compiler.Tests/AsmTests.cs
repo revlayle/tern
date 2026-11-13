@@ -622,14 +622,15 @@ public class AsmTests
         Assert.Contains("20 D2 FF  jsr $FFD2", result.Listing);
     }
 
-    internal static string FindExample(string name)
+    /// <summary>An example program: examples/&lt;platform&gt;/name.</summary>
+    internal static string FindExample(string name, string platform = "c64")
     {
         for (var dir = new DirectoryInfo(AppContext.BaseDirectory); dir is not null; dir = dir.Parent)
         {
-            var path = Path.Combine(dir.FullName, "examples", name);
+            var path = Path.Combine(dir.FullName, "examples", platform, name);
             if (File.Exists(path)) return path;
         }
-        throw new FileNotFoundException($"examples/{name} not found above {AppContext.BaseDirectory}");
+        throw new FileNotFoundException($"examples/{platform}/{name} not found above {AppContext.BaseDirectory}");
     }
 
     /// <summary>
