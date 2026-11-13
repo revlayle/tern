@@ -625,12 +625,26 @@ Done when: emulator tests cover `io` and the hex letters on both targets, and an
 
 ### M26: Apple II
 
-- Platform description and memory map (no interrupt source by default, text and hi-res pages, soft switches as volatile areas), high-bit ASCII
-- Output: a DOS 3.3 binary and/or ProDOS system file (spec session decides), with disk image creation for testing
-- `lib/apple2`: monitor and DOS/ProDOS routines as routines at a fixed address; text and hi-res screen helpers (row address tables)
-- First, label formats as writers named by the platform description (decision 2026-11-13, question 138), not chosen by output format; then the Apple II's, in the format of the emulator it is checked in
+Spec: 2.1 (`apple2`), 10.1 (`text_digits`), 12.2, 13. Decision 2026-11-13 (Apple II platform).
 
-Done when: an example draws text and hi-res graphics in an Apple II emulator (AppleWin or MAME).
+- First, label formats as writers named by the platform description (decision 2026-11-13, question 138), not chosen by output format; then the Apple II's, in AppleWin's symbol format
+- `--target apple2`: ProDOS 8 system file (`.system`, loaded at `$2000`), one block whose areas the startup code copies into place when the `memory` block puts them elsewhere; code from `$2000`, variables up to `$BEFF`, zero page `$00–$1F` and `$50–$FF`, volatile `$C000–$CFFF`
+- Startup: 40-column text page 1 with the ROM's hooks, reset vector to a close-and-quit routine, endless loop after `main`; `apple2.exit()` quits through the MLI
+- The `apple2` encoding (high-bit ASCII, `\n` = `$8D`); `lib/apple2/text_digits` with `apple2` digits, sign, point and hex letters
+- `tern run`: stand-ins for COUT, HOME and QUIT, a 40×24 screen at `$0400` in the Apple II's row order
+- `lib/apple2`: ROM and MLI entry points; screen text (`put`, `print`, `cursor`, inverse); hi-res (row table, clear, plot, page select); keyboard, speaker, soft switches; `exit`
+- `tests/tools/apple2-disk.ps1` puts the `.system` file on a ProDOS 2.4.3 boot image with CiderPress II's `cp2` (`C:\Program Files\CiderPress\cp2.exe`); a window-capture script for AppleWin, like `altirra-shot.ps1`. The developer installs AppleWin and downloads the ProDOS 2.4.3 image; the coding session writes their paths and command lines into `CLAUDE.md` through a status question
+- Check in AppleWin whether `$00–$1F` is free, and the size limit of the system file loader (ProDOS 2.4.3's Bitsy Bye)
+- Library modules that are not platform-specific (`math`, `mem`, `text`, `wide`, `bcd`, `random`, `cpu`, the floats) work unchanged
+
+Done when: an example draws text and hi-res graphics in AppleWin, on an enhanced IIe and on a II+ with 64 KB, with its code placed above the hi-res pages through the `memory` block, and the benchmarks compile for `apple2`.
+
+### M26 follow-up: Apple II `io` (before M27)
+
+- `lib/apple2/io` through the ProDOS MLI: `open`, `close`, `read`, `write`, `status`, whole-file `load` and `save`, as on the Atari where the machine allows; the overlay loader; the 1 KB page-aligned file buffer and the system bit map
+- `tern run`: a stand-in for the MLI's file calls that reads the build's own overlay files
+
+The spec session settles the details first (names, prefixes, buffers, the bit map). Done when: emulator tests cover `io`, and an example that saves a file and loads it back runs in AppleWin.
 
 ### M27: NES
 

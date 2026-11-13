@@ -50,7 +50,7 @@ Tern is a programming language for 6502-family processors. It aims to be easy to
 
 A number literal is at most 2^63 - 1 (`$7FFF_FFFF_FFFF_FFFF`, 9223372036854775807), the top of the range of constant arithmetic (3.1). A literal has no sign; `-` is the unary operator, so the lowest value is written `-9223372036854775807 - 1`, and all 64 bits set is `~0`.
 
-**Escapes** in char and string literals: `\0` (zero byte), `\n` (the encoding's line break; PETSCII `$0D`; an error in an encoding that has none, such as `screen` and `screen_mixed`), `\\`, `\"`, `\'`, and `\$NN` (a raw byte, not converted by the encoding). A character the encoding has no code for is a compile error that suggests `\$NN`.
+**Escapes** in char and string literals: `\0` (zero byte), `\n` (the encoding's line break; PETSCII `$0D`, `apple2` `$8D`; an error in an encoding that has none, such as `screen` and `screen_mixed`), `\\`, `\"`, `\'`, and `\$NN` (a raw byte, not converted by the encoding). A character the encoding has no code for is a compile error that suggests `\$NN`.
 
 A string literal is only an initial value, of `data` or of a global array. It is not an expression: `c64.print("HI", 2)` is an error that suggests declaring the text (`data HI = "HI"`) and passing `addr(HI), len(HI)`. An unnamed table would be memory the source does not show.
 
@@ -63,7 +63,7 @@ A string literal is only an initial value, of `data` or of a global array. It is
 | `screen` | C64 | Screen codes (bytes stored directly in screen memory), upper case and graphics set |
 | `screen_mixed` | C64 | Screen codes for the lower/upper-case set |
 | `ascii` | Commander X16 (ISO mode), general | Plain 7-bit ASCII |
-| `apple` | Apple II | ASCII with the high bit set (normal text) |
+| `apple2` | Apple II | Default on the Apple II. ASCII with the high bit set: the codes COUT prints and, for normal text, the codes in screen memory, so the Apple II needs no separate screen encoding. Inverse and flashing text are library functions. A II+ shows lower case as other characters |
 | `atascii` | Atari 8-bit | Default on the Atari |
 | `atari_screen` | Atari 8-bit | Atari internal screen codes |
 
@@ -864,7 +864,7 @@ The tables below describe the library as built (M4, M5, M10, M11, M14, M19 and t
 | `equal` | `(a: ptr u8, b: ptr u8, n: u8) -> bool` | Compare two texts |
 | `find` | `(s: ptr u8, n: u8, ch: u8) -> u8` | Index of the first `ch`, or `$FF` if not found |
 
-Digits are written as screen codes, which are the same as PETSCII for `0`-`9`. On the C64, hex letters are screen codes too. The digit table is the library module `text_digits`, which `lib/atari/` replaces (2.2), so a program cannot have its own module of that name. On the Atari, the library writes numbers in ATASCII, the platform's default encoding, so `atari.print` shows them: digits, `-` and `.` have the same codes as on the C64, and hex letters are `$41`-`$46` (decision 2026-11-13, question 132). Screen memory on the Atari takes internal codes (`atari_screen`), so a program that writes numbers there converts them.
+Digits are written as screen codes, which are the same as PETSCII for `0`-`9`. On the C64, hex letters are screen codes too. The digit table is the library module `text_digits`, which `lib/atari/` replaces (2.2), so a program cannot have its own module of that name. On the Atari, the library writes numbers in ATASCII, the platform's default encoding, so `atari.print` shows them: digits, `-` and `.` have the same codes as on the C64, and hex letters are `$41`-`$46` (decision 2026-11-13, question 132). Screen memory on the Atari takes internal codes (`atari_screen`), so a program that writes numbers there converts them. On the Apple II, numbers are written in `apple2` codes (digits `$B0`-`$B9`, `-` `$AD`, `.` `$AE`, hex letters `$C1`-`$C6`), which COUT prints and screen memory shows as normal text; `lib/apple2/` replaces `text_digits` (decision 2026-11-13, M26).
 
 **`wide`**: 24- and 32-bit unsigned numbers
 
@@ -1183,7 +1183,21 @@ A platform description gives: CPU variant, free zero-page ranges, RAM ranges for
 - Machines with 16 KB (an unexpanded 400, the 600XL) are reached through the `memory` block (8.4), e.g. `$2000..=$3BFF program`; there is no separate target.
 - Not in M25: the 130XE's extra 64 KB (four 16 KB banks at `$4000–$7FFF`, selected through PORTB) and cartridge images, including the XEGS's bank-switched cartridges. Both follow the bank model of 14.1, after M27.
 
-**Planned**, in this order: Atari 8-bit (`.xex`), Apple II (binary for DOS 3.3/ProDOS), NES (iNES, `ricoh2a03`, PRG/CHR banks), Commander X16 (`wdc65c02`). After them, the Commodore 128 in native mode (`.prg` at `$1C01`).
+**Apple II (M26)** (decision 2026-11-13)
+
+- One target, `--target apple2`, for every Apple II with 64 KB under ProDOS 8: a II+ with a language card, the IIe, IIc and IIgs. CPU: `nmos6502`; the 65C02 of the enhanced IIe and the IIc runs it.
+- Output: a ProDOS system file (`.system`; type `$FF`, loaded and started at `$2000`). It holds one block: the program's areas in order, with no gaps. When the `memory` block places areas elsewhere (`$0800–$1FFF`, or above the hi-res pages), the startup code first copies each area from the file to its place, as it copies initialized data, so the file is not padded over the hi-res pages. The compiler gives an error when the loaded block would go past `$BEFF`.
+- Code start: `$2000`. Variables: RAM after the program up to `$BEFF`; page `$BF` is ProDOS's global page. The default layout covers hi-res page 1 (`$2000–$3FFF`), so a program that uses hi-res graphics writes a `memory` block (the guide shows one).
+- Free zero page: `$00–$1F` and `$50–$FF`. The program never returns to BASIC, so Applesoft's bytes are free. Not free: `$20–$39` (the monitor's text window, cursor and I/O hooks, used by COUT), `$3A–$3F` (ProDOS's disk drivers, not restored), `$40–$4E` (the MLI, restored after each call) and `$4E–$4F` (KEYIN's random seed). `$00–$1F` is checked in AppleWin; if something there is in use, the range becomes `$50–$FF` only.
+- Startup: set up 40-column text, page 1, full window, with the ROM's input and output hooks (printing `$15` through `$C300` first when the 80-column firmware is on); point the reset vector (`$3F2`, with its power-up byte) at a routine that closes files and quits; move the areas into place; then zero globals, copy initialized data and call `main`. When `main` returns, the program stops in an endless loop, as on the other targets; `apple2.exit()` closes all files, invalidates the power-up byte and makes the MLI's QUIT call. The startup code leaves ProDOS's system bit map as it is; the Apple II's `io` (M26 follow-up) settles how it is used.
+- Default encoding: `apple2` (2.1).
+- Volatile areas (4): `$C000–$CFFF`, the soft switches, I/O and slot ROMs, where a read alone can have an effect. Nothing else changes outside a call: the Apple II has no interrupt source of its own, and the cursor, the screen holes and the global page change only inside ROM or MLI calls, which make the optimizer forget what it holds (4).
+- Soft switches need no language change: nearly all of them also respond to a write, so the library wraps them as functions (`apple2.hires()`, `apple2.page2()`, the keyboard strobe, the speaker), written in assembly where a read is needed.
+- `tern run` has stand-ins for COUT (`$FDED`), HOME (`$FC58`) and the MLI's QUIT call, with a 40×24 text screen at `$0400` in the Apple II's row order, so library and benchmark tests run in the built-in emulator. Graphics are checked in AppleWin.
+- `lib/apple2`: ROM and MLI entry points as routines at a fixed address (6.6); screen text (`put`, `print`, `cursor`, inverse text) with a row address table; hi-res graphics (row address table, clear, plot, page select); keyboard and speaker; soft switches; `exit`. Not in M26: interrupt helpers (an interrupt needs a card; under ProDOS it is installed through the MLI's `ALLOC_INTERRUPT`) and waiting for the vertical blank, which differs between the IIe, IIc and IIgs. Files are the Apple II's `io`, through the MLI (M26 follow-up).
+- Disk images are not made by the compiler: a test script puts the `.system` file on a ProDOS 2.4.3 boot image with CiderPress II's `cp2`, and AppleWin boots it.
+
+**Planned**, in this order: NES (iNES, `ricoh2a03`, PRG/CHR banks), Commander X16 (`wdc65c02`). After them, the Commodore 128 in native mode (`.prg` at `$1C01`).
 
 ### 12.3 Programs without `main`
 
@@ -1238,9 +1252,9 @@ source → lexer → parser → AST
 - **`step` is a keyword only right after the range of a `for`** (5.1). Elsewhere it is an ordinary name: `fn step()`, `var step: u8`, and `for i in 0..step step 2` all work. This is unambiguous, since a name cannot continue an expression that is already complete. **`emit` is a keyword only at the start of a statement in a `const fn`, before `{`** (4.1); elsewhere it is a name (`lib/c64/sprites.tern` has a function `emit`). Other keywords stay reserved everywhere.
 - **Branch range fixing.** A conditional branch reaches only −128 to +127 bytes. Layout repeats until every branch fits. Branches that do not fit become an inverted branch over a `jmp`.
 - **Outputs:**
-  - the program file (`.prg` for the C64, `.xex` for the Atari),
+  - the program file (`.prg` for the C64, `.xex` for the Atari, `.system` for the Apple II),
   - a listing (`.lst`) with source lines, addresses, bytes and cycles,
-  - a label file in the format of the platform's main emulator, which loads it: `.vs` for the C64, in VICE's format; `.lbl` for the Atari, a MADS label table, which Altirra loads by itself with the `.xex` of the same name,
+  - a label file in the format of the platform's main emulator, which loads it: `.vs` for the C64, in VICE's format; `.lbl` for the Atari, a MADS label table, which Altirra loads by itself with the `.xex` of the same name; for the Apple II, AppleWin's symbol format (checked in AppleWin in M26),
   - a report: bytes and cycle estimates per function, zero-page map, overlay map, and the functions with memory reachable from two roots (8.1).
 
 ### 13.1 Project layout (C#)
