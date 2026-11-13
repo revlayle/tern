@@ -158,7 +158,7 @@ public class EvaluationOrderTests
     public void Two_calls_cost_the_same_as_a_local_for_the_first()
     {
         // The left call's result goes to a temporary, as it would to a local written by hand.
-        static int Bytes(string body) => TernCompiler.Compile(Logger + "\nfn main() {\n" + body + "\n}").Prg.Length;
+        static int Bytes(string body) => TernCompiler.Compile(Logger + "\nfn main() {\n" + body + "\n}").File.Length;
         Assert.Equal(Bytes("var t: u8 = f(1)\n r = t + f(2)"), Bytes("r = f(1) + f(2)"));
         Assert.Equal(Bytes("var t: u8 = f(1)\n r = t | f(2)"), Bytes("r = f(1) | f(2)"));
         Assert.Equal(Bytes("var t: u8 = f(1)\n r = t - f(2)"), Bytes("r = f(1) - f(2)"));

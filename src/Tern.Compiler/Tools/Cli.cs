@@ -155,7 +155,7 @@ public static class Cli
             if (input is null) return Usage1("No source file given");
             if (warnings.Problem is { } both) return Usage1(both);
             if (target.Platform(out var noTarget) is not { } platform) return Usage1(noTarget);
-            outputPath ??= Path.ChangeExtension(input, ".prg");
+            outputPath ??= Path.ChangeExtension(input, platform.FileExtension);
 
             var result = CompileFile(input, platform, json, maxErrors, warnings.Mode);
             if (result is null) return 1;
@@ -165,13 +165,13 @@ public static class Cli
                 write(path);
                 files.Add(path);
             }
-            Write(outputPath, p => File.WriteAllBytes(p, result.Prg));
+            Write(outputPath, p => File.WriteAllBytes(p, result.File));
             Write(Path.ChangeExtension(outputPath, ".lst"), p => File.WriteAllText(p, result.Listing));
-            Write(Path.ChangeExtension(outputPath, ".vs"), p => File.WriteAllText(p, result.ViceLabels));
+            Write(Path.ChangeExtension(outputPath, platform.LabelExtension), p => File.WriteAllText(p, result.ViceLabels));
             Write(Path.ChangeExtension(outputPath, ".lines"), p => File.WriteAllText(p, LineTable.Format(LineTable.Rows(result, Path.GetFileName(input)))));
             string directory = Path.GetDirectoryName(Path.GetFullPath(outputPath))!;
             foreach (var overlay in result.Overlays)
-                Write(Path.Combine(directory, overlay.Name + ".prg"), p => File.WriteAllBytes(p, overlay.Prg));
+                Write(Path.Combine(directory, overlay.Name + platform.FileExtension), p => File.WriteAllBytes(p, overlay.File));
             if (result.ApiModule is not null)
                 Write(Path.Combine(directory, result.ApiModuleName + ".tern"), p => File.WriteAllText(p, result.ApiModule));
 

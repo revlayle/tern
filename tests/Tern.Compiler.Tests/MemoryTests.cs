@@ -165,7 +165,7 @@ public class MemoryTests
         Assert.Equal(6, r.U8("a"));
         Assert.Equal(0x0400, r.Result.LoadAddress);
         Assert.Equal(0x080D, r.Result.Entry);
-        Assert.Equal(new byte[] { 0x00, 0x04 }, r.Result.Prg[..2]);
+        Assert.Equal(new byte[] { 0x00, 0x04 }, r.Result.File[..2]);
     }
 
     [Fact]

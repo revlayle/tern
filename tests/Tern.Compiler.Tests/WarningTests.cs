@@ -632,7 +632,7 @@ public sealed class RepositoryWarningTests
                     catch (CompileError e) when (e.Description.StartsWith("Cannot") && pass < 2) { continue; }
                     programs.Remove(path);
                     compiled++;
-                    File.WriteAllBytes(Path.ChangeExtension(path, ".prg"), result.Prg);
+                    File.WriteAllBytes(Path.ChangeExtension(path, ".prg"), result.File);
                     if (result.ApiModule is not null) File.WriteAllText(Path.Combine(Path.GetDirectoryName(path)!, result.ApiModuleName + ".tern"), result.ApiModule);
                     warnings.AddRange(result.Warnings.Select(Line));
                 }

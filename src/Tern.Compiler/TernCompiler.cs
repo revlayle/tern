@@ -7,22 +7,26 @@ using static Tern.Cpu.Mnemonic;
 
 namespace Tern.Compiler;
 
-/// <summary>One overlay module's file (spec 8.5): its code, data and variables with initial values, loading at the start of its area.</summary>
-public sealed record OverlayFile(string Name, string Area, int LoadAddress, byte[] Image)
-{
-    /// <summary>The file: 2-byte load address followed by <see cref="Image"/>.</summary>
-    public byte[] Prg => new byte[] { (byte)LoadAddress, (byte)(LoadAddress >> 8) }.Concat(Image).ToArray();
-}
+/// <summary>
+/// One overlay module's file (spec 8.5): its code, data and variables with initial values, loading at the start of its area.
+/// <see cref="File"/> is the file in the platform's format (<c>name.prg</c>, or <c>name.xex</c> without a run address).
+/// </summary>
+public sealed record OverlayFile(string Name, string Area, int LoadAddress, byte[] Image, byte[] File);
 
 /// <summary>A variable's place: its type as written (<c>u16</c>, <c>[u8; 10]</c>), and the function whose frame holds it (null for a global).</summary>
 public sealed record VariableInfo(string Name, int Address, int Size, string Type, string? Function, bool IsData);
 
 public sealed class CompileResult
 {
-    /// <summary>The program file: 2-byte load address followed by <see cref="Image"/>.</summary>
-    public required byte[] Prg { get; init; }
-    /// <summary>The bytes loaded at <see cref="LoadAddress"/>.</summary>
+    /// <summary>
+    /// The program file in the platform's format (<see cref="Platform.FileOf"/>): a .prg, or a .xex with
+    /// one load segment per run of bytes and the run address (none for a binary without main).
+    /// </summary>
+    public required byte[] File { get; init; }
+    /// <summary>The bytes from <see cref="LoadAddress"/> to the highest address used, gaps as zeros.</summary>
     public required byte[] Image { get; init; }
+    /// <summary>The runs of bytes the program loads, by address (the .xex's load segments).</summary>
+    public required IReadOnlyList<(int Address, byte[] Bytes)> Segments { get; init; }
     public required int LoadAddress { get; init; }
     /// <summary>The machine the program was compiled for.</summary>
     public required Platform Platform { get; init; }
@@ -39,7 +43,7 @@ public sealed class CompileResult
     public required IReadOnlyList<PlacedSection> Sections { get; init; }
     /// <summary>The program areas the compiler filled and how much of each is used.</summary>
     public required IReadOnlyList<PlacedArea> Areas { get; init; }
-    /// <summary>One file for each module placed in an overlay area that has code or data in the program; the file is <c>name.prg</c>.</summary>
+    /// <summary>One file for each module placed in an overlay area that has code or data in the program; the file is <c>name.prg</c> or <c>name.xex</c>.</summary>
     public IReadOnlyList<OverlayFile> Overlays { get; init; } = [];
     /// <summary>For a binary without <c>main</c>: the jump table, <c>setup</c> first, then the exports, each with its address.</summary>
     public IReadOnlyList<(string Name, int Address)> Entries { get; init; } = [];
@@ -151,7 +155,8 @@ public static class TernCompiler
                         if (((v.Address + o) & 0xFF) == 0xFF)
                             throw new CompileError(v.Pos, $"'{v.Name}' is used as jmp ({v.Name}{o:+0;-0;''}) and was placed so that the vector starts at $FF, where the 6502 reads it wrongly. Place it at a fixed address whose low byte is not $FF");
 
-            if (!binary && layout.Program[0].First != platform.LoadAddress)
+            // The C64's BASIC line must be where the file loads; a .xex names its run address.
+            if (!binary && platform.Header.Length > 0 && layout.Program[0].First != platform.LoadAddress)
                 throw new CompileError(program.Main.Pos,
                     $"A program with 'main' starts at ${platform.LoadAddress:X4}, where the {platform.Name.ToUpperInvariant()} BASIC line goes, but its first program area begins at ${layout.Program[0].First:X4}. " +
                     (layout.ProgramReplaced ? $"Start the first 'program' line of the memory block at ${platform.LoadAddress:X4}" : "Move the 'reserved' or 'region' range that covers it"));
@@ -260,7 +265,7 @@ public static class TernCompiler
         int fileEnd = code.Segments.Max(s => s.Address + s.Bytes.Length);
         var image = new byte[fileEnd - loadAddress];
         foreach (var (address, bytes) in code.Segments) bytes.CopyTo(image, address - loadAddress);
-        var prg = new byte[] { (byte)loadAddress, (byte)(loadAddress >> 8) }.Concat(image).ToArray();
+        var file = platform.FileOf(code.Segments, binary ? null : start.Address);
 
         var symbols = new Dictionary<string, int>();
         var variables = new Dictionary<string, VariableInfo>();
@@ -348,7 +353,7 @@ public static class TernCompiler
 
             string baseName = sourcePath is null ? "binary" : Path.GetFileNameWithoutExtension(sourcePath);
             apiName = baseName + "_api";
-            apiModule = BinaryInterface.Generate(baseName + ".prg", apiName, table, fileRange, others);
+            apiModule = BinaryInterface.Generate(baseName + platform.FileExtension, apiName, table, fileRange, others);
         }
 
         if (program.ExportTableAddress is int tableAddress)
@@ -359,7 +364,7 @@ public static class TernCompiler
             entries.AddRange(table.Select(t => (t.Name, t.Item3)));
             string baseName = sourcePath is null ? "program" : Path.GetFileNameWithoutExtension(sourcePath);
             apiName = baseName + "_api";
-            apiModule = BinaryInterface.GenerateTable(baseName + ".prg", apiName, table);
+            apiModule = BinaryInterface.GenerateTable(baseName + platform.FileExtension, apiName, table);
         }
 
         if (program.Implementations.Count > 0)
@@ -380,7 +385,8 @@ public static class TernCompiler
             int first = Math.Min(segments.Min(s => s.Address), program.Layout.Overlays[module.OverlayArea!].First);
             var overlayImage = new byte[segments.Max(s => s.Address + s.Bytes.Length) - first];
             foreach (var (address, bytes) in segments) bytes.CopyTo(overlayImage, address - first);
-            overlayFiles.Add(new OverlayFile(module.Name, module.OverlayArea!, first, overlayImage));
+            overlayFiles.Add(new OverlayFile(module.Name, module.OverlayArea!, first, overlayImage,
+                platform.FileOf([(first, overlayImage)], null)));
         }
 
         var report = new StringBuilder();
@@ -411,7 +417,7 @@ public static class TernCompiler
             var inArea = overlayFiles.Where(o => o.Area == area.Key).ToList();
             report.AppendLine($"Overlay area {area.Key} {area.Value}" + (inArea.Count == 0 ? ": no overlay" : ":"));
             foreach (var o in inArea)
-                report.AppendLine($"  {o.Name}.prg: {o.Image.Length} of {area.Value.Size} bytes (${o.LoadAddress:X4}-${o.LoadAddress + o.Image.Length - 1:X4})");
+                report.AppendLine($"  {o.Name}{platform.FileExtension}: {o.Image.Length} of {area.Value.Size} bytes (${o.LoadAddress:X4}-${o.LoadAddress + o.Image.Length - 1:X4})");
         }
         if (binary)
         {
@@ -436,8 +442,9 @@ public static class TernCompiler
 
         return new CompileResult
         {
-            Prg = prg,
+            File = file,
             Image = image,
+            Segments = code.Segments,
             LoadAddress = loadAddress,
             Platform = platform,
             Entry = start.Address,
