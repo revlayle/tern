@@ -50,3 +50,16 @@ Branch `m25-atari-io` (`5009feb`, `48bb6b1`, `20f3edd`, `2c16cc0`, `f0aa3c2`, `5
 - [x] Emulator tests cover the hex letters on both targets: `AtariLibraryTests.Hex_digits_are_atascii` and `Hex_digits_print_as_letters` on the Atari; `LibraryTests.Hex8_for_every_value` and `Hex16_on_edge_values` on the C64.
 - [x] An example that saves a file and loads it back runs in Altirra on an 800 with 48 KB (AltirraOS) through `H:`: `examples/atari/files.tern`, checked by the coding session on the 800 and the 800XL, and again by the reviewer on the 800.
 - [x] Roadmap items: `io` functions as listed, ATASCII names with their device, true on failure, `status` with CIO's code; an overlay loader (`load_xex`); the `tern run` stand-in for the build's overlay files; `hex8`/`hex16` in ATASCII through a platform module, without copying `text`; the `.lbl` file loaded in Altirra and its format fixed (question 138).
+
+## Re-review
+
+Commits `3cf5f6e`, `e6a2be2`, `0e60125`, `ea2e605`, after `main` was merged in (`5305d40`). `dotnet test`: 3484 compiler tests pass. No benchmark changed.
+
+**Verdict: ready to merge.** All four suggestions are handled, each with a test:
+
+1. **Done.** The module is now `text_digits` (both the generic and the Atari file). `ModuleTests.A_program_may_have_its_own_module_named_digits` compiles the program from finding 1 together with `text.hex8`, on both targets. No reference to the old name remains in the sources, the skill or the tests.
+2. **Done in `tern run`.** The CIO stand-in checks the part after `:` against DOS 2's rule (`^[A-Z][A-Z0-9]{0,7}(\.[A-Z0-9]{0,3})?$`) and fails a name that does not fit with `$A5`, before it looks for an overlay. A valid name that is not an overlay still gives `$AA`. `AtariRunTests` covers lowercase, `_`, 9 characters, a 4-character extension and a leading digit. The skill says to keep Atari overlay names to 8 letters and digits. The compiler does not warn about such an overlay name; the status lists this as an open point, which is fine.
+3. **Done.** The comments say that a status below 128 is success. `A_status_below_128_other_than_1_is_success` makes the test CIO return 3 on the last byte and runs `load`, `load_xex` and `read` through it.
+4. **Done.** `load_xex` fails when the last address is below the first (`size` still holds the last address at that point, so `size < first` is the right test), keeping the read's success code for `status()`. The new rows in `Load_xex_fails_on_a_file_that_is_not_whole` cover last = first - 1 and a value that would wrap.
+
+No new findings. The status's open points (spec 10.1 does not list `text_digits` and still says hex letters are screen codes; questions 138 and 139) belong to the spec session.
