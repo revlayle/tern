@@ -146,6 +146,77 @@ public class AtariTests
     }
 
     [Fact]
+    public void The_benchmarks_run_on_the_atari_with_the_same_results()
+    {
+        string dir = BenchmarkTests.Directory_;
+        foreach (var path in Directory.GetFiles(dir, "*.tern").Order(StringComparer.Ordinal))
+        {
+            var r = Run.Program(File.ReadAllText(path), sourcePath: path, maxCycles: 20_000_000, platform: Platform.Atari);
+            Assert.Equal(0x2000, r.Result.Entry);
+            BenchmarkTests.Checks[Path.GetFileNameWithoutExtension(path)](new Results(r.Ram, (n, o) => r.Address(n) + o));
+        }
+    }
+
+    /// <summary>Every module that is not C64-only (spec 10.1), used once; run on both machines, the variables must agree.</summary>
+    private const string Modules = """
+        import math
+        import mem
+        import text
+        import wide
+        import bcd
+        import random
+        import cpu
+        import float
+        var product: u16
+        var quotient: u16
+        var buf: [u8; 16]
+        var copy: [u8; 16]
+        var digits: [u8; 8]
+        var n: u8
+        var a: wide.U24
+        var b: wide.U24
+        var score: [u8; 3]
+        var add: [u8; 3]
+        var r: u8
+        var carry: bool
+        var x: float.F32 = float.F32 { bytes = float.of(2.5) }
+        var y: float.F32 = float.F32 { bytes = float.of(-0.75) }
+        var f: u16
+        var ftext: [u8; 12]
+        fn main() {
+            product = math.mul8(200, 123)
+            quotient = math.div16(60000, 7)
+            mem.fill(addr(buf), $AA, 16)
+            mem.copy(addr(copy), addr(buf), 16)
+            n = text.dec16(addr(digits), 65535)
+            wide.set24(addr(a), 50000)
+            wide.set24(addr(b), 40000)
+            wide.add24(addr(a), addr(b))
+            add[2] = $99
+            bcd.add(addr(score), addr(add), 3)
+            random.seed(1234)
+            r = random.next8()
+            asm { sec }
+            carry = cpu.carry()
+            float.mul(addr(x), addr(y))
+            f = float.to_u16(addr(x))
+            n += float.dec(addr(ftext), addr(x), 3)
+        }
+        """;
+
+    [Fact]
+    public void Library_modules_that_are_not_c64_only_work_unchanged()
+    {
+        var c64 = Run.Program(Modules);
+        var atari = Run.Program(Modules, platform: Platform.Atari);
+        foreach (var v in c64.Result.Variables.Values.Where(v => v.Function is null && !v.IsData && !v.Name.Contains('.')))
+            Assert.True(c64.Ram.Bytes.AsSpan(v.Address, v.Size).SequenceEqual(atari.Ram.Bytes.AsSpan(atari.Address(v.Name), v.Size)), v.Name);
+        Assert.Equal(200 * 123, atari.U16("product"));
+        Assert.Equal(90000, atari.U16("a") | atari.U8("a", 2) << 16);
+        Assert.Equal("-1.875", string.Concat(atari.Ram.Bytes.AsSpan(atari.Address("ftext"), 6).ToArray().Select(c => (char)c)));
+    }
+
+    [Fact]
     public void Tern_writes_a_xex_and_an_altirra_label_file()
     {
         var dir = Directory.CreateTempSubdirectory("tern-atari-");
