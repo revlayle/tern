@@ -1,5 +1,8 @@
-// The digits the library writes numbers with: 0-9 and the hex letters A-F. Here as C64 screen codes,
-// which are the same as PETSCII for 0-9. A platform folder replaces this module with its own codes
-// (lib/atari/digits.tern: ATASCII).
+// The codes the library writes numbers with: the digits 0-9 and the hex letters A-F, the minus sign
+// and the point. Here as C64 screen codes, which are the same as PETSCII for 0-9, '-' and '.'. A
+// platform folder replaces this module with its own codes (lib/atari/text_digits.tern: ATASCII).
 
 data DIGITS = screen"0123456789ABCDEF"
+const ZERO = $30                // '0', DIGITS[0]
+const MINUS = $2D               // '-'
+const POINT = $2E               // '.'

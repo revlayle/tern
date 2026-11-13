@@ -10,6 +10,7 @@
 // Constants: var g: float.F32 = float.F32 { bytes = float.of(9.81) }
 //
 // The work bytes are private, so use the routines from main only, or from one interrupt handler only.
+import text_digits
 
 struct F32 { bytes: [u8; 4] }
 
@@ -41,7 +42,6 @@ private var bcd: [u8; 20]
 
 private data LOW_BITS: [u8; 8] = [$00, $01, $03, $07, $0F, $1F, $3F, $7F]
 private data BIT: [u8; 8] = [$01, $02, $04, $08, $10, $20, $40, $80]
-private data TEXT = screen"0123456789-."
 
 // ---- Constants ----
 
@@ -910,7 +910,7 @@ private asm fn chop() -> u8 {
 // ---- Text ----
 
 // Write p at dst in decimal with `decimals` digits after the point (0 to 9; more is written as 9),
-// rounded to nearest, halves away from zero, in screen codes: a '-' for a negative value that does
+// rounded to nearest, halves away from zero, in the codes of text_digits: a '-' for a negative value that does
 // not round to 0, the whole part without leading zeros (at least "0"), then '.' and the decimals.
 // Returns the number of characters, at most 50 (39 digits for the largest values).
 fn dec(dst: ptr u8, p: ptr F32, decimals: u8) -> u8 {
@@ -936,25 +936,25 @@ fn dec(dst: ptr u8, p: ptr F32, decimals: u8) -> u8 {
     if top < point { top = point }
     var count: u8 = 0
     if nonzero && ws >= $80 {
-        dst[0] = TEXT[10]
+        dst[0] = text_digits.MINUS
         count = 1
     }
     for k in 0..=top {
         var pos: u8 = top - k
         var b: u8 = bcd[pos >> 1]
         if (pos & 1) != 0 { b = b >> 4 }
-        dst[count] = TEXT[b & 15]
+        dst[count] = text_digits.DIGITS[b & 15]
         count += 1
         if pos == point && point != 0 {
-            dst[count] = TEXT[11]
+            dst[count] = text_digits.POINT
             count += 1
         }
     }
     if zeros != 0 {
-        dst[count] = TEXT[11]
+        dst[count] = text_digits.POINT
         count += 1
         for _ in 0..zeros {
-            dst[count] = TEXT[0]
+            dst[count] = text_digits.ZERO
             count += 1
         }
     }

@@ -4,7 +4,9 @@
 // (spec 6.3), and the flags saved for rti bring decimal mode back, so main can be interrupted
 // halfway through an addition.
 //
-// Digits are written as screen codes (the same as PETSCII for 0-9).
+// Digits are written in the codes of the module text_digits (screen codes on the C64, the same as
+// PETSCII for 0-9).
+import text_digits
 
 // Set the n bytes at p to 0.
 fn clear(p: ptr u8, n: u8) {
@@ -160,8 +162,8 @@ fn digits(dst: ptr u8, p: ptr u8, n: u8) {
     var k: u8 = 0
     for i in 0..n {
         var b: u8 = p[n - 1 - i]
-        dst[k] = (b >> 4) + $30
-        dst[k + 1] = (b & 15) + $30
+        dst[k] = (b >> 4) + text_digits.ZERO
+        dst[k + 1] = (b & 15) + text_digits.ZERO
         k += 2
     }
 }
@@ -172,7 +174,7 @@ fn text(dst: ptr u8, p: ptr u8, n: u8) -> u8 {
     digits(dst, p, n)
     var total: u8 = n << 1
     var skip: u8 = 0
-    while skip < total - 1 && dst[skip] == $30 {
+    while skip < total - 1 && dst[skip] == text_digits.ZERO {
         skip += 1
     }
     if skip != 0 {

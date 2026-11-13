@@ -7,6 +7,7 @@
 //
 // The work bytes are private, so use the routines from main only, or from one interrupt handler only.
 import text
+import text_digits
 
 struct U32 { lo: u16, hi: u16 }
 struct U24 { lo: u16, hi: u8 }
@@ -19,7 +20,6 @@ private var wm: [u8; 4]
 private var wr: [u8; 4]
 private var wp: [u8; 4]
 private var digits: [u8; 5]
-private data DIGIT_SCREEN = screen"0123456789"
 
 // The packed decimal digits in `digits`, written at dst from position `top` (0 = ones) down to 0.
 // With skip set, leading zeros are not written. Returns the number of digits written.
@@ -31,7 +31,7 @@ private fn put_digits(dst: ptr u8, top: u8, skip: bool) -> u8 {
         var d: u8 = b & 15
         if (pos & 1) != 0 { d = b >> 4 }
         if skip && d == 0 && pos != 0 && count == 0 { continue }
-        dst[count] = DIGIT_SCREEN[d]
+        dst[count] = text_digits.DIGITS[d]
         count += 1
     }
     return count
