@@ -1,0 +1,43 @@
+// A status line in the game's own character set. hudfont declares the glyphs and the encoding hud;
+// with 'default encoding', every literal in this file is in it ("SCORE", ' ', '0', '♥').
+import mem
+import c64
+import hudfont
+
+default encoding hudfont.hud
+
+const CHARSET = $2000               // in VIC bank 0, like the screen at $0400
+
+data SCORE = "SCORE"
+data LIVES = "LIVES"
+
+var digits: [u8; 5] = [0, 1, 2, 5, 0]
+var lives: u8 = 3
+
+// Writes n bytes of text at a screen offset.
+fn put(offset: u16, text: ptr u8, n: u8) {
+    var p: ptr u8 = c64.SCREEN as ptr u8 + offset
+    for i in 0..n { p[i] = text[i] }
+}
+
+fn main() {
+    mem.copy(CHARSET, addr(hudfont.glyphs), len(hudfont.glyphs))
+    mem.fill(c64.SCREEN, ' ', 1000)
+    mem.fill(c64.COLOR, c64.WHITE, 1000)
+    c64.vic.border = c64.BLACK
+    c64.vic.background = c64.BLACK
+    c64.vic.memory = $18            // screen at $0400 (bits 4-7: 1), characters at $2000 (bits 1-3: 4)
+
+    put(10 * 40 + 12, addr(SCORE), len(SCORE))
+    var p: ptr u8 = c64.SCREEN + 10 * 40 + 18
+    for i in 0..len(digits) { p[i] = '0' + digits[i] }
+
+    put(12 * 40 + 12, addr(LIVES), len(LIVES))
+    p = c64.SCREEN + 12 * 40 + 18
+    var color: ptr u8 = c64.COLOR + 12 * 40 + 18
+    for i in 0..lives {
+        p[i] = '♥'
+        color[i] = c64.RED
+    }
+    while true { }
+}

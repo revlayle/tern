@@ -308,6 +308,26 @@ public sealed class EncodingTests : IDisposable
         Assert.Equal(0x02, r.U8("out"));
     }
 
+    [Fact]
+    public void The_statusline_example_writes_its_text_in_its_own_character_set()
+    {
+        var path = AsmTests.FindExample("statusline.tern");
+        var program = TernCompiler.Compile(File.ReadAllText(path), sourcePath: path);
+        Assert.Empty(program.Warnings);
+        // main ends in an endless loop, as on a C64 with its own font.
+        var ram = Tools.Runner.Run(program, new Tools.RunOptions { MaxCycles = 300_000 }).Ram.Bytes;
+        // hudfont's glyphs: ' ' 0, '0'-'9' 1-10, C E I L O R S V 11-18, '♥' 19.
+        byte Glyph(char c) => c switch { ' ' => 0, >= '0' and <= '9' => (byte)(c - '0' + 1), '♥' => 19, _ => (byte)("CEILORSV".IndexOf(c) + 11) };
+        Assert.Equal("SCORE 01250".Select(Glyph).ToArray(), ram[(0x0400 + 10 * 40 + 12)..(0x0400 + 10 * 40 + 23)]);
+        Assert.Equal("LIVES ♥♥♥".Select(Glyph).ToArray(), ram[(0x0400 + 12 * 40 + 12)..(0x0400 + 12 * 40 + 21)]);
+        Assert.All(ram[0x0400..(0x0400 + 10 * 40)], b => Assert.Equal(0, b));
+        Assert.Equal([2, 2, 2], ram[(0xD800 + 12 * 40 + 18)..(0xD800 + 12 * 40 + 21)]);   // red hearts
+        Assert.Equal(0x18, ram[0xD018]);
+        // The glyphs are at $2000: '0' is glyph 1, the heart glyph 19.
+        Assert.Equal([0x3C, 0x66, 0x6E, 0x76, 0x66, 0x66, 0x3C, 0x00], ram[0x2008..0x2010]);
+        Assert.Equal([0x36, 0x7F, 0x7F, 0x7F, 0x3E, 0x1C, 0x08, 0x00], ram[(0x2000 + 19 * 8)..(0x2000 + 20 * 8)]);
+    }
+
     // ---------- Errors ----------
 
     [Theory]
