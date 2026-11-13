@@ -573,9 +573,15 @@ Done when: the tests and the example pass.
 
 ## M24: Floats as a library
 
-Decision 2026-11-08. A portable library module with a 4-byte format, built on `wide`; no language change. After M22, so `const fn` with `real` can build float constants and tables. Scope settled by a spec session before coding: the format (IEEE 754 single, or a layout closer to the 6502's needs, e.g. exponent byte plus 24-bit mantissa), the value type (a 4-byte struct), the operations (add, subtract, multiply, divide, compare, conversion to and from integers, to text), and how a `const fn` turns a `real` into the format's bytes.
+Spec: 10.1 (`float`), 3.3 (an array field's value from a `const fn`). Decisions 2026-11-08 and 2026-11-13.
 
-Done when: the operations match C# over edge values (0, ±1, smallest and largest, rounding), their bytes and cycles are in the spec 10.1 table, and an example prints computed values on the C64.
+- The `float` module: the 4-byte format with the exponent in its own byte, rounding to nearest, `overflow`, and every function in the 10.1 table, `float.of` included.
+- Language: a struct literal's array field takes an array returned by a `const fn` (3.3), with an error test for a wrong length.
+- A C# model of the format (pack, unpack, each operation, rounding), used by the tests as the reference.
+
+Tests: each operation matches the C# model bit for bit over edge values: 0, ±1, the smallest and largest values, ties in rounding, overflow (the result and the flag), division by zero, results that become 0; conversions at 0, -1, 32767, -32768, 65535 and out of range; `round_` on halves; `floor` and `trunc` on negative values with and without a fraction and on values of 2^23 or more; `dec` with 0 and several decimals; `float.of` against the model.
+
+Done when: the tests pass, the bytes and cycles of each routine are in the spec 10.1 table, and an example prints computed values on the C64 (`tern run` and VICE).
 
 ## New platforms
 

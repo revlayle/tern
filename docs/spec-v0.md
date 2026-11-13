@@ -236,7 +236,7 @@ e.pos.y = 5                        // ldy #1 / sta (e),y
   ```
   - Fields are separated by `,` or a newline, with an optional trailing `,`, as in a struct declaration (spec 2: a newline separates inside braces). The literals of a list are separated by `,` only, as any list elements: inside `[ ]` a newline means nothing, so `[10` / `-5]` on two lines is `10 - 5`.
   - The name is always written, also where the destination gives the type, so a long table can be read line by line and a literal in the wrong table is an error. `field = value`, not `field: value`, since `:` means "has type" (as `import m(P = value)`, 2.2).
-  - A value is what an initial value of the field's type allows (4): a constant, checked against the field's type; an address filled in when the program is placed (`addr(boss)`, `addr(map) + 40`, `.lo` / `.hi`); a list or string of exactly the field's length for an array field; a struct literal of the nested struct's type for a nested struct.
+  - A value is what an initial value of the field's type allows (4): a constant, checked against the field's type; an address filled in when the program is placed (`addr(boss)`, `addr(map) + 40`, `.lo` / `.hi`); a list or string of exactly the field's length, or an array returned by a `const fn` (4.1) of that length, for an array field (`float.F32 { bytes = float.of(9.81) }`, 10.1); a struct literal of the nested struct's type for a nested struct.
   - An unknown field, a field given twice, and a `_` padding field are errors.
   - An array of structs gets the layout its declaration gives (one table per byte, `linear` or `indexed`), filled in at compile time. No code is generated beyond what any initial value costs: none for `data`, the startup copy for a `var`.
   - **Only initial values.** A struct literal is never a runtime value: in code, or as a local's initial value, it is an error that suggests assigning the fields one by one, since structs are never copied (above).
@@ -903,6 +903,36 @@ Decimal output converts a copy to BCD (doubling in decimal mode) and costs thous
 | `text` | `(dst: ptr u8, p: ptr u8, n: u8) -> u8` | Without leading zeros; returns the number of digits. Needs room for `2n` at `dst` |
 
 Values wrap modulo 10^(2n). The routines use `sed` and always leave decimal mode off; interrupt handlers clear decimal mode (6.3).
+
+**`float`** (planned, M24; decision 2026-11-13): floating-point numbers in 4 bytes
+
+`struct F32 { bytes: [u8; 4] }`. The format suits the 6502 rather than IEEE 754, whose exponent straddles two bytes:
+
+| Byte | Contents |
+|---|---|
+| 0-2 | Mantissa, low byte first: 24 bits of precision. The leading 1 is not stored; bit 7 of byte 2 is the sign |
+| 3 | Exponent plus `$80`; `$00` means the value is 0 |
+
+About 7.2 significant digits; magnitudes from about 2.9e-39 to 1.7e38. There is no NaN, infinity or denormal. Results are rounded to nearest, halves away from zero (one guard byte in the work area). A result too large becomes the largest value with its sign and sets `float.overflow` (a `bool` that stays set until the program clears it); so does division by zero. A result too small becomes 0, with no flag.
+
+As in `wide`, every function takes pointers and the result goes into the first operand: `float.mul(addr(v), addr(dt))`. The work bytes are private: use the routines from main only, or from one interrupt handler only.
+
+| Function | Signature | Purpose |
+|---|---|---|
+| `add`, `sub`, `mul`, `div` | `(p: ptr F32, q: ptr F32)` | `p = p op q` |
+| `neg`, `abs` | `(p: ptr F32)` | Flip or clear the sign |
+| `cmp` | `(p: ptr F32, q: ptr F32) -> i8` | -1, 0 or 1 |
+| `is_zero` | `(p: ptr F32) -> bool using zero` | `p == 0` |
+| `copy` | `(dst: ptr F32, src: ptr F32)` | Copy |
+| `from_u16`, `from_i16` | `(p: ptr F32, v: u16)` / `(p: ptr F32, v: i16)` | Set from an integer (exact) |
+| `to_u16`, `to_i16` | `(p: ptr F32) -> u16` / `-> i16` | Toward zero. Out of range gives the nearest limit and sets `overflow` |
+| `round_u16`, `round_i16` | `(p: ptr F32) -> u16` / `-> i16` | Nearest, halves away from zero, as the compile-time `round` (4.1). Out of range as `to_` |
+| `trunc` | `(p: ptr F32)` | Toward zero, kept a float: clears the fraction bits. Any value; never overflows |
+| `floor` | `(p: ptr F32)` | Toward minus infinity, kept a float: `floor(-2.7)` is -3, so `x - floor(x)` is always in 0 to 1 |
+| `dec` | `(dst: ptr u8, p: ptr F32, decimals: u8) -> u8` | Fixed-point decimal text in screen codes, as `wide.dec32`; returns the number of characters |
+| `of` | `const fn (x: real) -> [int; _]` | The 4 bytes of `x`, rounded as above, for constants: `var g: float.F32 = float.F32 { bytes = float.of(9.81) }`. A value too large is an error |
+
+`trunc` and `to_i16` round the same way; `trunc` keeps a float, works for any magnitude and only masks bits, while `to_i16` shifts the mantissa into place. Values of 2^23 or more have no fraction bits, so `trunc` and `floor` leave them unchanged.
 
 **`random`**: xorshift generators
 
