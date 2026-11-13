@@ -11,11 +11,14 @@ public static class Cli
 {
     public const string Usage = """
         Usage:
-          tern [--json] [--max-errors <n>] [--no-warnings | --warnings-as-errors] <file.tern> [-o <output.prg>]
-          tern run <file.tern> [options]
-          tern bench [options] <file.tern>... | --code <statements>...
+          tern --target <machine> [--json] [--max-errors <n>] [--no-warnings | --warnings-as-errors] <file.tern> [-o <output>]
+          tern run --target <machine> <file.tern> [options]
+          tern bench --target <machine> [options] <file.tern>... | --code <statements>...
 
-        tern <file.tern> compiles a Tern program for the Commodore 64. Writes:
+        Every command names the machine it builds for: --target c64 (Commodore 64) or
+        --target atari (Atari 8-bit with 48 KB or more).
+
+        tern --target <machine> <file.tern> compiles a Tern program. Writes:
           <output>.prg   the program
           <output>.lst   listing with addresses, bytes and cycles
           <output>.vs    VICE label file (load in the monitor with: ll "<output>.vs")
@@ -94,6 +97,27 @@ public static class Cli
         }
     }
 
+    /// <summary>The value of <c>--target</c> (spec 12.2), which every command must give.</summary>
+    private sealed class TargetSwitch
+    {
+        private string? _name;
+
+        public bool Parse(string[] arguments, ref int i)
+        {
+            if (arguments[i] != "--target" || i + 1 >= arguments.Length) return false;
+            _name = arguments[++i];
+            return true;
+        }
+
+        /// <summary>The platform, or null with <paramref name="problem"/> saying what is wrong.</summary>
+        public Platform? Platform(out string problem)
+        {
+            problem = _name is null ? $"No target given: write {Compiler.Platform.Choices}"
+                : $"Unknown target '{_name}': write {Compiler.Platform.Choices}";
+            return _name is null ? null : Compiler.Platform.ByName(_name);
+        }
+    }
+
     /// <summary>Runs one <c>tern</c> command; returns the process exit code.</summary>
     public static int Run(string[] args, TextWriter output, TextWriter error)
     {
@@ -116,10 +140,12 @@ public static class Cli
             bool json = false;
             int maxErrors = 0;
             var warnings = new WarningSwitches();
+            var target = new TargetSwitch();
             string? input = null, outputPath = null;
             for (int i = 0; i < arguments.Length; i++)
             {
                 if (arguments[i] == "--json") json = true;
+                else if (target.Parse(arguments, ref i)) { }
                 else if (warnings.Parse(arguments[i])) { }
                 else if (arguments[i] == "-o" && i + 1 < arguments.Length) outputPath = arguments[++i];
                 else if (arguments[i] == "--max-errors" && i + 1 < arguments.Length && int.TryParse(arguments[i + 1], out maxErrors) && maxErrors > 0) i++;
@@ -128,9 +154,10 @@ public static class Cli
             }
             if (input is null) return Usage1("No source file given");
             if (warnings.Problem is { } both) return Usage1(both);
+            if (target.Platform(out var noTarget) is not { } platform) return Usage1(noTarget);
             outputPath ??= Path.ChangeExtension(input, ".prg");
 
-            var result = CompileFile(input, json, maxErrors, warnings.Mode);
+            var result = CompileFile(input, platform, json, maxErrors, warnings.Mode);
             if (result is null) return 1;
             var files = new List<string>();
             void Write(string path, Action<string> write)
@@ -166,6 +193,7 @@ public static class Cli
             bool json = false, screen = false, profile = false;
             int maxErrors = 0;
             var warnings = new WarningSwitches();
+            var target = new TargetSwitch();
             string? input = null;
             long cycles = new RunOptions().MaxCycles, irq = 0;
             var dumps = new List<string>();
@@ -176,6 +204,7 @@ public static class Cli
                 bool hasValue = i + 1 < arguments.Length;
                 if (a == "--json") json = true;
                 else if (warnings.Parse(a)) { }
+                else if (target.Parse(arguments, ref i)) { }
                 else if (a == "--set" && hasValue)
                 {
                     try { sets.Add(MemorySet.Parse(arguments[++i])); }
@@ -192,8 +221,9 @@ public static class Cli
             }
             if (input is null) return Usage1("No source file given");
             if (warnings.Problem is { } both) return Usage1(both);
+            if (target.Platform(out var noTarget) is not { } platform) return Usage1(noTarget);
 
-            var program = CompileFile(input, json, maxErrors, warnings.Mode);
+            var program = CompileFile(input, platform, json, maxErrors, warnings.Mode);
             if (program is null) return 1;
             List<MemoryDump> parsed;
             try { parsed = dumps.Select(d => MemoryDump.Parse(d, program)).ToList(); }
@@ -218,11 +248,13 @@ public static class Cli
             var dumps = new List<string>();
             var variants = new List<(string? Path, string? Code)>();
             var sets = new List<MemorySet>();
+            var target = new TargetSwitch();
             for (int i = 0; i < arguments.Length; i++)
             {
                 string a = arguments[i];
                 bool hasValue = i + 1 < arguments.Length;
                 if (a == "--json") json = true;
+                else if (target.Parse(arguments, ref i)) { }
                 else if (a == "--set" && hasValue)
                 {
                     try { sets.Add(MemorySet.Parse(arguments[++i])); }
@@ -239,6 +271,7 @@ public static class Cli
                 else return Usage1($"Unknown or incomplete argument: {a}");
             }
             if (variants.Count == 0) return Usage1("No variant given: name .tern files or give --code");
+            if (target.Platform(out var noTarget) is not { } platform) return Usage1(noTarget);
 
             var results = new List<BenchResult>();
             int snippets = 0;
@@ -255,7 +288,7 @@ public static class Cli
                     try { variant = new BenchVariant(name, File.ReadAllText(path!), path); }
                     catch (IOException e) { return Fail(json, new Diagnostic(path!, 0, 0, "error", $"Cannot read {path}: {e.Message}", null), $"Cannot read {path}: {e.Message}"); }
                 }
-                results.Add(Bench.Measure(variant, function, dumps, new RunOptions { MaxCycles = cycles, IrqEvery = irq, Sets = sets }, maxErrors > 0 ? maxErrors : null));
+                results.Add(Bench.Measure(variant, function, dumps, new RunOptions { MaxCycles = cycles, IrqEvery = irq, Sets = sets }, maxErrors > 0 ? maxErrors : null, platform));
             }
             output.Write(json ? Bench.Json(results) + Environment.NewLine : Bench.Text(results));
             return results.All(r => r.Error is null && r.Returned && r.IndexErrors.Count == 0) ? 0 : 1;
@@ -263,7 +296,7 @@ public static class Cli
 
         // ---------- shared ----------
 
-        CompileResult? CompileFile(string input, bool json, int maxErrors, WarningMode warnings)
+        CompileResult? CompileFile(string input, Platform platform, bool json, int maxErrors, WarningMode warnings)
         {
             string source;
             try
@@ -278,7 +311,7 @@ public static class Cli
             }
             try
             {
-                var result = TernCompiler.Compile(source, sourcePath: input, maxErrors: maxErrors > 0 ? maxErrors : null, warnings: warnings);
+                var result = TernCompiler.Compile(source, platform, sourcePath: input, maxErrors: maxErrors > 0 ? maxErrors : null, warnings: warnings);
                 // In JSON the warnings are in the result's diagnostics.
                 if (!json && result.Warnings.Count > 0) Print(result.Warnings, false);
                 return result;

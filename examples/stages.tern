@@ -6,9 +6,9 @@
 // functions that never run at the same time.
 //
 // To try it in the built-in emulator (it loads the stages' files itself):
-//   dotnet run --project src/Tern.Cli -- run examples/stages.tern --screen
+//   dotnet run --project src/Tern.Cli -- run --target c64 examples/stages.tern --screen
 // In VICE:
-//   dotnet run --project src/Tern.Cli -- examples/stages.tern
+//   dotnet run --project src/Tern.Cli -- --target c64 examples/stages.tern
 //   c1541 -format stages,01 d64 examples/stages.d64 -write examples/stages.prg stages
 //         -write examples/stage1.prg stage1 -write examples/stage2.prg stage2
 //   x64sc -default -warp -autostart examples/stages.d64

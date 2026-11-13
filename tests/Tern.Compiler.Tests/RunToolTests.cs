@@ -416,12 +416,12 @@ public class RunToolTests
             string file = Path.Combine(dir, "joy.tern");
             File.WriteAllText(file, "var joy: u8 @ $DC00\nvar seen: u8\nfn main() { seen = joy }\n");
             var output = new StringWriter();
-            Assert.Equal(0, Cli.Run(["run", file, "--set", "$DC00=$7B", "--set", "$C000=1", "--dump", "seen", "--dump", "$C000"], output, output));
+            Assert.Equal(0, Cli.Run(["run", "--target", "c64", file, "--set", "$DC00=$7B", "--set", "$C000=1", "--dump", "seen", "--dump", "$C000"], output, output));
             Assert.Contains("seen $", output.ToString());
             Assert.Contains("u8 = 123 ($7B)", output.ToString());
             Assert.Contains("$C000 (1 bytes):\n  $C000  01", output.ToString().Replace("\r", ""));
             var error = new StringWriter();
-            Assert.Equal(1, Cli.Run(["run", file, "--set", "$DC00"], output, error));
+            Assert.Equal(1, Cli.Run(["run", "--target", "c64", file, "--set", "$DC00"], output, error));
             Assert.Equal("--set '$DC00': write an address and a byte, as $DC00=$FF. Run 'tern --help' for the options.", error.ToString().Trim());
         }
         finally { Directory.Delete(dir, recursive: true); }

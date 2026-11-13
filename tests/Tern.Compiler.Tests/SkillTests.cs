@@ -102,7 +102,7 @@ public class SkillTests
                     if (!program && block.Info is not ("tern error" or "tern warning")) modules[Path.GetFullPath(name)] = where;
                     if (block.Info == "tern error")
                     {
-                        var (code, output) = Tern(["tern", name]);
+                        var (code, output) = Tern(["tern", "--target", "c64", name]);
                         var next = b + 1 < blocks.Count ? blocks[b + 1] : null;
                         if (code == 0) problems.Add($"{where}: {name} compiles, but the block is marked 'tern error'");
                         else if (next is null || next.Language != "text") problems.Add($"{where}: a 'tern error' block needs a 'text' block after it with the error; it is:\n{string.Join("\n", output)}");
@@ -111,7 +111,7 @@ public class SkillTests
                     }
                     else if (block.Info == "tern warning")
                     {
-                        var (code, output) = Tern(["tern", name]);
+                        var (code, output) = Tern(["tern", "--target", "c64", name]);
                         var next = b + 1 < blocks.Count ? blocks[b + 1] : null;
                         if (code != 0 || !output.Any(l => l.Contains(": warning: "))) problems.Add($"{where}: a 'tern warning' block must compile with warnings; it gives:\n{string.Join("\n", output)}");
                         else if (next is null || next.Language != "text") problems.Add($"{where}: a 'tern warning' block needs a 'text' block after it with the output; it is:\n{string.Join("\n", output)}");
@@ -126,7 +126,7 @@ public class SkillTests
                     else if (program)
                     {
                         // The skill's programs have no warnings (roadmap "Warnings").
-                        var (code, output) = Tern(["tern", "--warnings-as-errors", name]);
+                        var (code, output) = Tern(["tern", "--target", "c64", "--warnings-as-errors", name]);
                         if (code != 0) problems.Add($"{where}: {name} does not compile:\n{string.Join("\n", output)}");
                         else { lastProgram = name; Compiled(name); }
                     }

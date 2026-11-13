@@ -7,9 +7,9 @@
 //
 // The game offers two services to the levels: 'export add_score, show @ $0900' puts a jump table
 // at $0900, and the compiler writes game_api.tern, which the levels import. So build the game first:
-//   dotnet run --project src/Tern.Cli -- examples/plugins/game.tern
-//   dotnet run --project src/Tern.Cli -- examples/plugins/forest.tern
-//   dotnet run --project src/Tern.Cli -- examples/plugins/cave.tern
+//   dotnet run --project src/Tern.Cli -- --target c64 examples/plugins/game.tern
+//   dotnet run --project src/Tern.Cli -- --target c64 examples/plugins/forest.tern
+//   dotnet run --project src/Tern.Cli -- --target c64 examples/plugins/cave.tern
 //   c1541 -format plugins,01 d64 examples/plugins/plugins.d64 -write examples/plugins/game.prg game
 //         -write examples/plugins/forest.prg forest -write examples/plugins/cave.prg cave
 //   x64sc -default -warp -autostart examples/plugins/plugins.d64

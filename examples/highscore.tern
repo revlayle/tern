@@ -2,7 +2,7 @@
 // prints it and shows the drive's status message.
 //
 // To try it in VICE (a disk image, so the KERNAL uses drive 8):
-//   dotnet run --project src/Tern.Cli -- examples/highscore.tern
+//   dotnet run --project src/Tern.Cli -- --target c64 examples/highscore.tern
 //   c1541 -format scores,01 d64 examples/highscore.d64 -write examples/highscore.prg highscore
 //   x64sc -default -warp -autostart examples/highscore.d64
 //

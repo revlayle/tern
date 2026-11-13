@@ -31,10 +31,10 @@ the compiler is. The standard library is in `lib/` next to it.
 
 | Command | What it does |
 |---|---|
-| `tern game.tern` | compile: writes `game.prg`, `game.lst` (listing: every source line with its addresses, bytes and cycles), `game.vs` (VICE labels), `game.lines` (bytes and cycles per source line) and prints the memory report |
-| `tern --json game.tern` | the same, with the result and every error and warning as JSON: `file`, `line`, `column`, `severity`, `message`, `suggestion` |
-| `tern run game.tern` | compile and run in the built-in emulator until `main` returns; `--dump name` shows a variable, `--screen` the screen as text, `--profile` the cycles of each function and source line; `--set '$DC00=$7B'` writes a byte before the run |
-| `tern bench a.tern b.tern` | run each version and compare bytes and cycles; `--fn f` measures one function (a module's function with its module: `--fn ship.move`); `--code '...'` measures statements as the body of `main`, after `--decl '...'` lines |
+| `tern --target c64 game.tern` | compile: writes `game.prg`, `game.lst` (listing: every source line with its addresses, bytes and cycles), `game.vs` (VICE labels), `game.lines` (bytes and cycles per source line) and prints the memory report |
+| `tern --json --target c64 game.tern` | the same, with the result and every error and warning as JSON: `file`, `line`, `column`, `severity`, `message`, `suggestion` |
+| `tern run --target c64 game.tern` | compile and run in the built-in emulator until `main` returns; `--dump name` shows a variable, `--screen` the screen as text, `--profile` the cycles of each function and source line; `--set '$DC00=$7B'` writes a byte before the run |
+| `tern bench --target c64 a.tern b.tern` | run each version and compare bytes and cycles; `--fn f` measures one function (a module's function with its module: `--fn ship.move`); `--code '...'` measures statements as the body of `main`, after `--decl '...'` lines |
 
 Work in this loop: write a small piece, compile, `tern run` it with `--dump` to check the values,
 and `tern bench` two versions when speed matters. Quote `--code`, `--decl`, `--dump` and `--set` arguments
@@ -65,7 +65,7 @@ fn main() {
 ```
 
 ```console
-$ tern run bad.tern
+$ tern run --target c64 bad.tern
 Main returned: 249 cycles (153 in main)
 ...
 Index check (the program has no check; the emulator found these):
@@ -94,7 +94,7 @@ fn main() {
 ```
 
 ```console
-$ tern run count.tern --dump total --screen
+$ tern run --target c64 count.tern --dump total --screen
 Main returned: 3125 cycles (3109 in main)
 A=$04 X=$00 Y=$03 SP=$FF PC=$0817
 total $0002 u16 = 5050 ($13BA)
@@ -136,7 +136,7 @@ broken.tern:7:13: error: Expected u16, found bool
 ```
 
 ```console
-$ tern --json broken.tern
+$ tern --target c64 --json broken.tern
 {
   "ok": false,
   "files": [],
@@ -220,7 +220,7 @@ cycles of its instructions once each (`+` when a branch or page crossing can add
 ran and the cycles it took in the run. The same table without the run counts is in `count.lines`.
 
 ```console
-$ tern run count.tern --profile
+$ tern run --target c64 count.tern --profile
 Main returned: 3125 cycles (3109 in main)
 A=$04 X=$00 Y=$03 SP=$FF PC=$0817
 Functions (cycles include the functions they call):

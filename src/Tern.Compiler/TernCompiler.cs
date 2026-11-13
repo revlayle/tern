@@ -24,6 +24,8 @@ public sealed class CompileResult
     /// <summary>The bytes loaded at <see cref="LoadAddress"/>.</summary>
     public required byte[] Image { get; init; }
     public required int LoadAddress { get; init; }
+    /// <summary>The machine the program was compiled for.</summary>
+    public required Platform Platform { get; init; }
     /// <summary>Where execution starts.</summary>
     public required int Entry { get; init; }
     /// <summary>The address main returns to; -1 for a binary, which has no main.</summary>
@@ -437,6 +439,7 @@ public static class TernCompiler
             Prg = prg,
             Image = image,
             LoadAddress = loadAddress,
+            Platform = platform,
             Entry = start.Address,
             HaltAddress = halt.Address,
             Listing = code.Listing,

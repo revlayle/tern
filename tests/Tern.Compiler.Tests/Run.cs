@@ -73,3 +73,11 @@ public sealed class Run
     /// <summary>Element <paramref name="i"/> of a split [u16; n] array.</summary>
     public ushort U16At(string name, int i, int length) => (ushort)(U8(name, i) | (U8(name, length + i) << 8));
 }
+
+/// <summary>Command lines for <see cref="Tools.Cli.Run"/>.</summary>
+public static class Command
+{
+    /// <summary>A tern command line built for the C64: <c>--target c64</c> after the subcommand (run, bench), or first.</summary>
+    public static string[] C64(params string[] args) =>
+        args.Length > 0 && args[0] is "run" or "bench" ? [args[0], "--target", "c64", .. args[1..]] : ["--target", "c64", .. args];
+}

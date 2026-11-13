@@ -80,7 +80,7 @@ fn main() {
 ```
 
 ```console
-$ tern run arith.tern --dump offset --dump product --dump q --dump r --dump low
+$ tern run --target c64 arith.tern --dump offset --dump product --dump q --dump r --dump low
 Main returned: 606 cycles (554 in main)
 A=$1B X=$00 Y=$00 SP=$FF PC=$0831
 offset $0007 u16 = 283 ($011B)
@@ -159,7 +159,7 @@ fn main() {
 ```
 
 ```console
-$ tern run ring.tern --dump 'buf:2' --dump total --dump speeds
+$ tern run --target c64 ring.tern --dump 'buf:2' --dump total --dump speeds
 Main returned: 3217 cycles (472 in main)
 A=$1C X=$08 Y=$00 SP=$FF PC=$082D
 buf $0910 [u8; 256] (2 bytes):
@@ -211,7 +211,7 @@ fn main() {
 ```
 
 ```console
-$ tern run structs.tern --dump alive --dump 'player:3'
+$ tern run --target c64 structs.tern --dump alive --dump 'player:3'
 Main returned: 728 cycles (442 in main)
 A=$02 X=$08 Y=$08 SP=$FF PC=$081F
 alive $0002 u8 = 8 ($08)
@@ -255,7 +255,7 @@ fn main() {
 ```
 
 ```console
-$ tern run lines.tern --dump cols --dump lines
+$ tern run --target c64 lines.tern --dump cols --dump lines
 Main returned: 67 cycles (54 in main)
 A=$22 X=$02 Y=$00 SP=$FF PC=$0815
 cols $0002 u8 = 34 ($22)
@@ -294,7 +294,7 @@ fn main() {
 ```
 
 ```console
-$ tern run fill.tern --dump '$C000:4' --dump '$C1FC:4' --dump '$C200:1'
+$ tern run --target c64 fill.tern --dump '$C000:4' --dump '$C1FC:4' --dump '$C200:1'
 Main returned: 7248 cycles (7240 in main)
 A=$AA X=$02 Y=$00 SP=$FF PC=$0811
 $C000 (4 bytes):
@@ -340,7 +340,7 @@ fn main() {
 ```
 
 ```console
-$ tern run flow.tern --dump hits --dump n --dump 'log:10'
+$ tern run --target c64 flow.tern --dump hits --dump n --dump 'log:10'
 Main returned: 799 cycles (615 in main)
 A=$1F X=$00 Y=$12 SP=$FF PC=$0825
 hits $0003 u8 = 31 ($1F)
@@ -382,7 +382,7 @@ fn main() {
 ```
 
 ```console
-$ tern run dispatch.tern --dump acc
+$ tern run --target c64 dispatch.tern --dump acc
 Main returned: 206 cycles (193 in main)
 A=$68 X=$04 Y=$03 SP=$FF PC=$0815
 acc $0002 u8 = 104 ($68)
@@ -409,7 +409,7 @@ fn main() {
 ```
 
 ```console
-$ tern run calls.tern --dump r
+$ tern run --target c64 calls.tern --dump r
 Main returned: 2110 cycles (94 in main)
 A=$54 X=$2A Y=$00 SP=$FF PC=$081F
 r $0002 u8 = 84 ($54)
@@ -438,7 +438,7 @@ fn main() {
 ```
 
 ```console
-$ tern run kernal.tern --screen
+$ tern run --target c64 kernal.tern --screen
 Main returned: 112 cycles (104 in main)
 A=$4F X=$05 Y=$05 SP=$FF PC=$0811
 Printed:
@@ -482,7 +482,7 @@ fn main() {
 ```
 
 ```console
-$ tern run flags.tern --dump count
+$ tern run --target c64 flags.tern --dump count
 Main returned: 95 cycles (77 in main)
 A=$6F X=$00 Y=$00 SP=$FF PC=$0819
 count $0002 u8 = 111 ($6F)
@@ -533,7 +533,7 @@ fn main() {
 ```
 
 ```console
-$ tern run asm.tern --dump score --dump 'buffer:2'
+$ tern run --target c64 asm.tern --dump score --dump 'buffer:2'
 Main returned: 400 cycles (219 in main)
 A=$03 X=$03 Y=$00 SP=$FF PC=$0823
 score $0002 u16 = 260 ($0104)
@@ -583,7 +583,7 @@ fn main() {
 ```
 
 ```console
-$ tern run irq.tern --irq 20000 --dump band
+$ tern run --target c64 irq.tern --irq 20000 --dump band
 Main returned: 60076 cycles (60063 in main), 3 interrupts
 A=$03 X=$64 Y=$08 SP=$FF PC=$0815
 band $0002 u8 = 3 ($03)
@@ -633,7 +633,7 @@ fn main() {
 ```
 
 ```console
-$ tern run app.tern --dump a
+$ tern run --target c64 app.tern --dump a
 Main returned: 61 cycles (45 in main)
 A=$15 X=$00 Y=$00 SP=$FF PC=$0817
 a $0003 u8 = 21 ($15)
@@ -712,7 +712,7 @@ fn main() {
 ```
 
 ```console
-$ tern run wave.tern --dump out
+$ tern run --target c64 wave.tern --dump out
 Main returned: 101 cycles (60 in main)
 A=$20 X=$00 Y=$00 SP=$FF PC=$081B
 out $0974 [u8; 3] (3 bytes):

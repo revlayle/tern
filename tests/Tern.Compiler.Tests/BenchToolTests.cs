@@ -131,7 +131,7 @@ public class BenchToolTests
             File.WriteAllText(Path.Combine(dir, "other.tern"), "var n: u8\nfn main() { n = 2 }\n");
             string a = Path.Combine(dir, "a", "check.tern"), b = Path.Combine(dir, "b", "check.tern"), other = Path.Combine(dir, "other.tern");
             var output = new StringWriter();
-            Assert.Equal(0, Cli.Run(["bench", a, b, other], output, output));
+            Assert.Equal(0, Cli.Run(["bench", "--target", "c64", a, b, other], output, output));
             var rows = output.ToString().Split('\n').Skip(1).Take(3).Select(l => l.Split("  ")[0].Trim()).ToList();
             Assert.Equal([a, b, "other.tern"], rows);
         }
@@ -240,15 +240,15 @@ public class BenchToolTests
         Assert.Equal(3, doc.RootElement.GetProperty("variants")[1].GetProperty("indexErrors")[0].GetProperty("line").GetInt32());
 
         var output = new StringWriter();
-        Assert.Equal(1, Cli.Run(["bench", "--decl", Decl[0], "--code", "for i in 0..16 { a[i] = i }", "--code", "var n: u8 = 17; for i in 0..n { a[i] = i }"], output, output));
-        Assert.Equal(0, Cli.Run(["bench", "--decl", Decl[0], "--code", "for i in 0..16 { a[i] = i }"], output, output));
+        Assert.Equal(1, Cli.Run(["bench", "--target", "c64", "--decl", Decl[0], "--code", "for i in 0..16 { a[i] = i }", "--code", "var n: u8 = 17; for i in 0..n { a[i] = i }"], output, output));
+        Assert.Equal(0, Cli.Run(["bench", "--target", "c64", "--decl", Decl[0], "--code", "for i in 0..16 { a[i] = i }"], output, output));
     }
 
     [Fact]
     public void Set_writes_bytes_before_each_variant_runs()
     {
         var output = new StringWriter();
-        Assert.Equal(0, Cli.Run(["bench", "--decl", "var joy: u8 @ $DC00\nvar seen: u8", "--code", "seen = joy", "--code", "seen = joy & $FF", "--set", "$DC00=$7B", "--dump", "seen"], output, output));
+        Assert.Equal(0, Cli.Run(["bench", "--target", "c64", "--decl", "var joy: u8 @ $DC00\nvar seen: u8", "--code", "seen = joy", "--code", "seen = joy & $FF", "--set", "$DC00=$7B", "--dump", "seen"], output, output));
         Assert.Contains("code 1: seen = 123", output.ToString());
         Assert.Contains("code 2: seen = 123", output.ToString());
     }

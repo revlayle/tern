@@ -27,6 +27,15 @@ public sealed class Platform
 
     public bool IsVolatile(int first, int last) => VolatileAreas.Any(a => first <= a.Last && last >= a.First);
 
+    /// <summary>The platforms a build can name with <c>--target</c> (spec 12.2).</summary>
+    public static IReadOnlyList<Platform> All => [C64];
+
+    /// <summary>The platform named <paramref name="name"/>, or null.</summary>
+    public static Platform? ByName(string name) => All.FirstOrDefault(p => p.Name == name);
+
+    /// <summary>"--target c64 or --target atari", for messages that name the choices.</summary>
+    public static string Choices => string.Join(" or ", All.Select(p => "--target " + p.Name));
+
     /// <summary>
     /// Commodore 64: a .prg loaded at $0801 that starts with the BASIC line "10 SYS 2061".
     /// Uses BASIC's zero page ($02-$8F), so the program does not return to BASIC.
