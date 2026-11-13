@@ -414,7 +414,14 @@ public sealed partial class Checker : ICompileTimeHost
         return offset;
     }
 
-    long ICompileTimeHost.Encode(Module? module, CharExpr c) => Encode(c.Value, EncodingOf(c.Encoding, c.Pos), c.Pos);
+    long ICompileTimeHost.Encode(Module? module, CharExpr c)
+    {
+        long code = 0;
+        void Work() => code = Encode(c.Value, EncodingOf(c.Encoding, c.Pos), c.Pos);
+        if (module is null) Work();
+        else InModule(module, Work);
+        return code;
+    }
 
     /// <summary>A data table as a compile-time array, element by element (spec 4.1).</summary>
     private CtArray DataArray(VariableSymbol v, string name, SourcePos pos)

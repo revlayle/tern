@@ -37,12 +37,27 @@ public sealed partial class Checker
         {
             var syntax = module.Syntax;
 
+            // First, since a const fn's body records the names it uses, which count even if it is never called.
+            foreach (var f in syntax.Functions.Where(f => f.Address is null).Concat(syntax.ConstFns))
+            {
+                // Unused locals. A const fn's body is never resolved by the checks, so its names are found here.
+                var uses = new LocalUses(f.IsConst ? name => NamedInConstFn(module, name) : null);
+                uses.Function(f);
+                foreach (var local in uses.Unread)
+                    Warn(local.Pos, local.IsLoopVariable
+                        ? $"'{local.Name}' is never used. Write '_' as the loop variable"
+                        : $"'{local.Name}' is never used. Remove it, or start its name with '_' to keep it");
+
+                Unreachable.Check(f.Body, Warn);
+            }
+
             // Unused declarations: private ones of a module, any of the main file.
             var declarations = syntax.Consts.Select(c => (c.Name, c.Pos, Fixed: false))
                 .Concat(syntax.Globals.Select(g => (g.Name, g.Pos, Fixed: g.Placement.Kind != PlacementKind.None)))
                 .Concat(syntax.Functions.Select(f => (f.Name, f.Pos, Fixed: false)))
                 .Concat(syntax.ConstFns.Select(f => (f.Name, f.Pos, Fixed: false)))
-                .Concat(syntax.Structs.Select(s => (s.Name, s.Pos, Fixed: false)));
+                .Concat(syntax.Structs.Select(s => (s.Name, s.Pos, Fixed: false)))
+                .Concat(syntax.Encodings.Select(e => (e.Name, e.Pos, Fixed: false)));
             foreach (var (name, pos, isFixed) in declarations)
             {
                 if (!module.IsMain && !syntax.PrivateNames.Contains(name)) continue;
@@ -58,19 +73,6 @@ public sealed partial class Checker
                 if (import.Args.Count > 0 || !module.Imports.ContainsKey(import.Name)) continue;
                 if (_usedImports.Contains((module, import.Name)) || module.IsMain && exported.Contains(import.Name)) continue;
                 Warn(import.Pos, $"'{import.Name}' is imported but not used. Remove the import");
-            }
-
-            foreach (var f in syntax.Functions.Where(f => f.Address is null).Concat(syntax.ConstFns))
-            {
-                // Unused locals. A const fn's body is never resolved by the checks, so its names are found here.
-                var uses = new LocalUses(f.IsConst ? name => NamedInConstFn(module, name) : null);
-                uses.Function(f);
-                foreach (var local in uses.Unread)
-                    Warn(local.Pos, local.IsLoopVariable
-                        ? $"'{local.Name}' is never used. Write '_' as the loop variable"
-                        : $"'{local.Name}' is never used. Remove it, or start its name with '_' to keep it");
-
-                Unreachable.Check(f.Body, Warn);
             }
         }
         return warnings;
@@ -263,6 +265,9 @@ public sealed partial class Checker
             switch (e)
             {
                 case NameExpr n: Name(n.Name); break;
+                // A const fn's literal names its encoding (spec 2.1).
+                case CharExpr { Encoding: { } prefix }: outer?.Invoke(prefix); break;
+                case StringExpr { Encoding: { } prefix }: outer?.Invoke(prefix); break;
                 case CallExpr c:
                     Name(c.Name);
                     foreach (var arg in c.Args) Read(arg);

@@ -523,6 +523,23 @@ public class ImplementsTests
     }
 
     [Fact]
+    public void An_interface_placed_in_the_same_overlay_area_is_an_error()
+    {
+        var e = With(Files(), path => Assert.Throws<CompileError>(() => TernCompiler.Compile(
+            Header.Replace("import level_api\n", "import level_api @ levels\n") + "\nfn main() { }", sourcePath: path)));
+        Assert.Equal("'level_api' is placed in the overlay area 'levels'; an interface must be resident. Remove '@ levels' from its import", e.Description);
+        Assert.Equal((2, 35), (e.Pos.Line, e.Pos.Column));
+    }
+
+    [Fact]
+    public void An_interface_placed_in_another_overlay_area_is_an_error()
+    {
+        Assert.Equal("'level_api' is placed in the overlay area 'extra'; an interface must be resident. Remove '@ extra' from its import",
+            Message(Header.Replace("import level_api\n", "import level_api @ extra\n")
+                .Replace("overlay levels\n", "overlay levels\n    $7000..=$70FF  overlay extra\n") + "\nfn main() { }"));
+    }
+
+    [Fact]
     public void An_interface_named_twice_is_an_error()
     {
         Assert.Equal("'level_api' is named twice after 'implements'. Remove one",

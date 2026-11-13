@@ -100,7 +100,7 @@ public sealed partial class Checker
             return module.Scope.GetValueOrDefault(name);
         }
         // Not in the copy of the main file that parameter values are checked in: its globals are not the program's.
-        if (_declaring.Count > 0 && module != _parameterScope && module.Syntax.Globals.FirstOrDefault(g => g.Name == name) is { } g)
+        if (_declaring.Any(d => d.Decl is not EncodingDecl) && module != _parameterScope && module.Syntax.Globals.FirstOrDefault(g => g.Name == name) is { } g)
         {
             if (g.Symbol is { } partly) return partly;
             InModule(module, () => DeclareGlobal(g));
@@ -131,7 +131,7 @@ public sealed partial class Checker
         int first = _declaring.FindIndex(d => d.Decl == decl);
         if (first >= 0)
         {
-            var chain = _declaring.Skip(first).Select(d => d.Module.Qualify(d.Name)).Append(_module.Qualify(name));
+            var chain = _declaring.Skip(first).Select(d => d.Decl is EncodingDecl ? $"encoding {d.Module.Qualify(d.Name)}" : d.Module.Qualify(d.Name)).Append(_module.Qualify(name));
             throw new CompileError(decl.Pos,
                 $"'{name}' depends on itself: {string.Join(" -> ", chain)}. Give one of them a value that does not use the others");
         }
@@ -175,6 +175,7 @@ public sealed partial class Checker
         ConstSymbol => "constant",
         FunctionSymbol => "function",
         ConstFnSymbol => "const fn",
+        EncodingSymbol => "encoding",
         _ => "struct type",
     };
 
@@ -285,6 +286,11 @@ public sealed partial class Checker
         foreach (var f in scope.Syntax.ConstFns)
         {
             try { DeclareConstFn(f); }
+            catch (CompileError) { }
+        }
+        foreach (var e in scope.Syntax.Encodings)
+        {
+            try { DeclareEncoding(e); }
             catch (CompileError) { }
         }
         foreach (var c in scope.Syntax.Consts)
@@ -587,12 +593,8 @@ public sealed partial class Checker
     }
 
     /// <summary>The encoding named by a literal's prefix, or the target's default.</summary>
-    private CharEncoding EncodingOf(string? prefix, SourcePos pos)
-    {
-        if (prefix is null) return _platform.DefaultEncoding;
-        if (CharEncoding.ByName.TryGetValue(prefix, out var encoding)) return encoding;
-        throw new CompileError(pos, $"Unknown encoding '{prefix}'. Use one of: {string.Join(", ", CharEncoding.ByName.Keys)}");
-    }
+    private CharEncoding EncodingOf(string? prefix, SourcePos pos) =>
+        prefix is null ? DefaultEncodingFor(_module, pos) : NamedEncoding(prefix, pos);
 
     private static int Encode(char c, CharEncoding encoding, SourcePos pos)
     {

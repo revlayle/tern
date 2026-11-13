@@ -4,11 +4,27 @@ Owned by the coding session. Updated at the end of every coding session.
 
 ## Current
 
-- **Milestone:** Overlay interfaces: `implements` (roadmap; spec 8.5 "Interfaces: `implements`"; decisions 2026-11-12, 119-122). Done; review findings 1 and 3 done, 2 is question 123. Ready for `/review` again.
-- **Branch:** `implements`, from `main` at `76a378e`, `main` merged in at `c1266da` (the review). 3270 compiler tests pass plus 36 CPU tests. No benchmark changed (1254 / 350780); `SkillTests` pass.
-- **Next step:** `/review implements` (re-review of must-fix 1). After this: encodings, M24.
+- **Milestone:** Encodings declared by the program (roadmap; spec 2.1 "Encodings declared by the program"; decision 2026-11-12), plus question 123 from the `implements` review. Done; re-review: ready to merge, and its note is done too. Ready for `/merge encodings`.
+- **Branch:** `encodings`, from `main` at `077c649`, `main` merged in (the re-review, `387bdcb`). 3335 compiler tests pass plus 36 CPU tests. No benchmark changed (1254 / 350780); `SkillTests` pass.
+- **Next step:** `/merge encodings`. After this: M24 (floats as a library).
 
 ## Done
+
+- **Encodings, re-review** (2026-11-13, `docs/reviews/encodings.md`): ready to merge. Its note (a constant used in an encoding's byte that needs that encoding gave "'H' depends on itself: H -> H"): `Resolve` puts the encoding on `_declaring` while it is checked, so the chain names it, "H -> encoding tiles -> H" (the rule that lets a global be demanded while a constant is worked out ignores encodings). Two tests.
+
+- **Encodings, first review** (2026-11-12, `docs/reviews/encodings.md`): not ready to merge; all three findings done in `a5b3f4b`.
+  - Must-fix 1: an encoding's byte whose literal needs that encoding while it is worked out (`tiles'A'` in `tiles`, through another encoding's byte, or an unprefixed character in a line of the default encoding) gave no error and crashed code generation. `_checkingLines` holds the lines whose byte is being checked; `Resolve` (with `EncodingSymbol.LinesBefore`) and `ProgramDefault` (with `_defaultLinesBefore`) tell a cycle through a byte from one through bases, and report it at the literal: "The byte of 'B' in the encoding 'tiles' uses 'tiles' itself. Write the byte as a number", or "... uses a character without a prefix, which is in the default encoding 'tiles', and that needs this byte. Write the byte as a number, or write a prefix before the quote" (`ByteUsesDefault`, the same whichever is checked first). Tests: the review's program (one error), with no data first, the module variant, a prefixed self-reference, two encodings' bytes using each other, a base through a byte, a range under a base, and a byte using another encoding under a default (compiles).
+  - Suggestion 2: a range of more than 256 characters: "... but an encoding has 256 bytes. Split the range".
+  - Suggestion 3: "Unknown encoding 'font.tilez'. Use one of: font.tiles" lists the named module's public encodings; a module with none: "the module plain declares no encodings".
+
+- **Encodings declared by the program** (2026-11-12, branch `encodings`). Four commits.
+  - *Question 123* (`11d5ed1`): an interface module placed in an overlay area (the implementing module's or another) is an error at the name after `implements`: "'api' is placed in the overlay area 'lv'; an interface must be resident. Remove '@ lv' from its import". Two tests in `ImplementsTests`.
+  - *Syntax* (`e4ac704`): `encoding name [: base] { 'c' = byte, 'a'..='z' = byte }` (lines separated by `,` or a line break), `private encoding`, `default encoding name` (`EncodingDecl`, `DefaultEncoding`, `ProgramSyntax.Encodings` / `DefaultEncodings`). `encoding` is a word only before a name at the top level, `default` only before `encoding` (`IsEncodingWord`, `IsDefaultEncoding`); both stay usable as names. The lexer reads `font.tiles"HI"` as one literal with the prefix `font.tiles`. Parse errors: `..` for `..=`, a range that goes down, a prefixed character (`screen'A' = 1`), `'\0'` or `'\$NN'` as a character, a block not closed.
+  - *Checks* (`Semantics/Checker.Encodings.cs`): encodings are declared with the const fns, before anything else, in the module's scope (so a name clash with any other declaration is "already declared"), then each is checked once (`Resolve`), when a literal first needs it or at its module's turn: the base (built-in or declared, in any order; `a: b`, `b: a` is an error), each byte a constant 0-255, a character listed twice, a range whose bytes pass `$FF`. A declared encoding is `CharEncoding.Declared`: its own codes, then the base's. `EncodingOf` (all literals: data, expressions, asm operands, const fns through `ICompileTimeHost.Encode`, now run in the literal's module) uses `NamedEncoding` for a prefix and `DefaultEncodingFor` otherwise: the main file's `default encoding` for the main file and program modules, the platform's for library modules (`Module.IsLibrary`). Errors: a built-in's name, an unknown encoding (the list includes the file's own), a name that is not an encoding, a module's private encoding, a missing import, a second `default encoding` line, one outside the main file. A failed encoding or default adds no errors at its uses.
+  - *Warnings*: an unused encoding of the main file, or a private one of a module, is warned like other declarations; a prefix (also in a const fn body) or the default line counts as a use, and of its import. Fixed on the way: `FindWarnings` walked const fn bodies after checking unused declarations, so a constant used only in a const fn that is never called was warned (spec 13: a use in an unused function counts). The walk now comes first.
+  - *Example* (`37b3065`): `examples/hudfont.tern` (20 glyphs and `encoding hud`, in the game's order) and `examples/statusline.tern` (copies the glyphs to `$2000`, sets `$D018`, writes "SCORE 01250" and three red hearts with `default encoding hudfont.hud`). Checked in `tern run` (test) and in VICE.
+  - *Skill*: `language.md` section 1 has a bullet on declared encodings.
+  - Tests: `EncodingTests` (50): bytes of ranges, single characters, non-ASCII characters (`♥`, `é`), a built-in base with changes, a declared base declared later with its own base, shared bytes, escapes, a constant as the byte and a constant using the encoding before the memory block, a const fn, an asm operand, `encoding`/`default` as names, a module's encoding and private one, a module's encoding as base and as default, the default in the main file and a program module but not a library module, a prefix over the default, each error with its position, one error per broken encoding, warnings; the example. `WarningTests`: a constant used only in an uncalled const fn.
 
 - **`implements`, first review** (2026-11-12, `docs/reviews/implements.md`): not ready to merge, decision 120 not built.
   - Must-fix 1 (`186771b`): inside a module that implements an interface, the interface's volatile variable matching the module's data is an error, "'level_api.header' is this module's data 'header'. Use 'header'" (decision 120, spec 8.5). `CheckImplements` records each match by module and variable (`_moduleData`); `CheckNotBinaryData`, called from `UseGlobal`, which every use goes through, reports it when the file being checked is that module. Resident code and the interface's own functions keep naming it. Tests: a read with an index, a write, `addr()`, an asm operand (each at the name), and resident code plus an interface helper called from main and from a level.
@@ -582,6 +598,8 @@ Including `jsr` and `rts`; from the tests.
 
 ## Known limitations and technical debt
 
+- Encodings: a character outside the Basic Multilingual Plane (most emoji) cannot be listed, since a character literal holds one UTF-16 unit ("exactly one character"); in a string each half has no code.
+- Encodings: "a literal without a prefix on a platform with no default encoding is an error" (spec 2.1) is not built; every platform so far (the C64) has a default.
 - Warnings: an unused import is reported at the module name.
 - M23: after an error in a `for` or `match` header, its body is not checked (an `if`/`while` body is). An error in an `asm` block, `match` arm, struct or memory block skips the rest of it: one error each.
 - M23: after an unclosed `(` or `[`, the lines of the statement that start further right than it are skipped with it (the lexer gives no line breaks inside brackets).
@@ -644,9 +662,19 @@ Not bugs; things to improve, mostly in M7 (optimizer).
 
 ## Questions for the spec session
 
-Open, from the review of `implements` (`docs/reviews/implements.md`, suggestion 2):
+Open, from the encodings milestone (provisional, as built):
 
-123. **An interface module placed in an overlay.** `import api @ lv` next to `import l1 @ lv implements api` compiles with no error about the interface. Its routines give no file, so nothing breaks; but helper functions with a body go into an overlay file in the same area, and a level calling one gets "'l1.enter' calls 'api.draw', but the modules l1 and api are both in the overlay area 'lv'", which does not point at the cause. Spec 8.5 says the interface is resident when the main file imports it, but lists no error. Proposed: an error at the `implements` name, "'api' is placed in the overlay area 'lv'; an interface must be resident. Remove '@ lv' from its import". Not built.
+124. **`pub encoding`.** Spec 2.1 says "a module's `pub encoding` is used with the module's name" and "`encoding` is a word only at the start of a top-level declaration (after `pub`)"; spec 13 also mentions `pub` declarations. Tern has no `pub`: a module's top-level declarations are public unless `private` (2.2), and the parser treats `pub fn` as a word from another language. Built: an encoding is public unless `private encoding`, like other declarations. Proposed: write "a module's encoding" and "(after `private`)" in 2.1, and drop `pub` from 13.
+125. **Details of the encoding declaration** the spec does not state. Built:
+     - A byte may be any constant expression with a value 0-255 (`'A'..='Z' = LETTERS`), not only a literal.
+     - A range is written with `..=` only; `'a'..'z'` is an error ("A range of characters includes its last one. Write '..='"), as is a range that goes down (`'Z'..='A'`).
+     - `'\0'` and `'\$NN'` cannot be listed (they are bytes, not characters); `'\n'`, `'\''`, `'\\'` can.
+     - A declared encoding may not have a built-in's name (`encoding screen { }` is an error), since the prefix would have two meanings.
+     - Encoding names share the module's namespace with its other declarations: `var tiles` and `encoding tiles` in one file are "already declared". Since encodings are declared first, the error is at the other declaration, whichever comes first in the file.
+     - `default encoding` may name a built-in encoding (`default encoding screen`), and a module's encoding (`font.tiles`).
+     - An unused encoding of the main file, or a private one of a module, is warned (spec 13 lists encodings).
+
+Question 123 was settled on 2026-11-12 (decisions.md) and is built on the `encodings` branch.
 
 Questions 119-122 were settled on 2026-11-12 (decisions.md): 119, 121 and 122 as built; 120 changed (a module names its own data) and is built in the review fixes.
 

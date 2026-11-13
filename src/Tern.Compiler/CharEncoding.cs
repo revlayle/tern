@@ -55,6 +55,11 @@ public sealed class CharEncoding
         _ => null,
     });
 
+    /// <summary>An encoding the program declares (spec 2.1): <paramref name="codes"/>, then the characters of <paramref name="baseEncoding"/>.</summary>
+    public static CharEncoding Declared(string name, CharEncoding? baseEncoding, IReadOnlyDictionary<char, int> codes) =>
+        new(name, c => codes.TryGetValue(c, out int code) ? code : baseEncoding?.Encode(c));
+
+    /// <summary>The built-in encodings.</summary>
     public static IReadOnlyDictionary<string, CharEncoding> ByName { get; } =
         new[] { Petscii, PetsciiMixed, Screen, ScreenMixed }.ToDictionary(e => e.Name);
 

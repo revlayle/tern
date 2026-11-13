@@ -15,6 +15,12 @@ Each example is a whole program that compiles. The full rules are in the Tern re
   takes its type from where it is used; one that does not fit is an error (`300` into a `u8`).
 - Strings are PETSCII; `screen"HI"` gives screen codes, `petscii_mixed"Hi"` the lower-case set. No
   terminator unless written: `"HI\0"`.
+- A game with its own font declares an encoding at the top level, then uses its name as a prefix:
+  `encoding tiles { '0'..='9' = $00, 'A'..='Z' = $0A, ' ' = $24 }`, then `tiles"SCORE"`, `tiles'0' + n`.
+  `encoding hud: screen { '♥' = $53 }` starts from another encoding. A module's encoding is
+  `font.tiles"HI"`. `default encoding tiles` in the main file applies it to every unprefixed literal
+  of the program's own files (library modules keep PETSCII). A character the encoding lacks is an
+  error; write it as `\$NN`. See `examples/statusline.tern`.
 
 ## 2. Types and arithmetic
 
