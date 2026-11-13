@@ -342,6 +342,9 @@ public sealed class EncodingTests : IDisposable
     [InlineData("default encoding tiles\nencoding tiles { 'A' = 1, 'B' = 'A' + 1 }",
         "The byte of 'B' in the encoding 'tiles' uses a character without a prefix, which is in the default encoding 'tiles', and that needs this byte. Write the byte as a number, or write a prefix before the quote", 2, 33)]
     [InlineData("default encoding top\nencoding top: tiles { }\nencoding tiles { 'A'..='Z' = 'A' }", "The byte of 'A'..='Z' in the encoding 'tiles' uses a character without a prefix, which is in the default encoding 'top'", 3, 30)]
+    [InlineData("const H: u8 = 'Z'\ndefault encoding tiles\nencoding tiles { 'A' = H, 'Z' = 2 }",
+        "'H' depends on itself: H -> encoding tiles -> H. Give one of them a value that does not use the others", 1, 1)]
+    [InlineData("const H: u8 = tiles'Z'\nencoding tiles { 'A' = H, 'Z' = 2 }", "'H' depends on itself: H -> encoding tiles -> H", 1, 1)]
     [InlineData("encoding t { 'A' = 256 }", "256 is not a byte; an encoding gives each character one byte, $00 to $FF. Use a value in that range", 1, 20)]
     [InlineData("encoding t { 'A' = -1 }", "-1 is not a byte", 1, 20)]
     [InlineData("var v: u8\nencoding t { 'A' = v }", "An encoding's byte must be known at compile time. Use a number or a constant", 2, 20)]

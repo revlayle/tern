@@ -152,7 +152,10 @@ public sealed partial class Checker
         try
         {
             CharEncoding result = null!;
-            InModule(symbol.Module!, () => result = Build(decl, symbol.Module!.Qualify(decl.Name)));
+            // On the list of declarations being worked out, so a constant that needs this encoding names it in its cycle.
+            _declaring.Add((symbol.Module!, decl.Name, decl));
+            try { InModule(symbol.Module!, () => result = Build(decl, symbol.Module!.Qualify(decl.Name))); }
+            finally { _declaring.RemoveAt(_declaring.Count - 1); }
             symbol.Encoding = result;
             return result;
         }

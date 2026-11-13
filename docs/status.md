@@ -4,11 +4,13 @@ Owned by the coding session. Updated at the end of every coding session.
 
 ## Current
 
-- **Milestone:** Encodings declared by the program (roadmap; spec 2.1 "Encodings declared by the program"; decision 2026-11-12), plus question 123 from the `implements` review. Done; review findings 1-3 done. Ready for `/review encodings` again.
-- **Branch:** `encodings`, from `main` at `077c649`, `main` merged in (the review, `fc6189e`). 3333 compiler tests pass plus 36 CPU tests. No benchmark changed (1254 / 350780); `SkillTests` pass.
-- **Next step:** `/review encodings` (re-review of must-fix 1). After this: M24 (floats as a library).
+- **Milestone:** Encodings declared by the program (roadmap; spec 2.1 "Encodings declared by the program"; decision 2026-11-12), plus question 123 from the `implements` review. Done; re-review: ready to merge, and its note is done too. Ready for `/merge encodings`.
+- **Branch:** `encodings`, from `main` at `077c649`, `main` merged in (the re-review, `387bdcb`). 3335 compiler tests pass plus 36 CPU tests. No benchmark changed (1254 / 350780); `SkillTests` pass.
+- **Next step:** `/merge encodings`. After this: M24 (floats as a library).
 
 ## Done
+
+- **Encodings, re-review** (2026-11-13, `docs/reviews/encodings.md`): ready to merge. Its note (a constant used in an encoding's byte that needs that encoding gave "'H' depends on itself: H -> H"): `Resolve` puts the encoding on `_declaring` while it is checked, so the chain names it, "H -> encoding tiles -> H" (the rule that lets a global be demanded while a constant is worked out ignores encodings). Two tests.
 
 - **Encodings, first review** (2026-11-12, `docs/reviews/encodings.md`): not ready to merge; all three findings done in `a5b3f4b`.
   - Must-fix 1: an encoding's byte whose literal needs that encoding while it is worked out (`tiles'A'` in `tiles`, through another encoding's byte, or an unprefixed character in a line of the default encoding) gave no error and crashed code generation. `_checkingLines` holds the lines whose byte is being checked; `Resolve` (with `EncodingSymbol.LinesBefore`) and `ProgramDefault` (with `_defaultLinesBefore`) tell a cycle through a byte from one through bases, and report it at the literal: "The byte of 'B' in the encoding 'tiles' uses 'tiles' itself. Write the byte as a number", or "... uses a character without a prefix, which is in the default encoding 'tiles', and that needs this byte. Write the byte as a number, or write a prefix before the quote" (`ByteUsesDefault`, the same whichever is checked first). Tests: the review's program (one error), with no data first, the module variant, a prefixed self-reference, two encodings' bytes using each other, a base through a byte, a range under a base, and a byte using another encoding under a default (compiles).
