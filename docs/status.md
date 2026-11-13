@@ -4,11 +4,17 @@ Owned by the coding session. Updated at the end of every coding session.
 
 ## Current
 
-- **Milestone:** M24, floats as a library (roadmap; spec 10.1 `float`, 3.3; decision 2026-11-13). Done; review (`docs/reviews/m24.md`): ready to merge, suggestions only, all handled. Ready for `/merge m24-floats`.
-- **Branch:** `m24-floats`, from `main` at `004d57c`, `main` merged in (the review, `03993a6`). 3370 compiler tests pass plus 36 CPU tests. No benchmark changed (1254 / 350780); `SkillTests` pass.
-- **Next step:** `/merge m24-floats`. The spec session can copy the bytes and cycles below ("M24: float sizes and cycles") into the spec 10.1 table (with the 19 bytes of zero page, review suggestion 2), and answer questions 126-130.
+- **Milestone:** M24 follow-up, `assert` inside a `const fn` (roadmap; spec 4.1; decision 2026-11-13, question 128). Done, ready for `/review`.
+- **Branch:** `m24-followup`, from `main` at `c4a1910`. 3381 compiler tests pass plus 36 CPU tests. No benchmark changed (1254 / 350780); `SkillTests` pass.
+- **Next step:** `/review` of `m24-followup`, then `/merge`. After that, M25 (Atari 8-bit) starts with its spec session.
 
 ## Done
+
+- **M24 follow-up: `assert` inside a `const fn`** (2026-11-13, branch `m24-followup`).
+  - *Language* (`9cf52d2`): `assert cond, "message"` parses as a statement (`AssertStmt`) when the parser is in a `const fn`; the interpreter checks it when it runs, and a false condition throws the message at the `assert` line through `Interpreter.Error`, so it gets "(called from main.tern:3)" after its first sentence and `CalledFrom` (`calledFrom` in `tern --json`), like every other error raised while a const fn runs. A condition that is not a bool is "An assert condition needs a bool, not an int. Compare instead, ...". In runtime code (a function body, also nested blocks) it is "An assert is checked at compile time. Write it at the top level or in a const fn" (was "put it outside the function"). The warnings pass reads the condition's names.
+  - *Tests*: `ConstFnTests` (an assert that holds; one that fails, with line, message and `CalledFrom`; a message with a fix sentence keeps the call note after its first sentence; an assert in a module const fn called by another, which names the main file's line; one using a loop variable, a local and a real; errors: a non-bool condition, no message, a message that is not a string, assert in `main` and in a nested block), `DiagnosticTests.A_failing_assert_in_a_const_fn_gives_the_calls_location_as_a_field`, and the old message in `ModuleParameterTests`.
+  - *`float.of`* (`716c0ab`): `assert e + 128 <= 255, "float.of: the value is larger than the largest float, about 1.7e38"` replaces the index out of range on purpose. `FloatTests.Of_a_value_too_large_is_an_error` checks the message, that the line is the assert, and `CalledFrom`. The message is the spec's; it has no fix sentence, so `tern --json` gives `suggestion: null` for it.
+  - *Skill*: the note about the old `float.of` error is removed from `language.md`; the const fn rules (section 13) say how to reject a bad argument with `assert`.
 
 - **M24 review** (2026-11-13, `docs/reviews/m24.md`): ready to merge, four suggestions and notes.
   - Suggestion 1: the skill (`language.md`, under the library table) says what the "Index 1 is outside the array" error from `float.of` means and that the fix is at the caller's line, until question 128 is settled. (Not in `errors.md`: its examples are compiled by `SkillTests`, and this error names the library's path, which differs per machine.)
@@ -702,14 +708,6 @@ Not bugs; things to improve, mostly in M7 (optimizer).
 
 ## Questions for the spec session
 
-Open, from M24 (provisional, as built):
-
-126. **What "exponent plus $80" means.** Built as Microsoft BASIC: the value is 0.1mmm (binary) × 2^(byte 3 - $80), the mantissa from 1/2 to 1, which gives the range in 10.1 (2^-128, about 2.9e-39, to (1 - 2^-24) × 2^127, about 1.7e38); 1.0 is `00 00 00 81`, -1.0 is `00 00 80 81`. Proposed: say so in 10.1, with these two examples.
-127. **`float.dec` details.** Built: `decimals` 0 to 9, more is written as 9; a `-` only when the text is not all zeros (-0.004 with 2 decimals is `0.00`); at least one digit before the point (`0.05`); no point when `decimals` is 0; at most 50 characters (39 digits for the largest values). Proposed: write these in 10.1, with "dst needs room for 50 characters, or for the program's largest value".
-128. **An error from a `const fn`.** `float.of` of a value too large must be an error (10.1), but a const fn cannot report one of its own: it is an index out of range on purpose, "float.tern:NN: Index 1 is outside the array (length 1) (called from main.tern:3)", at a line whose comment says the value is too large. Proposed: an `assert` statement inside a `const fn` (`assert e <= 127, "float.of: the value is larger than the largest float, about 1.7e38"`), reported at its line with "(called from ...)".
-129. **Small behaviors.** Built: division by zero gives the largest value with p's sign (0 / 0 the positive largest); `neg` leaves 0 as 0, so no -0 is made; any value with exponent 0 is 0 (`cmp`, `is_zero`, the operations); `to_u16` of -0.5 is 0 without `overflow` (toward zero it is 0), `round_u16` of -0.5 is 0 with `overflow` (it rounds to -1); every routine that stores 0 writes four zero bytes (`add`/`sub` with a 0 operand store nothing, so a 0 the program wrote with other mantissa bytes stays as it is; every routine reads it as 0). Proposed: as built.
-130. **A module function named like a compile-time built-in** (`floor`, `trunc` and `abs` in `float`) hides the built-in in that module's const fns: `floor(x)` in `float.of` is "'floor' runs on the 6502, so compile-time code cannot call it". `float.of` uses `round` instead. Proposed: keep it (one meaning per name inside a module), and say so in 4.1.
-
 Open, from the encodings milestone (provisional, as built):
 
 124. **`pub encoding`.** Spec 2.1 says "a module's `pub encoding` is used with the module's name" and "`encoding` is a word only at the start of a top-level declaration (after `pub`)"; spec 13 also mentions `pub` declarations. Tern has no `pub`: a module's top-level declarations are public unless `private` (2.2), and the parser treats `pub fn` as a word from another language. Built: an encoding is public unless `private encoding`, like other declarations. Proposed: write "a module's encoding" and "(after `private`)" in 2.1, and drop `pub` from 13.
@@ -721,6 +719,8 @@ Open, from the encodings milestone (provisional, as built):
      - Encoding names share the module's namespace with its other declarations: `var tiles` and `encoding tiles` in one file are "already declared". Since encodings are declared first, the error is at the other declaration, whichever comes first in the file.
      - `default encoding` may name a built-in encoding (`default encoding screen`), and a module's encoding (`font.tiles`).
      - An unused encoding of the main file, or a private one of a module, is warned (spec 13 lists encodings).
+
+Questions 126-130 were settled on 2026-11-13 (decisions.md): 126, 127, 129 and 130 as built; 128 (assert in a const fn) is built in the M24 follow-up.
 
 Question 123 was settled on 2026-11-12 (decisions.md) and is built on the `encodings` branch.
 
