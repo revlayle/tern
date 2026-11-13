@@ -34,11 +34,8 @@ public sealed class Platform
     public required OutputFormat Format { get; init; }
     /// <summary>The program file's extension: ".prg", ".xex".</summary>
     public string FileExtension => Format == OutputFormat.Prg ? ".prg" : ".xex";
-    /// <summary>
-    /// The label file's extension: ".vs" for VICE, in VICE's format ("al C:0810 .main"); ".lbl" for
-    /// Altirra, as MADS's label table, which Altirra loads with a program of the same name.
-    /// </summary>
-    public string LabelExtension => Format == OutputFormat.Prg ? ".vs" : ".lbl";
+    /// <summary>The label file's format: the one the platform's main emulator loads (question 138).</summary>
+    public required LabelFormat Labels { get; init; }
     /// <summary>ROM and I/O, where <c>tern run</c> finds no program code: first and last address, inclusive.</summary>
     public required (int First, int Last)[] Rom { get; init; }
 
@@ -120,6 +117,7 @@ public sealed class Platform
         ],
         DefaultEncoding = CharEncoding.Petscii,
         Format = OutputFormat.Prg,
+        Labels = LabelFormat.Vice,
         Rom =
         [
             (0xA000, 0xBFFF),   // BASIC
@@ -148,6 +146,7 @@ public sealed class Platform
         ],
         DefaultEncoding = CharEncoding.Atascii,
         Format = OutputFormat.Xex,
+        Labels = LabelFormat.Mads,
         Rom =
         [
             (0xC000, 0xFFFF),   // OS ROM (from $C000 on the XL/XE), I/O at $D000-$D7FF
