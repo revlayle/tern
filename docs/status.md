@@ -4,11 +4,18 @@ Owned by the coding session. Updated at the end of every coding session.
 
 ## Current
 
-- **Milestone:** Warnings (roadmap "Warnings"; spec 13 "Warnings", 5.1, 8.1; decision 2026-11-12 "warnings for code that does nothing"). Done and reviewed (`docs/reviews/warnings.md`: ready to merge; suggestions 1, 2 and 4 done, note 3 is question 118).
-- **Branch:** `warnings`, from `main` at `12f1ae1`, with `main` merged in again for the review. 2943 compiler tests pass plus 36 CPU tests. No benchmark changed (1254 / 350780); `SkillTests` pass (one skill output rewritten, see below).
-- **Next step:** `/merge warnings`. After this: `implements`, encodings, M24.
+- **Milestone:** `for _` follow-up (roadmap "`for _` follow-up"; spec 5.1, 11; decision 118). Done and reviewed (`docs/reviews/for-followup.md`: ready to merge; suggestion 1 done, note 2 needs no change).
+- **Branch:** `for-followup`, from `main` at `1b991c1`. 3224 compiler tests pass plus 36 CPU tests. No benchmark changed (1254 / 350780); `SkillTests` pass (two skill outputs rewritten, see below).
+- **Next step:** `/merge for-followup`. After this: `implements`, encodings, M24.
 
 ## Done
+
+- **`for _` follow-up, review** (2026-11-12, `docs/reviews/for-followup.md`): ready to merge. Suggestion 1: `UnderscoreLoopTests` also has signed ranges (`-5..5`, `-128..=127`, `-1..=-10 step -1`, which take the repeat path too) and two nested-loop bodies (`for _ in 0..3`, a `while`): 280 cases, all pass. Note 2 (a constant count of 0 compiles to no code for both spellings): no change.
+
+- **`for _` follow-up** (2026-11-12, branch `for-followup`, `0a80f43`). Decision 118: a `for _` loop is never slower than the same loop with a named counter the body does not read.
+  - `CodeGen.GenRepeat` (a `for _` with a constant count, `ldx #n` ... `dex` / `bne`, 8- and 16-bit) now calls `HoldInRegister` after loading the counter, as the named path does, and `ReleaseHeld` after the loop's end (where `break` goes). `for _ in 9..=0 step -1 { n += 1 }`: 107 cycles before, 83 now (`ldx #$0A` / `ldy n` / `iny` / `dex` / `bne` / `sty n`), as `for i`. A `for _` with a variable count already took the named path. When nothing is held, the spec 11 shape is unchanged.
+  - Tests: `UnderscoreLoopTests` (201): 200 cases compare a `_` loop with its named twin (same memory, no more cycles): constant ranges up and down, counts of 1, 2, 10, 256 (`0..=255`, `255..=0 step -1`), steps 2 and 3, u16 counts (`0..300`, `0..=256`), variable counts (`0..m`, `1..=m`, `m..=0 step -1`, `m..0 step -1`, `0..m step 2` with m = 0, 1, 255); bodies with `+= 1`, `-= 2`, indexes, `break`, `continue` and a u16. 33 fail without the change. Plus the listing of the example.
+  - Skill: `flow.tern` from 826 to 799 cycles (802 before its counters became `_`); `shapes.tern` one byte longer; `costs.md`'s listing excerpts updated by hand, with a note that `y`'s store after the loop is removed (line 31 overwrites it).
 
 - **Warnings, first review** (2026-11-12, `docs/reviews/warnings.md`): ready to merge.
   - Suggestion 1: the unreachable warning points at the first token of an assignment target (`buf` in `buf[1] = 2`, `pt` in `pt.a = 2`) and at the word `asm` of an asm block (`AsmStmt.KeywordPos`; the block's own position stays its `{`, so asm errors are unchanged).
@@ -559,7 +566,6 @@ Including `jsr` and `rts`; from the tests.
 
 ## Known limitations and technical debt
 
-- Warnings: a `for _` loop can be slower than the same loop with a named counter: `for _ in 9..=0 step -1 { n += 1 }` takes 107 cycles, `for i in ...` 83, since the optimizer keeps `n` in Y across the loop only with a named counter (the `_` loop counts down with `dex`/`bne` and does `inc n` each pass). The skill's `flow.tern` went from 802 to 826 cycles when its unread counters became `_`. For the optimizer.
 - Warnings: an unused import is reported at the module name.
 - M23: after an error in a `for` or `match` header, its body is not checked (an `if`/`while` body is). An error in an `asm` block, `match` arm, struct or memory block skips the rest of it: one error each.
 - M23: after an unclosed `(` or `[`, the lines of the statement that start further right than it are skipped with it (the lexer gives no line breaks inside brackets).
@@ -622,13 +628,9 @@ Not bugs; things to improve, mostly in M7 (optimizer).
 
 ## Questions for the spec session
 
-Question 118 (review Warnings, note 3): the warning for an unused `for` variable says "Write '_'", but `for _` can be slower: `for _ in 9..=0 step -1 { n += 1 }` takes the "repeat n times" path (`ldx #10` / `inc n` / `dex` / `bne`, 8 bytes, 107 cycles), while `for i` keeps `n` in Y (`ldy n` / `iny` / `dex` / `bpl` / `sty n`, 11 bytes, 83 cycles). Should the repeat path also hold a variable in the free index register? Spec 11 rule 4 ("match it or be shorter") allows the shorter, slower code, so the trade-off needs a decision. Not caused by this branch.
+Question 118 was settled on 2026-11-12 (decisions.md) and is built in the `for _` follow-up.
 
-Questions 114-117 (Warnings, provisional, built as described):
-- **114:** a compound assignment (`x += 1`) is a write, not a read, so a local only changed that way is unused (as Rust warns). Spec 13 says "never read"; `x += 1` reads `x` to compute the new value, but nothing reads the result.
-- **115:** a local `const` that is never used is warned like a local variable ("a local" in spec 13).
-- **116:** every global at a fixed address (`@ $C000`, `@ zp`, `@ region`) is never warned, also a module's `private` one. Spec 13 says "a global variable at a fixed address"; the roadmap and the decision say "of the main file". A private fixed global of a module is normally hardware or reserved memory too.
-- **117:** `examples/speedcode.tern`'s `cycle_plain` is now `_cycle_plain`; `docs/guide.md` (the speedcode table) still names `cycle_plain`. The guide should also mention the warnings (roadmap).
+Questions 114-117 were settled on 2026-11-12 (decisions.md): 114-116 as built (now in spec 13); 117 done in the guide.
 
 Questions 112-113 were settled on 2026-11-12 (decisions.md): as built.
 
