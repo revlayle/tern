@@ -739,3 +739,7 @@ Spec 4.1 left these open; settled before M22's coding session.
 ## 2026-11-12: `.gitignore` belongs to the spec session
 
 `.gitignore` had no owner in `docs/workflow.md`; the spec session now edits it. The plug-in example's build outputs in `examples/plugins/` are ignored, except the hand-written `level_api.tern`. Reason: it is repository setup, like `CLAUDE.md`, and the coding session reported the untracked files.
+
+## 2026-11-12: `implements` question 123
+
+- **123: an interface module must be resident.** An interface placed in an overlay or bank area (`import api @ lv` next to `import l1 @ lv implements api`) is an error at the name after `implements`: "'api' is placed in the overlay area 'lv'; an interface must be resident. Remove '@ lv' from its import" (spec 8.5). It applies to any area, not only the implementing module's. Reason: an interface's routines and `volatile` variables are names for addresses and take no space in a file, so placing it only moves its helper functions and data into an overlay; in the same area the levels can never call them (and the error they get, "both in the overlay area 'lv'", does not point at the cause), and in another area the program must load a second file to use shared helpers. Spec 8.5 already said an interface imported by the main file is resident; the error makes it a rule. Like 119, the interface's import line in the main file decides how it is used. Accepted cost: shared helpers in a separate overlay go in an ordinary module placed there, not in the interface.

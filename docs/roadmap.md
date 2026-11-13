@@ -565,6 +565,7 @@ Spec: 2.1 ("Encodings declared by the program"). Decision 2026-11-12. Small; fro
 - `encoding name { ... }` with single characters and ranges, `encoding name: base { ... }`, `pub encoding` and `module.name` prefixes, `default encoding name` in the main file (program files only, not library modules).
 - Errors: a character listed twice, a range past `$FF`, an unknown base, a second `default encoding` line, `default encoding` outside the main file, a character the encoding lacks (suggesting `\$NN`), `\n` not mapped.
 - An example: a C64 program with its own character set and an encoding for it.
+- From the `implements` review (question 123, decision 2026-11-12): an interface module placed in an overlay or bank area is an error at the name after `implements` (spec 8.5), with a test.
 
 Tests: bytes of strings and chars in a declared encoding (ranges, a base with changes, a non-ASCII character), a qualified prefix, the default in the main file and a program module but not in a library module, each error.
 
