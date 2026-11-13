@@ -666,6 +666,12 @@ public sealed partial class Interpreter
             case EmitStmt e:
                 Emit(e);
                 return Flow.Normal;
+            case AssertStmt a:
+                // The same wording as a top-level assert (review M24 follow-up, suggestion 1).
+                if (Eval(a.Condition) is not CtBool holds)
+                    throw Error(a.Condition.Pos, "An assert condition is a bool. Write a comparison, e.g. COUNT <= 64");
+                if (!holds.Value) throw Error(a.Pos, a.Message);
+                return Flow.Normal;
             default:
                 throw Error(s.Pos, "This statement cannot run at compile time. Remove it from the const fn");
         }

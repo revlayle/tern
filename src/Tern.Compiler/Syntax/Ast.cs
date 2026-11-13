@@ -394,6 +394,12 @@ public sealed class EmitStmt(SourcePos pos, AsmStmt fragment) : Stmt(pos)
 {
     public AsmStmt Fragment { get; } = fragment;
 }
+/// <summary><c>assert condition, "message"</c> in a <c>const fn</c> (spec 4.1): fails the compile when the condition is false.</summary>
+public sealed class AssertStmt(SourcePos pos, Expr condition, string message) : Stmt(pos)
+{
+    public Expr Condition { get; } = condition;
+    public string Message { get; } = message;
+}
 public sealed class ReturnStmt(SourcePos pos, Expr? value) : Stmt(pos)
 {
     public Expr? Value { get; set; } = value;

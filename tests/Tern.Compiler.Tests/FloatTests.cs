@@ -401,7 +401,9 @@ public class FloatTests
     {
         var e = Assert.Throws<CompileError>(() => TernCompiler.Compile($"import float\ndata g = float.F32 {{ bytes = float.of({x}) }}\nfn main() {{ }}\n"));
         Assert.Contains("float.tern", e.Pos.File ?? "");
-        Assert.Contains("called from", e.Description);
+        Assert.Contains("assert e + 128 <= 255", File.ReadAllLines(e.Pos.File!)[e.Pos.Line - 1]);
+        Assert.Equal("float.of: the value is larger than the largest float, about 1.7e38 (called from line 2)", e.Description);
+        Assert.Equal(2, e.CalledFrom!.Value.Line);
     }
 
     [Fact]

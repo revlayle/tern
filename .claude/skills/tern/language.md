@@ -733,6 +733,10 @@ out $0974 [u8; 3] (3 bytes):
   each element must fit the table's type.
 - A `const fn` reads constants, module parameters, `sizeof`, `offset(T.field)` and `data` tables (also `include_bytes`),
   not `var`s; `addr(x)` there is a `label`, whose number it cannot read. A loop that never ends stops after 10,000,000 steps with an error.
+- To reject a bad argument, write `assert n <= 64, "rows: n must be 64 or less"` in the `const fn`:
+  the compile fails with the message at that line, "(called from main.tern:5)". A second sentence
+  that starts with a verb ("... 64 or less. Use a smaller n") is the fix `tern --json` suggests. `assert` is a
+  top-level declaration or a `const fn` statement; in a runtime function it is an error.
 - A generator is a `const fn` with `emit { ... }` and no return value. It is called on a line of
   its own inside `asm { }` or an `asm fn`; each `emit` adds its instructions there. Operands use
   the generator's variables (computed) and the program's variables, data and functions (addresses).
@@ -764,6 +768,3 @@ out $0974 [u8; 3] (3 bytes):
 Strings and blocks are passed as a pointer and a length: `text.put(c64.SCREEN, addr(msg), len(msg))`.
 The library source is readable Tern in `lib/`; read it for the exact signatures.
 
-`float.of(x)` of a value larger than the largest float (about 1.7e38) fails with
-"float.tern:NN: Index 1 is outside the array ... (called from your line)": the index is out of range
-on purpose, as a const fn has no error of its own. Fix the value at your line, not the library.

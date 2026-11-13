@@ -199,6 +199,7 @@ public sealed partial class Checker
                     break;
                 case AsmStmt a: Asm(a); break;
                 case EmitStmt e: Asm(e.Fragment); break;
+                case AssertStmt a: Read(a.Condition); break;
                 case ReturnStmt r:
                     if (r.Value is not null) Read(r.Value);
                     break;
