@@ -509,7 +509,7 @@ public class ImplementsTests
     public void An_interrupt_fn_cannot_implement_a_routine()
     {
         Assert.StartsWith("'tick' is an interrupt handler, which the CPU calls through a vector",
-            Message(Header + "\nfn main() { }", Files(api: Api + "\nfn tick() @ $6006", level1: Level1 + "\ninterrupt fn tick() { }")));
+            Message(Header + "\nfn main() { }", Files(api: Api + "\nfn tick() @ $6006", level1: Level1 + "\ninterrupt fn tick() { }", level2: Level2 + "\nfn tick() { }")));
     }
 
     [Fact]
