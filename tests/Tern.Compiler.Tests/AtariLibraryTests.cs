@@ -142,6 +142,45 @@ public class AtariLibraryTests
     }
 
     [Fact]
+    public void Hello_example_prints_squares()
+    {
+        var path = AsmTests.FindExample("hello.tern", "atari");
+        var run = Runner.Run(TernCompiler.Compile(File.ReadAllText(path), Platform.Atari, sourcePath: path));
+        Assert.True(run.Returned, run.Stop);
+        Assert.Equal(["  Hello from Tern!", "  Squares: 1 4 9 16 25 36 49 64"], Runner.ScreenText(run).Take(2));
+    }
+
+    [Fact]
+    public void Dli_example_sets_up_its_screen_and_changes_the_color_on_each_row()
+    {
+        var path = AsmTests.FindExample("dli.tern", "atari");
+        var r = Run.Program(File.ReadAllText(path), sourcePath: path, platform: Platform.Atari,
+            traps: new Dictionary<int, Action<Run>>
+            {
+                [0xE45C] = Setvbv,
+                // CIO: the text goes to the screen at SAVMSC; only its length matters here.
+                [0xE456] = run => run.Cpu.Y = 1,
+            });
+        Assert.Equal(0x4000, r.Ram.Bytes[0x58] | r.Ram.Bytes[0x59] << 8);
+        Assert.Equal(0x3C00, r.Ram.Bytes[0x0230] | r.Ram.Bytes[0x0231] << 8);
+        byte[] list = [0x70, 0x70, 0x70, 0xC2, 0x00, 0x40, .. Enumerable.Repeat((byte)0x82, 22), 0x02, 0x41, 0x00, 0x3C];
+        Assert.Equal(list, r.Ram.Bytes[0x3C00..0x3C20]);
+        Assert.Equal(0xC0, r.Ram.Bytes[0xD40E]);
+
+        // A frame: the VBI starts the rows again, then each DLI sets the next row's color.
+        Nmi(r, VbiEntry(0x0224));
+        for (int row = 0; row < 23; row++)
+        {
+            Nmi(r, 0x6C, 0x00, 0x02);
+            byte color = (byte)(((row + 1) & 15) << 4 | 4);
+            Assert.Equal((color, color), (r.Ram.Bytes[0xD018], r.Ram.Bytes[0xD01A]));
+        }
+        Nmi(r, VbiEntry(0x0224));
+        Nmi(r, 0x6C, 0x00, 0x02);
+        Assert.Equal(0x14, r.Ram.Bytes[0xD018]);
+    }
+
+    [Fact]
     public void A_text_display_list()
     {
         var r = TernCompiler.Compile("""

@@ -1,0 +1,51 @@
+// Display-list interrupts on the Atari: a text screen of our own whose background changes color on
+// every row. A display list built at compile time shows 24 rows of text and asks for a DLI at the end
+// of each; the DLI handler sets the next row's color; a VBI handler starts the colors again each frame.
+//
+//   dotnet run --project src/Tern.Cli -- --target atari examples/atari/dli.tern
+//   C:\Altirra\Altirra64.exe /portable /hardware:800 /kernel:osb /memsize:48K /nobasic /run examples\atari\dli.xex
+import atari
+
+const SCREEN = $4000                // 40 x 24 characters, 960 bytes
+const LIST = $3C00                  // the display list, 32 bytes, inside one 1 KB block
+
+// The screen is not the compiler's to place variables in.
+memory { SCREEN..=SCREEN + 959 reserved }
+
+// DLIs at the end of rows 0 to 22: each sets the color of the row below it.
+data list: [u8; _] @ LIST = atari.display_list(atari.MODE_TEXT, 24, SCREEN, LIST, (1 << 23) - 1)
+
+// One color per row: the hue in the high nibble, a dark luminance in the low one.
+data COLORS: [u8; _] = [(i & 15) << 4 | 4 for i in 1..25]
+
+data TEXT = "\$7D\nTern on the Atari\n\nEach row gets its own color\nfrom a display-list interrupt.\n"
+
+var row: u8                         // the row whose DLI comes next
+
+fn main() {
+    atari.savmsc = SCREEN           // the screen editor writes to our screen
+    atari.crsinh = 1                // no cursor
+    atari.color[1] = $0E            // text: white
+    atari.color[2] = $04            // the first row's background
+    atari.color[4] = $00            // border: black
+    atari.print(addr(TEXT), len(TEXT))
+    atari.set_vbi(addr(frame))
+    atari.set_display_list(addr(list))
+    atari.set_dli(addr(dli))
+}
+
+// At the end of a row: wait for the end of the scan line, so that the change does not show half way
+// across, then set the next row's background (and the border with it). Any value written to WSYNC
+// waits; writing the color keeps it in A for the stores right after.
+interrupt fn dli() {
+    var c: u8 = COLORS[row]
+    atari.antic.wsync = c
+    atari.gtia.colpf[2] = c
+    atari.gtia.colbk = c
+    row += 1
+}
+
+// Once a frame, after the OS has copied the shadow colors: the first DLI is row 0's again.
+interrupt fn frame() {
+    row = 0
+}
