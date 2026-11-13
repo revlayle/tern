@@ -1,0 +1,171 @@
+// Atari device I/O: files through CIO, the OS's central I/O.
+//
+//     import io
+//     data NAME = "D1:SCORES.DAT"
+//     io.save(addr(NAME), len(NAME), addr(scores), 16)            // whole file
+//     io.load(addr(NAME), len(NAME), addr(scores), 16)
+//
+// Names are ATASCII strings with their device, passed as a pointer and a length: "D1:SCORES.DAT" on
+// the first disk drive, "H:SCORES.DAT" on an emulator's host device. At most 39 characters.
+//
+// The module uses one I/O control block, IOCB below, so one file is open at a time. The screen
+// editor keeps IOCB 0 (atari.print).
+//
+// Errors. A function that returns a bool returns true on failure. status() gives CIO's code for the
+// last call: 1 is success, 128 and above an error (ST_ below).
+const IOCB = 1
+
+const READ = 4                  // modes for open()
+const WRITE = 8                 // a new file, or one that replaces the old one
+
+const ST_OK = 1
+const ST_EOF = $88              // end of file: a read got fewer bytes than asked, maybe none
+const ST_NOT_FOUND = $AA        // no such file
+
+// IOCB 1, at $0340 + 16 * IOCB.
+private var iccom: u8 @ $0352
+private var icsta: u8 @ $0353
+private var icbuf: ptr u8 @ $0354
+private var iclen: u16 @ $0358
+private var icax1: u8 @ $035A
+private var icax2: u8 @ $035B
+
+private const OPEN = $03
+private const GET_BYTES = $07
+private const PUT_BYTES = $0B
+private const CLOSE = $0C
+private const EOL = $9B
+
+// CIO for IOCB 1: X = 16 * IOCB. It returns the status in Y, negative on an error.
+private fn cio($10 using X) -> bool using negative @ $E456
+
+// ---------- Files ----------
+
+// Open the file `name` (n characters, its device included) with `mode`, READ or WRITE. Returns true
+// on failure, e.g. no such file (ST_NOT_FOUND). After a failure the IOCB may still be taken: call
+// close() before the next open().
+fn open(name: ptr u8, n: u8, mode: u8) -> bool {
+    var path: [u8; 40]                  // CIO wants the name to end with an EOL
+    if n > 39 {
+        n = 39
+    }
+    for i in 0..n using Y {
+        path[i] = name[i]
+    }
+    path[n] = EOL
+    iccom = OPEN
+    icbuf = addr(path)
+    icax1 = mode
+    icax2 = 0
+    return cio()
+}
+
+// Close the file. Returns true on failure: when writing, the last bytes reach the disk only now, so a
+// full disk may show here.
+fn close() -> bool {
+    iccom = CLOSE
+    return cio()
+}
+
+// Read up to `n` bytes from the open file into `dst`. Returns how many bytes were read: fewer than n
+// at the end of the file (status() is then ST_EOF), 0 on any other error.
+fn read(dst: ptr u8, n: u16) -> u16 {
+    if n == 0 {
+        return 0                        // CIO would read one byte into A
+    }
+    iccom = GET_BYTES
+    icbuf = dst
+    iclen = n
+    if cio() && icsta != ST_EOF {
+        return 0
+    }
+    return iclen                        // CIO leaves the count it moved here
+}
+
+// Write `n` bytes from `src` to the open file. Returns true on failure.
+fn write(src: ptr u8, n: u16) -> bool {
+    if n == 0 {
+        return false                    // CIO would write the byte in A
+    }
+    iccom = PUT_BYTES
+    icbuf = src
+    iclen = n
+    return cio()
+}
+
+// CIO's code for the last call: ST_OK, or 128 and above for an error.
+inline fn status() -> u8 {
+    return icsta
+}
+
+// ---------- Whole files ----------
+
+// Load the file `name` into `dst`, at most `max` bytes. A shorter file is not an error. Returns true
+// on failure; status() then gives the first error.
+fn load(name: ptr u8, n: u8, dst: ptr u8, max: u16) -> bool {
+    if open(name, n, READ) {
+        return close_after_error()
+    }
+    read(dst, max)
+    if icsta >= 128 && icsta != ST_EOF {
+        return close_after_error()
+    }
+    return close()
+}
+
+// Save `count` bytes from `src` as the file `name`, replacing a file of that name. Returns true on
+// failure; status() then gives the first error.
+fn save(name: ptr u8, n: u8, src: ptr u8, count: u16) -> bool {
+    if open(name, n, WRITE) || write(src, count) {
+        return close_after_error()
+    }
+    return close()
+}
+
+// Load a binary file (.xex) the way DOS does, each segment to its own address, e.g. an overlay, which
+// the compiler writes as a .xex without a run address. Nothing is run: a segment for RUNAD or INITAD
+// is loaded like any other. Returns true on failure: a missing file, a file that ends inside a
+// segment (status() ST_EOF), or one that does not start with $FF $FF (status() ST_OK).
+fn load_xex(name: ptr u8, n: u8) -> bool {
+    if open(name, n, READ) {
+        return close_after_error()
+    }
+    var head: [u8; 4]
+    if read(addr(head), 2) != 2 || head[0] != $FF || head[1] != $FF {
+        return close_after_error()
+    }
+    while true {
+        var got = read(addr(head), 4)
+        if got == 0 && icsta == ST_EOF {
+            break                       // the end of the file, between segments
+        }
+        if got != 4 {
+            return close_after_error()
+        }
+        if head[0] == $FF && head[1] == $FF {
+            // A segment may start with another $FF $FF.
+            head[0] = head[2]
+            head[1] = head[3]
+            if read(addr(head) + 2, 2) != 2 {
+                return close_after_error()
+            }
+        }
+        var first: u16 = head[0] as u16
+        first.hi = head[1]
+        var size: u16 = head[2] as u16
+        size.hi = head[3]
+        size = size - first + 1
+        if read(first as ptr u8, size) != size {
+            return close_after_error()
+        }
+    }
+    return close()
+}
+
+// Close after a failed call, keeping that call's status for status(). Returns true.
+private fn close_after_error() -> bool {
+    var failed_with = icsta
+    close()
+    icsta = failed_with
+    return true
+}
