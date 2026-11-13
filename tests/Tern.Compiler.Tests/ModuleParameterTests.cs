@@ -180,7 +180,7 @@ public sealed class ModuleParameterTests : IDisposable
     [Fact]
     public void Assert_inside_a_function_says_where_it_goes()
     {
-        Assert.Contains("put it outside the function", Fail("fn main() {\n assert true, \"x\"\n}").Description);
+        Assert.Contains("Write it at the top level or in a const fn", Fail("fn main() {\n assert true, \"x\"\n}").Description);
     }
 
     [Fact]

@@ -134,6 +134,17 @@ public class DiagnosticTests
     }
 
     [Fact]
+    public void A_failing_assert_in_a_const_fn_gives_the_calls_location_as_a_field()
+    {
+        var d = Error("const fn f(n: int) -> int {\n    assert n < 10, \"f: n must be below 10\"\n    return n\n}\nconst K = f(12)\nfn main() { }");
+        var e = Json(d);
+        Assert.Equal(2, e.GetProperty("line").GetInt32());
+        Assert.Equal("f: n must be below 10 (called from line 5)", e.GetProperty("message").GetString());
+        Assert.Equal(5, e.GetProperty("calledFrom").GetProperty("line").GetInt32());
+        Assert.Equal(11, e.GetProperty("calledFrom").GetProperty("column").GetInt32());
+    }
+
+    [Fact]
     public void An_error_in_generated_code_gives_the_generator_calls_location()
     {
         // A branch out of range, found by the assembler, and an operand the checker rejects.

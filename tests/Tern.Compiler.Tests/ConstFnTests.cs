@@ -756,4 +756,98 @@ public sealed class ConstFnTests : IDisposable
         var r = Run.Program("var n: u8\nfn emit() { n = 3 }\nfn main() {\n    var emit2: u8 = 1\n    emit()\n    n += emit2\n}");
         Assert.Equal(4, r.U8("n"));
     }
+
+    // ---------- assert in a const fn (spec 4.1, decision 2026-11-13, question 128) ----------
+
+    [Fact]
+    public void An_assert_that_holds_lets_the_const_fn_go_on()
+    {
+        var r = Run.Program("""
+            const fn half(n: int) -> int {
+                assert n % 2 == 0, "half: n must be even"
+                return n / 2
+            }
+            const K = half(200)
+            var v: u8
+            fn main() { v = K }
+            """);
+        Assert.Equal(100, r.U8("v"));
+    }
+
+    [Fact]
+    public void A_failing_assert_gives_its_message_at_its_line_with_the_call()
+    {
+        var e = Error("const fn half(n: int) -> int {\n    assert n % 2 == 0, \"half: n must be even\"\n    return n / 2\n}\nconst K = half(7)\nfn main() { }");
+        Assert.Equal(2, e.Pos.Line);
+        Assert.Equal("half: n must be even (called from line 5)", e.Description);
+        Assert.Equal(5, e.CalledFrom!.Value.Line);
+    }
+
+    [Fact]
+    public void A_message_with_a_fix_keeps_the_call_after_its_first_sentence()
+    {
+        var e = Error("const fn f(n: int) -> int {\n    assert n <= 255, \"n is too large. Use a value up to 255\"\n    return n\n}\nconst K = f(256)\nfn main() { }");
+        Assert.Equal("n is too large (called from line 5). Use a value up to 255", e.Description);
+    }
+
+    [Fact]
+    public void An_assert_in_a_const_fn_called_by_another_names_the_first_call()
+    {
+        Write("tables.tern", """
+            const fn check(n: int) {
+                assert n < 10, "tables: n must be below 10"
+            }
+
+            const fn table(n: int) -> [int; _] {
+                check(n)
+                return [i for i in 0..n]
+            }
+            """);
+        var ok = RunMain("import tables\ndata t: [u8; _] = tables.table(9)\nvar v: u8\nfn main() { v = t[8] }");
+        Assert.Equal(8, ok.U8("v"));
+        var e = ErrorInMain("import tables\n\ndata t: [u8; _] = tables.table(12)\nfn main() { }");
+        Assert.Equal(Path.Combine(_dir.FullName, "tables.tern"), e.Pos.File);
+        Assert.Equal(2, e.Pos.Line);
+        Assert.Equal("tables: n must be below 10 (called from main.tern:3)", e.Description);
+    }
+
+    [Fact]
+    public void An_assert_may_use_locals_reals_and_loops()
+    {
+        var src = """
+            const fn sum(n: int) -> int {
+                var s = 0
+                for i in 0..n {
+                    s += i
+                    assert s * 1.5 < 300.0, "sum: too large"
+                }
+                return s
+            }
+            const K = sum(LIMIT)
+            var v: u8
+            fn main() { v = K }
+            """;
+        Assert.Equal(190, Run.Program(src.Replace("LIMIT", "20")).U8("v"));
+        var e = Error(src.Replace("LIMIT", "21"));
+        Assert.Equal(5, e.Pos.Line);
+        Assert.Equal("sum: too large (called from line 9)", e.Description);
+    }
+
+    [Theory]
+    [InlineData("const fn f(n: int) -> int {\n    assert n, \"m\"\n    return n\n}\nconst K = f(1)\nfn main() { }", 2,
+        "An assert condition needs a bool, not an int (called from line 5). Compare instead, e.g. 'n != 0'")]
+    [InlineData("const fn f(n: int) -> int {\n    assert n > 0\n    return n\n}\nconst K = f(1)\nfn main() { }", 2,
+        "Expected ',' and a message string after the condition")]
+    [InlineData("const fn f(n: int) -> int {\n    assert n > 0, n\n    return n\n}\nconst K = f(1)\nfn main() { }", 2,
+        "Expected a message string")]
+    [InlineData("fn main() {\n    assert 1 < 2, \"m\"\n}", 2,
+        "An assert is checked at compile time. Write it at the top level or in a const fn")]
+    [InlineData("fn main() {\n    if true {\n        assert 1 < 2, \"m\"\n    }\n}", 3,
+        "An assert is checked at compile time. Write it at the top level or in a const fn")]
+    public void Assert_errors(string source, int line, string message)
+    {
+        var e = Error(source);
+        Assert.Equal(line, e.Pos.Line);
+        Assert.StartsWith(message, e.Description);
+    }
 }

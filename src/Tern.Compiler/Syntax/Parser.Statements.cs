@@ -98,8 +98,17 @@ public sealed partial class Parser
                 throw new CompileError(Current.Pos, "'asm fn' must be declared outside functions. Move it to the top level of the file");
             case TokenKind.Interrupt:
                 throw new CompileError(Current.Pos, "'interrupt fn' must be declared outside functions. Move it to the top level of the file");
+            case TokenKind.Assert when _inConstFn:
+            {
+                var t = Advance();
+                var cond = ParseExpr();
+                Expect(TokenKind.Comma, "',' and a message string after the condition");
+                var msg = Expect(TokenKind.String, "a message string");
+                ExpectEndOfStatement();
+                return new AssertStmt(t.Pos, cond, msg.Text);
+            }
             case TokenKind.Assert:
-                throw new CompileError(Current.Pos, "'assert' is a top-level declaration checked at compile time; put it outside the function");
+                throw new CompileError(Current.Pos, "An assert is checked at compile time. Write it at the top level or in a const fn");
             case TokenKind.Module:
                 throw new CompileError(Current.Pos, "'module' must be the first line of the file, outside functions. Move it there");
             case TokenKind.Noinit:

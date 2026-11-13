@@ -113,7 +113,7 @@ public sealed partial class Checker : ICompileTimeHost
                     if (c.TypeSyntax is not null) Types.Resolve(c.TypeSyntax);
                     Name(c.Name, c.Pos);
                     break;
-                case AssignStmt: break;
+                case AssignStmt or AssertStmt: break;
                 case ExprStmt e:
                     if (e.Expr is not CallExpr)
                         throw new CompileError(e.Pos, "Only a function call can be used as a statement. Assign the value to a variable, or remove it");

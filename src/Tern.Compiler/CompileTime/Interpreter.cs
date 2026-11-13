@@ -666,6 +666,9 @@ public sealed partial class Interpreter
             case EmitStmt e:
                 Emit(e);
                 return Flow.Normal;
+            case AssertStmt a:
+                if (!Bool(Eval(a.Condition), a.Condition.Pos, "An assert condition")) throw Error(a.Pos, a.Message);
+                return Flow.Normal;
             default:
                 throw Error(s.Pos, "This statement cannot run at compile time. Remove it from the const fn");
         }
