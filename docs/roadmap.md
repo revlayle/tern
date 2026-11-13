@@ -583,6 +583,17 @@ Tests: each operation matches the C# model bit for bit over edge values: 0, ±1,
 
 Done when: the tests pass, the bytes and cycles of each routine are in the spec 10.1 table, and an example prints computed values on the C64 (`tern run` and VICE).
 
+## M24 follow-up (small, before M25)
+
+Spec: 4.1 (`assert` inside a `const fn`, a module function hiding a built-in), 10.1. Decision 2026-11-13 (questions 126-130).
+
+- `assert` as a statement inside a `const fn`, reported at its line with "(called from ...)"; in runtime code the error "An assert is checked at compile time. Write it at the top level or in a const fn".
+- `float.of` uses it for a value too large, in place of the index out of range; the skill's note about the old error is removed.
+
+Tests: an assert that holds, one that fails (message, line, called-from, `calledFrom` in `tern --json`), a condition on a parameter, one inside a const fn called by another, the runtime-code error, `float.of` of a value too large.
+
+Done when: the tests pass and `float.of`'s error names the value.
+
 ## New platforms
 
 In this order (decision 2026-11-07; renumbered 2026-11-08). Each starts with a spec session for the platform's memory map, output format, encoding and library; the scope below is a first outline.

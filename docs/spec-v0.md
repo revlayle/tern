@@ -381,7 +381,9 @@ data rows: [u16; 25] = [row_addr(i) for i in 0..25]
 - **What a `const fn` reads:** constants (typed ones as their value), module parameters (2.2), `sizeof` and `offset(T.field)` (10), and `data` tables element by element, including `include_bytes` tables. Not a `var`, even one with an initial value ("'score' is a variable, which a const fn cannot read. Use a const or data"), not a `volatile` or fixed-address table over an overlay, and not `addr()`, which is decided after compile-time evaluation. (An `emit` operand may name addresses, since it is assembled after placement like any asm block.) Evaluation follows dependencies, as constants do; a cycle is an error.
 - **A step limit** of 10,000,000 steps (a statement run or a loop pass) for each top-level evaluation: one `const`, `data` or initial value, or one generator call in assembly. The error names the `const fn`, its line, and the declaration or asm line that started it: "'sine' did not finish after 10,000,000 steps (called from main.tern:5). Check its loops for one that never ends". There is no setting.
 - A `const fn` can live in an imported module (2.2), so table generators can be shared between programs as Tern scripts: `import tables` … `data sine: [u8; _] = tables.sine(256)`. Reading files from compile-time code (e.g. converting an image into sprite data) is a possible later extension; `include_bytes` tables can already be read.
-- No built-in for the bits of a `real`: `floor`, `log2` and `pow` split it into sign, exponent and mantissa, enough for the float library (M24) to build its constants. M24's spec session may add one if its format needs it.
+- No built-in for the bits of a `real`: `floor`, `log2` and `pow` split it into sign, exponent and mantissa, enough for the float library (M24) to build its constants.
+- **A module's own function hides a compile-time built-in of the same name** in that module's `const fn`s: in `float`, which declares `floor`, `trunc` and `abs`, `floor(x)` inside `float.of` names `float.floor`, and is the error "'floor' runs on the 6502, so compile-time code cannot call it". A name has one meaning inside a module (rule 3); such a module uses another built-in (`round`) or names its function differently. Other modules are not affected.
+- **`assert` inside a `const fn`** is a statement with the form of the top-level `assert` (below): `assert e <= 127, "float.of: the value is larger than the largest float, about 1.7e38"`. When the condition is false, compilation fails with the message, at the `assert` line with "(called from main.tern:3)", like any error raised while a `const fn` runs. The condition is a compile-time `bool` and may use the function's parameters and locals; the message is a string literal. `assert` is a statement only in a `const fn`; in runtime code it is an error ("An assert is checked at compile time. Write it at the top level or in a const fn").
 
 **Planned: code generators (`emit`).** A `const fn` may build assembly with all of its control flow (`while`, `if`, nested loops, its own variables). Each `emit { ... }` adds instructions to the asm block or `asm fn` that called the generator. This is for generated "speedcode": unrolled copies, plotters, sprite clearing, any repeated code whose shape depends on parameters.
 
@@ -904,7 +906,7 @@ Decimal output converts a copy to BCD (doubling in decimal mode) and costs thous
 
 Values wrap modulo 10^(2n). The routines use `sed` and always leave decimal mode off; interrupt handlers clear decimal mode (6.3).
 
-**`float`** (planned, M24; decision 2026-11-13): floating-point numbers in 4 bytes
+**`float`** (M24; decisions 2026-11-13): floating-point numbers in 4 bytes
 
 `struct F32 { bytes: [u8; 4] }`. The format suits the 6502 rather than IEEE 754, whose exponent straddles two bytes:
 
@@ -913,7 +915,13 @@ Values wrap modulo 10^(2n). The routines use `sed` and always leave decimal mode
 | 0-2 | Mantissa, low byte first: 24 bits of precision. The leading 1 is not stored; bit 7 of byte 2 is the sign |
 | 3 | Exponent plus `$80`; `$00` means the value is 0 |
 
+As in Microsoft BASIC, the value is 0.1mmm… (binary) × 2^(byte 3 − $80): the mantissa, with its leading 1 restored, is from 1/2 to just under 1. So 1.0 is `00 00 00 81` and -1.0 is `00 00 80 81`; the smallest magnitude is 2^-128 (`00 00 00 01`, about 2.9e-39) and the largest (1 − 2^-24) × 2^127 (`FF FF 7F FF`, about 1.7e38).
+
 About 7.2 significant digits; magnitudes from about 2.9e-39 to 1.7e38. There is no NaN, infinity or denormal. Results are rounded to nearest, halves away from zero (one guard byte in the work area). A result too large becomes the largest value with its sign and sets `float.overflow` (a `bool` that stays set until the program clears it); so does division by zero. A result too small becomes 0, with no flag.
+
+- **Zero.** Any value whose byte 3 is `$00` is 0, whatever its other bytes; every routine reads it so. A routine that stores 0 writes four zero bytes, except that `add` and `sub` with a 0 operand store nothing when p is the result (p + 0 leaves p as it is). `neg` leaves 0 as 0, so no -0 is ever made.
+- **Division by zero** gives the largest value with p's sign and sets `overflow`; 0 / 0 gives the positive largest.
+- **Toward zero and rounding differ at small negatives:** `to_u16` of -0.5 is 0 without `overflow` (toward zero it is 0), while `round_u16` of -0.5 rounds to -1, so it gives 0 and sets `overflow`.
 
 As in `wide`, every function takes pointers and the result goes into the first operand: `float.mul(addr(v), addr(dt))`. The work bytes are private: use the routines from main only, or from one interrupt handler only.
 
@@ -929,10 +937,31 @@ As in `wide`, every function takes pointers and the result goes into the first o
 | `round_u16`, `round_i16` | `(p: ptr F32) -> u16` / `-> i16` | Nearest, halves away from zero, as the compile-time `round` (4.1). Out of range as `to_` |
 | `trunc` | `(p: ptr F32)` | Toward zero, kept a float: clears the fraction bits. Any value; never overflows |
 | `floor` | `(p: ptr F32)` | Toward minus infinity, kept a float: `floor(-2.7)` is -3, so `x - floor(x)` is always in 0 to 1 |
-| `dec` | `(dst: ptr u8, p: ptr F32, decimals: u8) -> u8` | Fixed-point decimal text in screen codes, as `wide.dec32`; returns the number of characters |
+| `dec` | `(dst: ptr u8, p: ptr F32, decimals: u8) -> u8` | Fixed-point decimal text in screen codes, as `wide.dec32`; returns the number of characters. Details below |
 | `of` | `const fn (x: real) -> [int; _]` | The 4 bytes of `x`, rounded as above, for constants: `var g: float.F32 = float.F32 { bytes = float.of(9.81) }`. A value too large is an error |
 
 `trunc` and `to_i16` round the same way; `trunc` keeps a float, works for any magnitude and only masks bits, while `to_i16` shifts the mantissa into place. Values of 2^23 or more have no fraction bits, so `trunc` and `floor` leave them unchanged.
+
+`dec` writes the value rounded to `decimals` places (0 to 9; more is taken as 9). There is at least one digit before the point (`0.05`), no point when `decimals` is 0, and a `-` only when the text is not all zeros (-0.004 with 2 decimals is `0.00`). The text is at most 50 characters (39 digits for values near the largest): `dst` needs room for 50, or for the program's largest value. It costs up to about 7,700 cycles below 65536 and up to about 91,000 near the largest, since it converts a 128-bit integer.
+
+Sizes and cycles (cycles include `jsr` and `rts`, best and worst over the test values). Bytes are each routine's own code; the shared steps (unpacking, normalizing, rounding, storing 0 or the largest: 214 bytes) come once with the first routine that needs them, and unpacking a second operand (32) with the first that takes two. With every routine used: about 2,450 bytes of code and tables, and 124 bytes of variables, 19 of them in zero page.
+
+| Routine | Bytes | Cycles | Notes |
+|---|---|---|---|
+| `add` / `sub` | 22 / 28, + 329 shared | 108-961 / 116-951 | the most after cancelling, with a long normalization |
+| `mul` | 32 + 128 | 153-2490 | 153 when an operand is 0 |
+| `div` | 37 + 146 | 218-4418 | 32 steps of shift-and-subtract |
+| `neg` / `abs` | 14 / 9 | 22-36 / 27 | |
+| `cmp` | 94 | 58-138 | |
+| `is_zero` | 5 | 19 | |
+| `copy` | 10 | 77 | |
+| `from_u16` / `from_i16` | 19 / 36, + 34 shared | 102-509 / 106-524 | |
+| `to_u16` / `round_u16` | 13 / 13, + 55 + 130 shared | 158-461 / 158-487 | |
+| `to_i16` / `round_i16` | 13 / 13, + 76, + the 130 shared with `to_u16` | 164-469 / 164-495 | |
+| `trunc` | 31, + 68 shared with `floor` | 94-306 | |
+| `floor` | 116, + 68 shared with `trunc` | 94-394 | |
+| `dec` | 229 + 375 | 1245-7692 below 65536; up to 91222 | |
+| `of` | none | none | compile time |
 
 **`random`**: xorshift generators
 
