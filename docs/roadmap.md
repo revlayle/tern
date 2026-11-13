@@ -633,7 +633,7 @@ Spec: 2.1 (`apple2`), 10.1 (`text_digits`), 12.2, 13. Decision 2026-11-13 (Apple
 - The `apple2` encoding (high-bit ASCII, `\n` = `$8D`); `lib/apple2/text_digits` with `apple2` digits, sign, point and hex letters
 - `tern run`: stand-ins for COUT, HOME and QUIT, a 40×24 screen at `$0400` in the Apple II's row order
 - `lib/apple2`: ROM and MLI entry points; screen text (`put`, `print`, `cursor`, inverse); hi-res (row table, clear, plot, page select); keyboard, speaker, soft switches; `exit`
-- `tests/tools/apple2-disk.ps1` puts the `.system` file on a ProDOS 2.4.3 boot image with CiderPress II's `cp2` (`C:\Program Files\CiderPress\cp2.exe`); a window-capture script for AppleWin, like `altirra-shot.ps1`. The developer installs AppleWin and downloads the ProDOS 2.4.3 image; the coding session writes their paths and command lines into `CLAUDE.md` through a status question
+- `tests/tools/apple2-disk.ps1` puts the `.system` file on a ProDOS 2.4.3 boot image with CiderPress II's `cp2` (`C:\Program Files\CiderPress\cp2.exe`); a window-capture script for AppleWin, like `altirra-shot.ps1`. AppleWin and the ProDOS 2.4.3 image are installed (`CLAUDE.md` gives the paths and command lines); the test disk holds `PRODOS` and the program as its first system file, so it boots straight into the program
 - Check in AppleWin whether `$00–$1F` is free, and the size limit of the system file loader (ProDOS 2.4.3's Bitsy Bye)
 - Library modules that are not platform-specific (`math`, `mem`, `text`, `wide`, `bcd`, `random`, `cpu`, the floats) work unchanged
 

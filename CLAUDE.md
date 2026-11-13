@@ -60,6 +60,13 @@ pwsh tests/tools/altirra-shot.ps1 file.xex shot.png 8 /skipsetup /hardware:800 /
 pwsh tests/tools/altirra-shot.ps1 file.xex shot.png 8 /skipsetup /hardware:800xl /kernel:default /memsize:64K /nobasic
 ```
 
+To check a program on an emulated Apple II, use AppleWin (1.32.1.0, installed at `C:\AppleWin`; its ROMs are built in). Run it in portable mode with `-conf C:\AppleWin\AppleWin.ini`, so settings stay out of the registry, and name the machine on the command line. Check on an enhanced IIe (`-model apple2ee`) and on a II+ with a language card (`-model apple2p -s0 languagecard`; without `-s0` the `.ini` leaves slot 0 empty and ProDOS stops with "REQUIRES 64K"). `-s7 empty -d1 disk.po` boots the disk in slot 6, drive 1; `-m` turns sound off; `-no-printscreen-dlg` suppresses a message box. `C:\AppleWin\AppleWin.chm` documents the switches (CommandLine page). The ProDOS 2.4.3 boot disk is `C:\AppleWin\ProDOS_2_4_3.po` (shipped with AppleWin); booted as it is, it starts the Bitsy Bye menu, since ProDOS runs the first `.SYSTEM` file in the volume directory, so a test disk is a copy that holds `PRODOS` and the program's `.system` file as the first system file. CiderPress II's command-line tool, `C:\Program Files\CiderPress\cp2.exe`, edits ProDOS disk images (`Manual-cp2.md` next to it). AppleWin needs a window, like Altirra; the window-capture approach of `altirra-shot.ps1` works with it:
+
+```
+C:\AppleWin\AppleWin-x64.exe -conf C:\AppleWin\AppleWin.ini -model apple2ee -s7 empty -d1 disk.po -no-printscreen-dlg -m
+C:\AppleWin\AppleWin-x64.exe -conf C:\AppleWin\AppleWin.ini -model apple2p -s0 languagecard -s7 empty -d1 disk.po -no-printscreen-dlg -m
+```
+
 ## Design rules
 
 These come from the spec and `docs/decisions.md`. Apply them to every change.
