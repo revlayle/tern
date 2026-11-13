@@ -835,7 +835,7 @@ public sealed class ConstFnTests : IDisposable
 
     [Theory]
     [InlineData("const fn f(n: int) -> int {\n    assert n, \"m\"\n    return n\n}\nconst K = f(1)\nfn main() { }", 2,
-        "An assert condition needs a bool, not an int (called from line 5). Compare instead, e.g. 'n != 0'")]
+        "An assert condition is a bool (called from line 5). Write a comparison, e.g. COUNT <= 64")]
     [InlineData("const fn f(n: int) -> int {\n    assert n > 0\n    return n\n}\nconst K = f(1)\nfn main() { }", 2,
         "Expected ',' and a message string after the condition")]
     [InlineData("const fn f(n: int) -> int {\n    assert n > 0, n\n    return n\n}\nconst K = f(1)\nfn main() { }", 2,

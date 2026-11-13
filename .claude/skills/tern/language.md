@@ -734,7 +734,8 @@ out $0974 [u8; 3] (3 bytes):
 - A `const fn` reads constants, module parameters, `sizeof`, `offset(T.field)` and `data` tables (also `include_bytes`),
   not `var`s; `addr(x)` there is a `label`, whose number it cannot read. A loop that never ends stops after 10,000,000 steps with an error.
 - To reject a bad argument, write `assert n <= 64, "rows: n must be 64 or less"` in the `const fn`:
-  the compile fails with the message at that line, "(called from main.tern:5)". `assert` is a
+  the compile fails with the message at that line, "(called from main.tern:5)". A second sentence
+  that starts with a verb ("... 64 or less. Use a smaller n") is the fix `tern --json` suggests. `assert` is a
   top-level declaration or a `const fn` statement; in a runtime function it is an error.
 - A generator is a `const fn` with `emit { ... }` and no return value. It is called on a line of
   its own inside `asm { }` or an `asm fn`; each `emit` adds its instructions there. Operands use

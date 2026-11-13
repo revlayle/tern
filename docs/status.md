@@ -4,14 +4,18 @@ Owned by the coding session. Updated at the end of every coding session.
 
 ## Current
 
-- **Milestone:** M24 follow-up, `assert` inside a `const fn` (roadmap; spec 4.1; decision 2026-11-13, question 128). Done, ready for `/review`.
-- **Branch:** `m24-followup`, from `main` at `c4a1910`. 3381 compiler tests pass plus 36 CPU tests. No benchmark changed (1254 / 350780); `SkillTests` pass.
-- **Next step:** `/review` of `m24-followup`, then `/merge`. After that, M25 (Atari 8-bit) starts with its spec session.
+- **Milestone:** M24 follow-up, `assert` inside a `const fn` (roadmap; spec 4.1; decision 2026-11-13, question 128). Done; review (`docs/reviews/m24-followup.md`): ready to merge, suggestions only, handled. Ready for `/merge m24-followup`.
+- **Branch:** `m24-followup`, from `main` at `c4a1910`, `main` merged in (the review, `eca78b5`). 3381 compiler tests pass plus 36 CPU tests. No benchmark changed (1254 / 350780); `SkillTests` pass.
+- **Next step:** `/merge m24-followup`. After that, M25 (Atari 8-bit) starts with its spec session.
 
 ## Done
 
+- **M24 follow-up review** (2026-11-13, `docs/reviews/m24-followup.md`): ready to merge.
+  - Suggestion 1: a condition that is not a bool now gives the top-level assert's wording in a const fn too, "An assert condition is a bool (called from line 5). Write a comparison, e.g. COUNT <= 64".
+  - Note 3: the skill's `assert` bullet says that a second sentence starting with a verb is the fix `tern --json` suggests. `float.of`'s message stays the spec's (note 2: the done-when item is met).
+
 - **M24 follow-up: `assert` inside a `const fn`** (2026-11-13, branch `m24-followup`).
-  - *Language* (`9cf52d2`): `assert cond, "message"` parses as a statement (`AssertStmt`) when the parser is in a `const fn`; the interpreter checks it when it runs, and a false condition throws the message at the `assert` line through `Interpreter.Error`, so it gets "(called from main.tern:3)" after its first sentence and `CalledFrom` (`calledFrom` in `tern --json`), like every other error raised while a const fn runs. A condition that is not a bool is "An assert condition needs a bool, not an int. Compare instead, ...". In runtime code (a function body, also nested blocks) it is "An assert is checked at compile time. Write it at the top level or in a const fn" (was "put it outside the function"). The warnings pass reads the condition's names.
+  - *Language* (`9cf52d2`): `assert cond, "message"` parses as a statement (`AssertStmt`) when the parser is in a `const fn`; the interpreter checks it when it runs, and a false condition throws the message at the `assert` line through `Interpreter.Error`, so it gets "(called from main.tern:3)" after its first sentence and `CalledFrom` (`calledFrom` in `tern --json`), like every other error raised while a const fn runs. A condition that is not a bool: see the review below. In runtime code (a function body, also nested blocks) it is "An assert is checked at compile time. Write it at the top level or in a const fn" (was "put it outside the function"). The warnings pass reads the condition's names.
   - *Tests*: `ConstFnTests` (an assert that holds; one that fails, with line, message and `CalledFrom`; a message with a fix sentence keeps the call note after its first sentence; an assert in a module const fn called by another, which names the main file's line; one using a loop variable, a local and a real; errors: a non-bool condition, no message, a message that is not a string, assert in `main` and in a nested block), `DiagnosticTests.A_failing_assert_in_a_const_fn_gives_the_calls_location_as_a_field`, and the old message in `ModuleParameterTests`.
   - *`float.of`* (`716c0ab`): `assert e + 128 <= 255, "float.of: the value is larger than the largest float, about 1.7e38"` replaces the index out of range on purpose. `FloatTests.Of_a_value_too_large_is_an_error` checks the message, that the line is the assert, and `CalledFrom`. The message is the spec's; it has no fix sentence, so `tern --json` gives `suggestion: null` for it.
   - *Skill*: the note about the old `float.of` error is removed from `language.md`; the const fn rules (section 13) say how to reject a bad argument with `assert`.
