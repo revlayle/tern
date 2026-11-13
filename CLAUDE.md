@@ -52,7 +52,7 @@ To check a program on a real emulated C64 (VICE is installed at `C:\Vice\bin`):
 C:\Vice\bin\x64sc.exe -default -warp -autostart file.prg -limitcycles 8000000 -exitscreenshot shot.png
 ```
 
-To check a program on an emulated Atari 8-bit, use Altirra (4.40, installed at `C:\Altirra`). `C:\Altirra\Altirra64.exe file.xex` boots a program; `Altirra64.exe /?` lists the switches (machine, memory size, OS, debugger commands). Check on an 800 with OS-B and 48 KB and on an 800XL (spec 12.2). The M25 coding session settles a command that runs without a window and saves a screenshot, and writes it here through a status question.
+To check a program on an emulated Atari 8-bit, use Altirra (4.40, installed at `C:\Altirra`). `C:\Altirra\Altirra64.exe file.xex` boots a program; `Altirra64.exe /?` lists the switches (machine, memory size, OS, debugger commands). It runs in portable mode: settings are in `C:\Altirra\Altirra.ini`, not the registry, so name the machine, memory size and OS on the command line rather than relying on them. Several copies starting at once can conflict over the `.ini` file, so run Altirra checks one at a time. Check on an 800 with OS-B and 48 KB and on an 800XL (spec 12.2). The M25 coding session settles a command that runs without a window and saves a screenshot, and writes it here through a status question.
 
 ## Design rules
 
