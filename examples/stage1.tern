@@ -1,0 +1,18 @@
+// The first stage of the interface example (stages.tern), an overlay. The main program never names
+// stage1: it calls stage_api, and the jmp table at $6000 leads here while this file is loaded.
+import mem
+
+data title: [u8; 8] @ $6009 = screen"FOREST  "
+
+var lives: u8
+var trees: u8 = 1               // set again each time the file is loaded
+
+fn enter(n: u8 using A) { lives = n }
+
+// Fill the top half of the screen, below the title row, with trees.
+fn draw() {
+    mem.fill($0400 as ptr u8 + 40, screen'T', 440)
+    trees += 1
+}
+
+fn score() -> u8 using A { return lives + trees }

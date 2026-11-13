@@ -306,7 +306,7 @@ public class ImplementsTests
             }
             """);
         var r = Compile($$"""
-            {{Header.Replace("import level_api\n", "import level_api\nimport util\n")}}
+            {{Header.Replace("import level_api", "import level_api\nimport util")}}
             var a: u8
             var b: u8
             fn main() {
@@ -422,6 +422,24 @@ public class ImplementsTests
         Assert.Equal(14, r.U8("a"));
     }
 
+    [Fact]
+    public void The_stages_example_runs_each_stage_through_the_interface_in_tern_run()
+    {
+        var path = AsmTests.FindExample("stages.tern");
+        var program = TernCompiler.Compile(File.ReadAllText(path), sourcePath: path);
+        var run = Tools.Runner.Run(program);
+        Assert.True(run.Returned);
+        var screen = run.Ram.Bytes;
+        // Screen codes: letters 1-26, space $20, digits $30-$39.
+        Assert.Equal(new byte[] { 6, 15, 18, 5, 19, 20, 0x20, 0x20, 0x20, 0x35 }, screen[0x0400..0x040A]);    // "FOREST", 5
+        Assert.Equal(new byte[] { 12, 1, 11, 5, 0x20, 0x20, 0x20, 0x20, 0x20, 0x37 }, screen[0x05E0..0x05EA]); // "LAKE", 7
+        Assert.All(Enumerable.Range(40, 440), i => Assert.Equal(0x14, screen[0x0400 + i]));    // 'T'
+        Assert.All(Enumerable.Range(520, 480), i => Assert.Equal(0x17, screen[0x0400 + i]));   // 'W'
+        Assert.Equal(new byte[] { 5, 7, 5 }, screen[program.Symbols["scores"]..(program.Symbols["scores"] + 3)]);
+        Assert.Equal(["stage1", "stage2"], program.Overlays.Select(o => o.Name).Order());
+        Assert.Empty(program.Warnings);
+    }
+
     // ---------- Errors ----------
 
     [Fact]
@@ -474,7 +492,7 @@ public class ImplementsTests
     public void An_interface_with_no_routines_at_a_fixed_address_is_an_error()
     {
         Assert.Equal("'shapes' has no routines at a fixed address to implement. Remove it from the 'implements' list, or declare its entries as 'fn name() @ address'",
-            Message(Header.Replace("level2 @ levels implements level_api", "level2 @ levels implements shapes").Replace("import level_api\n", "import level_api\nimport shapes\n") + "\nfn main() { }",
+            Message(Header.Replace("level2 @ levels implements level_api", "level2 @ levels implements shapes").Replace("import level_api", "import level_api\nimport shapes") + "\nfn main() { }",
                 Files(more: ("shapes", "pub const SIZE = 4\nfn area() -> u8 { return 16 }"))));
     }
 
@@ -588,7 +606,7 @@ public class ImplementsTests
         Assert.Equal("The tables of level_api and music_api overlap in level1: 'music_api.play' at $6004-$6006 and an entry of level_api at $6003-$6005. " +
             "Move the routines of one interface so that each one's 3-byte jmp has its own addresses",
             Message($$"""
-                {{Header.Replace("level1 @ levels implements level_api", "level1 @ levels implements level_api, music_api").Replace("import level_api\n", "import level_api\nimport music_api\n")}}
+                {{Header.Replace("level1 @ levels implements level_api", "level1 @ levels implements level_api, music_api").Replace("import level_api", "import level_api\nimport music_api")}}
                 fn main() { }
                 """, Files(level1: Level1 + "\nfn play() { }", more: ("music_api", "fn play() @ $6004"))));
     }

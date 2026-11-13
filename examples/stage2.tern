@@ -1,0 +1,17 @@
+// The second stage of the interface example (stages.tern). It shares its memory with stage1.
+import mem
+
+data title: [u8; 8] @ $6009 = screen"LAKE    "
+
+var lives: u8
+var fish: u8 = 5
+
+fn enter(n: u8 using A) { lives = n + 1 }      // the lake gives an extra life
+
+// Fill the bottom half of the screen, below its title row, with water.
+fn draw() {
+    mem.fill($0400 as ptr u8 + 520, screen'W', 480)
+    fish -= 2
+}
+
+fn score() -> u8 using A { return lives + fish }
