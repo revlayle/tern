@@ -6,7 +6,7 @@
     {
       "name": "tern",
       "source": "./",
-      "description": "The Tern skill: writing, checking and measuring Tern programs for the 6502 (Commodore 64)"
+      "description": "The Tern skill: writing, checking and measuring Tern programs for the 6502 (Commodore 64, Atari 8-bit)"
     }
   ]
 }

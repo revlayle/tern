@@ -639,7 +639,7 @@ A=$15 X=$00 Y=$00 SP=$FF PC=$0817
 a $0003 u8 = 21 ($15)
 ```
 
-- `import name` looks in the platform library (`lib/c64/`), the standard library (`lib/`), then the
+- `import name` looks in the platform library (`lib/c64/`, `lib/atari/`), the standard library (`lib/`), then the
   program's folder. Names are used with the module name. `private` hides a declaration. A module of
   your own may not have a library module's name (`io.tern`, `random.tern`): rename it.
 - Only what is reached is compiled. Module parameters: `import sprites(COUNT = 24)`; a module
@@ -761,10 +761,14 @@ out $0974 [u8; 3] (3 bytes):
 | `random` | `seed`, `next8`, `next16`, `below(n)` |
 | `cpu` | `carry()`, `zero()`, `negative()`, `overflow()` after an `asm` block |
 | `c64` | `SCREEN`, `COLOR`, the 16 colors (`c64.BLACK` ... `c64.LIGHT_GREY`), `chrout`, `print`, `getin`, `cursor`, `load`; registers `vic`, `sid`, `cia1`, `cia2`; `sprite_xy` (the sprite positions as an array: x of sprite n at `2n`, y at `2n + 1`); `kernal_off`, `set_irq`, `set_kernal_irq`, `set_nmi`, `interrupts_on`, `interrupts_off` |
+| `atari` (Atari) | `put`, `print`, `cursor` (text through the screen editor, in ATASCII); registers `gtia`/`gtia_in`, `pokey`/`pokey_in`, `pia`, `antic`; shadow registers (`color`, `sdmctl`, `sdlst`, `chbas`, ...), `stick`, `strig`, `ch`, `rtclok`, `savmsc`; `wait_frame`, `exit`; `set_dli`, `set_vbi` (after the OS's frame work), `set_vbi_immediate`; display lists: `DL_` and `MODE_` constants, the const fn `display_list(mode, rows, screen, at, dli)` for `data list: [u8; _] @ LIST = ...`, `set_display_list` |
 | `io` (C64) | disk files through the KERNAL: `load`, `save`, `open`, `read`, `write`, `close`, the command channel |
 | `sprites` (C64) | a sprite multiplexer, 8 to 64 sprites |
 | `scroll` (C64) | smooth eight-way character scrolling |
 
 Strings and blocks are passed as a pointer and a length: `text.put(c64.SCREEN, addr(msg), len(msg))`.
+The digits `text`, `wide`, `bcd` and `float` write are `$30`-`$39` (with `-` `$2D` and `.` `$2E`): C64
+screen codes and also ATASCII, so on the Atari print them with `atari.print`; in Atari screen memory
+a digit is `$10`-`$19`. `text.hex8`/`hex16` write A-F as C64 screen codes.
 The library source is readable Tern in `lib/`; read it for the exact signatures.
 
