@@ -43,6 +43,9 @@ public sealed partial class Checker
                             if (mainModule.Syntax.BrokenNames.Any(b => b.Name == name)) throw new FollowOnError();
                             throw new CompileError(pos, $"'{name}' is not a module the main file imports; 'implements' names interface modules. Add 'import {name}' to the main file");
                         }
+                        // Decision 123: its helpers would go into an overlay file the levels cannot call.
+                        if (api.OverlayArea is { } apiArea)
+                            throw new CompileError(pos, $"'{name}' is placed in the overlay area '{apiArea}'; an interface must be resident. Remove '@ {apiArea}' from its import");
                         // Both imports are used, by the table (spec 13).
                         _usedImports.Add((mainModule, name));
                         _usedImports.Add((importer, import.Name));
