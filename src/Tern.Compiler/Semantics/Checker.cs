@@ -396,11 +396,16 @@ public sealed partial class Checker
     /// <summary>For <c>export level_api</c>: the interface's volatile variables, each with the name of the binary's own data at its address.</summary>
     private readonly Dictionary<VariableSymbol, string> _binaryData = [];
 
-    /// <summary>The binary names its own data, not the interface's variable at the same address (spec 12.3, question 92).</summary>
+    /// <summary>
+    /// The binary names its own data, not the interface's variable at the same address (spec 12.3, question 92);
+    /// so does a module that implements the interface, inside that module (spec 8.5, decision 120).
+    /// </summary>
     private void CheckNotBinaryData(VariableSymbol v, SourcePos pos)
     {
         if (_binaryData.TryGetValue(v, out var own))
             throw new CompileError(pos, $"'{v.QualifiedName}' is this binary's data '{own}'. Use '{own}'");
+        if (_moduleData.TryGetValue((_module, v), out var mine))
+            throw new CompileError(pos, $"'{v.QualifiedName}' is this module's data '{mine}'. Use '{mine}'");
     }
 
     // ---------- Going on after an error (spec 13) ----------

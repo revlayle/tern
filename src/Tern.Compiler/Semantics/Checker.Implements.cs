@@ -67,6 +67,9 @@ public sealed partial class Checker
     /// <summary>The data each implementing module provides for its interfaces' volatile variables: always in the overlay's file.</summary>
     private readonly List<VariableSymbol> _tableData = [];
 
+    /// <summary>Each implementing module's data for an interface's volatile variable, by module and variable: the module names its own (decision 120).</summary>
+    private readonly Dictionary<(Module, VariableSymbol), string> _moduleData = [];
+
     /// <summary>The entries of one interface in one module, checked.</summary>
     private List<Implementation> Implement(Module module, Module api, AddressRange area, string areaName, SourcePos pos)
     {
@@ -123,6 +126,7 @@ public sealed partial class Checker
                 throw new CompileError(d.Pos, $"'{name}' does not match '{api.Name}.{name}'. Declare it as '{want} = ...'");
             _named.Add(d);
             _tableData.Add(d);
+            _moduleData[(module, v)] = name;
         }
         return result;
     }

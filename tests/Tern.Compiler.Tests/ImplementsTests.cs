@@ -380,6 +380,47 @@ public class ImplementsTests
         Assert.Equal(42, r.U8("b"));
     }
 
+    private const string ApiWithHeader = Api + "\nvolatile var header: [u8; 2] @ $6006\nfn second() -> u8 using A { return header[1] }";
+
+    [Theory]
+    [InlineData("count = level_api.header[1]")]                      // a read with an index
+    [InlineData("level_api.header[0] = n")]                         // a write
+    [InlineData("var p: ptr u8 = addr(level_api.header)\n p[0] = 1")] // addr()
+    [InlineData("asm {\n lda level_api.header+1\n sta count\n }")]   // an asm operand
+    public void Inside_an_implementing_module_the_interface_name_of_its_own_data_is_an_error(string use)
+    {
+        var e = With(Files(api: ApiWithHeader,
+                level1: "import level_api\nvar count: u8\ndata header: [u8; 2] @ $6006 = [0, 41]\nfn init(n: u8 using A) {\n " + use + "\n}\nfn update() -> u8 using A { return count }",
+                level2: Level2 + "\ndata header: [u8; 2] @ $6006 = [0, 42]"),
+            path => Assert.Throws<CompileError>(() => TernCompiler.Compile(Header + "\nfn main() { load(1); level_api.init(1) }", sourcePath: path)));
+        Assert.Equal("'level_api.header' is this module's data 'header'. Use 'header'", e.Description);
+        Assert.EndsWith("level1.tern", e.Pos.File);
+        Assert.Equal(5 + use[..use.IndexOf("level_api.header")].Count(c => c == '\n'), e.Pos.Line);   // at the name
+    }
+
+    [Fact]
+    public void Resident_code_and_the_interface_own_functions_name_the_interface_variable()
+    {
+        var r = Compile($$"""
+            {{Header}}
+            var a: u8
+            var b: u8
+            var c: u8
+            fn main() {
+                load(2)
+                a = level_api.header[1]         // resident code
+                b = level_api.second()          // the interface's own function, called from main
+                load(1)
+                c = level_api.update()          // level1 calls the interface's helper too
+            }
+            """, Files(api: ApiWithHeader,
+                level1: "import level_api\ndata header: [u8; 2] @ $6006 = [0, 41]\nfn init(n: u8 using A) { }\nfn update() -> u8 using A { return level_api.second() + header[0] }",
+                level2: Level2 + "\ndata header: [u8; 2] @ $6006 = [0, 42]"));
+        Assert.Equal(42, r.U8("a"));
+        Assert.Equal(42, r.U8("b"));
+        Assert.Equal(41, r.U8("c"));
+    }
+
     [Fact]
     public void A_module_implements_two_interfaces()
     {
