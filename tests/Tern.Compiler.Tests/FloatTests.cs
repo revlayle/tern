@@ -448,4 +448,43 @@ public class FloatTests
             "to_u16 158-461, round_u16 158-487, to_i16 164-469, round_i16 164-495, trunc 94-306, floor 94-394, dec 1245-91222, " +
             "dec below 65536 1245-7692, from_u16 102-509, from_i16 106-524", actual);
     }
+
+    /// <summary>
+    /// examples/floats.tern: the screen holds the values the model computes with the same steps, each
+    /// placed so that its point is in the column the example gives.
+    /// </summary>
+    [Fact]
+    public void Example_prints_computed_values()
+    {
+        string path = AsmTests.FindExample("floats.tern");
+        var r = Run.Program(File.ReadAllText(path), sourcePath: path);
+        string Row(int row) => new(r.Ram.Bytes[(0x0400 + row * 40)..(0x0400 + row * 40 + 40)].Select(c => (char)(c < 0x20 ? c + 0x40 : c)).ToArray());
+        static string At(string line, int point, byte[] x, int decimals)
+        {
+            string s = FloatModel.Dec(x, decimals);
+            int start = point + decimals + 1 - s.Length;
+            return line[..start] + s + line[(start + s.Length)..];
+        }
+        byte[] g = B(-9.81), dt = B(0.05), y = B(0), v = B(12.5), t = B(0);
+        Assert.Equal("BALL THROWN UP AT 12.5 M/S".PadRight(40), Row(0));
+        for (int i = 0; i < 11; i++)
+        {
+            string line = new(' ', 40);
+            line = At(At(At(line, 5, t, 2), 14, y, 2), 23, v, 2);
+            Assert.Equal(line, Row(3 + i));
+            for (int k = 0; k < 5; k++)
+            {
+                y = FloatModel.Add(y, FloatModel.Mul(v, dt).Bytes).Bytes;
+                v = FloatModel.Add(v, FloatModel.Mul(g, dt).Bytes).Bytes;
+                t = FloatModel.Add(t, dt).Bytes;
+            }
+        }
+        Assert.Equal(new string(' ', 40), Row(14));
+        Assert.Equal("1 / 3 =        0.3333333", Row(17).TrimEnd());
+        var area = FloatModel.Mul(FloatModel.Mul(B(Math.PI), B(2.5)).Bytes, B(2.5)).Bytes;
+        Assert.Equal("AREA, R = 2.5:  " + FloatModel.Dec(area, 4), Row(18).TrimEnd());
+        Assert.Equal("AREA, R = 2.5:  19.6350", Row(18).TrimEnd());
+        Assert.Equal("ROUND(-2.5) = -3", Row(19).TrimEnd());
+        Assert.False(r.U8("float.overflow") != 0);
+    }
 }
