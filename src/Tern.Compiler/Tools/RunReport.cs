@@ -107,8 +107,9 @@ public static class RunReport
         }
         if (screen)
         {
-            sb.AppendLine("Screen ($0400, 40 x 25):");
-            foreach (var line in Runner.ScreenText(run.Ram)) sb.AppendLine("  |" + line.PadRight(Runner.Columns) + "|");
+            var (address, columns, rows) = Runner.Screen(run);
+            sb.AppendLine($"Screen (${address:X4}, {columns} x {rows}):");
+            foreach (var line in Runner.ScreenText(run)) sb.AppendLine("  |" + line.PadRight(columns) + "|");
         }
         if (profile is not null)
         {
@@ -151,7 +152,7 @@ public static class RunReport
                 value = d.Value(run.Ram.Bytes),
                 bytes = run.Ram.Bytes.AsSpan(d.Address, d.Size).ToArray().Select(b => (int)b).ToArray(),
             }),
-            screen = screen ? Runner.ScreenText(run.Ram) : null,
+            screen = screen ? Runner.ScreenText(run) : null,
             functions = profile is null ? null : run.Functions,
             lines = profile?.Select(r => new
             {

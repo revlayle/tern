@@ -46,8 +46,10 @@ public static class Cli
 
         tern run <file.tern> compiles the program and runs it in the built-in emulator until
         main returns, then prints the cycles taken and the registers. Memory is plain RAM (no
-        VIC-II, SID or CIA); CHROUT, GETIN and PLOT have stand-ins, other ROM calls stop the run.
-        SETNAM, SETLFS and LOAD load the program's own overlay files ("LEVEL1" is level1.prg).
+        VIC-II, SID or CIA; no ANTIC, GTIA, POKEY or PIA); a few ROM routines have stand-ins,
+        and other ROM calls stop the run. On the C64: CHROUT, GETIN and PLOT; SETNAM, SETLFS
+        and LOAD load the program's own overlay files ("LEVEL1" is level1.prg). On the Atari:
+        CIOV for put bytes on IOCB 0 (the screen editor), and SETVBV.
         The emulator reports an array index outside its array and an 'indexed match' value
         outside its span, with the source line (a match value outside stops the run). Exit
         code: 0 when main returned, 2 when it did not, 3 when it did but an index was outside.
@@ -58,7 +60,7 @@ public static class Cli
           --dump <what>    show memory after the run: a variable (score, main.count), a
                            variable with a byte count (table:4), $C000-$C0FF or $C000:16;
                            may be given more than once
-          --screen         show the screen at $0400 as text
+          --screen         show the text screen ($0400 on the C64, SAVMSC on the Atari)
           --profile        show the cycles of each function and each source line
           --max-errors <n>, --no-warnings, --warnings-as-errors  as for tern <file.tern>
           --json           print the result as JSON
