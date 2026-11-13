@@ -80,7 +80,7 @@ public sealed class ModuleTests : IDisposable
         Assert.Equal(4, r.U8("util.counter"));
         Assert.Contains("jsr util.add", r.Result.Listing);
         // VICE labels keep the dots, so a module name and a similar main-file name do not clash.
-        Assert.Contains($"al C:{r.Address("util.counter"):x4} .util.counter{Environment.NewLine}", r.Result.ViceLabels);
+        Assert.Contains($"al C:{r.Address("util.counter"):x4} .util.counter{Environment.NewLine}", r.Result.Labels);
     }
 
     [Fact]

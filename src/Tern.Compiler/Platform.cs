@@ -35,8 +35,8 @@ public sealed class Platform
     /// <summary>The program file's extension: ".prg", ".xex".</summary>
     public string FileExtension => Format == OutputFormat.Prg ? ".prg" : ".xex";
     /// <summary>
-    /// The label file's extension. Both are VICE's format ("al C:0810 .main"): ".vs" for VICE, ".lbl"
-    /// for Altirra, which reads it as a cc65 label file.
+    /// The label file's extension: ".vs" for VICE, in VICE's format ("al C:0810 .main"); ".lbl" for
+    /// Altirra, as MADS's label table, which Altirra loads with a program of the same name.
     /// </summary>
     public string LabelExtension => Format == OutputFormat.Prg ? ".vs" : ".lbl";
     /// <summary>ROM and I/O, where <c>tern run</c> finds no program code: first and last address, inclusive.</summary>

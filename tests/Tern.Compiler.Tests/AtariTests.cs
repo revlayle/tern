@@ -231,7 +231,12 @@ public class AtariTests
             Assert.Equal(0, Cli.Run(["--target", "atari", path], output, output));
             var xex = File.ReadAllBytes(Path.ChangeExtension(path, ".xex"));
             Assert.Equal(0x2000, Segments(xex)[0].First);
-            Assert.Contains(" .main", File.ReadAllText(Path.ChangeExtension(path, ".lbl")));
+            // MADS's label table, which Altirra reads (question 136); VICE's format loads with no labels.
+            var labels = File.ReadAllLines(Path.ChangeExtension(path, ".lbl"));
+            Assert.Equal(["mads label table, written by Tern", "Label table:"], labels[..2]);
+            var main = TernCompiler.Compile(File.ReadAllText(path), Platform.Atari).Symbols["main"];
+            Assert.Contains($"00\t{main:X4}\tmain", labels);
+            Assert.All(labels[2..], l => Assert.Matches(@"^00\t[0-9A-F]{4}\t[a-z_.0-9]+$", l));
             Assert.True(File.Exists(Path.ChangeExtension(path, ".lst")));
             Assert.True(File.Exists(Path.ChangeExtension(path, ".lines")));
             Assert.False(File.Exists(Path.ChangeExtension(path, ".prg")));

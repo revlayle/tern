@@ -82,7 +82,7 @@ public class RoutineTests
         Assert.Contains("20 40 C0  jsr $C040", r.Result.Listing);
         Assert.DoesNotContain("\nlog:", r.Result.Listing);
         Assert.Equal(0xC040, r.Address("log"));
-        Assert.Contains("al C:c040 .log", r.Result.ViceLabels);
+        Assert.Contains("al C:c040 .log", r.Result.Labels);
     }
 
     [Theory]

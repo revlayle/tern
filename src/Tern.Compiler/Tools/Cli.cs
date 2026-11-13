@@ -172,7 +172,7 @@ public static class Cli
             }
             Write(outputPath, p => File.WriteAllBytes(p, result.File));
             Write(Path.ChangeExtension(outputPath, ".lst"), p => File.WriteAllText(p, result.Listing));
-            Write(Path.ChangeExtension(outputPath, platform.LabelExtension), p => File.WriteAllText(p, result.ViceLabels));
+            Write(Path.ChangeExtension(outputPath, platform.LabelExtension), p => File.WriteAllText(p, result.Labels));
             Write(Path.ChangeExtension(outputPath, ".lines"), p => File.WriteAllText(p, LineTable.Format(LineTable.Rows(result, Path.GetFileName(input)))));
             string directory = Path.GetDirectoryName(Path.GetFullPath(outputPath))!;
             foreach (var overlay in result.Overlays)
