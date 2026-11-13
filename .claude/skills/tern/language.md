@@ -641,6 +641,13 @@ a $0003 u8 = 21 ($15)
 - A `memory { }` block in the main file reserves ranges (`$2000..=$2FFF reserved`), adds regions,
   overlay areas and zero page. A main file with `export` lines and no `main` is a binary for another
   program (`name_api.tern` is written for the host). See `docs/guide.md` sections 3.11 and 3.12.
+- Overlays: `import level1 @ levels` puts a module in an overlay area; it gets its own file
+  (`level1.prg`), loaded with `c64.load`, and modules in one area share memory. With
+  `import level1 @ levels implements level_api`, level1's file also has a `jmp` at each routine of
+  the interface module `level_api` (routines at fixed addresses inside the area), so resident code
+  calls `level_api.update()` and whichever level is loaded answers. Each function must match its
+  routine's registers and `keeps`; each `volatile var` of the interface is `data` of the same name,
+  type and address in the module. See `examples/stages.tern`.
 - Plug-ins: `export level_api` in a binary takes its entries from a hand-written interface module
   (routines at fixed addresses, with `setup` at the start of the binary's first program area, and
   `volatile var`s the binary defines as `data` at the same address); each function must match its
