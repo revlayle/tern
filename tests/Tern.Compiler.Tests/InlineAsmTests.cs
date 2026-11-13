@@ -147,7 +147,7 @@ public class InlineAsmTests
                 }
                 stored = carry_set()
             }
-            """.Replace("lda " + a + "\n", "lda #" + a + "\n"));
+            """);
         bool ge = a >= b;
         Assert.Equal(ge ? 1 : 0, r.U8("yes"));
         Assert.Equal(ge ? 0 : 1, r.U8("no"));

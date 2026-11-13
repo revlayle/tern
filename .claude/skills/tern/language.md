@@ -231,8 +231,8 @@ player $0918 Enemy (3 bytes):
 A global struct, a global array of structs, and `data` may start with **struct literals**: the
 struct's name, then `field = value` for the fields to set (the others are 0). The bytes are built at
 compile time, in the array's layout, so a table of records costs what the parallel arrays would.
-Values are anything an initial value allows: constants, `addr()` forms, a list or string for an
-array field, a nested literal. In code, or as a local's initial value, a struct literal is an error:
+Values are anything an initial value allows: constants, `addr()` forms, a list or string (or an
+array from a `const fn`, of the field's length) for an array field, a nested literal. In code, or as a local's initial value, a struct literal is an error:
 assign the fields one by one.
 
 ```tern
@@ -753,6 +753,7 @@ out $0974 [u8; 3] (3 bytes):
 | `text` | `put(dst, src, n)`, `dec8`/`dec16` (return the digit count), signed `dec8s`/`dec16s`, fixed width `dec8z`/`dec16z`, `hex8`/`hex16`, `equal`, `find` |
 | `wide` | `U24`, `U32` structs; `add32(addr(a), addr(b))` and the rest take pointers |
 | `bcd` | packed decimal counters of 1-4 bytes for scores |
+| `float` | `F32`, 4-byte floats (24-bit mantissa, about 7 digits): `add`, `sub`, `mul`, `div` (`float.mul(addr(v), addr(dt))`, result in the first), `neg`, `abs`, `cmp`, `is_zero`, `copy`, `from_u16`/`from_i16`, `to_`/`round_` `u16`/`i16`, `trunc`, `floor`, `dec` (text); `float.overflow`; constants with `float.F32 { bytes = float.of(9.81) }` |
 | `random` | `seed`, `next8`, `next16`, `below(n)` |
 | `cpu` | `carry()`, `zero()`, `negative()`, `overflow()` after an `asm` block |
 | `c64` | `SCREEN`, `COLOR`, the 16 colors (`c64.BLACK` ... `c64.LIGHT_GREY`), `chrout`, `print`, `getin`, `cursor`, `load`; registers `vic`, `sid`, `cia1`, `cia2`; `sprite_xy` (the sprite positions as an array: x of sprite n at `2n`, y at `2n + 1`); `kernal_off`, `set_irq`, `set_kernal_irq`, `set_nmi`, `interrupts_on`, `interrupts_off` |
@@ -762,3 +763,7 @@ out $0974 [u8; 3] (3 bytes):
 
 Strings and blocks are passed as a pointer and a length: `text.put(c64.SCREEN, addr(msg), len(msg))`.
 The library source is readable Tern in `lib/`; read it for the exact signatures.
+
+`float.of(x)` of a value larger than the largest float (about 1.7e38) fails with
+"float.tern:NN: Index 1 is outside the array ... (called from your line)": the index is out of range
+on purpose, as a const fn has no error of its own. Fix the value at your line, not the library.

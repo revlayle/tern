@@ -1,0 +1,80 @@
+// Floating point with lib/float: a ball thrown up at 12.5 m/s, its height and speed every quarter
+// second, computed in steps of 1/20 s, and a few other computed values, written to screen memory.
+import c64
+import float
+import mem
+import text
+
+data title = screen"BALL THROWN UP AT 12.5 M/S"
+data heading = screen"  T (S)    Y (M)   V (M/S)"
+data third = screen"1 / 3 ="
+data circle = screen"AREA, R = 2.5:"
+data rounded = screen"ROUND(-2.5) ="
+
+var g: float.F32 = float.F32 { bytes = float.of(-9.81) }
+var dt: float.F32 = float.F32 { bytes = float.of(0.05) }
+var r: float.F32 = float.F32 { bytes = float.of(2.5) }
+var pi: float.F32 = float.F32 { bytes = float.of(PI) }
+var y: float.F32
+var v: float.F32 = float.F32 { bytes = float.of(12.5) }
+var t: float.F32
+var step: float.F32
+var x: float.F32
+
+// A number with `decimals` digits after the point, so that the point is in column `point` of the row
+// at `line`.
+fn put(line: ptr u8, point: u8, p: ptr float.F32, decimals: u8) {
+    var buf: [u8; 50]
+    var n: u8 = float.dec(addr(buf), p, decimals)
+    var start: u8 = point + decimals + 1 - n
+    if decimals == 0 { start = point - n }
+    text.put(line + start, addr(buf), n)
+}
+
+fn main() {
+    mem.fill(c64.SCREEN, $20, 1000)
+    text.put(c64.SCREEN, addr(title), len(title))
+    text.put(c64.SCREEN + 80, addr(heading), len(heading))
+
+    var line: ptr u8 = c64.SCREEN + 120
+    for _ in 0..11 {
+        put(line, 5, addr(t), 2)
+        put(line, 14, addr(y), 2)
+        put(line, 23, addr(v), 2)
+        line += 40
+        // Five steps: y += v * dt, v += g * dt, t += dt.
+        for _ in 0..5 {
+            float.copy(addr(step), addr(v))
+            float.mul(addr(step), addr(dt))
+            float.add(addr(y), addr(step))
+            float.copy(addr(step), addr(g))
+            float.mul(addr(step), addr(dt))
+            float.add(addr(v), addr(step))
+            float.add(addr(t), addr(dt))
+        }
+    }
+
+    // 1 / 3, pi * r * r and round(-2.5).
+    line = c64.SCREEN + 40 * 17
+    text.put(line, addr(third), len(third))
+    float.from_u16(addr(x), 1)
+    float.from_u16(addr(step), 3)
+    float.div(addr(x), addr(step))
+    put(line, 16, addr(x), 7)
+
+    line += 40
+    text.put(line, addr(circle), len(circle))
+    float.copy(addr(x), addr(pi))
+    float.mul(addr(x), addr(r))
+    float.mul(addr(x), addr(r))
+    put(line, 18, addr(x), 4)
+
+    line += 40
+    text.put(line, addr(rounded), len(rounded))
+    float.from_i16(addr(x), -5)
+    float.from_u16(addr(step), 2)
+    float.div(addr(x), addr(step))
+    var digits: [u8; 6]
+    var n: u8 = text.dec16s(addr(digits), float.round_i16(addr(x)))
+    text.put(line + 14, addr(digits), n)
+}

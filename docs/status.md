@@ -4,11 +4,28 @@ Owned by the coding session. Updated at the end of every coding session.
 
 ## Current
 
-- **Milestone:** Encodings declared by the program (roadmap; spec 2.1 "Encodings declared by the program"; decision 2026-11-12), plus question 123 from the `implements` review. Done; re-review: ready to merge, and its note is done too. Ready for `/merge encodings`.
-- **Branch:** `encodings`, from `main` at `077c649`, `main` merged in (the re-review, `387bdcb`). 3335 compiler tests pass plus 36 CPU tests. No benchmark changed (1254 / 350780); `SkillTests` pass.
-- **Next step:** `/merge encodings`. After this: M24 (floats as a library).
+- **Milestone:** M24, floats as a library (roadmap; spec 10.1 `float`, 3.3; decision 2026-11-13). Done; review (`docs/reviews/m24.md`): ready to merge, suggestions only, all handled. Ready for `/merge m24-floats`.
+- **Branch:** `m24-floats`, from `main` at `004d57c`, `main` merged in (the review, `03993a6`). 3370 compiler tests pass plus 36 CPU tests. No benchmark changed (1254 / 350780); `SkillTests` pass.
+- **Next step:** `/merge m24-floats`. The spec session can copy the bytes and cycles below ("M24: float sizes and cycles") into the spec 10.1 table (with the 19 bytes of zero page, review suggestion 2), and answer questions 126-130.
 
 ## Done
+
+- **M24 review** (2026-11-13, `docs/reviews/m24.md`): ready to merge, four suggestions and notes.
+  - Suggestion 1: the skill (`language.md`, under the library table) says what the "Index 1 is outside the array" error from `float.of` means and that the fix is at the caller's line, until question 128 is settled. (Not in `errors.md`: its examples are compiled by `SkillTests`, and this error names the library's path, which differs per machine.)
+  - Suggestion 2 (work bytes in zero page for `mul`/`div`): left as is, a trade-off for later; the 19 bytes of zero page are in "M24: float sizes and cycles" for the spec table.
+  - Note 3: question 129 reworded: `add`/`sub` with a 0 operand store nothing, so a 0 the program wrote with other mantissa bytes stays as it is.
+  - Note 4: the `Replace` in `InlineAsmTests` that matched nothing is removed.
+  - The review's untested case: `FloatTests.An_operand_may_be_the_result` (add, sub, mul, div with q equal to p, over the 71 values).
+
+- **M24: floats as a library** (2026-11-13, branch `m24-floats`).
+  - *Language* (`0ddf2b4`): a struct literal's array field takes an array from a `const fn`, `repeat()` or a list built with `for` (spec 3.3), checked by `ArrayBytes` like a table (each element against the field's element type); a `[u16; n]` field is split into low and high bytes inside the record. A wrong length: "The field 't' is [u8; 4]: expected 4 values, found an array of 3. Return an array of 4 values". Tests in `StructLiteralTests` (a const fn, `repeat`, a list with `for`, `data` of structs, a `[u16; 2]` field; a wrong length, an element out of range, a real element).
+  - *`lib/float`* (`bb455b0`, `src/lib/float.tern`): `struct F32 { bytes: [u8; 4] }`, `var overflow: bool`, and every function of the 10.1 table, `of` included. The value is `±M * 2^(E - 152)`, M the 24-bit mantissa with its leading 1, so 0.1mmm × 2^(E - $80) as in Microsoft BASIC; the spec's range 2.9e-39 to 1.7e38 fixes this reading (question 126). Each public routine copies its pointers to the private zero-page `pa`/`pb`, then `jsr`s shared steps: `unpack_a`/`unpack_b` (the mantissa with its 1 and a guard byte, a 16-bit exponent, the sign), `normalize`, `finish` (rounds on the guard byte's top bit, then 0 below exponent 1, the largest value and `overflow` above 255, else stores).
+  - *Rounding*: every result is the exact result rounded once, halves away from zero. `add`/`sub` swap so A is the larger magnitude and shift B with the bits past the guard byte ORed into its lowest bit (a sticky bit, which a subtraction needs; the guard is still one byte); `mul` keeps the whole 48-bit product (shift-and-add, 24 steps); `div` takes 32 quotient bits (a tie cannot happen in a division). `neg` leaves 0 as 0; `cmp` counts any value with exponent 0 as 0. `trunc` and `floor` clear the fraction bits (`chop`); `floor` of a negative value with a fraction adds 1 to the magnitude at the bit above it. `to_`/`round_` share `int_part`.
+  - *`dec`* (in Tern, with the asm `to_digits`): the integer round(|x| * 10^d), or |x| shifted left when it has no fraction bits (then d zeros are written after the point), in up to 16 bytes, converted to packed decimal by doubling in decimal mode over only the bytes in use; a `-` when the text is not all zeros; at least one digit before the point; `decimals` above 9 is written as 9 (question 127).
+  - *`float.of`*: finds the exponent with `round(log2(a))` and two correcting loops (the module's own `floor` hides the built-in in its const fns, question 130), then `round(a * pow(2.0, 24 - e))`. Too large: an index out of range on purpose, at a line whose comment says why: "float.tern:NN: Index 1 is outside the array (length 1) (called from main.tern:3)" (question 128).
+  - *Model and tests* (`FloatModel.cs`, `FloatTests.cs`, 27 tests): the model computes each operation as an exact fraction (`BigInteger`) rounded once, so it does not repeat the 6502 algorithm. Bit for bit, with `overflow` and with q unchanged: add, sub, mul and div over all pairs of 71 values (0, ±1, ±0.5, the smallest and largest values with both signs, 1 ± an ulp, integers near the conversion limits, 2^23, random values, values near 1) and 1500 random pairs each with close exponents; ties (1 + half an ulp, 1 + 1.5 ulp, 1 - 2^-25, 4097 * 4097, a subtraction that only the sticky bit keeps below the half); overflow, division by zero (also 0 / 0), results that become 0, and the flag staying set; `neg`, `abs`, `copy`, `is_zero`, `cmp` (also a 0 with its sign bit set); `from_u16`/`from_i16` over about 2,000 values; `to_`/`round_` at 0, -1, ±0.5, halves, 32767, -32768, 65535 and out of range; `trunc`/`floor` on negative values with and without a fraction, and at 2^23 and above; `dec` at 0-10 decimals over about 100 values, and examples; `float.of` for 32 reals (ties at the smallest and at the largest value) and its error. `Cycle_counts` pins the best and worst cycles of each routine.
+  - *Example* (`examples/floats.tern`): a ball thrown up at 12.5 m/s, its height and speed every quarter second in steps of 1/20 s, then 1/3, pi * 2.5 * 2.5 and round(-2.5). `Example_prints_computed_values` compares the screen with the same steps done by the model; checked in VICE.
+  - *Skill*: `float` in the library table of `language.md` and its costs in `costs.md`; the struct literal's array from a `const fn`.
 
 - **Encodings, re-review** (2026-11-13, `docs/reviews/encodings.md`): ready to merge. Its note (a constant used in an encoding's byte that needs that encoding gave "'H' depends on itself: H -> H"): `Resolve` puts the encoding on `_declaring` while it is checked, so the chain names it, "H -> encoding tiles -> H" (the rule that lets a global be demanded while a constant is worked out ignores encodings). Two tests.
 
@@ -596,8 +613,31 @@ Including `jsr` and `rts`; from the tests.
 | `bcd.add` (3 bytes) | 88 | `sub`, `inc`, `add_byte` within 11 cycles of this |
 | `bcd.text` (3 bytes) | 395-635 | |
 
+### M24: float sizes and cycles
+
+Cycles including `jsr` and `rts`, best and worst over the test values (`FloatTests.Cycle_counts`). Bytes of each routine's own code; the shared steps (`unpack_a`, `normalize`, `finish`, `store_zero`, `store_max`: 214 bytes) come once with the first routine that needs them, and `unpack_b` (32) with the first that takes two values. With every routine used: about 2,450 bytes of code and tables, and 124 bytes of variables (19 in zero page).
+
+| Routine | Bytes | Cycles | Notes |
+|---|---|---|---|
+| `add` / `sub` | 22 / 28, + 329 shared | 108-961 / 116-951 | the most after cancelling, with a long normalization |
+| `mul` | 32 + 128 | 153-2490 | 153 when an operand is 0 |
+| `div` | 37 + 146 | 218-4418 | 32 steps of shift-and-subtract |
+| `neg` / `abs` | 14 / 9 | 22-36 / 27 | |
+| `cmp` | 94 | 58-138 | |
+| `is_zero` | 5 | 19 | |
+| `copy` | 10 | 77 | |
+| `from_u16` / `from_i16` | 19 / 36, + 34 shared | 102-509 / 106-524 | |
+| `to_u16` / `round_u16` | 13 / 13, + 55 + 130 shared | 158-461 / 158-487 | `to_unsigned`, `int_part` |
+| `to_i16` / `round_i16` | 13 / 13, + 76 + `int_part` | 164-469 / 164-495 | |
+| `trunc` | 31 + 60 + 8 | 94-306 | `chop` and a mask table |
+| `floor` | 116 + `chop` + 8 | 94-394 | |
+| `dec` | 229 + 363 + 12 | 1245-7692 below 65536; up to 91222 | the most for 39-digit values near 1.7e38 |
+| `of` | none | none | compile time |
+
 ## Known limitations and technical debt
 
+- `float.dec` takes up to about 91,000 cycles for values near the largest (39 digits), since it converts a 128-bit integer to decimal; below 65536 at most about 7,700. `float.div` (up to 4,418) could save about 1,000 cycles with its work bytes in zero page or an unrolled loop.
+- `float` uses 19 bytes of zero page once any routine is used (the compiler places its small work variables there).
 - Encodings: a character outside the Basic Multilingual Plane (most emoji) cannot be listed, since a character literal holds one UTF-16 unit ("exactly one character"); in a string each half has no code.
 - Encodings: "a literal without a prefix on a platform with no default encoding is an error" (spec 2.1) is not built; every platform so far (the C64) has a default.
 - Warnings: an unused import is reported at the module name.
@@ -661,6 +701,14 @@ Not bugs; things to improve, mostly in M7 (optimizer).
 - `w = addr(map) - 1` (or `+`) into a 16-bit variable stores `addr(map)` and then subtracts at run time; `CodeGen.AddressBytes` could make it two `lda #` / `sta` pairs, as it already does for `.lo` / `.hi`.
 
 ## Questions for the spec session
+
+Open, from M24 (provisional, as built):
+
+126. **What "exponent plus $80" means.** Built as Microsoft BASIC: the value is 0.1mmm (binary) × 2^(byte 3 - $80), the mantissa from 1/2 to 1, which gives the range in 10.1 (2^-128, about 2.9e-39, to (1 - 2^-24) × 2^127, about 1.7e38); 1.0 is `00 00 00 81`, -1.0 is `00 00 80 81`. Proposed: say so in 10.1, with these two examples.
+127. **`float.dec` details.** Built: `decimals` 0 to 9, more is written as 9; a `-` only when the text is not all zeros (-0.004 with 2 decimals is `0.00`); at least one digit before the point (`0.05`); no point when `decimals` is 0; at most 50 characters (39 digits for the largest values). Proposed: write these in 10.1, with "dst needs room for 50 characters, or for the program's largest value".
+128. **An error from a `const fn`.** `float.of` of a value too large must be an error (10.1), but a const fn cannot report one of its own: it is an index out of range on purpose, "float.tern:NN: Index 1 is outside the array (length 1) (called from main.tern:3)", at a line whose comment says the value is too large. Proposed: an `assert` statement inside a `const fn` (`assert e <= 127, "float.of: the value is larger than the largest float, about 1.7e38"`), reported at its line with "(called from ...)".
+129. **Small behaviors.** Built: division by zero gives the largest value with p's sign (0 / 0 the positive largest); `neg` leaves 0 as 0, so no -0 is made; any value with exponent 0 is 0 (`cmp`, `is_zero`, the operations); `to_u16` of -0.5 is 0 without `overflow` (toward zero it is 0), `round_u16` of -0.5 is 0 with `overflow` (it rounds to -1); every routine that stores 0 writes four zero bytes (`add`/`sub` with a 0 operand store nothing, so a 0 the program wrote with other mantissa bytes stays as it is; every routine reads it as 0). Proposed: as built.
+130. **A module function named like a compile-time built-in** (`floor`, `trunc` and `abs` in `float`) hides the built-in in that module's const fns: `floor(x)` in `float.of` is "'floor' runs on the 6502, so compile-time code cannot call it". `float.of` uses `round` instead. Proposed: keep it (one meaning per name inside a module), and say so in 4.1.
 
 Open, from the encodings milestone (provisional, as built):
 
