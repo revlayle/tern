@@ -4,11 +4,16 @@ Owned by the coding session. Updated at the end of every coding session.
 
 ## Current
 
-- **Milestone:** Encodings declared by the program (roadmap; spec 2.1 "Encodings declared by the program"; decision 2026-11-12), plus question 123 from the `implements` review. Done; ready for `/review encodings`.
-- **Branch:** `encodings`, from `main` at `077c649`. 3323 compiler tests pass plus 36 CPU tests. No benchmark changed (1254 / 350780); `SkillTests` pass.
-- **Next step:** `/review encodings`. After this: M24 (floats as a library).
+- **Milestone:** Encodings declared by the program (roadmap; spec 2.1 "Encodings declared by the program"; decision 2026-11-12), plus question 123 from the `implements` review. Done; review findings 1-3 done. Ready for `/review encodings` again.
+- **Branch:** `encodings`, from `main` at `077c649`, `main` merged in (the review, `fc6189e`). 3333 compiler tests pass plus 36 CPU tests. No benchmark changed (1254 / 350780); `SkillTests` pass.
+- **Next step:** `/review encodings` (re-review of must-fix 1). After this: M24 (floats as a library).
 
 ## Done
+
+- **Encodings, first review** (2026-11-12, `docs/reviews/encodings.md`): not ready to merge; all three findings done in `a5b3f4b`.
+  - Must-fix 1: an encoding's byte whose literal needs that encoding while it is worked out (`tiles'A'` in `tiles`, through another encoding's byte, or an unprefixed character in a line of the default encoding) gave no error and crashed code generation. `_checkingLines` holds the lines whose byte is being checked; `Resolve` (with `EncodingSymbol.LinesBefore`) and `ProgramDefault` (with `_defaultLinesBefore`) tell a cycle through a byte from one through bases, and report it at the literal: "The byte of 'B' in the encoding 'tiles' uses 'tiles' itself. Write the byte as a number", or "... uses a character without a prefix, which is in the default encoding 'tiles', and that needs this byte. Write the byte as a number, or write a prefix before the quote" (`ByteUsesDefault`, the same whichever is checked first). Tests: the review's program (one error), with no data first, the module variant, a prefixed self-reference, two encodings' bytes using each other, a base through a byte, a range under a base, and a byte using another encoding under a default (compiles).
+  - Suggestion 2: a range of more than 256 characters: "... but an encoding has 256 bytes. Split the range".
+  - Suggestion 3: "Unknown encoding 'font.tilez'. Use one of: font.tiles" lists the named module's public encodings; a module with none: "the module plain declares no encodings".
 
 - **Encodings declared by the program** (2026-11-12, branch `encodings`). Four commits.
   - *Question 123* (`11d5ed1`): an interface module placed in an overlay area (the implementing module's or another) is an error at the name after `implements`: "'api' is placed in the overlay area 'lv'; an interface must be resident. Remove '@ lv' from its import". Two tests in `ImplementsTests`.
