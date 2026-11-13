@@ -1146,6 +1146,16 @@ A platform description gives: CPU variant, free zero-page ranges, RAM ranges for
 - The library calls only the OS's documented entry points and vectors (CIO at `$E456`, `SETVBV` at `$E45C`, `XITVBV` at `$E462`, the vectors in page 2), the same on every model; never the XL OS's internal routines, which moved between versions.
 - The platform's library never writes PORTB (`$D301`): on the 400/800 it reads joystick ports 3 and 4, on the XL/XE it switches BASIC, the OS ROM and the 130XE's banks. Anything that needs it is an XL/XE-only module.
 - The startup code does not switch BASIC off. On the 400/800 BASIC is a cartridge left out; on an XL/XE the user (or the loader: DOS, Altirra) boots without it.
+- Volatile areas (4): memory the OS's interrupts change or read, and the chips.
+
+  | Range | What changes or reads it |
+  |---|---|
+  | `$12–$14` | `RTCLOK`, the frame clock |
+  | `$4D–$4F` | `ATRACT`, `DRKMSK`, `COLRSH`: attract mode |
+  | `$0200–$02FF` | OS vectors, frame-interrupt timers, shadow registers (written by the program, copied to the chips each frame), joystick, paddle and trigger copies, keyboard (`CH`, `SRTIMR`) |
+  | `$D000–$D7FF` | GTIA, POKEY, PIA, ANTIC, cartridge control (`$D500`) |
+
+  The rest of the OS's zero page (`$00–$7F`) and page 3 (I/O control blocks) are ordinary memory: the OS changes them only inside a call, and a call to a routine at a fixed address makes the optimizer forget what it holds (4).
 - **Interrupts need no language change** (6.3). A display-list interrupt is a plain `interrupt fn`: the OS's NMI code jumps through `VDSLST` with only the CPU's push. `atari.set_dli(handler)` writes `VDSLST` while DLIs are off, then sets `NMIEN` to `$C0`. For the vertical blank the OS pushes A, X and Y before jumping through its vector, so, as with the C64's `set_kernal_irq`, a library stub pulls them and jumps to the `interrupt fn`, whose `rti` then does what `jmp XITVBV` would. `atari.set_vbi(handler)` sets the deferred vector (`VVBLKD`) through `SETVBV`, after the OS's frame work (shadow registers, clock, attract); `atari.set_vbi_immediate(handler)` sets the immediate vector (`VVBLKI`), and the OS's frame work then does not run, so shadow registers are no longer copied to the chips. An immediate handler that continues into the OS (`jmp SYSVBV`) is written in assembly.
 - Machines with 16 KB (an unexpanded 400, the 600XL) are reached through the `memory` block (8.4), e.g. `$2000..=$3BFF program`; there is no separate target.
 - Not in M25: the 130XE's extra 64 KB (four 16 KB banks at `$4000–$7FFF`, selected through PORTB) and cartridge images, including the XEGS's bank-switched cartridges. Both follow the bank model of 14.1, after M27.
