@@ -425,6 +425,9 @@ public class FloatTests
                         Add(op, Binary(op, a, b));
                 foreach (var op in new[] { "neg", "abs", "is_zero", "to_u16", "round_u16", "to_i16", "round_i16", "trunc", "floor" })
                     Add(op, Unary(op, a));
+                Float.Set16("float.copy.dst", P);
+                Float.Set16("float.copy.src", Q);
+                Add("copy", Float.Call("float.copy"));
                 Store(P, a);
                 Float.Set16("float.dec.dst", Out);
                 Float.Set16("float.dec.p", P);
@@ -445,8 +448,8 @@ public class FloatTests
         }
         string actual = string.Join(", ", counts.Select(c => $"{c.Key} {c.Value.Min}-{c.Value.Max}"));
         Assert.Equal("add 108-961, sub 116-951, mul 153-2490, div 218-4418, cmp 58-138, neg 22-36, abs 27-27, is_zero 19-19, " +
-            "to_u16 158-461, round_u16 158-487, to_i16 164-469, round_i16 164-495, trunc 94-306, floor 94-394, dec 1245-91222, " +
-            "dec below 65536 1245-7692, from_u16 102-509, from_i16 106-524", actual);
+            "to_u16 158-461, round_u16 158-487, to_i16 164-469, round_i16 164-495, trunc 94-306, floor 94-394, copy 77-77, dec 1245-91222," +
+            " dec below 65536 1245-7692, from_u16 102-509, from_i16 106-524", actual);
     }
 
     /// <summary>

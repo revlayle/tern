@@ -197,6 +197,9 @@ Library routines, roughly, in cycles per call (measure your own case with `tern 
 | `mem.copy` / `mem.fill` | 16-19 / 13-17 per byte |
 | `random.next8` | about 57 |
 | `wide.dec32` | about 4000 |
+| `float.add` / `float.sub` | 110-960 |
+| `float.mul` / `float.div` | up to about 2500 / 4400 |
+| `float.dec` | 1250-7700 below 65536 |
 
 ## 2. Arrays before pointers
 
