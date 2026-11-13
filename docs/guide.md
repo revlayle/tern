@@ -19,9 +19,11 @@ Build once, then compile a program:
 
 ```
 dotnet build
-dotnet run --project src/Tern.Cli -- examples/hello.tern
-dotnet run --project src/Tern.Cli -- game.tern -o out/game.prg
+dotnet run --project src/Tern.Cli -- --target c64 examples/c64/hello.tern
+dotnet run --project src/Tern.Cli -- --target c64 game.tern -o out/game.prg
 ```
+
+Every command names the machine it builds for: `--target c64` (Commodore 64) or `--target atari` (Atari 8-bit with 48 KB or more). For the Atari the program is `game.xex` and the label file `game.lbl`; the rest is as below.
 
 For `game.tern` the compiler writes, next to the source (or the `-o` path):
 
@@ -34,7 +36,7 @@ For `game.tern` the compiler writes, next to the source (or the `-o` path):
 | `game_api.tern` | Only for a binary without `main`, or a program with an export table (section 3.11): the module others import |
 | `level1.prg`, ... | One file per overlay module (section 3.12), named after the module |
 
-It also prints a report: where code and variables went, the zero-page map, and the functions whose memory is reachable from two roots (main and an interrupt handler). Errors look like `game.tern:12:5: error: ...` and say how to fix the problem. `tern --json game.tern` gives the same result as JSON, for editors and coding agents: each diagnostic has its file, line, column, message, the fix as `suggestion`, and `calledFrom` for an error inside compile-time code (3.14). `tern run` and `tern bench` run a program in the built-in emulator (7.11).
+It also prints a report: where code and variables went, the zero-page map, and the functions whose memory is reachable from two roots (main and an interrupt handler). Errors look like `game.tern:12:5: error: ...` and say how to fix the problem. `tern --json --target c64 game.tern` gives the same result as JSON, for editors and coding agents: each diagnostic has its file, line, column, message, the fix as `suggestion`, and `calledFrom` for an error inside compile-time code (3.14). `tern run` and `tern bench` run a program in the built-in emulator (7.11).
 
 The compiler also warns about code that does nothing: an unused local, an unused private or main-file declaration, an unused import, and a statement that is never reached (`game.tern:9:5: warning: 'temp' is never used. ...`). Code that runs is never warned about, however unusual. Warnings do not stop the build. To keep something unused on purpose, start its name with `_` (`fn _debug_dump()`); for a loop counter you do not read, write `for _ in ...`, which is never slower than a named counter. `--no-warnings` turns them off, `--warnings-as-errors` makes them errors (for CI); both work with `tern run` too, and `--json` reports them with `"severity": "warning"`.
 
@@ -465,7 +467,7 @@ level_api.update()                            // jsr $6003: the loaded level's u
 - The main file must import the interface module itself.
 - A call through the interface counts as a call to every level's function, so their memory is shared with other code as usual.
 - Inside a level, use its own `data` name (`header`), not the interface's (`level_api.header`); the compiler says so.
-- `examples/stages.tern` loads two stages in turn and calls them through `stage_api`; `tern run` can run it (7.11).
+- `examples/c64/stages.tern` loads two stages in turn and calls them through `stage_api`; `tern run` can run it (7.11).
 
 ### 3.13 Built-ins
 
@@ -482,7 +484,7 @@ The math functions of compile-time code are in 3.14.
 
 ### 3.14 Compile-time code: `const fn` and generators
 
-A `const fn` is a function the compiler runs while it compiles. Only its result goes into the program; the function never becomes 6502 code. Use it to build lookup tables, and, as a *generator*, to write assembly whose shape depends on parameters. From `examples/sine.tern`:
+A `const fn` is a function the compiler runs while it compiles. Only its result goes into the program; the function never becomes 6502 code. Use it to build lookup tables, and, as a *generator*, to write assembly whose shape depends on parameters. From `examples/c64/sine.tern`:
 
 ```
 import c64
@@ -548,7 +550,7 @@ data ball: [u8; 63] @ $0C00 = disc(10.5)
 - An error inside a `const fn` is reported at its line, with "(called from main.tern:5)", the declaration that ran it. `tern --json` gives that place as `calledFrom`.
 - Structs and strings are not compile-time values, so a `const fn` cannot build a table of struct literals.
 
-**Generators.** A `const fn` with no return value may `emit` instructions. It is called on a line of its own in an `asm` block or `asm fn`, and what it emits goes there, so loops, `if`s and parameters decide the code's shape: unrolled copies, plotters, sprite clearing. A shortened version of `examples/speedcode.tern`:
+**Generators.** A `const fn` with no return value may `emit` instructions. It is called on a line of its own in an `asm` block or `asm fn`, and what it emits goes there, so loops, `if`s and parameters decide the code's shape: unrolled copies, plotters, sprite clearing. A shortened version of `examples/c64/speedcode.tern`:
 
 ```
 import c64
@@ -694,7 +696,7 @@ fn main() {
 }
 ```
 
-`band` is used by the handler only, so it is ordinary memory. If main also read it, it would become volatile automatically. See `examples/raster.tern` for a fuller version.
+`band` is used by the handler only, so it is ordinary memory. If main also read it, it would become volatile automatically. See `examples/c64/raster.tern` for a fuller version.
 
 ### 4.4 A binary and its host
 
@@ -792,7 +794,7 @@ fn main() {
 }
 ```
 
-Compiling writes `levels.prg`, `level1.prg` and `level2.prg`. Put them on a disk image to run it; the commands are in the header of `examples/levels.tern`.
+Compiling writes `levels.prg`, `level1.prg` and `level2.prg`. Put them on a disk image to run it; the commands are in the header of `examples/c64/levels.tern`.
 
 ### 4.6 Levels as plug-ins
 
@@ -879,9 +881,9 @@ fn add_score(points: u8 using A) @ $0900 keeps X, Y
 fn show(ch: u8 using A) @ $0903 keeps X, Y
 ```
 
-The full example, with a second level and the commands for a disk image, is in `examples/plugins/`.
+The full example, with a second level and the commands for a disk image, is in `examples/c64/plugins/`.
 
-More in `examples/`: `library.tern` (KERNAL printing, numbers), `kernal.tern` (KERNAL routines at fixed addresses), `structs.tern`, `arcade.tern` (32-bit and BCD scores, `sin8`, random sound), `scroller.tern` (eight-way scrolling under 24 multiplexed sprites), `sprite_data.tern`, `kernal_irq.tern` (a raster split with the KERNAL left in), `highscore.tern` (saving and loading a file with `io`), `player.tern` with `player_host.tern`, `levels.tern` (overlays), `plugins/` (levels as plug-ins), `sine.tern` (sine tables and a sprite shape from `const fn`s, 3.14), `speedcode.tern` (a generator against a plain loop, 7.9).
+More in `examples/c64/`: `library.tern` (KERNAL printing, numbers), `kernal.tern` (KERNAL routines at fixed addresses), `structs.tern`, `arcade.tern` (32-bit and BCD scores, `sin8`, random sound), `scroller.tern` (eight-way scrolling under 24 multiplexed sprites), `sprite_data.tern`, `kernal_irq.tern` (a raster split with the KERNAL left in), `highscore.tern` (saving and loading a file with `io`), `player.tern` with `player_host.tern`, `levels.tern` (overlays), `plugins/` (levels as plug-ins), `sine.tern` (sine tables and a sprite shape from `const fn`s, 3.14), `speedcode.tern` (a generator against a plain loop, 7.9).
 
 ## 5. Standard library
 
@@ -1010,7 +1012,7 @@ A plain `match` tests its values in source order, so put the most common first. 
 
 ### 7.9 Unroll a per-frame loop with a generator
 
-The compiler never unrolls a loop by itself. When a loop must finish within a frame and does not, a generator (3.14) can write it out: the work stays the same, and the loop counters, pointer setup and `(p),y` go. In `examples/speedcode.tern`, moving 22 rows of colour RAM one column left:
+The compiler never unrolls a loop by itself. When a loop must finish within a frame and does not, a generator (3.14) can write it out: the work stays the same, and the loop counters, pointer setup and `(p),y` go. In `examples/c64/speedcode.tern`, moving 22 rows of colour RAM one column left:
 
 | Version | Bytes | Cycles |
 |---|--:|--:|
@@ -1036,9 +1038,9 @@ The `bubble.direct` (comparing the elements, no locals) and `bubble.minus` (`i -
 `tern bench` runs two or more versions in the built-in emulator and prints the bytes and cycles of each (`tern` is `dotnet run --project src/Tern.Cli --`):
 
 ```
-tern bench --decl "var n: u8" --code "for i in 0..200 { n += i }" --code "for i in 0..200 using X { n += i }" --dump n
-tern bench old.tern new.tern --dump result        // whole programs; --fn f measures one function
-tern run game.tern --profile                      // the cycles of each function and source line
+tern bench --target c64 --decl "var n: u8" --code "for i in 0..200 { n += i }" --code "for i in 0..200 using X { n += i }" --dump n
+tern bench --target c64 old.tern new.tern --dump result        // whole programs; --fn f measures one function
+tern run --target c64 game.tern --profile                      // the cycles of each function and source line
 ```
 
 `--dump` shows a value after each run, to check that the versions agree. `--set $DC00=$7B` writes a byte before the run starts, for inputs such as the joystick; it takes addresses only, since the program's startup sets its own globals after loading and would overwrite a variable set by name.

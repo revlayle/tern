@@ -26,13 +26,14 @@ src/Tern.Compiler/
   CompileTime/           interpreter for const fn and code generators (values, emit)
   Backend/               code generator, allocator (zero page, shared frames), assembler
   Tools/                 agent tools: --json diagnostics, .lines table, tern run, tern bench
-  Platform.cs            target machine descriptions (C64)
+  Platform.cs            target machine descriptions (C64, Atari)
   TernCompiler.cs        driver: source -> .prg, listing, labels, report
 src/Tern.Cli/            `tern` command-line tool
 src/lib/                 standard library source (.tern); platform modules in src/lib/<platform>/; copied to lib/ next to the compiler
 tests/Tern.Cpu.Tests/    CPU tests, including Klaus Dormann's 6502 functional test
 tests/Tern.Compiler.Tests/  end-to-end tests: compile, run in the emulator, check memory
-examples/                example .tern programs
+examples/c64/            example .tern programs for the C64
+examples/atari/          example .tern programs for the Atari
 .claude/commands/        session commands: /spec, /code, /review, /merge
 .claude/skills/tern/     the Tern skill for coding agents (checked by SkillTests)
 .claude-plugin/          plugin.json and marketplace.json: the repository as a Claude Code plugin
@@ -43,7 +44,7 @@ examples/                example .tern programs
 ```
 dotnet build
 dotnet test                                              # all tests, about 2 seconds
-dotnet run --project src/Tern.Cli -- examples/border.tern  # writes .prg, .lst, .vs next to the source
+dotnet run --project src/Tern.Cli -- --target c64 examples/c64/border.tern  # writes .prg, .lst, .vs next to the source
 ```
 
 To check a program on a real emulated C64 (VICE is installed at `C:\Vice\bin`):
@@ -52,7 +53,12 @@ To check a program on a real emulated C64 (VICE is installed at `C:\Vice\bin`):
 C:\Vice\bin\x64sc.exe -default -warp -autostart file.prg -limitcycles 8000000 -exitscreenshot shot.png
 ```
 
-To check a program on an emulated Atari 8-bit, use Altirra (4.40, installed at `C:\Altirra`). `C:\Altirra\Altirra64.exe file.xex` boots a program; `Altirra64.exe /?` lists the switches (machine, memory size, OS, debugger commands). Use it in portable mode, with settings in `C:\Altirra\Altirra.ini` rather than the registry (`/portable`, or the `.ini` file present; the M25 coding session sets this up). Name the machine, memory size and OS on the command line rather than relying on the settings. Several copies starting at once can conflict over the `.ini` file, so run Altirra checks one at a time. Check on an 800 with 48 KB and on an 800XL (spec 12.2). No OS ROM images are installed, so checks use AltirraOS (`/kernel:default`); once the OS-B and XL OS images are registered in Altirra (Configure System, Firmware), check with `/kernel:osb` on the 800 and the XL OS on the 800XL. The M25 coding session settles a command that runs without a window and saves a screenshot, and writes it here through a status question.
+To check a program on an emulated Atari 8-bit, use Altirra (4.40, installed at `C:\Altirra`). `C:\Altirra\Altirra64.exe file.xex` boots a program; `Altirra64.exe /?` lists the switches (machine, memory size, OS, debugger commands). Use it in portable mode, with settings in `C:\Altirra\Altirra.ini` rather than the registry (the `.ini` file is present). Name the machine, memory size and OS on the command line rather than relying on the settings. Several copies starting at once can conflict over the `.ini` file, so run Altirra checks one at a time. Check on an 800 with 48 KB and on an 800XL (spec 12.2). No OS ROM images are installed, so checks use AltirraOS (`/kernel:default`); once the OS-B and XL OS images are registered in Altirra (Configure System, Firmware), check with `/kernel:osb` on the 800 and the XL OS on the 800XL. Altirra cannot run without a window, so `tests/tools/altirra-shot.ps1` starts it, copies its window to a PNG after the given seconds and closes it:
+
+```
+pwsh tests/tools/altirra-shot.ps1 file.xex shot.png 8 /skipsetup /hardware:800 /kernel:default /memsize:48K /nobasic
+pwsh tests/tools/altirra-shot.ps1 file.xex shot.png 8 /skipsetup /hardware:800xl /kernel:default /memsize:64K /nobasic
+```
 
 ## Design rules
 
