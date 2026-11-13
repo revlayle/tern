@@ -602,9 +602,11 @@ In this order (decision 2026-11-07; renumbered 2026-11-08). Each starts with a s
 
 - `--target` (spec 12.2, decision 2026-11-12): required on `tern`, `tern run` and `tern bench` once the Atari exists; scripts, tests' command lines, the skill and the guide name `--target c64`
 - One `atari` target for every model with 48 KB or more, any OS version (spec 12.2, decision 2026-11-13); the library uses only the documented OS entry points and never writes PORTB
-- Platform description: memory map, free zero page, volatile areas (hardware registers, OS variables), ATASCII and screen-code encodings
-- `.xex` output (load segments, run address); the `memory` block's areas map to segments
-- `lib/atari`: OS routines (CIO) as routines at a fixed address; register structs for ANTIC, GTIA, POKEY, PIA; display lists; VBI and DLI handlers through the OS vectors
+- Platform description (spec 12.2, settled 2026-11-13): code at `$2000`, variables up to `$BC1F`, zero page `$80–$FF`, the volatile areas, `atascii` and `atari_screen`; startup as on the C64, an endless loop after `main`
+- `.xex` output: one load segment per used area, then the run address
+- `tern run`: stand-ins for CIO screen output
+- `lib/atari`: OS routines as routines at a fixed address; register structs for ANTIC, GTIA, POKEY, PIA; display-list helpers; `set_dli`, `set_vbi`, `set_vbi_immediate`, `exit`; the Atari's `io` and screen text modules where they make sense
+- Altirra checks in portable mode, with a command line that runs without a window and saves a screenshot (written into `CLAUDE.md` through a status question)
 - Library modules that are not C64-only (`math`, `mem`, `text`, `wide`, `bcd`, `random`, `cpu`, the M24 floats) work unchanged
 
 Done when: an example with a display list and a DLI color change runs in an Atari emulator (Altirra), on an 800 with OS-B and 48 KB and on an 800XL, and the benchmarks compile for the Atari.

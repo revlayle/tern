@@ -1140,7 +1140,15 @@ A platform description gives: CPU variant, free zero-page ranges, RAM ranges for
   | `$D000–$DFFF` | VIC, SID, color RAM, CIAs, cartridge I/O |
 - Default encoding: `petscii` (2.1).
 
-**Atari 8-bit (M25; the rest of its description is settled in the M25 spec session)**
+**Atari 8-bit (M25)**
+
+- CPU: `nmos6502`. Output: `.xex`, a series of load segments, one per used area, so gaps between areas are not padded as in a `.prg`; a last segment sets the run address (`RUNAD`, `$02E0`) to the startup code.
+- Code start: `$2000`, above DOS 2.5 and most other DOSes. Variables: RAM after the program up to `$BC1F`, below the display list and screen the OS sets up for its 40-column text screen (`RAMTOP` `$C0`). A program with its own display list and screen elsewhere takes that space back in its `memory` block.
+- Free zero page: `$80–$FF`. BASIC is out, and the OS's floating-point routines (`$D4–$FF`) are never called: Tern's floats are a library (10.1).
+- Startup: zero globals, copy initialized data, call `main`. When `main` returns, the program stops in an endless loop, as on the C64; `atari.exit()` returns to DOS.
+- Default encoding: `atascii`; `atari_screen` gives the screen's internal codes (2.1).
+- `tern run` has stand-ins for CIO's screen output (put a byte and print text to the screen editor), as it has for the C64's KERNAL, so library and benchmark tests run in the built-in emulator. Display lists and DLIs are checked in Altirra.
+- `lib/atari`: register structs for ANTIC, GTIA, POKEY and PIA; OS routines as routines at a fixed address (6.6); `set_dli`, `set_vbi`, `set_vbi_immediate`, `exit`; helpers that build display lists; and the Atari's versions of platform modules C64 programs use (`io`, screen text), where they make sense.
 
 - One target, `--target atari`, for every Atari 8-bit with at least 48 KB: the 800, a 400 expanded to 48 KB, and every XL/XE model, with the 800's OS (revision A or B) or the XL/XE OS. A 64 KB XL/XE gives a program no more usable RAM than a 48 KB 800, since its extra 16 KB lies under the OS ROM, and Tern programs keep the OS.
 - The library calls only the OS's documented entry points and vectors (CIO at `$E456`, `SETVBV` at `$E45C`, `XITVBV` at `$E462`, the vectors in page 2), the same on every model; never the XL OS's internal routines, which moved between versions.
@@ -1215,7 +1223,7 @@ source → lexer → parser → AST
 - **`step` is a keyword only right after the range of a `for`** (5.1). Elsewhere it is an ordinary name: `fn step()`, `var step: u8`, and `for i in 0..step step 2` all work. This is unambiguous, since a name cannot continue an expression that is already complete. **`emit` is a keyword only at the start of a statement in a `const fn`, before `{`** (4.1); elsewhere it is a name (`lib/c64/sprites.tern` has a function `emit`). Other keywords stay reserved everywhere.
 - **Branch range fixing.** A conditional branch reaches only −128 to +127 bytes. Layout repeats until every branch fits. Branches that do not fit become an inverted branch over a `jmp`.
 - **Outputs:**
-  - the program file (`.prg` for C64),
+  - the program file (`.prg` for the C64, `.xex` for the Atari),
   - a listing (`.lst`) with source lines, addresses, bytes and cycles,
   - a VICE label file (`.vs`),
   - a report: bytes and cycle estimates per function, zero-page map, overlay map, and the functions with memory reachable from two roots (8.1).

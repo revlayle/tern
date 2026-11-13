@@ -785,3 +785,12 @@ Spec 4.1 left these open; settled before M22's coding session.
 ## 2026-11-13: the Atari's volatile areas
 
 - **Volatile on the Atari** (spec 12.2): `$12–$14` (frame clock), `$4D–$4F` (attract mode), all of page 2 and `$D000–$D7FF` (the chips). Reason: page 2 holds the shadow registers, which the program writes and the OS's frame interrupt copies to the chips, so a store the optimizer removed could still have been shown for a frame; almost everything else in the page is changed by the OS's interrupts, so the whole page is simpler than a list and costs little, since programs rarely read it in a tight loop. The rest of the OS zero page and page 3 change only inside OS calls, which already make the optimizer forget. The developer is less familiar with the Atari's map: if the coding session or an Altirra check finds an address the OS's interrupts change outside these ranges, it raises a question and the table grows.
+
+## 2026-11-13: the Atari platform description
+
+- **Memory:** code from `$2000` (above DOS 2.5 and most DOSes), variables up to `$BC1F` (below the OS's 40-column screen and its display list), free zero page `$80–$FF` (BASIC out; the OS's float routines are not used, since Tern's floats are a library). Reason: the usual layout for Atari disk programs on 48 KB; a program with its own screen moves it with the `memory` block.
+- **`.xex` with one segment per used area, then `RUNAD`.** Reason: segments load each area where it belongs, so no padding fills the gaps a `.prg` must fill. If the format cannot express something the `memory` block can, the coding session raises a question.
+- **Startup and the end of `main` as on the C64**, an endless loop; `atari.exit()` returns to DOS. Reason: one meaning across platforms.
+- **`atascii` default, `atari_screen`** (2.1), as planned in the founding encodings decision.
+- **`tern run` stands in for CIO screen output** only, so tests run in the built-in emulator as on the C64; display lists and DLIs are checked in Altirra. Reason: the tests need text output, while emulating ANTIC is Altirra's job.
+- **`lib/atari`**: chip register structs, OS routines at fixed addresses, the interrupt installers, display-list helpers, and the Atari's `io` and screen text where they make sense (the coding session lists them).
