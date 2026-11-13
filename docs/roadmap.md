@@ -552,6 +552,7 @@ Spec: 8.5 ("Interfaces: `implements`"). Decision 2026-11-12. Small; reuses the c
 - The errors listed in 8.5, each with a test.
 - An example: two levels as overlays implementing one interface, loaded in turn and called through it (`tern run`, and VICE).
 - The skill and guide mention `implements` next to overlays.
+- Questions 119-122 (decision 2026-11-12): one change to build on the branch before the review: inside an implementing module, the interface's `volatile` variable that matches the module's `data` is an error ("'level_api.header' is this module's data 'header'. Use 'header'"), as in a binary (12.3), with a test.
 
 Tests: calls through the interface reach the loaded overlay (load each in turn in the emulator); frames of the implementations are shared with other code; each check and error; a plain call next to an interface call.
 

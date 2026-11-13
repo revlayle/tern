@@ -451,6 +451,22 @@ import level2 @ levels
 - Making sure the right overlay is loaded before calling it is your job: the compiler cannot check it, and a check on every call would cost every call.
 - A fixed-address variable over an overlay's file is an error unless it is marked `volatile`, which reads whatever overlay is loaded (memory an overlay loads on purpose, e.g. a level header).
 
+**Interfaces.** When several overlays play the same part, such as levels, resident code can call whichever is loaded without knowing which. Write an interface module with routines at fixed addresses, as for plug-ins (3.11), and add `implements` to each overlay's import:
+
+```
+import level_api                              // fn init(n: u8 using A) @ $6000, fn update() @ $6003, ...
+import level1 @ levels implements level_api
+import level2 @ levels implements level_api
+
+level_api.update()                            // jsr $6003: the loaded level's update
+```
+
+- The compiler puts a `jmp` at each routine's address to the module's function of the same name, and checks the module as it checks a plug-in: a function for every routine, with the same registers, return and `keeps`, and a `data` for every `volatile` variable.
+- The main file must import the interface module itself.
+- A call through the interface counts as a call to every level's function, so their memory is shared with other code as usual.
+- Inside a level, use its own `data` name (`header`), not the interface's (`level_api.header`); the compiler says so.
+- `examples/stages.tern` loads two stages in turn and calls them through `stage_api`; `tern run` can run it (7.11).
+
 ### 3.13 Built-ins
 
 | Built-in | Meaning |
@@ -1028,6 +1044,8 @@ tern run game.tern --profile                      // the cycles of each function
 `--dump` shows a value after each run, to check that the versions agree. `--set $DC00=$7B` writes a byte before the run starts, for inputs such as the joystick; it takes addresses only, since the program's startup sets its own globals after loading and would overwrite a variable set by name.
 
 `tern run` also checks every variable array index (the program itself never does, section 6). An index outside its array is printed with the source line, and the run goes on, so one run shows every bad access. An `indexed match` value outside its span is printed and stops the run. The exit code is 0 when `main` returned with no error, 3 when `main` returned but the check reported an error, and 2 when `main` did not return (the cycle limit, or a stop after a bad `indexed match` value). Pointer accesses and `asm` are not checked.
+
+`tern run` has no KERNAL; `CHROUT`, `GETIN` and `PLOT` work, and `c64.load` works for the program's own overlays when the file name is the module's name in capitals (`"LEVEL1"` loads `level1.prg`). Any other name fails as a missing file does; check such a program in VICE.
 
 ## 8. Not supported yet
 

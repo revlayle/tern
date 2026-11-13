@@ -728,3 +728,14 @@ Spec 4.1 left these open; settled before M22's coding session.
 - **115: as built.** An unused local `const` is warned like a local variable (spec 13 now lists it).
 - **116: as built.** No global at a fixed address is warned (`@ $C000`, `@ zp`, `@ region`), a module's `private` one included (spec 13 now says so). Reason: such a global reserves or names memory on purpose (hardware, a buffer another program reads) whichever file declares it.
 - **117:** the guide's speedcode table names `_cycle_plain`, and guide section 2 describes the warnings, `_` and the two switches.
+
+## 2026-11-12: `implements` questions 119-122
+
+- **119: as built.** The name after `implements` must be a module the main file imports (spec 8.5). Reason: a name in a file refers to that file's own imports, everywhere else and for `export level_api` (12.3); accepting a module imported only by another module would make this the one exception. The cost is one `import` line.
+- **120: changed.** Inside an implementing module, the interface's `volatile` variable that matches the module's `data` is an error, "'level_api.header' is this module's data 'header'. Use 'header'", as in a binary (12.3). Reason: the check already guarantees both names are the same bytes, so a second name adds nothing; the interface's name is a volatile access (slower, and the optimizer forgets everything on a write) and a writable `var` over read-only `data`. Resident code and the interface's own functions keep using `level_api.header`. Built on the `implements` branch before its review.
+- **121: as built.** An implementation no interface call reaches is compiled as a function whose address is taken (6.5), so its frame shares memory with no other. Reason: its table points to it, and a call from `asm` (`jsr $6003`) or from outside the build cannot be seen; treating it as never run could corrupt memory, for a few bytes saved in an unusual program. The report does not list the interface tables; the listing shows each `jmp`.
+- **122: as built.** `tern run` has stand-ins for SETNAM, SETLFS and LOAD that load the build's own overlay files, named by the module's name in capitals; any other name fails with carry set; secondary address 0 loads to X/Y (spec 13, guide 7.11). Reason: the roadmap asks for the overlay example to be checked with `tern run`, and matching by module name needs no new switch. A program that names its files otherwise is checked in VICE.
+
+## 2026-11-12: `.gitignore` belongs to the spec session
+
+`.gitignore` had no owner in `docs/workflow.md`; the spec session now edits it. The plug-in example's build outputs in `examples/plugins/` are ignored, except the hand-written `level_api.tern`. Reason: it is repository setup, like `CLAUDE.md`, and the coding session reported the untracked files.

@@ -19,3 +19,10 @@ examples/player_api.tern
 tests/benchmarks/*/*.lst
 tests/benchmarks/*/*.vs
 tests/benchmarks/*/*.lines
+examples/plugins/*.prg
+examples/plugins/*.lst
+examples/plugins/*.vs
+examples/plugins/*.lines
+examples/plugins/*.d64
+examples/plugins/*_api.tern
+!examples/plugins/level_api.tern
