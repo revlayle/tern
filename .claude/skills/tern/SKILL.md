@@ -1,13 +1,13 @@
 ---
 name: tern
-description: Writing, checking and measuring programs in Tern, a small language that compiles to 6502 machine code for the Commodore 64 and the Atari 8-bit (files ending in .tern). The syntax and the restrictions a model would not guess (no recursion, no runtime multiply, arrays of at most 256, u8 indexes, `using` registers, roots and shared memory, flags as values), what each construct costs, how to write fast Tern, common compile errors and their fixes, inline assembly, and the compiler's tools - `tern --json` for errors, `tern run` to run a program in the built-in emulator and dump memory or the screen, `tern bench` to compare the bytes and cycles of two ways of writing the same code. Use when writing or changing .tern code, when a Tern program does not compile, or when deciding which way of writing Tern code is faster.
+description: Writing, checking and measuring programs in Tern, a small language that compiles to 6502 machine code for the Commodore 64, the Atari 8-bit and the Apple II (files ending in .tern). The syntax and the restrictions a model would not guess (no recursion, no runtime multiply, arrays of at most 256, u8 indexes, `using` registers, roots and shared memory, flags as values), what each construct costs, how to write fast Tern, common compile errors and their fixes, inline assembly, and the compiler's tools - `tern --json` for errors, `tern run` to run a program in the built-in emulator and dump memory or the screen, `tern bench` to compare the bytes and cycles of two ways of writing the same code. Use when writing or changing .tern code, when a Tern program does not compile, or when deciding which way of writing Tern code is faster.
 ---
 
 # Tern
 
 Tern is a small language for the 6502 that compiles to compact, predictable machine code. The first
-targets are the Commodore 64 (`--target c64`) and the Atari 8-bit with 48 KB or more (`--target atari`);
-every command names one. The examples here are for the C64. You have not seen Tern code before: it looks a little like Rust and Go,
+targets are the Commodore 64 (`--target c64`), the Atari 8-bit with 48 KB or more (`--target atari`)
+and the Apple II with 64 KB under ProDOS 8 (`--target apple2`); every command names one. The examples here are for the C64. You have not seen Tern code before: it looks a little like Rust and Go,
 but do not guess from them. Write what the examples here show, compile often, and read the errors,
 which say how to fix the problem.
 
@@ -58,6 +58,21 @@ keep Atari overlay names to 8 letters and digits; any other name fails with `$AA
 shows the text screen at SAVMSC (`$BC40`, 40 x 24, left margin 2). Display lists, DLIs and files
 show in Altirra: `Altirra64.exe /hardware:800xl /kernel:default /memsize:64K /nobasic /run game.xex`,
 with `/hdpathrw <folder>` for the `H:` device on a folder.
+
+For the Apple II, `tern --target apple2 game.tern` writes `game.system` (a ProDOS system file: one
+block that ProDOS loads and starts at `$2000`) and `game.sym` (AppleWin symbols). Literals without a
+prefix are `apple2` codes: ASCII with the high bit set (`'A'` is `$C1`, `'\n'` is `$8D`), which COUT
+prints and text screen memory shows as normal text; `$00`-`$3F` in screen memory are inverse. The default layout
+puts the program at `$2000`, on hi-res page 1, so a program that draws hi-res graphics needs a
+`memory` block that keeps it off the pages it draws on (`$0800..=$1FFF program` and
+`$6000..=$BEFF program`); the startup code copies each area from the file to its place, and the
+report says which. The file stays at `$2000` after that, so clear page 1 before drawing on it. Zero
+page is `$50-$FF`, then `$00-$1F`. `tern run` has stand-ins for COUT (`apple2.put` and
+`apple2.print`), HOME, and the MLI's CLOSE and QUIT (`apple2.exit()` ends the run); `--screen` shows
+text page 1 at `$0400` in the Apple II's row order. Hi-res and sound show in AppleWin: put the file on
+a ProDOS boot disk with `pwsh tests/tools/apple2-disk.ps1 game.system game.po` and boot `game.po`;
+in its debugger, `symuser load "..\path\game.sym"` (in quotes, relative to AppleWin's folder) loads
+the labels.
 
 The program never checks an array index, but `tern run` does: an index outside its array, and an
 `indexed match` value outside its patterns (which also stops the run), are printed with the source

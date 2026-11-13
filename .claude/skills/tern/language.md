@@ -639,7 +639,7 @@ A=$15 X=$00 Y=$00 SP=$FF PC=$0817
 a $0003 u8 = 21 ($15)
 ```
 
-- `import name` looks in the platform library (`lib/c64/`, `lib/atari/`), the standard library (`lib/`), then the
+- `import name` looks in the platform library (`lib/c64/`, `lib/atari/`, `lib/apple2/`), the standard library (`lib/`), then the
   program's folder. Names are used with the module name. `private` hides a declaration. A module of
   your own may not have a library module's name (`io.tern`, `random.tern`): rename it.
 - Only what is reached is compiled. Module parameters: `import sprites(COUNT = 24)`; a module
@@ -648,7 +648,7 @@ a $0003 u8 = 21 ($15)
   overlay areas and zero page. A main file with `export` lines and no `main` is a binary for another
   program (`name_api.tern` is written for the host). See `docs/guide.md` sections 3.11 and 3.12.
 - Overlays: `import level1 @ levels` puts a module in an overlay area; it gets its own file
-  (`level1.prg`, on the Atari `level1.xex`), loaded with `c64.load` or the Atari's `io.load_xex`, and
+  (`level1.prg`, on the Atari `level1.xex`, on the Apple II `level1.bin`), loaded with `c64.load` or the Atari's `io.load_xex`, and
   modules in one area share memory. With
   `import level1 @ levels implements level_api`, level1's file also has a `jmp` at each routine of
   the interface module `level_api` (routines at fixed addresses inside the area), so resident code
@@ -763,6 +763,7 @@ out $0974 [u8; 3] (3 bytes):
 | `cpu` | `carry()`, `zero()`, `negative()`, `overflow()` after an `asm` block |
 | `c64` | `SCREEN`, `COLOR`, the 16 colors (`c64.BLACK` ... `c64.LIGHT_GREY`), `chrout`, `print`, `getin`, `cursor`, `load`; registers `vic`, `sid`, `cia1`, `cia2`; `sprite_xy` (the sprite positions as an array: x of sprite n at `2n`, y at `2n + 1`); `kernal_off`, `set_irq`, `set_kernal_irq`, `set_nmi`, `interrupts_on`, `interrupts_off` |
 | `atari` (Atari) | `put`, `print`, `cursor` (text through the screen editor, in ATASCII); registers `gtia`/`gtia_in`, `pokey`/`pokey_in`, `pia`, `antic`; shadow registers (`color`, `sdmctl`, `sdlst`, `chbas`, ...), `stick`, `strig`, `ch`, `rtclok`, `savmsc`; `wait_frame`, `exit`; `set_dli`, `set_vbi` (after the OS's frame work), `set_vbi_immediate`; display lists: `DL_` and `MODE_` constants, the const fn `display_list(mode, rows, screen, at, dli)` for `data list: [u8; _] @ LIST = ...`, `set_display_list` |
+| `apple2` (Apple II) | `put` (COUT itself), `print`, `cursor`, `inverse`, `flashing`, `normal`, `home`, `put_hex`, `read_key`, `bell`, `wait`; `TEXT_ROWS`; soft switches `show_text`, `show_graphics`, `show_mixed`, `show_full`, `show_page1`, `show_page2`, `show_lores`, `show_hires`; hi-res: `draw_page` (`$20` or `$40`), `clear`, `plot(x, y)`, `HIRES_ROWS`; `kbd`, `key()`, `click`, `tone`; `mli(command, parameters)`, `exit` |
 | `io` (C64) | disk files through the KERNAL: `load`, `save`, `open`, `read`, `write`, `close`, the command channel |
 | `io` (Atari) | files through CIO on IOCB 1, one open at a time, names with their device (`"D1:SCORES.DAT"`, `"H:..."`): `open(name, n, io.READ or io.WRITE)`, `read(dst, n: u16)` (returns the count), `write`, `close`, `status()` (CIO's code: below 128 is success, not only `ST_OK`; `ST_EOF`, `ST_NOT_FOUND`), `load(name, n, dst, max)`, `save(name, n, src, count)`, `load_xex(name, n)` for overlay files; `true` means it failed |
 | `sprites` (C64) | a sprite multiplexer, 8 to 64 sprites |
@@ -772,6 +773,8 @@ Strings and blocks are passed as a pointer and a length: `text.put(c64.SCREEN, a
 The digits `text`, `wide`, `bcd` and `float` write are `$30`-`$39` (with `-` `$2D` and `.` `$2E`): C64
 screen codes and also ATASCII, so on the Atari print them with `atari.print`; in Atari screen memory
 a digit is `$10`-`$19`. `text.hex8`/`hex16` write A-F as C64 screen codes on the C64 and in ATASCII on
-the Atari (`$41`-`$46`; the table is the module `text_digits`, which `lib/atari/` replaces).
+the Atari (`$41`-`$46`). On the Apple II all of them are `apple2` codes (digits `$B0`-`$B9`, `-` `$AD`,
+`.` `$AE`, A-F `$C1`-`$C6`), which `apple2.print` prints and text screen memory shows. The codes are
+the module `text_digits`, which `lib/atari/` and `lib/apple2/` replace.
 The library source is readable Tern in `lib/`; read it for the exact signatures.
 
