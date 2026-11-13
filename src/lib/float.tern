@@ -1,0 +1,1347 @@
+// Floating-point numbers in 4 bytes (spec 10.1). The format suits the 6502 rather than IEEE 754:
+//     bytes 0-2  the mantissa, low byte first: 24 bits, the leading 1 not stored; bit 7 of byte 2 is the sign
+//     byte 3     the exponent plus $80; $00 means the value is 0
+// The value is 0.1mmm...m (binary) * 2^(exponent - $80): from about 2.9e-39 to 1.7e38, about 7.2 digits.
+// Results are rounded to nearest, halves away from zero. A result too large becomes the largest value
+// with its sign and sets `overflow`; so does division by zero. A result too small becomes 0.
+//
+// As in `wide`, every function takes pointers and the result goes into the first operand:
+//     float.mul(addr(v), addr(dt))
+// Constants: var g: float.F32 = float.F32 { bytes = float.of(9.81) }
+//
+// The work bytes are private, so use the routines from main only, or from one interrupt handler only.
+
+struct F32 { bytes: [u8; 4] }
+
+// Set when a result was too large, a division was by zero, or a conversion to an integer was out of
+// range. It stays set until the program clears it.
+var overflow: bool
+
+// The operands, unpacked. A: the mantissa in wa+1..wa+3 with its leading 1 (bit 7 of wa+3) and a guard
+// byte below it in wa; the exponent in we, 16 bits, as it may leave 1-255 during an operation; the sign
+// in bit 7 of ws. B: the same in wb, eb and sb.
+private var pa: ptr F32
+private var pb: ptr F32
+private var wa: [u8; 4]
+private var we: u16
+private var ws: u8
+private var wb: [u8; 4]
+private var eb: u8
+private var sb: u8
+private var wc: [u8; 4]
+private var wd: [u8; 3]
+private var wt: u8
+private var wn: u8
+private var wm: u8
+private var wz: u8
+
+// dec: the number as an integer (16 bytes, low first) and its packed decimal digits (20 bytes, low first).
+private var big: [u8; 16]
+private var bcd: [u8; 20]
+
+private data LOW_BITS: [u8; 8] = [$00, $01, $03, $07, $0F, $1F, $3F, $7F]
+private data BIT: [u8; 8] = [$01, $02, $04, $08, $10, $20, $40, $80]
+private data TEXT = screen"0123456789-."
+
+// ---- Constants ----
+
+// The 4 bytes of x, rounded to nearest, halves away from zero. A value too large is an error.
+const fn of(x: real) -> [int; _] {
+    if x == 0.0 { return [0, 0, 0, 0] }
+    var sign = 0
+    var a = x
+    if a < 0.0 {
+        sign = $80
+        a = -a
+    }
+    // 2^(e-1) <= a < 2^e, so the mantissa a / 2^e is from 1/2 to 1. (The module's own floor
+    // is a runtime function, so the exponent starts from round.)
+    var e = round(log2(a))
+    if e < -200 { return [0, 0, 0, 0] }
+    var m = 0
+    if e <= 200 {
+        while a >= pow(2.0, e) { e += 1 }
+        while a < pow(2.0, e - 1) { e -= 1 }
+        m = round(a * pow(2.0, 24 - e))
+        if m == $1000000 {
+            m = $800000
+            e += 1
+        }
+    }
+    if e + 128 > 255 {
+        // x is larger than the largest float, about 1.7e38. The index is out of range on purpose,
+        // so that the error is reported here.
+        var too_large = [0]
+        return too_large[1 + e - e]
+    }
+    if e + 128 < 1 { return [0, 0, 0, 0] }
+    return [m & $FF, (m >> 8) & $FF, ((m >> 16) & $7F) | sign, e + 128]
+}
+
+// ---- Simple operations ----
+
+// dst = src.
+asm fn copy(dst: ptr F32, src: ptr F32) {
+    ldy #3
+.loop:
+    lda (src),y
+    sta (dst),y
+    dey
+    bpl .loop
+}
+
+// p = -p. 0 stays 0.
+asm fn neg(p: ptr F32) {
+    ldy #3
+    lda (p),y
+    beq .done
+    dey
+    lda (p),y
+    eor #$80
+    sta (p),y
+.done:
+}
+
+// p = |p|.
+asm fn abs(p: ptr F32) {
+    ldy #2
+    lda (p),y
+    and #$7F
+    sta (p),y
+}
+
+// True if p == 0.
+asm fn is_zero(p: ptr F32) -> bool using zero {
+    ldy #3
+    lda (p),y
+}
+
+// -1 if p < q, 0 if p == q, 1 if p > q.
+asm fn cmp(p: ptr F32, q: ptr F32) -> i8 {
+    // The signs, 0 counting as positive.
+    ldy #3
+    lda (p),y
+    beq .p_sign
+    dey
+    lda (p),y
+    and #$80
+.p_sign:
+    sta ws
+    ldy #3
+    lda (q),y
+    beq .q_sign
+    dey
+    lda (q),y
+    and #$80
+.q_sign:
+    cmp ws
+    bne .signs
+    // Same signs: compare the magnitudes, exponent first.
+    ldy #3
+    lda (p),y
+    cmp (q),y
+    bne .magnitude
+    tax
+    beq .equal          // both 0
+    dey
+    lda (q),y
+    and #$7F
+    sta wt
+    lda (p),y
+    and #$7F
+    cmp wt
+    bne .magnitude
+    dey
+    lda (p),y
+    cmp (q),y
+    bne .magnitude
+    dey
+    lda (p),y
+    cmp (q),y
+    bne .magnitude
+.equal:
+    lda #0
+    rts
+.magnitude:
+    // Carry set: |p| > |q|.
+    bcc .smaller
+    lda ws
+    bmi .less
+.greater:
+    lda #1
+    rts
+.smaller:
+    lda ws
+    bmi .greater
+.less:
+    lda #$FF
+    rts
+.signs:
+    lda ws
+    bmi .less
+    bpl .greater
+}
+
+// ---- Arithmetic ----
+
+// p += q.
+asm fn add(p: ptr F32, q: ptr F32) {
+    lda p
+    sta pa
+    lda p+1
+    sta pa+1
+    lda q
+    sta pb
+    lda q+1
+    sta pb+1
+    jsr unpack_b
+    jmp add_b
+}
+
+// p -= q.
+asm fn sub(p: ptr F32, q: ptr F32) {
+    lda p
+    sta pa
+    lda p+1
+    sta pa+1
+    lda q
+    sta pb
+    lda q+1
+    sta pb+1
+    jsr unpack_b
+    lda sb
+    eor #$80
+    sta sb
+    jmp add_b
+}
+
+// p *= q.
+asm fn mul(p: ptr F32, q: ptr F32) {
+    lda p
+    sta pa
+    lda p+1
+    sta pa+1
+    lda q
+    sta pb
+    lda q+1
+    sta pb+1
+    jsr unpack_b
+    beq .zero
+    jsr unpack_a
+    beq .zero
+    jmp mul_ab
+.zero:
+    jmp store_zero
+}
+
+// p /= q. Division by zero gives the largest value with the sign of p, and sets overflow.
+asm fn div(p: ptr F32, q: ptr F32) {
+    lda p
+    sta pa
+    lda p+1
+    sta pa+1
+    lda q
+    sta pb
+    lda q+1
+    sta pb+1
+    jsr unpack_a
+    jsr unpack_b
+    bne .divisor
+    jmp store_max
+.divisor:
+    lda we
+    bne .divide
+    jmp store_zero
+.divide:
+    jmp div_ab
+}
+
+// *pa = A + B, with B unpacked.
+private asm fn add_b() {
+    lda eb
+    bne .b
+    rts                 // A + 0 = A
+.b:
+    jsr unpack_a
+    bne .both
+    // A is 0: the result is B.
+    ldx #3
+.copy:
+    lda wb,x
+    sta wa,x
+    dex
+    bpl .copy
+    lda eb
+    sta we
+    lda sb
+    sta ws
+    jmp finish
+.both:
+    // Make A the larger magnitude.
+    lda we
+    cmp eb
+    bne .order
+    lda wa+3
+    cmp wb+3
+    bne .order
+    lda wa+2
+    cmp wb+2
+    bne .order
+    lda wa+1
+    cmp wb+1
+.order:
+    bcs .align
+    ldx #3
+.swap:
+    lda wa,x
+    ldy wb,x
+    sta wb,x
+    tya
+    sta wa,x
+    dex
+    bpl .swap
+    lda we
+    ldy eb
+    sta eb
+    sty we
+    lda ws
+    ldy sb
+    sta sb
+    sty ws
+.align:
+    // Shift B right by the difference of the exponents. Bits shifted out of the guard byte set its
+    // lowest bit, so that a subtraction rounds as the exact result would.
+    lda #0
+    sta wt
+    lda we
+    sec
+    sbc eb
+    tax
+    cpx #32
+    bcc .bytes
+    lda #0
+    sta wb+3
+    sta wb+2
+    sta wb+1
+    lda #1
+    sta wb
+    jmp .add
+.bytes:
+    cpx #8
+    bcc .bits
+    lda wb
+    ora wt
+    sta wt
+    lda wb+1
+    sta wb
+    lda wb+2
+    sta wb+1
+    lda wb+3
+    sta wb+2
+    lda #0
+    sta wb+3
+    txa
+    sbc #8
+    tax
+    jmp .bytes
+.bits:
+    txa
+    beq .sticky
+.bit:
+    lsr wb+3
+    ror wb+2
+    ror wb+1
+    ror wb
+    bcc .next
+    lda #1
+    sta wt
+.next:
+    dex
+    bne .bit
+.sticky:
+    lda wt
+    beq .add
+    lda wb
+    ora #1
+    sta wb
+.add:
+    lda ws
+    eor sb
+    bmi .subtract
+    clc
+    lda wa
+    adc wb
+    sta wa
+    lda wa+1
+    adc wb+1
+    sta wa+1
+    lda wa+2
+    adc wb+2
+    sta wa+2
+    lda wa+3
+    adc wb+3
+    sta wa+3
+    bcc .done
+    ror wa+3
+    ror wa+2
+    ror wa+1
+    ror wa
+    inc we
+    bne .done
+    inc we+1
+.done:
+    jmp finish
+.subtract:
+    sec
+    lda wa
+    sbc wb
+    sta wa
+    lda wa+1
+    sbc wb+1
+    sta wa+1
+    lda wa+2
+    sbc wb+2
+    sta wa+2
+    lda wa+3
+    sbc wb+3
+    sta wa+3
+    ora wa+2
+    ora wa+1
+    ora wa
+    bne .normalize
+    jmp store_zero
+.normalize:
+    jsr normalize
+    jmp finish
+}
+
+// *pa = A * B, both unpacked and not 0. Shift-and-add over the 48-bit product.
+private asm fn mul_ab() {
+    lda ws
+    eor sb
+    sta ws
+    // we = we + eb - $80
+    clc
+    lda we
+    adc eb
+    sta we
+    lda #0
+    adc #0
+    sta we+1
+    sec
+    lda we
+    sbc #$80
+    sta we
+    bcs .start
+    dec we+1
+.start:
+    // The product shifts right through wa+3..wa+1 (high) and wb+3..wb+1 (the multiplier, low).
+    lda wa+1
+    sta wc
+    lda wa+2
+    sta wc+1
+    lda wa+3
+    sta wc+2
+    lda #0
+    sta wa+1
+    sta wa+2
+    sta wa+3
+    ldx #24
+.loop:
+    lda wb+1
+    lsr
+    bcc .shift
+    clc
+    lda wa+1
+    adc wc
+    sta wa+1
+    lda wa+2
+    adc wc+1
+    sta wa+2
+    lda wa+3
+    adc wc+2
+    sta wa+3
+.shift:
+    ror wa+3
+    ror wa+2
+    ror wa+1
+    ror wb+3
+    ror wb+2
+    ror wb+1
+    dex
+    bne .loop
+    lda wb+3
+    sta wa
+    jsr normalize
+    jmp finish
+}
+
+// *pa = A / B, both unpacked and not 0. Shift-and-subtract: 32 bits of the quotient into wa.
+private asm fn div_ab() {
+    lda ws
+    eor sb
+    sta ws
+    // we = we - eb + $81: the quotient of the mantissas is from 1/2 to 2, and wa holds half of it.
+    sec
+    lda we
+    sbc eb
+    sta we
+    lda #0
+    sbc #0
+    sta we+1
+    clc
+    lda we
+    adc #$81
+    sta we
+    lda we+1
+    adc #0
+    sta we+1
+    // The remainder in wc, starting as A's mantissa.
+    lda wa+1
+    sta wc
+    lda wa+2
+    sta wc+1
+    lda wa+3
+    sta wc+2
+    lda #0
+    sta wc+3
+    ldx #32
+.loop:
+    sec
+    lda wc
+    sbc wb+1
+    sta wd
+    lda wc+1
+    sbc wb+2
+    sta wd+1
+    lda wc+2
+    sbc wb+3
+    sta wd+2
+    lda wc+3
+    sbc #0
+    bcc .shift
+    sta wc+3
+    lda wd+2
+    sta wc+2
+    lda wd+1
+    sta wc+1
+    lda wd
+    sta wc
+.shift:
+    rol wa
+    rol wa+1
+    rol wa+2
+    rol wa+3
+    asl wc
+    rol wc+1
+    rol wc+2
+    rol wc+3
+    dex
+    bne .loop
+    jsr normalize
+    jmp finish
+}
+
+// ---- Integers ----
+
+// p = v.
+asm fn from_u16(p: ptr F32, v: u16) {
+    lda p
+    sta pa
+    lda p+1
+    sta pa+1
+    lda #0
+    sta ws
+    lda v
+    ldx v+1
+    jmp from_int
+}
+
+// p = v.
+asm fn from_i16(p: ptr F32, v: i16) {
+    lda p
+    sta pa
+    lda p+1
+    sta pa+1
+    lda v+1
+    sta ws
+    bpl .positive
+    sec
+    lda #0
+    sbc v
+    tay
+    lda #0
+    sbc v+1
+    tax
+    tya
+    jmp from_int
+.positive:
+    lda v
+    ldx v+1
+    jmp from_int
+}
+
+// p toward zero. Out of range gives 0 or 65535 and sets overflow.
+asm fn to_u16(p: ptr F32) -> u16 {
+    lda p
+    sta pa
+    lda p+1
+    sta pa+1
+    lda #0
+    jmp to_unsigned
+}
+
+// p to nearest, halves away from zero. Out of range gives 0 or 65535 and sets overflow.
+asm fn round_u16(p: ptr F32) -> u16 {
+    lda p
+    sta pa
+    lda p+1
+    sta pa+1
+    lda #1
+    jmp to_unsigned
+}
+
+// p toward zero. Out of range gives -32768 or 32767 and sets overflow.
+asm fn to_i16(p: ptr F32) -> i16 {
+    lda p
+    sta pa
+    lda p+1
+    sta pa+1
+    lda #0
+    jmp to_signed
+}
+
+// p to nearest, halves away from zero. Out of range gives -32768 or 32767 and sets overflow.
+asm fn round_i16(p: ptr F32) -> i16 {
+    lda p
+    sta pa
+    lda p+1
+    sta pa+1
+    lda #1
+    jmp to_signed
+}
+
+// *pa = the magnitude in AX with the sign in ws. Exact.
+private asm fn from_int(v: u16 using AX) {
+    sta wa+2
+    stx wa+3
+    ora wa+3
+    bne .value
+    jmp store_zero
+.value:
+    lda #0
+    sta wa
+    sta wa+1
+    sta we+1
+    lda #$90            // 16 bits
+    sta we
+    jsr normalize
+    jmp finish
+}
+
+// *pa as a u16, toward zero (round 0) or to nearest (round 1).
+private asm fn to_unsigned(round: u8 using A) -> u16 {
+    pha
+    jsr unpack_a
+    pla
+    jsr int_part
+    lda wd
+    ora wd+1
+    ora wd+2
+    beq .zero
+    lda ws
+    bmi .low
+    lda wd+2
+    bne .high
+    lda wd
+    ldx wd+1
+    rts
+.zero:
+    lda #0
+    tax
+    rts
+.low:
+    lda #1
+    sta overflow
+    lda #0
+    tax
+    rts
+.high:
+    lda #1
+    sta overflow
+    lda #$FF
+    tax
+}
+
+// *pa as an i16, toward zero (round 0) or to nearest (round 1).
+private asm fn to_signed(round: u8 using A) -> i16 {
+    pha
+    jsr unpack_a
+    pla
+    jsr int_part
+    lda wd+2
+    bne .limit
+    lda ws
+    bmi .negative
+    lda wd+1
+    bmi .limit          // 32768 or more
+    lda wd
+    ldx wd+1
+    rts
+.negative:
+    lda wd+1
+    cmp #$80
+    bcc .negate
+    bne .limit
+    lda wd
+    bne .limit          // more than 32768
+.negate:
+    sec
+    lda #0
+    sbc wd
+    tay
+    lda #0
+    sbc wd+1
+    tax
+    tya
+    rts
+.limit:
+    lda #1
+    sta overflow
+    lda ws
+    bmi .min
+    lda #$FF
+    ldx #$7F
+    rts
+.min:
+    lda #0
+    ldx #$80
+}
+
+// The magnitude of A (unpacked) as an integer in wd, 3 bytes, toward zero (round 0) or to nearest,
+// halves up (round 1). wd+2 is not 0 when the integer is 65536 or more.
+private asm fn int_part(round: u8 using A) {
+    sta wt
+    lda #0
+    sta wd
+    sta wd+1
+    sta wd+2
+    lda we
+    beq .done
+    cmp #152
+    bcs .big            // 2^23 or more
+    // Shift out 152 - we bits, or one less to keep the bit that rounds.
+    lda #152
+    sec
+    sbc we
+    sec
+    sbc wt
+    tax
+    cpx #24
+    bcs .done           // below 1/2 when rounding, below 1 when not
+    lda wa+1
+    sta wd
+    lda wa+2
+    sta wd+1
+    lda wa+3
+    sta wd+2
+.bytes:
+    cpx #8
+    bcc .bits
+    lda wd+1
+    sta wd
+    lda wd+2
+    sta wd+1
+    lda #0
+    sta wd+2
+    txa
+    sbc #8
+    tax
+    jmp .bytes
+.bits:
+    txa
+    beq .round
+.bit:
+    lsr wd+2
+    ror wd+1
+    ror wd
+    dex
+    bne .bit
+.round:
+    lda wt
+    beq .done
+    inc wd
+    bne .half
+    inc wd+1
+    bne .half
+    inc wd+2
+    beq .big            // 2^24
+.half:
+    lsr wd+2
+    ror wd+1
+    ror wd
+.done:
+    rts
+.big:
+    lda #$FF
+    sta wd+2
+}
+
+// p toward zero, kept a float.
+asm fn trunc(p: ptr F32) {
+    lda p
+    sta pa
+    lda p+1
+    sta pa+1
+    jsr unpack_a
+    beq .done
+    cmp #152
+    bcs .done           // no fraction bits
+    cmp #129
+    bcs .chop
+    jmp store_zero      // below 1
+.chop:
+    jsr chop
+    jmp finish
+.done:
+}
+
+// p toward minus infinity, kept a float.
+asm fn floor(p: ptr F32) {
+    lda p
+    sta pa
+    lda p+1
+    sta pa+1
+    jsr unpack_a
+    beq .done
+    cmp #152
+    bcs .done           // no fraction bits
+    cmp #129
+    bcs .chop
+    // Below 1: 0, or -1 when negative.
+    lda ws
+    bmi .minus_one
+    jmp store_zero
+.minus_one:
+    ldy #0
+    lda #0
+    sta (pa),y
+    iny
+    sta (pa),y
+    iny
+    lda #$80
+    sta (pa),y
+    iny
+    lda #$81
+    sta (pa),y
+    rts
+.chop:
+    jsr chop
+    beq .store          // no fraction
+    lda ws
+    bpl .store
+    // Negative with a fraction: 1 more in magnitude, at the bit above the fraction.
+    lda #152
+    sec
+    sbc we
+    tax
+    ldy #1
+.find:
+    cpx #8
+    bcc .add
+    txa
+    sbc #8
+    tax
+    iny
+    jmp .find
+.add:
+    clc
+    lda wa,y
+    adc BIT,x
+    sta wa,y
+.carry:
+    bcc .store
+    iny
+    cpy #4
+    beq .over
+    lda wa,y            // carry clear after cpy
+    adc #1
+    sta wa,y
+    jmp .carry
+.over:
+    lda #$80
+    sta wa+3
+    inc we
+.store:
+    jmp finish
+.done:
+}
+
+// Clear the fraction bits of A (we from 129 to 151): the low 152 - we bits of the mantissa.
+// Returns the cleared bits ORed together, so not 0 when there was a fraction.
+private asm fn chop() -> u8 {
+    lda #0
+    sta wt
+    lda #152
+    sec
+    sbc we
+    tax
+    ldy #1
+.bytes:
+    cpx #8
+    bcc .bits
+    lda wa,y
+    ora wt
+    sta wt
+    lda #0
+    sta wa,y
+    iny
+    txa
+    sbc #8
+    tax
+    jmp .bytes
+.bits:
+    lda wa,y
+    and LOW_BITS,x
+    ora wt
+    sta wt
+    lda LOW_BITS,x
+    eor #$FF
+    and wa,y
+    sta wa,y
+    lda wt
+}
+
+// ---- Text ----
+
+// Write p at dst in decimal with `decimals` digits after the point (0 to 9; more is written as 9),
+// rounded to nearest, halves away from zero, in screen codes: a '-' for a negative value that does
+// not round to 0, the whole part without leading zeros (at least "0"), then '.' and the decimals.
+// Returns the number of characters, at most 50 (39 digits for the largest values).
+fn dec(dst: ptr u8, p: ptr F32, decimals: u8) -> u8 {
+    var d: u8 = decimals
+    if d > 9 { d = 9 }
+    var zeros: u8 = to_digits(p, d)
+    // The highest digit that is not 0.
+    var top: u8 = 0
+    var nonzero = false
+    var i: u8 = 20
+    while i > 0 {
+        i -= 1
+        var b: u8 = bcd[i]
+        if b != 0 {
+            top = i << 1
+            if b >= 16 { top += 1 }
+            nonzero = true
+            break
+        }
+    }
+    // The digits after the point that are in bcd: d, or none when they are the zeros added below.
+    var point: u8 = d - zeros
+    if top < point { top = point }
+    var count: u8 = 0
+    if nonzero && ws >= $80 {
+        dst[0] = TEXT[10]
+        count = 1
+    }
+    for k in 0..=top {
+        var pos: u8 = top - k
+        var b: u8 = bcd[pos >> 1]
+        if (pos & 1) != 0 { b = b >> 4 }
+        dst[count] = TEXT[b & 15]
+        count += 1
+        if pos == point && point != 0 {
+            dst[count] = TEXT[11]
+            count += 1
+        }
+    }
+    if zeros != 0 {
+        dst[count] = TEXT[11]
+        count += 1
+        for _ in 0..zeros {
+            dst[count] = TEXT[0]
+            count += 1
+        }
+    }
+    return count
+}
+
+// The packed decimal digits of round(|p| * 10^d) in bcd, or of |p| when it has no fraction bits
+// (2^23 or more); the sign in ws. Returns the number of zeros to write after the point: d when the
+// digits are of |p|, else 0.
+private asm fn to_digits(p: ptr F32, d: u8) -> u8 {
+    lda p
+    sta pa
+    lda p+1
+    sta pa+1
+    lda #0
+    sta wz
+    ldx #19
+.clear_bcd:
+    sta bcd,x
+    dex
+    bpl .clear_bcd
+    ldx #15
+.clear_big:
+    sta big,x
+    dex
+    bpl .clear_big
+    jsr unpack_a
+    bne .value
+    lda #0
+    rts
+.value:
+    lda wa+1
+    sta big
+    lda wa+2
+    sta big+1
+    lda wa+3
+    sta big+2
+    lda we
+    cmp #152
+    bcc .fraction
+    // A whole number: shift left by we - 152 (0 to 103), then the d zeros are written after the point.
+    lda d
+    sta wz
+    lda we
+    sbc #152
+    tax
+.left_bytes:
+    cpx #8
+    bcc .left_bits
+    ldy #15
+.up:
+    lda big-1,y
+    sta big,y
+    dey
+    bne .up
+    sty big
+    txa
+    sbc #8
+    tax
+    jmp .left_bytes
+.left_bits:
+    txa
+    bne .left_count
+    jmp .convert
+.left_count:
+    stx wn
+.left_bit:
+    ldx #0
+    ldy #16
+    clc
+.rol16:
+    rol big,x
+    inx
+    dey
+    bne .rol16
+    dec wn
+    bne .left_bit
+    jmp .convert
+.fraction:
+    // big = M * 10^d, below 2^54 in 8 bytes.
+    lda d
+    beq .right
+    sta wn
+.times10:
+    ldx #0
+    ldy #8
+    clc
+.x2:
+    rol big,x
+    inx
+    dey
+    bne .x2
+    ldx #7
+.keep:
+    lda big,x
+    sta big+8,x
+    dex
+    bpl .keep
+    ldx #0
+    ldy #8
+    clc
+.x4:
+    rol big,x
+    inx
+    dey
+    bne .x4
+    ldx #0
+    ldy #8
+    clc
+.x8:
+    rol big,x
+    inx
+    dey
+    bne .x8
+    ldx #0
+    ldy #8
+    clc
+.plus:
+    lda big,x
+    adc big+8,x
+    sta big,x
+    inx
+    dey
+    bne .plus
+    dec wn
+    bne .times10
+    ldx #7
+    lda #0
+.clear_high:
+    sta big+8,x
+    dex
+    bpl .clear_high
+.right:
+    // Shift right by 152 - we (1 to 151): by all but one bit, then by the bit that rounds.
+    lda #152
+    sec
+    sbc we
+    tax
+    dex
+    cpx #64
+    bcc .right_bytes
+    ldx #7
+    lda #0
+.clear_low:
+    sta big,x
+    dex
+    bpl .clear_low
+    jmp .convert
+.right_bytes:
+    cpx #8
+    bcc .right_bits
+    ldy #0
+.down:
+    lda big+1,y
+    sta big,y
+    iny
+    cpy #7
+    bne .down
+    lda #0
+    sta big+7
+    txa
+    sec
+    sbc #8
+    tax
+    jmp .right_bytes
+.right_bits:
+    inx
+    stx wn
+.right_bit:
+    ldx #7
+    clc
+.ror8:
+    ror big,x
+    dex
+    bpl .ror8
+    dec wn
+    bne .right_bit
+    // The carry is the bit below the last digit: halves round up.
+    ldx #0
+    ldy #8
+.round:
+    lda big,x
+    adc #0
+    sta big,x
+    inx
+    dey
+    bne .round
+.convert:
+    // The bytes of big that are not 0, and the bcd bytes their digits need: n + (n + 3) / 4.
+    ldx #16
+.size:
+    lda big-1,x
+    bne .found
+    dex
+    bne .size
+    lda wz
+    rts
+.found:
+    stx wn
+    txa
+    clc
+    adc #3
+    lsr
+    lsr
+    clc
+    adc wn
+    sta wm
+    lda wn
+    asl
+    asl
+    asl
+    sta wt              // 8 bits a byte, at most 128
+.bcd_bit:
+    ldx #0
+    ldy wn
+    clc
+.shift:
+    rol big,x
+    inx
+    dey
+    bne .shift
+    ldx #0
+    ldy wm
+    sed
+.double:
+    lda bcd,x
+    adc bcd,x
+    sta bcd,x
+    inx
+    dey
+    bne .double
+    cld
+    dec wt
+    bne .bcd_bit
+    lda wz
+}
+
+// ---- Shared steps ----
+
+// Unpack *pa into wa, we and ws. Ends with the exponent in A and Z set when the value is 0.
+private asm fn unpack_a() {
+    ldy #0
+    sty wa
+    sty we+1
+    lda (pa),y
+    sta wa+1
+    iny
+    lda (pa),y
+    sta wa+2
+    iny
+    lda (pa),y
+    sta ws
+    ora #$80
+    sta wa+3
+    iny
+    lda (pa),y
+    sta we
+}
+
+// Unpack *pb into wb, eb and sb. Ends with the exponent in A and Z set when the value is 0.
+private asm fn unpack_b() {
+    ldy #0
+    sty wb
+    lda (pb),y
+    sta wb+1
+    iny
+    lda (pb),y
+    sta wb+2
+    iny
+    lda (pb),y
+    sta sb
+    ora #$80
+    sta wb+3
+    iny
+    lda (pb),y
+    sta eb
+}
+
+// Shift wa left until its top bit is set, taking 1 from we for each bit. wa is not 0.
+private asm fn normalize() {
+.bytes:
+    lda wa+3
+    bne .bits
+    lda wa+2
+    sta wa+3
+    lda wa+1
+    sta wa+2
+    lda wa
+    sta wa+1
+    lda #0
+    sta wa
+    sec
+    lda we
+    sbc #8
+    sta we
+    bcs .bytes
+    dec we+1
+    jmp .bytes
+.bits:
+    bmi .done
+.bit:
+    asl wa
+    rol wa+1
+    rol wa+2
+    rol wa+3
+    lda we
+    bne .low
+    dec we+1
+.low:
+    dec we
+    lda wa+3
+    bpl .bit
+.done:
+}
+
+// Round wa to 24 bits on its guard byte, check the exponent, and store the result at pa.
+// wa is normalized.
+private asm fn finish() {
+    lda wa
+    bpl .range
+    inc wa+1
+    bne .range
+    inc wa+2
+    bne .range
+    inc wa+3
+    bne .range
+    lda #$80
+    sta wa+3
+    inc we
+    bne .range
+    inc we+1
+.range:
+    lda we+1
+    bmi .zero
+    bne .max
+    lda we
+    beq .zero
+    ldy #3
+    sta (pa),y
+    dey
+    lda wa+3
+    asl
+    asl ws
+    ror
+    sta (pa),y
+    dey
+    lda wa+2
+    sta (pa),y
+    dey
+    lda wa+1
+    sta (pa),y
+    rts
+.zero:
+    jmp store_zero
+.max:
+    jmp store_max
+}
+
+// *pa = 0.
+private asm fn store_zero() {
+    lda #0
+    ldy #3
+.loop:
+    sta (pa),y
+    dey
+    bpl .loop
+}
+
+// *pa = the largest value with the sign in ws, and set overflow.
+private asm fn store_max() {
+    lda #1
+    sta overflow
+    ldy #3
+    lda #$FF
+    sta (pa),y
+    dey
+    lda ws
+    ora #$7F
+    sta (pa),y
+    dey
+    lda #$FF
+    sta (pa),y
+    dey
+    sta (pa),y
+}
