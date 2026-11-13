@@ -135,7 +135,80 @@ public class RunToolTests
     {
         var (_, run) = RunSource("import io\nfn main() { io.clrchn() }");
         Assert.False(run.Returned);
-        Assert.Equal("reached $FFCC in ROM, which the emulator does not have (stand-ins: CHROUT $FFD2, GETIN $FFE4, PLOT $FFF0)", run.Stop);
+        Assert.Equal("reached $FFCC in ROM, which the emulator does not have (stand-ins: CHROUT $FFD2, GETIN $FFE4, PLOT $FFF0, SETNAM $FFBD, SETLFS $FFBA, LOAD $FFD5)", run.Stop);
+    }
+
+    /// <summary>A program with one overlay, level1, at $6000, built in a temporary folder and run.</summary>
+    private static (CompileResult Program, RunResult Run) RunWithOverlay(string main)
+    {
+        var dir = Directory.CreateTempSubdirectory("tern");
+        try
+        {
+            File.WriteAllText(Path.Combine(dir.FullName, "level1.tern"), "data MARK: [u8; 3] = [7, 8, 9]\nfn first() -> u8 using A { return MARK[0] }");
+            var path = Path.Combine(dir.FullName, "main.tern");
+            var program = TernCompiler.Compile(main, sourcePath: path);
+            return (program, Runner.Run(program));
+        }
+        finally { dir.Delete(recursive: true); }
+    }
+
+    private const string OverlayHeader = """
+        import c64
+        import io
+        import level1 @ levels
+        memory {
+            $0801..=$5FFF  program
+            $6000..=$6FFF  overlay levels
+        }
+        """;
+
+    [Fact]
+    public void Load_reads_the_overlay_whose_name_in_capitals_is_the_file_name()
+    {
+        var (program, run) = RunWithOverlay($$"""
+            {{OverlayHeader}}
+            data NAME = "LEVEL1"
+            var failed: bool = true
+            var got: u8
+            fn main() {
+                failed = c64.load(addr(NAME), len(NAME), 8)
+                got = level1.first()
+            }
+            """);
+        Assert.True(run.Returned);
+        Assert.Equal(0, run.Ram.Bytes[program.Symbols["failed"]]);
+        Assert.Equal(7, run.Ram.Bytes[program.Symbols["got"]]);
+    }
+
+    [Fact]
+    public void Load_of_a_name_that_is_not_an_overlay_fails_with_carry_set()
+    {
+        var (program, run) = RunWithOverlay($$"""
+            {{OverlayHeader}}
+            data NAME = "LEVEL9"
+            var failed: bool
+            fn main() { failed = c64.load(addr(NAME), len(NAME), 8) }
+            """);
+        Assert.True(run.Returned);
+        Assert.Equal(1, run.Ram.Bytes[program.Symbols["failed"]]);
+        Assert.Equal(0, run.Ram.Bytes[0x6000]);
+    }
+
+    [Fact]
+    public void Load_with_secondary_address_0_puts_the_file_at_the_address_given()
+    {
+        var (program, run) = RunWithOverlay($$"""
+            {{OverlayHeader}}
+            data NAME = "LEVEL1"
+            var failed: bool = true
+            var keep: u16 = addr(level1.first)      // keeps level1 in the build without calling it at $6000
+            fn main() { failed = io.load(addr(NAME), len(NAME), 8, $7000 as ptr u8) }
+            """);
+        Assert.True(run.Returned);
+        Assert.Equal(0, run.Ram.Bytes[program.Symbols["failed"]]);
+        var file = program.Overlays.Single();
+        Assert.Equal(file.Image, run.Ram.Bytes[0x7000..(0x7000 + file.Image.Length)]);
+        Assert.Equal(0, run.Ram.Bytes[0x6000]);
     }
 
     [Fact]

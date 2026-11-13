@@ -42,8 +42,8 @@ with single quotes: `$C000` in double quotes is a shell variable.
 
 The emulator is a 6502 with plain RAM: there is no VIC-II, SID or CIA, so a hardware register reads
 back what was last written (the joystick reads 0, which means every direction pressed, unless
-`--set '$DC00=$FF'` gives it a value) and a wait for a raster line never ends. CHROUT, GETIN and PLOT work (printing goes to the screen at `$0400`);
-any other KERNAL call stops the run. Keep game logic in functions that take their inputs as
+`--set '$DC00=$FF'` gives it a value) and a wait for a raster line never ends. CHROUT, GETIN and PLOT work (printing goes to the screen at `$0400`),
+and `c64.load` loads the program's own overlay files ("LEVEL1" is `level1.prg`); any other KERNAL call stops the run. Keep game logic in functions that take their inputs as
 parameters, so that it can be run and measured (`sprite.md` shows how). Check the finished program
 in VICE: `x64sc -autostart game.prg`.
 

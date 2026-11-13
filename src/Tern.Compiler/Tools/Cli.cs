@@ -44,7 +44,7 @@ public static class Cli
         tern run <file.tern> compiles the program and runs it in the built-in emulator until
         main returns, then prints the cycles taken and the registers. Memory is plain RAM (no
         VIC-II, SID or CIA); CHROUT, GETIN and PLOT have stand-ins, other ROM calls stop the run.
-        Only the program file is loaded: overlays are not, so a call into one stops at a brk.
+        SETNAM, SETLFS and LOAD load the program's own overlay files ("LEVEL1" is level1.prg).
         The emulator reports an array index outside its array and an 'indexed match' value
         outside its span, with the source line (a match value outside stops the run). Exit
         code: 0 when main returned, 2 when it did not, 3 when it did but an index was outside.

@@ -1,0 +1,10 @@
+// The interface of the stages example (stages.tern). Every stage offers these entries at these
+// addresses, so the main program calls whichever stage is loaded without knowing which.
+// 'import stage1 @ stages implements stage_api' puts a jmp at each address in stage1's file.
+
+fn enter(lives: u8 using A) @ $6000
+fn draw() @ $6003
+fn score() -> u8 using A @ $6006
+
+// Data every stage provides at the same place: its name, in screen codes.
+volatile var title: [u8; 8] @ $6009

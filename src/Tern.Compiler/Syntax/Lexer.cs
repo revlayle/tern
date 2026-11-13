@@ -51,7 +51,7 @@ public enum TokenKind
 
     // Keywords
     Const, Var, Data, Fn, Return, If, Else, While, For, In, Using, Break, Continue,
-    True, False, As, Zp, Struct, Match, Bank, Linear, Inline, Interrupt, Asm, Noinit, Keeps, Import, Private, Volatile, Module, Assert, Export,
+    True, False, As, Zp, Struct, Match, Bank, Linear, Inline, Interrupt, Asm, Noinit, Keeps, Import, Private, Volatile, Module, Assert, Export, Implements,
 
     // Punctuation and operators
     LParen, RParen, LBracket, RBracket, LBrace, RBrace, Comma, Colon, Semicolon,
@@ -80,7 +80,7 @@ public static class Lexer
 
     public static bool IsRawByte(char c) => c >= RawByteBase && c <= RawByteBase + 0xFF;
 
-    public static bool IsKeyword(TokenKind kind) => kind >= TokenKind.Const && kind <= TokenKind.Export;
+    public static bool IsKeyword(TokenKind kind) => kind >= TokenKind.Const && kind <= TokenKind.Implements;
 
     private static readonly Dictionary<string, TokenKind> Keywords = new()
     {
@@ -95,6 +95,7 @@ public static class Lexer
         ["interrupt"] = TokenKind.Interrupt, ["asm"] = TokenKind.Asm, ["noinit"] = TokenKind.Noinit,
         ["keeps"] = TokenKind.Keeps, ["import"] = TokenKind.Import, ["private"] = TokenKind.Private,
         ["volatile"] = TokenKind.Volatile, ["module"] = TokenKind.Module, ["assert"] = TokenKind.Assert, ["export"] = TokenKind.Export,
+        ["implements"] = TokenKind.Implements,
     };
 
     // Longest operators first, so "<<=" wins over "<<" and "<".

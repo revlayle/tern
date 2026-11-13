@@ -1,0 +1,57 @@
+// Overlay interfaces (spec 8.5): two stages implement one interface, stage_api, and are loaded in turn.
+//
+// play() is the same code for every stage: it calls stage_api.enter, draw and score (each a jsr to
+// a fixed address in the overlay area) and reads stage_api.title, which every stage provides as data
+// at $6009. Whichever stage file is loaded answers. The stages' frames share memory, as for any two
+// functions that never run at the same time.
+//
+// To try it in the built-in emulator (it loads the stages' files itself):
+//   dotnet run --project src/Tern.Cli -- run examples/stages.tern --screen
+// In VICE:
+//   dotnet run --project src/Tern.Cli -- examples/stages.tern
+//   c1541 -format stages,01 d64 examples/stages.d64 -write examples/stages.prg stages
+//         -write examples/stage1.prg stage1 -write examples/stage2.prg stage2
+//   x64sc -default -warp -autostart examples/stages.d64
+//
+// Result: "FOREST" and the score 5 on the top row, then trees; "LAKE" and 7 in the middle, then water.
+// stage1 is loaded a second time at the end: its file sets 'trees' back to 1, so its score is 5 again.
+import c64
+import stage_api
+import stage1 @ stages implements stage_api
+import stage2 @ stages implements stage_api
+
+memory {
+    $0801..=$5FFF  program
+    $6000..=$7FFF  overlay stages
+}
+
+data NAME1 = "STAGE1"
+data NAME2 = "STAGE2"
+
+var scores: [u8; 3]
+
+fn load(name: ptr u8, n: u8) {
+    if c64.load(name, n, 8) {
+        c64.vic.border = c64.RED        // loading failed
+        while true { }
+    }
+}
+
+// Play the loaded stage, whichever it is, and show its title and score on the given row.
+fn play(row: ptr u8) -> u8 {
+    stage_api.enter(3)
+    stage_api.draw()
+    for i in 0..8 { row[i] = stage_api.title[i] }
+    var score = stage_api.score()
+    row[9] = screen'0' + score
+    return score
+}
+
+fn main() {
+    load(addr(NAME1), len(NAME1))
+    scores[0] = play($0400 as ptr u8)
+    load(addr(NAME2), len(NAME2))
+    scores[1] = play($0400 as ptr u8 + 480)
+    load(addr(NAME1), len(NAME1))
+    scores[2] = play($0400 as ptr u8)
+}

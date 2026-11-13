@@ -60,15 +60,16 @@ public sealed record RunResult(
 /// emulated, so their registers read back what was written. The screen starts cleared (spaces). A few
 /// KERNAL routines have stand-ins that take no cycles: CHROUT ($FFD2) prints to the screen and to
 /// <see cref="RunResult.Output"/>, GETIN ($FFE4) returns 0 (no key), PLOT ($FFF0) sets or reads the
-/// cursor. Reaching any other ROM address stops the run. Only the program file is loaded, not its
-/// overlays (the KERNAL LOAD that loads them has no stand-in), so a call into an overlay stops at a brk.
+/// cursor. SETNAM ($FFBD), SETLFS ($FFBA) and LOAD ($FFD5) load the build's own overlay files: the one whose
+/// module name, in capitals, is the file name (<c>c64.load</c> with "LEVEL1" loads level1.prg); any other
+/// name fails with carry set, as for a file not on the disk. Reaching any other ROM address stops the run.
 /// Array indexes and <c>indexed match</c> values are checked (<see cref="IndexChecker"/>); a match
 /// value outside its span stops the run, since its jump goes to an address no one chose.
 /// </summary>
 public static class Runner
 {
     public const int Screen = 0x0400, Columns = 40, Rows = 25;
-    private const int Chrout = 0xFFD2, Getin = 0xFFE4, Plot = 0xFFF0;
+    private const int Chrout = 0xFFD2, Getin = 0xFFE4, Plot = 0xFFF0, Setnam = 0xFFBD, Setlfs = 0xFFBA, Load = 0xFFD5;
 
     public static RunResult Run(CompileResult program, RunOptions? options = null)
     {
@@ -93,6 +94,8 @@ public static class Runner
         var profile = new Profile();
         var output = new StringBuilder();
         var cursor = (Row: 0, Column: 0);
+        string fileName = "";
+        int secondary = 0;
         var calls = new Dictionary<string, (long Calls, long Cycles)>();
         var active = new Stack<(string Name, int Sp, long Start)>();
         long? mainStart = null;
@@ -115,7 +118,7 @@ public static class Runner
             int pc = cpu.PC;
             if (pc >= 0xA000 && !(pc is >= 0xC000 and < 0xD000) && !InProgram(pc))
             {
-                if (pc is Chrout or Getin or Plot)
+                if (pc is Chrout or Getin or Plot or Setnam or Setlfs or Load)
                 {
                     StandIn(pc);
                     // Return as rts would.
@@ -125,7 +128,7 @@ public static class Runner
                     Left();
                     continue;
                 }
-                stop = $"reached ${pc:X4} in ROM, which the emulator does not have (stand-ins: CHROUT $FFD2, GETIN $FFE4, PLOT $FFF0)";
+                stop = $"reached ${pc:X4} in ROM, which the emulator does not have (stand-ins: CHROUT $FFD2, GETIN $FFE4, PLOT $FFF0, SETNAM $FFBD, SETLFS $FFBA, LOAD $FFD5)";
                 break;
             }
             byte opcode = ram.Bytes[pc];
@@ -169,6 +172,22 @@ public static class Runner
             {
                 case Chrout: Print(cpu.A); cpu.C = false; break;
                 case Getin: cpu.A = 0; cpu.Z = true; cpu.N = false; cpu.C = false; break;
+                case Setnam:
+                    fileName = string.Concat(Enumerable.Range(0, cpu.A).Select(i => (char)ram.Bytes[(cpu.X | cpu.Y << 8) + i & 0xFFFF]));
+                    return;
+                case Setlfs: secondary = cpu.Y; return;
+                case Load:
+                {
+                    // The build's overlays are the disk. Secondary address 0 loads to X/Y; X/Y return the end.
+                    var file = program.Overlays.FirstOrDefault(o => o.Name.ToUpperInvariant() == fileName);
+                    cpu.C = file is null;
+                    if (file is null) return;
+                    int at = secondary == 0 ? cpu.X | cpu.Y << 8 : file.LoadAddress;
+                    ram.Load((ushort)at, file.Image);
+                    int end = at + file.Image.Length;
+                    (cpu.X, cpu.Y) = ((byte)end, (byte)(end >> 8));
+                    return;
+                }
                 default:
                     if (cpu.C) { cpu.X = (byte)cursor.Row; cpu.Y = (byte)cursor.Column; }
                     else cursor = (Math.Min((int)cpu.X, Rows - 1), Math.Min((int)cpu.Y, Columns - 1));

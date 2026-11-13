@@ -197,12 +197,13 @@ public sealed partial class Checker
 
     /// <summary>
     /// The functions reachable from main, then from each interrupt handler, then from each function
-    /// whose address is taken; callers first. Handlers are roots: those of the main file, and those
+    /// whose address is taken, then from each function an overlay's interface table points to that no
+    /// root reaches (spec 8.5); callers first. Handlers are roots: those of the main file, and those
     /// a compiled function names (to install them). Each function records the roots it is reached
     /// from (<see cref="FunctionSymbol.Roots"/>); one reached from two roots gets a frame that
     /// overlaps no other (spec 8.1).
     /// </summary>
-    private static List<FunctionSymbol> OrderRoots(FunctionSymbol main, Module mainModule)
+    private static List<FunctionSymbol> OrderRoots(FunctionSymbol main, Module mainModule, List<FunctionSymbol> tableTargets)
     {
         var all = new List<FunctionSymbol>();
         var seen = new HashSet<FunctionSymbol>();
@@ -240,11 +241,19 @@ public sealed partial class Checker
             }
         }
         // Main and the handlers first, then the address-taken functions, whose callers are unknown.
-        for (int r = 0, a = 0; r < roots.Count || a < addressTaken.Count;)
+        int r = 0, a = 0;
+        void AddAll()
         {
-            if (r < roots.Count) Add(roots[r++], isRoot: true);
-            else Add(addressTaken[a++], isRoot: false);
+            while (r < roots.Count || a < addressTaken.Count)
+            {
+                if (r < roots.Count) Add(roots[r++], isRoot: true);
+                else Add(addressTaken[a++], isRoot: false);
+            }
         }
+        AddAll();
+        // An implementation that no call through its interface reaches is still in its table.
+        foreach (var f in tableTargets.Where(f => !seen.Contains(f) && !addressTaken.Contains(f))) addressTaken.Add(f);
+        AddAll();
         return all;
     }
 
@@ -252,7 +261,7 @@ public sealed partial class Checker
     /// An interrupt fn is a part if a function that is compiled calls it (spec 6.3). Callers that are
     /// never compiled, such as a module's handler that nothing installs, do not count.
     /// </summary>
-    private static void MarkParts(FunctionSymbol main, Module mainModule)
+    private static void MarkParts(FunctionSymbol main, Module mainModule, List<FunctionSymbol> tableTargets)
     {
         var visited = new HashSet<FunctionSymbol>();
         var compiled = new HashSet<FunctionSymbol>();
@@ -270,6 +279,7 @@ public sealed partial class Checker
         void Compiled(FunctionSymbol f) { if (compiled.Add(f)) Visit(f); }
         void Named(FunctionSymbol f) { if (f.IsInterrupt) Compiled(f); else Visit(f); }
         Visit(main);
+        foreach (var f in tableTargets) Visit(f);
         foreach (var f in mainModule.Scope.Values.OfType<FunctionSymbol>().Where(f => f.IsInterrupt)) Compiled(f);
         foreach (var g in mainModule.Scope.Values.OfType<VariableSymbol>())
             foreach (var f in GlobalsNamedBy(g).SelectMany(t => t.FunctionAddresses)) Named(f);

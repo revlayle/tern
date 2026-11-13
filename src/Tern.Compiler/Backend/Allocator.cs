@@ -290,11 +290,22 @@ public static class Allocator
         int end = 0;
         // A shared function's callees are reached from its roots too, so they are shared and follow it.
         bool PlacedLast(FunctionSymbol f) => f.Isolated || f.Roots.Count > 1;
+
+        // A routine at a fixed address has no frame; it may be called from main and from handlers.
+        // One with implementations (spec 8.5) follows its callers, so that the implementations do too;
+        // a caller of another root comes later, but then the implementations have two roots and are placed last.
+        int RoutineOffset(FunctionSymbol routine)
+        {
+            if (routine.Callees.Count == 0) return 0;
+            var placed = callers[routine].Where(offsets.ContainsKey).ToList();
+            return placed.Count == 0 ? 0 : placed.Max(c => offsets[c] + size(c));
+        }
+
         foreach (var f in callersFirst.Where(f => !PlacedLast(f)).Concat(callersFirst.Where(PlacedLast)))
         {
-            // A routine at a fixed address has no frame; it may be called from main and from handlers.
             offsets[f] = (f.IsInterrupt && !f.IsPart) || PlacedLast(f) ? end
-                : f.FixedAddress is not null || callers[f].Count == 0 ? 0
+                : f.FixedAddress is not null ? RoutineOffset(f)
+                : callers[f].Count == 0 ? 0
                 : callers[f].Max(c => offsets[c] + size(c));
             end = Math.Max(end, offsets[f] + size(f));
         }

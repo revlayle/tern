@@ -4,11 +4,27 @@ Owned by the coding session. Updated at the end of every coding session.
 
 ## Current
 
-- **Milestone:** `for _` follow-up (roadmap "`for _` follow-up"; spec 5.1, 11; decision 118). Done and reviewed (`docs/reviews/for-followup.md`: ready to merge; suggestion 1 done, note 2 needs no change).
-- **Branch:** `for-followup`, from `main` at `1b991c1`. 3224 compiler tests pass plus 36 CPU tests. No benchmark changed (1254 / 350780); `SkillTests` pass (two skill outputs rewritten, see below).
-- **Next step:** `/merge for-followup`. After this: `implements`, encodings, M24.
+- **Milestone:** Overlay interfaces: `implements` (roadmap; spec 8.5 "Interfaces: `implements`"; decisions 2026-11-12, 119-122). Done; review findings 1 and 3 done, 2 is question 123. Ready for `/review` again.
+- **Branch:** `implements`, from `main` at `76a378e`, `main` merged in at `c1266da` (the review). 3270 compiler tests pass plus 36 CPU tests. No benchmark changed (1254 / 350780); `SkillTests` pass.
+- **Next step:** `/review implements` (re-review of must-fix 1). After this: encodings, M24.
 
 ## Done
+
+- **`implements`, first review** (2026-11-12, `docs/reviews/implements.md`): not ready to merge, decision 120 not built.
+  - Must-fix 1 (`186771b`): inside a module that implements an interface, the interface's volatile variable matching the module's data is an error, "'level_api.header' is this module's data 'header'. Use 'header'" (decision 120, spec 8.5). `CheckImplements` records each match by module and variable (`_moduleData`); `CheckNotBinaryData`, called from `UseGlobal`, which every use goes through, reports it when the file being checked is that module. Resident code and the interface's own functions keep naming it. Tests: a read with an index, a write, `addr()`, an asm operand (each at the name), and resident code plus an interface helper called from main and from a level.
+  - Suggestion 2 (an interface module placed in an overlay): question 123.
+  - Suggestion 3 (`f2f95a4`): `Allocator.FrameOffsets` puts a routine's offset in a local function `RoutineOffset`; no change in behavior.
+
+- **Overlay interfaces: `implements`** (2026-11-12, branch `implements`). Five commits.
+  - *Syntax* (`c813b22`): `implements` is a keyword; `import m @ area implements a, b` fills `ImportDecl.Implements`.
+  - *Checks* (`Semantics/Checker.Implements.cs`): for each interface, `Implement` matches every routine at a fixed address of the interface module to the module's function of the same name, as `MatchInterface` does for `export level_api` (12.3): same register parameters and return (`Signature.Matches`), not inline or interrupt (`CheckExportable`), no fixed inputs, routines 3 bytes apart and inside the module's area; each `volatile` fixed variable of the interface needs `data` of the same name, type and address in the module, inside the area. `setup` is not required. Errors: `implements` on a module not placed in an overlay (also on a module's import), an interface the main file does not import, a name given twice, an interface with no routines at a fixed address, tables of two interfaces overlapping. Each match is an `Implementation` in `CheckedProgram.Implementations`.
+  - *Call graph*: each implementation is a callee of its routine (`routine.Callees`), so a call to `level_api.update()` reaches `level1.update` and `level2.update`: frames, roots, the two-roots report and recursion (`level1.update` calling `level_api.update`) all follow. An implementation that no call reaches is still compiled (`OrderRoots` adds it as an address-taken function; `MarkParts` visits it). `Allocator.FrameOffsets` placed a routine at offset 0 (it has no frame); one with implementations now follows its callers already placed (`385c100`), else the implementations shared memory with the function calling the interface. Callers from another root come later, but then the implementations have two roots and are placed last.
+  - *Warnings*: the implementing import and the interface import count as used; the implementing functions and data count as named. The matched data is always in the overlay's file (`_tableData`), even when no code names it.
+  - *Backend* (`TernCompiler.Build`): one fixed section per entry, named `level_api.update`, at the routine's address in the module's overlay (`SectionStart(..., Overlay: module)`), holding `jmp level1.update`; the assembler places the module's code around it, as around fixed data. Fixed data of the module over an entry gets the assembler's overlap error. After code generation, `RegisterUse` checks that no implementation changes a register its routine `keeps`.
+  - *`tern run`* (`ca238d4`): stand-ins for SETNAM, SETLFS and LOAD load the build's own overlay files, the one whose module name in capitals is the file name; another name fails with carry set; secondary address 0 loads to X/Y. Before, a program with overlays could not be run. The ROM stop message lists the new stand-ins.
+  - *Example*: `examples/stages.tern` with `stage_api.tern`, `stage1.tern`, `stage2.tern`: `play()` calls only `stage_api` (three entries and a title every stage provides as data at `$6009`); stages loaded in turn and stage1 again. Checked in `tern run` (a test) and in VICE (screen: "FOREST 5" over trees, "LAKE 7" over water).
+  - *Skill*: `language.md` section 12 has a bullet on overlays and `implements`; `SKILL.md` says `c64.load` works in `tern run`.
+  - Tests: `ImplementsTests` (38): calls through the interface reach the loaded overlay, the table's bytes, entries with gaps and code around them, a plain call next to an interface call, an uncalled interface, frames shared with other code and not with the caller, a function called from an implementation and main, the two-roots report, recursion, volatile data, two interfaces, `keeps` relied on in a `using X` loop, the example, each error. `RunToolTests` (3 more): LOAD by name, a missing file, secondary address 0.
 
 - **`for _` follow-up, review** (2026-11-12, `docs/reviews/for-followup.md`): ready to merge. Suggestion 1: `UnderscoreLoopTests` also has signed ranges (`-5..5`, `-128..=127`, `-1..=-10 step -1`, which take the repeat path too) and two nested-loop bodies (`for _ in 0..3`, a `while`): 280 cases, all pass. Note 2 (a constant count of 0 compiles to no code for both spellings): no change.
 
@@ -583,7 +599,7 @@ Including `jsr` and `rts`; from the tests.
 - `using X` with a call in the loop suggests removing `using X` but not why an `inline fn` does not help.
 - `tern run` has no KERNAL, so a program using `c64.set_kernal_irq` can be checked only in VICE (the tests put the KERNAL's IRQ entry bytes at `$FF48`).
 - The skill's outputs include addresses and cycles, so a code generator or library change that moves code fails `SkillTests` until `TERN_UPDATE_SKILL=1 dotnet test --filter SkillTests` rewrites them (read the diff: a prose claim next to an output may need changing too). Listing excerpts (```` ```lst ````) are updated by hand. Question 74 asks for this as a CLAUDE.md convention.
-- `tern run` / `tern bench` (M19): memory is plain RAM, so the VIC-II, SID and CIAs are not emulated (a raster wait never ends; the cycle limit stops it). The KERNAL stand-ins (CHROUT, GETIN, PLOT) take no cycles; any other ROM call stops the run, so overlays (loaded with KERNAL LOAD) cannot be run. A dumped local may not hold its last value: the compiler may keep it in a register or remove stores nobody reads.
+- `tern run` / `tern bench` (M19): memory is plain RAM, so the VIC-II, SID and CIAs are not emulated (a raster wait never ends; the cycle limit stops it). The KERNAL stand-ins (CHROUT, GETIN, PLOT, and SETNAM, SETLFS, LOAD for the build's overlay files) take no cycles; any other ROM call stops the run. The run profile names a function by its address, so two overlays' functions at the same address are counted under one name. A dumped local may not hold its last value: the compiler may keep it in a register or remove stores nobody reads.
 - The source map gives an instruction to the last source line before it in the listing. Code the optimizer moves (a store sunk out of a loop) counts under the line it lands after.
 - `Diagnostic.Split` finds a suggestion only after a sentence that starts with a fix verb (question 69).
 - An `indexed match` on a value already held in X or Y (a loop counter), with a lowest value of 0, copies it through A (`txa` / `tay`) instead of indexing with that register (review M19, suggestion 4: 4 cycles, 2 bytes). Matches spec 11 as written.
@@ -627,6 +643,12 @@ Not bugs; things to improve, mostly in M7 (optimizer).
 - `w = addr(map) - 1` (or `+`) into a 16-bit variable stores `addr(map)` and then subtracts at run time; `CodeGen.AddressBytes` could make it two `lda #` / `sta` pairs, as it already does for `.lo` / `.hi`.
 
 ## Questions for the spec session
+
+Open, from the review of `implements` (`docs/reviews/implements.md`, suggestion 2):
+
+123. **An interface module placed in an overlay.** `import api @ lv` next to `import l1 @ lv implements api` compiles with no error about the interface. Its routines give no file, so nothing breaks; but helper functions with a body go into an overlay file in the same area, and a level calling one gets "'l1.enter' calls 'api.draw', but the modules l1 and api are both in the overlay area 'lv'", which does not point at the cause. Spec 8.5 says the interface is resident when the main file imports it, but lists no error. Proposed: an error at the `implements` name, "'api' is placed in the overlay area 'lv'; an interface must be resident. Remove '@ lv' from its import". Not built.
+
+Questions 119-122 were settled on 2026-11-12 (decisions.md): 119, 121 and 122 as built; 120 changed (a module names its own data) and is built in the review fixes.
 
 Question 118 was settled on 2026-11-12 (decisions.md) and is built in the `for _` follow-up.
 
