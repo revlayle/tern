@@ -1,0 +1,255 @@
+// Apple II with 64 KB under ProDOS 8: text on the screen, hi-res graphics, keyboard, speaker, soft
+// switches, ROM routines and the MLI.
+//
+// The ROM routines here are the monitor's documented entry points, the same on the II+, IIe, IIc and
+// IIgs. They are called directly (spec 6.6), so a call costs one jsr. The startup code leaves 40-column
+// text on page 1, a full window and the ROM's own input and output hooks.
+
+// ---------- ROM routines ----------
+
+// Print one character at the cursor through the output hook (COUT). Text in the apple2 encoding:
+// '\n' starts a new line; codes from $A0 are shown as INVFLG says (see inverse()).
+fn put(ch: u8 using A) @ $FDED keeps A, Y
+
+// Clear the text window and put the cursor at its top left (HOME).
+fn home() @ $FC58
+
+// Print a byte as two hex digits (PRBYTE).
+fn put_hex(b: u8 using A) @ $FDDA
+
+// Wait for a key, with a flashing cursor, and return its code with bit 7 set (RDKEY).
+fn read_key() -> u8 using A @ $FD0C
+
+// Sound the bell (BELL).
+fn bell() @ $FF3A
+
+// Wait about (26 + 27 t + 5 t * t) / 2 cycles, t = 0 meaning 256 (WAIT).
+fn wait(t: u8 using A) @ $FCA8
+
+// ---------- The MLI (ProDOS's machine language interface) ----------
+
+const MLI_QUIT = $65
+const MLI_CLOSE = $CC
+
+// Make an MLI call: `command` with its parameter list at `parameters`. Returns ProDOS's error code,
+// 0 for success. The MLI expects the command and the list's address in the 3 bytes after its jsr,
+// so this writes them there before the call.
+asm fn mli(command: u8 using A, parameters: u16 using XY) -> u8 using A {
+    sta .call+3
+    stx .call+4
+    sty .call+5
+.call:
+    jsr $BF00
+    bit $FFFF                       // replaced by the command and the parameters' address
+    rts
+}
+
+private data CLOSE_ALL: [u8; 2] = [1, 0]                       // reference number 0: every open file
+private data QUIT_STANDARD: [u8; 7] = [4, 0, 0, 0, 0, 0, 0]
+
+// Quit to ProDOS, which starts its program selector: close every file, make reset no longer come
+// back to the program (the power-up byte, $03F4), and make the MLI's QUIT call.
+asm fn exit() {
+    lda #MLI_CLOSE
+    ldx #CLOSE_ALL.lo
+    ldy #CLOSE_ALL.hi
+    jsr mli
+    inc $03F4
+    lda #MLI_QUIT
+    ldx #QUIT_STANDARD.lo
+    ldy #QUIT_STANDARD.hi
+    jmp mli
+}
+
+// ---------- Text on the screen ----------
+//
+// Text page 1 is 24 rows of 40 bytes at $0400, but the rows are not in order: row r starts at
+// $0400 + 128 * (r % 8) + 40 * (r / 8). The 8 bytes after every third row are the "screen holes",
+// which slot cards use. Normal text is the apple2 encoding; codes $00-$3F are inverse, $40-$7F flash.
+
+const TEXT = $0400
+
+var ch: u8 @ $0024                  // the cursor's column
+var cv: u8 @ $0025                  // the cursor's row
+var basl: u16 @ $0028               // the address of the cursor's row, which COUT writes through
+var invflg: u8 @ $0032              // the mask COUT applies to characters: $FF normal, $3F inverse, $7F flashing
+
+// The address of each text row from `base`: TEXT for page 1, $0800 for page 2.
+const fn text_rows(base: int) -> [int; _] {
+    var rows = repeat(0, 24)
+    for r in 0..24 {
+        rows[r] = base + 128 * (r % 8) + 40 * (r / 8)
+    }
+    return rows
+}
+
+data TEXT_ROWS: [u16; 24] = text_rows(TEXT)
+
+// Print n characters through COUT.
+fn print(text: ptr u8, n: u8) {
+    for i in 0..n using Y {
+        put(text[i])
+    }
+}
+
+// Move the cursor: the next character printed goes to row 0-23, column 0-39.
+fn cursor(row: u8, col: u8) {
+    cv = row
+    ch = col
+    basl = TEXT_ROWS[row]
+}
+
+// Print what follows in inverse (dark on light), flashing, or normal again.
+fn inverse() {
+    invflg = $3F
+}
+
+fn flashing() {
+    invflg = $7F
+}
+
+fn normal() {
+    invflg = $FF
+}
+
+// ---------- Soft switches ----------
+//
+// Each switch changes the display when the program touches its address; these write it.
+
+private var sw_graphics: u8 @ $C050
+private var sw_text: u8 @ $C051
+private var sw_full: u8 @ $C052
+private var sw_mixed: u8 @ $C053
+private var sw_page1: u8 @ $C054
+private var sw_page2: u8 @ $C055
+private var sw_lores: u8 @ $C056
+private var sw_hires: u8 @ $C057
+
+fn show_graphics() { sw_graphics = 0 }      // graphics, as the other switches say
+fn show_text() { sw_text = 0 }              // text
+fn show_full() { sw_full = 0 }              // graphics on the whole screen
+fn show_mixed() { sw_mixed = 0 }            // graphics with 4 rows of text at the bottom
+fn show_page1() { sw_page1 = 0 }            // show page 1 (text at $0400, hi-res at $2000)
+fn show_page2() { sw_page2 = 0 }            // show page 2 (text at $0800, hi-res at $4000)
+fn show_lores() { sw_lores = 0 }
+fn show_hires() { sw_hires = 0 }
+
+// ---------- Hi-res graphics ----------
+//
+// 280 x 192 pixels, 7 to a byte (bit 0 is the leftmost; bit 7 picks the color group), 40 bytes a
+// row. Page 1 is $2000-$3FFF and page 2 $4000-$5FFF, which the default layout gives to the program:
+// write a memory block that keeps the program out of a page it draws on, e.g.
+//
+//     memory {
+//         $0800..=$1FFF program
+//         $4000..=$BEFF program
+//     }
+//
+// The rows are not in order either: row y starts at 1024 * (y % 8) + 128 * (y / 8 % 8) + 40 * (y / 64)
+// from the page's start. On a color screen a lone pixel is violet or green by its column; two side by
+// side are white.
+
+const HIRES1 = $2000
+const HIRES2 = $4000
+
+// The high byte of the page that clear() and plot() draw on: $20 (page 1) or $40 (page 2).
+var draw_page: u8 = $20
+
+// Each row's offset from the page's start.
+const fn hires_rows() -> [int; _] {
+    var rows = repeat(0, 192)
+    for y in 0..192 {
+        rows[y] = 1024 * (y % 8) + 128 * (y / 8 % 8) + 40 * (y / 64)
+    }
+    return rows
+}
+
+// x / 7 and the bit of x % 7, for x from 0 to 255; x from 256 to 279 adds 4 (256 = 7 * 36 + 4).
+const fn div7() -> [int; _] {
+    var t = repeat(0, 256)
+    for x in 0..256 {
+        t[x] = x / 7
+    }
+    return t
+}
+
+const fn bit7() -> [int; _] {
+    var t = repeat(0, 256)
+    for x in 0..256 {
+        t[x] = 1 << (x % 7)
+    }
+    return t
+}
+
+data HIRES_ROWS: [u16; 192] = hires_rows()
+private data DIV7: [u8; 256] = div7()
+private data BIT7: [u8; 256] = bit7()
+
+// Clear the draw page (8 KB of zeros: black).
+asm fn clear() {
+    var p: ptr u8
+    lda #0
+    sta p
+    lda draw_page
+    sta p+1
+    ldx #32
+    lda #0
+    tay
+.loop:
+    sta (p),y
+    iny
+    bne .loop
+    inc p+1
+    dex
+    bne .loop
+}
+
+// Set the pixel at x (0-279), y (0-191) on the draw page.
+fn plot(x: u16, y: u8) {
+    var i: u8 = x.lo
+    var column: u8 = 0
+    if x.hi != 0 {
+        i += 4
+        column = 36
+    }
+    column += DIV7[i]
+    var at: u16 = HIRES_ROWS[y] + column
+    at.hi += draw_page
+    var p: ptr u8 = at as ptr u8
+    p[0] = p[0] | BIT7[i]
+}
+
+// ---------- Keyboard and speaker ----------
+
+var kbd: u8 @ $C000                 // bit 7 set: a key is waiting; bits 0-6: its code
+private var kbdstrb: u8 @ $C010     // any access takes the key
+
+// The waiting key's code with bit 7 set, and take it; 0 if no key is waiting.
+fn key() -> u8 {
+    var k: u8 = kbd
+    if k < $80 {
+        return 0
+    }
+    kbdstrb = 0
+    return k
+}
+
+// Move the speaker's cone once: a click. Only a read moves it reliably, so this is assembly.
+asm fn click() {
+    bit $C030
+}
+
+// A square wave of `count` clicks, `half` delay steps of 5 cycles apart (0 means 256): higher
+// numbers give a lower note.
+asm fn tone(half: u8 using A, count: u8 using X) {
+    var h: u8
+    sta h
+.wave:
+    bit $C030
+    ldy h
+.delay:
+    dey
+    bne .delay
+    dex
+    bne .wave
+}
