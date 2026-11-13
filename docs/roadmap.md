@@ -628,6 +628,7 @@ Done when: emulator tests cover `io` and the hex letters on both targets, and an
 - Platform description and memory map (no interrupt source by default, text and hi-res pages, soft switches as volatile areas), high-bit ASCII
 - Output: a DOS 3.3 binary and/or ProDOS system file (spec session decides), with disk image creation for testing
 - `lib/apple2`: monitor and DOS/ProDOS routines as routines at a fixed address; text and hi-res screen helpers (row address tables)
+- First, label formats as writers named by the platform description (decision 2026-11-13, question 138), not chosen by output format; then the Apple II's, in the format of the emulator it is checked in
 
 Done when: an example draws text and hi-res graphics in an Apple II emulator (AppleWin or MAME).
 

@@ -23,7 +23,7 @@ dotnet run --project src/Tern.Cli -- --target c64 examples/c64/hello.tern
 dotnet run --project src/Tern.Cli -- --target c64 game.tern -o out/game.prg
 ```
 
-Every command names the machine it builds for: `--target c64` (Commodore 64) or `--target atari` (Atari 8-bit with 48 KB or more). For the Atari the program is `game.xex` and the label file `game.lbl`; the rest is as below.
+Every command names the machine it builds for: `--target c64` (Commodore 64) or `--target atari` (Atari 8-bit with 48 KB or more). For the Atari the program is `game.xex` and the label file `game.lbl`, which Altirra loads by itself when it boots `game.xex`; the rest is as below.
 
 For `game.tern` the compiler writes, next to the source (or the `-o` path):
 

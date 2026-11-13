@@ -733,7 +733,7 @@ import level2 @ levels
   - Overlays of the same area may put data at the same address, since they are never loaded together.
   - Errors: fixed data overlapping the module's other fixed data or fixed variables; an overlay module's fixed data outside its own area (in another overlay area, or in a program or reserved area: put resident data in the main file or a resident module); a resident module's fixed data in an overlay area.
 - An overlay that does not fit its area gives an error with its size.
-- **Loading** is a platform library function. C64: `c64.load(name: ptr u8, n: u8, device: u8) -> bool` loads a file to its own address through the KERNAL (logical file 1, secondary address 1) and returns the KERNAL's carry (true when loading failed). The drive's error channel is not read. An overlay's file is named after its module (`level1.prg`); the name on the disk is the program's choice, passed as a PETSCII string (`data NAME = "LEVEL1"`, then `c64.load(addr(NAME), len(NAME), 8)`).
+- **Loading** is a platform library function. C64: `c64.load(name: ptr u8, n: u8, device: u8) -> bool` loads a file to its own address through the KERNAL (logical file 1, secondary address 1) and returns the KERNAL's carry (true when loading failed). The drive's error channel is not read. An overlay's file is named after its module (`level1.prg`); the name on the disk is the program's choice, passed as a PETSCII string (`data NAME = "LEVEL1"`, then `c64.load(addr(NAME), len(NAME), 8)`). Atari: `io.load_xex(name: ptr u8, n: u8) -> bool` loads an overlay's `.xex` (built without a run address) through CIO; the name is ATASCII with its device (`"D1:LEVEL1.XEX"`). It is in `io`, not `atari`, since it is built on `io`'s file reads (10.1).
 - **Interfaces: `implements`.** Overlays that play the same part, such as levels, can offer the same entries at the same addresses, so resident code calls whichever one is loaded without knowing which:
   ```
   import level_api                              // fn init(n: u8 using A) @ $6000, fn update() @ $6003, ...
@@ -864,7 +864,7 @@ The tables below describe the library as built (M4, M5, M10, M11, M14, M19 and t
 | `equal` | `(a: ptr u8, b: ptr u8, n: u8) -> bool` | Compare two texts |
 | `find` | `(s: ptr u8, n: u8, ch: u8) -> u8` | Index of the first `ch`, or `$FF` if not found |
 
-Digits are written as screen codes, which are the same as PETSCII for `0`-`9`. Hex letters are screen codes too. On the Atari, the library writes numbers in ATASCII, the platform's default encoding, so `atari.print` shows them: digits, `-` and `.` have the same codes as on the C64, and hex letters are `$41`-`$46` (decision 2026-11-13, question 132). Screen memory on the Atari takes internal codes (`atari_screen`), so a program that writes numbers there converts them.
+Digits are written as screen codes, which are the same as PETSCII for `0`-`9`. On the C64, hex letters are screen codes too. The digit table is the library module `text_digits`, which `lib/atari/` replaces (2.2), so a program cannot have its own module of that name. On the Atari, the library writes numbers in ATASCII, the platform's default encoding, so `atari.print` shows them: digits, `-` and `.` have the same codes as on the C64, and hex letters are `$41`-`$46` (decision 2026-11-13, question 132). Screen memory on the Atari takes internal codes (`atari_screen`), so a program that writes numbers there converts them.
 
 **`wide`**: 24- and 32-bit unsigned numbers
 
@@ -1027,6 +1027,21 @@ Each is an empty-body `inline asm fn` (section 7), so a call adds no instruction
 
 `c64.load` (8.5) is built on the same routines. Fast loaders are out of scope.
 
+**`io` on the Atari**: files through CIO (M25 follow-up; decision 2026-11-13, question 139). Same name as the C64's module, different functions: each follows its machine. Everything uses IOCB 1 (`io.IOCB`), so one file is open at a time; a program that needs more calls CIO itself. Names are ATASCII with their device (`"D1:SCORES.DAT"`, `"H:SCORES.DAT"`); `open` copies the name into a 40-byte buffer and ends it with an end-of-line, so a longer name is cut to 39 characters (a DOS 2 name with its device has at most 15). Counts are `u16`, as CIO's are; a count of 0 does nothing. Results that are `bool` are true on failure.
+
+| Name | Signature | Purpose |
+|---|---|---|
+| `open` | `(name: ptr u8, n: u8, mode: u8) -> bool` | Open a file; `READ` (4) or `WRITE` (8, a new file or one that replaces the old one). After a failure the IOCB may still be taken: call `close` |
+| `close` | `() -> bool` | Close the file. A write's last bytes reach the disk here, so a full disk shows here |
+| `read` | `(dst: ptr u8, n: u16) -> u16` | Read up to `n` bytes; returns the count read, fewer at the end of the file (`status()` is then `ST_EOF`), 0 on any other error |
+| `write` | `(src: ptr u8, n: u16) -> bool` | Write `n` bytes |
+| `status` | `() -> u8` | CIO's code for the last call (`ICSTA`), inline: below 128 is success (not only `ST_OK`: a disk may give 3 before the end of the file), 128 and above an error; constants `ST_OK`, `ST_EOF`, `ST_NOT_FOUND` |
+| `load` | `(name: ptr u8, n: u8, dst: ptr u8, max: u16) -> bool` | Load a whole file to `dst`, at most `max` bytes; a shorter file is no error |
+| `save` | `(name: ptr u8, n: u8, src: ptr u8, count: u16) -> bool` | Save `count` bytes from `src`: a pointer and a count, the library's rule, where the C64's `save` takes the KERNAL's first and last |
+| `load_xex` | `(name: ptr u8, n: u8) -> bool` | Load every segment of an executable, including any `RUNAD` and `INITAD` segments, and run nothing: the loader for overlays (8.5). A file that does not start with `$FF $FF` fails with a success code in `status()`, since CIO has no code for it |
+
+`load`, `save` and `load_xex` always close the file, and `status()` then gives the first error.
+
 **C64 graphics (M11):**
 
 - **`sprites`**, a sprite multiplexer: `module sprites(COUNT: u8 = 32, FLICKER: bool = false, SCREEN: u16 = $0400, SCREEN2: u16 = $0400)`, `COUNT` 8 to 64.
@@ -1148,7 +1163,7 @@ A platform description gives: CPU variant, free zero-page ranges, RAM ranges for
 - Startup: zero globals, copy initialized data, call `main`. When `main` returns, the program stops in an endless loop, as on the C64; `atari.exit()` returns to DOS.
 - Default encoding: `atascii`; `atari_screen` gives the screen's internal codes (2.1).
 - `tern run` has stand-ins for CIO's screen output (put a byte and print text to the screen editor), as it has for the C64's KERNAL, so library and benchmark tests run in the built-in emulator. Display lists and DLIs are checked in Altirra. The stand-in's screen is the OS's on a 48 KB machine: at `$BC40`, with a left margin of 2, so a line holds 38 characters; a line that fills them moves the cursor to the next line, so an end-of-line right after it leaves a blank line. The screen editor's logical lines (3 screen lines each) and the cursor's inverse cell are not modelled.
-- `lib/atari`: register structs for ANTIC, GTIA, POKEY and PIA; OS routines as routines at a fixed address (6.6); `set_dli`, `set_vbi`, `set_vbi_immediate`, `exit`; helpers that build display lists; and screen text (`put`, `print`, `cursor`), as `c64` has it. The Atari's `io` (files through CIO) follows in the M25 follow-up.
+- `lib/atari`: register structs for ANTIC, GTIA, POKEY and PIA; OS routines as routines at a fixed address (6.6); `set_dli`, `set_vbi`, `set_vbi_immediate`, `exit`; helpers that build display lists; and screen text (`put`, `print`, `cursor`), as `c64` has it. Files are in the Atari's `io` (10.1).
 
 - One target, `--target atari`, for every Atari 8-bit with at least 48 KB: the 800, a 400 expanded to 48 KB, and every XL/XE model, with the 800's OS (revision A or B) or the XL/XE OS. A 64 KB XL/XE gives a program no more usable RAM than a 48 KB 800, since its extra 16 KB lies under the OS ROM, and Tern programs keep the OS.
 - The library calls only the OS's documented entry points and vectors (CIO at `$E456`, `SETVBV` at `$E45C`, `XITVBV` at `$E462`, the vectors in page 2), the same on every model; never the XL OS's internal routines, which moved between versions.
@@ -1219,13 +1234,13 @@ source → lexer → parser → AST
   - **Library modules** (found in the compiler's `lib/` folders, 2.2) are never warned about, since the program cannot change them. The program's own modules are.
   - Warnings are reported only when the checks found no error, since a statement left unchecked after an error could make a used name look unused. They are sorted by place with any later error (allocation, layout). Text output writes `warning:` where an error writes `error:`, and ends with both counts ("2 warnings", "1 error, 2 warnings"). `tern --json` gives them in `diagnostics` with `"severity": "warning"`, and `ok` stays true when there are only warnings. Warnings do not stop the build. `--max-errors` counts errors only.
   - `--no-warnings` turns them off; `--warnings-as-errors` reports each as an error (it then stops the build and counts as one). Giving both is an error. `tern run` reports warnings and runs the program; `tern bench` does not report them, since compared snippets often leave values unused on purpose.
-- **`tern run` loads overlays.** The emulator has no KERNAL, but SETNAM, SETLFS and LOAD have stand-ins (as CHROUT, GETIN and PLOT do) that load the build's own overlay files: the file name must be the module's name in capitals (`"LEVEL1"` loads `level1.prg`). Any other name fails with carry set, as a missing file does, so a program that names its files otherwise is checked in VICE. Secondary address 0 loads to the address in X/Y; otherwise the file loads to its own address.
+- **`tern run` loads overlays.** The emulator has no KERNAL, but SETNAM, SETLFS and LOAD have stand-ins (as CHROUT, GETIN and PLOT do) that load the build's own overlay files: the file name must be the module's name in capitals (`"LEVEL1"` loads `level1.prg`). Any other name fails with carry set, as a missing file does, so a program that names its files otherwise is checked in VICE. Secondary address 0 loads to the address in X/Y; otherwise the file loads to its own address. On the Atari, CIO has a stand-in on IOCBs 1-7 that opens the build's overlay files for reading: the part of the name after the device's `:` must be the overlay's file name in capitals (`"D1:LEVEL1.XEX"`, any device). A name Atari DOS 2 cannot store (1-8 letters and digits starting with a letter, an extension of up to 3) fails with `$A5`, DOS's file name error, so keep overlay module names to 8 letters and digits; the compiler does not warn. Opening a file for writing stops the run with a message, so saving is checked in Altirra.
 - **`step` is a keyword only right after the range of a `for`** (5.1). Elsewhere it is an ordinary name: `fn step()`, `var step: u8`, and `for i in 0..step step 2` all work. This is unambiguous, since a name cannot continue an expression that is already complete. **`emit` is a keyword only at the start of a statement in a `const fn`, before `{`** (4.1); elsewhere it is a name (`lib/c64/sprites.tern` has a function `emit`). Other keywords stay reserved everywhere.
 - **Branch range fixing.** A conditional branch reaches only −128 to +127 bytes. Layout repeats until every branch fits. Branches that do not fit become an inverted branch over a `jmp`.
 - **Outputs:**
   - the program file (`.prg` for the C64, `.xex` for the Atari),
   - a listing (`.lst`) with source lines, addresses, bytes and cycles,
-  - a label file: `.vs` for the C64 (VICE), `.lbl` for the Atari (Altirra); both are in VICE's format, which Altirra reads as cc65 labels,
+  - a label file in the format of the platform's main emulator, which loads it: `.vs` for the C64, in VICE's format; `.lbl` for the Atari, a MADS label table, which Altirra loads by itself with the `.xex` of the same name,
   - a report: bytes and cycle estimates per function, zero-page map, overlay map, and the functions with memory reachable from two roots (8.1).
 
 ### 13.1 Project layout (C#)
