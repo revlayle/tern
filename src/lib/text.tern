@@ -1,7 +1,9 @@
 // Text in memory, platform independent. Texts are a pointer plus a length.
-// Digits are screen codes, which are the same as PETSCII for 0-9.
+// Digits come from the module text_digits: C64 screen codes (the same as PETSCII for 0-9), or on the
+// Atari ATASCII.
 
-private data DIGITS = screen"0123456789ABCDEF"
+import text_digits
+
 private const MINUS = $2D   // screen code of "-"
 private data POWERS: [u16; 4] = [10000, 1000, 100, 10]
 
@@ -16,7 +18,7 @@ fn put(dst: ptr u8, src: ptr u8, n: u8) {
 fn dec8(dst: ptr u8, value: u8) -> u8 {
     var n: u8 = 0
     if value >= 100 {
-        var d: u8 = DIGITS[0]
+        var d: u8 = text_digits.DIGITS[0]
         while value >= 100 {
             value -= 100
             d += 1
@@ -25,7 +27,7 @@ fn dec8(dst: ptr u8, value: u8) -> u8 {
         n = 1
     }
     if value >= 10 || n != 0 {
-        var d: u8 = DIGITS[0]
+        var d: u8 = text_digits.DIGITS[0]
         while value >= 10 {
             value -= 10
             d += 1
@@ -33,7 +35,7 @@ fn dec8(dst: ptr u8, value: u8) -> u8 {
         dst[n] = d
         n += 1
     }
-    dst[n] = value + DIGITS[0]
+    dst[n] = value + text_digits.DIGITS[0]
     return n + 1
 }
 
@@ -48,26 +50,26 @@ fn dec16(dst: ptr u8, value: u16) -> u8 {
             d += 1
         }
         if d != 0 || n != 0 {
-            dst[n] = DIGITS[d]
+            dst[n] = text_digits.DIGITS[d]
             n += 1
         }
     }
-    dst[n] = DIGITS[value.lo]
+    dst[n] = text_digits.DIGITS[value.lo]
     return n + 1
 }
 
 // Write value as 2 hex digits at dst.
 fn hex8(dst: ptr u8, value: u8) {
-    dst[0] = DIGITS[value >> 4]
-    dst[1] = DIGITS[value & 15]
+    dst[0] = text_digits.DIGITS[value >> 4]
+    dst[1] = text_digits.DIGITS[value & 15]
 }
 
 // Write value as 4 hex digits at dst.
 fn hex16(dst: ptr u8, value: u16) {
-    dst[0] = DIGITS[value.hi >> 4]
-    dst[1] = DIGITS[value.hi & 15]
-    dst[2] = DIGITS[value.lo >> 4]
-    dst[3] = DIGITS[value.lo & 15]
+    dst[0] = text_digits.DIGITS[value.hi >> 4]
+    dst[1] = text_digits.DIGITS[value.hi & 15]
+    dst[2] = text_digits.DIGITS[value.lo >> 4]
+    dst[3] = text_digits.DIGITS[value.lo & 15]
 }
 
 // True if the n bytes at a and b are the same.
@@ -122,10 +124,10 @@ fn dec16z(dst: ptr u8, value: u16, width: u8) {
             value -= power
             d += 1
         }
-        dst[0] = DIGITS[d]
+        dst[0] = text_digits.DIGITS[d]
         dst += 1
     }
-    dst[0] = DIGITS[value.lo]
+    dst[0] = text_digits.DIGITS[value.lo]
 }
 
 // Write value as exactly `width` decimal digits at dst, with leading zeros (width 1 to 3).

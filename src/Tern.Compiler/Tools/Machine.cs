@@ -11,7 +11,7 @@ internal abstract class Machine
 {
     /// <summary>The platform's machine, for a run of <paramref name="program"/> (whose overlay files the C64's LOAD finds).</summary>
     public static Machine For(Platform platform, CompileResult? program = null) =>
-        platform.Format == OutputFormat.Xex ? new AtariMachine() : new C64Machine(program?.Overlays ?? []);
+        platform.Format == OutputFormat.Xex ? new AtariMachine(program?.Overlays ?? []) : new C64Machine(program?.Overlays ?? []);
 
     /// <summary>The routines with stand-ins, for the message when the run reaches another ROM address.</summary>
     public abstract string StandIns { get; }
@@ -168,17 +168,27 @@ internal sealed class C64Machine(IReadOnlyList<OverlayFile> overlays) : Machine
 /// The Atari with 48 KB, as the OS leaves it for a program: the 40 x 24 text screen at $BC40 (SAVMSC
 /// points to it), cleared, with the cursor at the left margin (column 2) of the top row. CIOV ($E456)
 /// has a stand-in for IOCB 0, the screen editor, which the OS opens at startup: put bytes ($0B) prints
-/// ICBLL/ICBLH bytes from ICBAL/ICBAH, or the byte in A when the length is 0, and returns Y = 1.
-/// SETVBV ($E45C) sets the immediate (A = 6) or deferred (A = 7) VBI vector to Y (low), X (high).
+/// ICBLL/ICBLH bytes from ICBAL/ICBAH, or the byte in A when the length is 0. On IOCBs 1-7 it reads the
+/// build's own overlay files: open ($03) for reading finds the one whose name, in capitals, follows
+/// the device ("D1:LEVEL1.XEX" opens level1.xex, on any device). A name Atari DOS 2 cannot store
+/// (1-8 letters and digits starting with a letter, an extension of up to 3) fails with $A5, DOS's file
+/// name error, so an overlay named level_1 fails here as on a disk; any other name fails with $AA, as
+/// a file not on the disk. Get bytes ($07) and close ($0C) work as in CIO. CIO returns the status in Y
+/// and ICSTA, negative on an error. SETVBV ($E45C) sets the immediate (A = 6) or deferred (A = 7) VBI
+/// vector to Y (low), X (high).
 /// </summary>
-internal sealed class AtariMachine : Machine
+internal sealed class AtariMachine(IReadOnlyList<OverlayFile> overlays) : Machine
 {
     public const int ScreenAddress = 0xBC40, Columns = 40, Rows = 24;
     private const int Ciov = 0xE456, Setvbv = 0xE45C;
     private const int Savmsc = 0x58, Lmargn = 0x52, Rmargn = 0x53, Rowcrs = 0x54, Colcrs = 0x55;
-    private const int Iccom = 0x0342, Icbal = 0x0344, Icbll = 0x0348;
+    private const int Iccom = 0x0342, Icsta = 0x0343, Icbal = 0x0344, Icbll = 0x0348, Icax1 = 0x034A;
+    private const int Ok = 1, Eof = 0x88, NotFound = 0xAA, AlreadyOpen = 0x81, NotOpen = 0x85, BadName = 0xA5;
 
-    public override string StandIns => "CIOV $E456 for put bytes on IOCB 0 (the screen editor), SETVBV $E45C";
+    /// <summary>The overlay file open on each IOCB (1-7) and the next byte to read.</summary>
+    private readonly Dictionary<int, (byte[] File, int Pos)> _open = [];
+
+    public override string StandIns => "CIOV $E456 for put bytes on IOCB 0 (the screen editor) and for reading the build's overlay files on IOCBs 1-7, SETVBV $E45C";
 
     public override void Start(Ram ram)
     {
@@ -206,20 +216,74 @@ internal sealed class AtariMachine : Machine
             ram.Bytes[vector + 1] = cpu.X;
             return null;
         }
-        int command = ram.Bytes[Iccom + cpu.X];
-        if (cpu.X != 0 || command != 0x0B)
-            return $"CIO command ${command:X2} on IOCB {cpu.X >> 4}, which the emulator does not have (stand-in: put bytes, $0B, on IOCB 0, the screen editor)";
-        int length = ram.Bytes[Icbll] | ram.Bytes[Icbll + 1] << 8;
-        if (length == 0) Put(cpu.A);
-        else
+        int x = cpu.X, command = ram.Bytes[Iccom + x];
+        int buffer = ram.Bytes[Icbal + x] | ram.Bytes[Icbal + x + 1] << 8;
+        int length = ram.Bytes[Icbll + x] | ram.Bytes[Icbll + x + 1] << 8;
+        int status = Ok;
+        if (x == 0 && command == 0x0B)
         {
-            int buffer = ram.Bytes[Icbal] | ram.Bytes[Icbal + 1] << 8;
-            for (int i = 0; i < length; i++) Put(ram.Bytes[(buffer + i) & 0xFFFF]);
+            if (length == 0) Put(cpu.A);
+            else
+                for (int i = 0; i < length; i++) Put(ram.Bytes[(buffer + i) & 0xFFFF]);
         }
-        cpu.Y = 1;
-        cpu.N = false;
+        else if (x is > 0 and < 0x80 && (x & 0x0F) == 0 && command is 0x03 or 0x07 or 0x0C)
+        {
+            if (File() is { } why) return why;
+        }
+        else
+            return $"CIO command ${command:X2} on IOCB {x >> 4}, which the emulator does not have (stand-ins: put bytes, $0B, on IOCB 0, the screen editor; open for reading, get bytes and close on IOCBs 1-7, for the build's overlay files)";
+        ram.Bytes[Icsta + x] = (byte)status;
+        cpu.Y = (byte)status;
+        cpu.N = status >= 0x80;
         cpu.Z = false;
         return null;
+
+        // The build's overlay files are the disk, for reading.
+        string? File()
+        {
+            switch (command)
+            {
+                case 0x03:
+                {
+                    int mode = ram.Bytes[Icax1 + x];
+                    if (mode != 4)
+                        return $"CIO open with mode {mode} on IOCB {x >> 4}; the emulator only reads the build's overlay files (mode 4)";
+                    if (_open.ContainsKey(x)) { status = AlreadyOpen; break; }
+                    var name = new StringBuilder();
+                    for (int i = 0; i < 128 && ram.Bytes[(buffer + i) & 0xFFFF] != 0x9B; i++) name.Append((char)ram.Bytes[(buffer + i) & 0xFFFF]);
+                    var text = name.ToString();
+                    string fileName = text[(text.IndexOf(':') + 1)..];
+                    bool dosName = text.Contains(':') && System.Text.RegularExpressions.Regex.IsMatch(fileName, @"^[A-Z][A-Z0-9]{0,7}(\.[A-Z0-9]{0,3})?$");
+                    var file = dosName ? overlays.FirstOrDefault(o => (o.Name + ".xex").ToUpperInvariant() == fileName) : null;
+                    _open[x] = (file?.File ?? [], 0);     // as in CIO, the IOCB stays taken after a failed open
+                    if (file is null) status = text.Contains(':') && !dosName ? BadName : NotFound;
+                    break;
+                }
+                case 0x07:
+                {
+                    if (!_open.TryGetValue(x, out var f)) { status = NotOpen; break; }
+                    if (length == 0)
+                    {
+                        // One byte, into A.
+                        if (f.Pos == f.File.Length) { status = Eof; break; }
+                        cpu.A = f.File[f.Pos];
+                        _open[x] = (f.File, f.Pos + 1);
+                        break;
+                    }
+                    int n = Math.Min(length, f.File.Length - f.Pos);
+                    for (int i = 0; i < n; i++) ram.Bytes[(buffer + i) & 0xFFFF] = f.File[f.Pos + i];
+                    ram.Bytes[Icbll + x] = (byte)n;
+                    ram.Bytes[Icbll + x + 1] = (byte)(n >> 8);
+                    _open[x] = (f.File, f.Pos + n);
+                    if (n < length) status = Eof;
+                    break;
+                }
+                default:
+                    _open.Remove(x);
+                    break;
+            }
+            return null;
+        }
 
         // The screen editor: the end-of-line code, clear, the four cursor moves and backspace; other
         // control codes are ignored. Lines go from the left to the right margin and scroll at the bottom.

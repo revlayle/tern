@@ -49,11 +49,15 @@ parameters, so that it can be run and measured (`sprite.md` shows how). Check th
 in VICE: `x64sc -autostart game.prg`.
 
 For the Atari, `tern --target atari game.tern` writes `game.xex` (a load segment per area and the
-run address) and `game.lbl` (labels for Altirra) instead of `.prg` and `.vs`. Its `tern run` has
-plain RAM for ANTIC, GTIA, POKEY and PIA, and stand-ins for CIO's put bytes on IOCB 0 (the screen
-editor, which is what `atari.put` and `atari.print` use) and for SETVBV; `--screen` shows the text
-screen at SAVMSC (`$BC40`, 40 x 24, left margin 2). Display lists and DLIs only show in Altirra:
-`Altirra64.exe /hardware:800xl /kernel:default /memsize:64K /nobasic /run game.xex`.
+run address) and `game.lbl` (labels for Altirra, which loads them with `game.xex`) instead of `.prg`
+and `.vs`. Its `tern run` has plain RAM for ANTIC, GTIA, POKEY and PIA, and stand-ins for CIO's put
+bytes on IOCB 0 (the screen editor, which is what `atari.put` and `atari.print` use), for reading the
+build's own overlay files on IOCBs 1-7 (`io.load_xex` of `"D1:LEVEL1.XEX"` reads `level1.xex`; a name
+Atari DOS cannot store, such as an overlay `level_1` or one over 8 characters, fails with `$A5`, so
+keep Atari overlay names to 8 letters and digits; any other name fails with `$AA`; opening a file for writing stops the run) and for SETVBV; `--screen`
+shows the text screen at SAVMSC (`$BC40`, 40 x 24, left margin 2). Display lists, DLIs and files
+show in Altirra: `Altirra64.exe /hardware:800xl /kernel:default /memsize:64K /nobasic /run game.xex`,
+with `/hdpathrw <folder>` for the `H:` device on a folder.
 
 The program never checks an array index, but `tern run` does: an index outside its array, and an
 `indexed match` value outside its patterns (which also stops the run), are printed with the source

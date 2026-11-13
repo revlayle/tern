@@ -390,7 +390,7 @@ public class InterruptTests
     [Fact]
     public void Public_variables_and_private_data_may_be_shared_with_a_handler()
     {
-        // math.remainder8 is public; text.DIGITS, used by hex8 and dec8, is private but read-only data.
+        // math.remainder8 is public; text_digits.DIGITS, used by hex8 and dec8, is read-only data.
         var r = Run.Program($$"""
             import math
             import text

@@ -1,0 +1,9 @@
+// The overlay of the files example (files.tern): built as greet.xex, loaded into $6000 with
+// io.load_xex, then called.
+import atari
+
+data HELLO = "Hello from an overlay\n"
+
+fn hello() {
+    atari.print(addr(HELLO), len(HELLO))
+}

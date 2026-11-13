@@ -1,0 +1,5 @@
+// The digits the library writes numbers with: 0-9 and the hex letters A-F. Here as C64 screen codes,
+// which are the same as PETSCII for 0-9. A platform folder replaces this module with its own codes
+// (lib/atari/digits.tern: ATASCII).
+
+data DIGITS = screen"0123456789ABCDEF"

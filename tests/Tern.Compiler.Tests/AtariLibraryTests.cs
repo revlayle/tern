@@ -84,6 +84,59 @@ public class AtariLibraryTests
         Assert.Contains(put, l => l.Contains("jmp $E456"));
     }
 
+    [Theory]
+    [InlineData(0x0000)]
+    [InlineData(0x09AF)]
+    [InlineData(0xABCD)]
+    [InlineData(0xF00F)]
+    [InlineData(0xFFFF)]
+    public void Hex_digits_are_atascii(int value)
+    {
+        // Decision 2026-11-13 (question 132): lib/atari/digits.tern replaces the C64's screen codes.
+        var r = Run.Program($$"""
+            import text
+            import wide
+            var h8: [u8; 2]
+            var h16: [u8; 4]
+            var h32: [u8; 8]
+            var d: [u8; 6]
+            var n: u8
+            var w: wide.U32
+            fn main() {
+                text.hex8(addr(h8), {{value & 0xFF}})
+                text.hex16(addr(h16), {{value}})
+                w.lo = {{value}}
+                w.hi = {{value ^ 0xFFFF}}
+                wide.hex32(addr(h32), addr(w))
+                n = text.dec16s(addr(d), {{(short)value}})
+            }
+            """, platform: Platform.Atari);
+        string Text(string name, int n) => System.Text.Encoding.ASCII.GetString(r.Ram.Bytes, r.Address(name), n);
+        Assert.Equal((value & 0xFF).ToString("X2"), Text("h8", 2));
+        Assert.Equal(value.ToString("X4"), Text("h16", 4));
+        Assert.Equal((value ^ 0xFFFF).ToString("X4") + value.ToString("X4"), Text("h32", 8));
+        Assert.Equal(((short)value).ToString(), Text("d", r.U8("n")));
+    }
+
+    [Fact]
+    public void Hex_digits_print_as_letters()
+    {
+        var run = Runner.Run(TernCompiler.Compile("""
+            import atari
+            import text
+            var h: [u8; 4]
+            fn main() {
+                text.hex16(addr(h), $ABCD)
+                atari.print(addr(h), 4)
+                text.hex16(addr(h), $EF09)
+                atari.print(addr(h), 4)
+            }
+            """, Platform.Atari));
+        Assert.True(run.Returned, run.Stop);
+        Assert.Equal("ABCDEF09", run.Output);
+        Assert.Equal("  ABCDEF09", Runner.ScreenText(run)[0]);
+    }
+
     [Fact]
     public void Set_dli_installs_the_handler_and_turns_dlis_on()
     {

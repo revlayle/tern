@@ -119,7 +119,7 @@ public class AtariRunTests
             }
             """);
         Assert.False(run.Returned);
-        Assert.Equal("CIO command $03 on IOCB 0, which the emulator does not have (stand-in: put bytes, $0B, on IOCB 0, the screen editor)", run.Stop);
+        Assert.Equal("CIO command $03 on IOCB 0, which the emulator does not have (stand-ins: put bytes, $0B, on IOCB 0, the screen editor; open for reading, get bytes and close on IOCBs 1-7, for the build's overlay files)", run.Stop);
     }
 
     [Fact]
@@ -168,5 +168,127 @@ public class AtariRunTests
             Assert.Contains($"Screen ($BC40, 40 x 24):\n  |{"  HI",-40}|\n", text);
         }
         finally { dir.Delete(recursive: true); }
+    }
+
+    // ---------- Files: the build's overlays (M25 follow-up) ----------
+
+    /// <summary>A program with one overlay, level1, at $6000, built in a temporary folder and run.</summary>
+    private static (CompileResult Program, RunResult Run) RunWithOverlay(string main)
+    {
+        var dir = Directory.CreateTempSubdirectory("tern");
+        try
+        {
+            File.WriteAllText(Path.Combine(dir.FullName, "level1.tern"), "data MARK: [u8; 3] = [7, 8, 9]\nfn first() -> u8 using A { return MARK[0] }");
+            var path = Path.Combine(dir.FullName, "main.tern");
+            var program = TernCompiler.Compile(main, Platform.Atari, sourcePath: path);
+            return (program, Runner.Run(program));
+        }
+        finally { dir.Delete(recursive: true); }
+    }
+
+    private const string OverlayHeader = """
+        import io
+        import level1 @ levels
+        memory {
+            $2000..=$5FFF  program
+            $6000..=$6FFF  overlay levels
+        }
+        var failed: bool = true
+        var st: u8
+        """;
+
+    [Theory]
+    [InlineData("D1:LEVEL1.XEX")]
+    [InlineData("D:LEVEL1.XEX")]
+    [InlineData("H:LEVEL1.XEX")]
+    public void Load_xex_reads_the_overlay_whose_name_in_capitals_follows_the_device(string name)
+    {
+        var (program, run) = RunWithOverlay($$"""
+            {{OverlayHeader}}
+            data NAME = "{{name}}"
+            var got: u8
+            fn main() {
+                failed = io.load_xex(addr(NAME), len(NAME))
+                st = io.status()
+                got = level1.first()
+            }
+            """);
+        Assert.True(run.Returned, run.Stop);
+        Assert.Equal(0, run.Ram.Bytes[program.Symbols["failed"]]);
+        Assert.Equal(1, run.Ram.Bytes[program.Symbols["st"]]);
+        Assert.Equal(7, run.Ram.Bytes[program.Symbols["got"]]);
+        var file = program.Overlays.Single();
+        Assert.Equal(file.Image, run.Ram.Bytes[0x6000..(0x6000 + file.Image.Length)]);
+    }
+
+    [Theory]
+    [InlineData("D1:LEVEL9.XEX", 0xAA)]
+    [InlineData("D1:LEVEL1", 0xAA)]
+    [InlineData("LEVEL1.XEX", 0xAA)]           // no device
+    [InlineData("D1:level1.xex", 0xA5)]        // DOS 2's file name error: not in capitals
+    [InlineData("D1:LEVEL_1.XEX", 0xA5)]       // '_'
+    [InlineData("D1:LEVEL1234.XEX", 0xA5)]     // more than 8 characters
+    [InlineData("D1:LEVEL1.XEXE", 0xA5)]       // an extension of more than 3
+    [InlineData("D1:1LEVEL.XEX", 0xA5)]        // starts with a digit
+    public void Load_xex_of_a_name_that_is_not_an_overlay_fails(string name, int status)
+    {
+        var (program, run) = RunWithOverlay($$"""
+            {{OverlayHeader}}
+            data NAME = "{{name}}"
+            var keep: u16 = addr(level1.first)
+            fn main() {
+                failed = io.load_xex(addr(NAME), len(NAME))
+                st = io.status()
+                failed = failed && io.open(addr(NAME), len(NAME), io.READ)    // the IOCB was closed
+                io.close()
+            }
+            """);
+        Assert.True(run.Returned, run.Stop);
+        Assert.Equal(1, run.Ram.Bytes[program.Symbols["failed"]]);
+        Assert.Equal(status, run.Ram.Bytes[program.Symbols["st"]]);
+        Assert.Equal(0, run.Ram.Bytes[0x6000]);
+    }
+
+    [Fact]
+    public void Read_gets_the_file_s_bytes_and_stops_at_its_end()
+    {
+        var (program, run) = RunWithOverlay($$"""
+            {{OverlayHeader}}
+            data NAME = "D1:LEVEL1.XEX"
+            var keep: u16 = addr(level1.first)
+            var n: u16
+            var more: u16 = 99
+            var after: u8
+            fn main() {
+                failed = io.open(addr(NAME), len(NAME), io.READ)
+                n = io.read($7000, 1000)
+                st = io.status()
+                more = io.read($7000, 5)
+                failed = failed || io.close()
+                after = io.read($7000, 5).lo        // closed
+                st += io.status()
+            }
+            """);
+        Assert.True(run.Returned, run.Stop);
+        var file = program.Overlays.Single().File;
+        Assert.Equal(0, run.Ram.Bytes[program.Symbols["failed"]]);
+        Assert.Equal(file.Length, run.Ram.Bytes[program.Symbols["n"]] | run.Ram.Bytes[program.Symbols["n"] + 1] << 8);
+        Assert.Equal(0, run.Ram.Bytes[program.Symbols["more"]]);
+        Assert.Equal((0x88 + 0x85) & 0xFF, run.Ram.Bytes[program.Symbols["st"]]);
+        Assert.Equal(file, run.Ram.Bytes[0x7000..(0x7000 + file.Length)]);
+        Assert.Equal([0xFF, 0xFF, 0x00, 0x60], file[..4]);
+    }
+
+    [Fact]
+    public void Opening_a_file_for_writing_stops_the_run()
+    {
+        var (_, run) = RunWithOverlay($$"""
+            {{OverlayHeader}}
+            data NAME = "D1:SCORES.DAT"
+            var keep: u16 = addr(level1.first)
+            fn main() { failed = io.save(addr(NAME), len(NAME), $7000, 10) }
+            """);
+        Assert.False(run.Returned);
+        Assert.Equal("CIO open with mode 8 on IOCB 1; the emulator only reads the build's overlay files (mode 4)", run.Stop);
     }
 }

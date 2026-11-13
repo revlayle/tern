@@ -37,7 +37,8 @@ public sealed class CompileResult
     public required string Listing { get; init; }
     /// <summary>Variable and function addresses by name (locals as "function.name").</summary>
     public required IReadOnlyDictionary<string, int> Symbols { get; init; }
-    public required string ViceLabels { get; init; }
+    /// <summary>The label file: VICE's format for the C64 (.vs), MADS's label table for the Atari (.lbl), which Altirra reads.</summary>
+    public required string Labels { get; init; }
     public required string Report { get; init; }
     /// <summary>Every function, data item and the startup code, with the address it was placed at.</summary>
     public required IReadOnlyList<PlacedSection> Sections { get; init; }
@@ -285,10 +286,16 @@ public static class TernCompiler
             }
         }
 
-        // VICE accepts dots inside labels, so names stay as in the listing and cannot clash (util.bump, util_bump).
-        var vice = new StringBuilder();
+        // VICE and Altirra accept dots inside labels, so names stay as in the listing and cannot clash
+        // (util.bump, util_bump). Altirra reads MADS's label table, not VICE's format (question 136).
+        var labels = new StringBuilder();
+        if (platform.Format == OutputFormat.Xex)
+        {
+            labels.AppendLine("mads label table, written by Tern");
+            labels.AppendLine("Label table:");
+        }
         foreach (var (name, address) in symbols.OrderBy(s => s.Value))
-            vice.AppendLine($"al C:{address:x4} .{name}");
+            labels.AppendLine(platform.Format == OutputFormat.Xex ? $"00\t{address:X4}\t{name}" : $"al C:{address:x4} .{name}");
 
         var entries = new List<(string Name, int Address)>();
         string? apiModule = null, apiName = null;
@@ -454,7 +461,7 @@ public static class TernCompiler
             HaltAddress = halt.Address,
             Listing = code.Listing,
             Symbols = symbols,
-            ViceLabels = vice.ToString(),
+            Labels = labels.ToString(),
             Report = report.ToString(),
             Sections = code.Sections,
             Areas = code.Areas,

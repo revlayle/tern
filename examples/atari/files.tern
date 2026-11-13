@@ -1,0 +1,83 @@
+// Files on the Atari (lib/atari/io): save a file, load it back, and load an overlay from a file.
+//
+// The program saves 8 bytes as H:SCORES.DAT, loads them back into another array and prints them in
+// hex, then loads the overlay greet (greet.xex, written next to files.xex by the same build) into
+// $6000 and calls it.
+//
+// To try it in Altirra, with the host device H: on a folder that holds files.xex and greet.xex:
+//   dotnet run --project src/Tern.Cli -- --target atari examples/atari/files.tern
+//   Altirra64.exe /hdpathrw <folder> /run <folder>\files.xex
+// With a DOS disk instead, write the names as "D1:SCORES.DAT" and "D1:GREET.XEX" and copy greet.xex
+// onto the disk.
+//
+// Result:
+//   Saved H:SCORES.DAT
+//   Loaded 0A 14 1E 28 FF 00 C8 9B
+//   Same bytes
+//   Hello from an overlay
+// A call that fails prints CIO's status in hex instead, e.g. "Load failed: $AA" for a missing file.
+import atari
+import io
+import text
+import greet @ overlays
+
+memory {
+    $2000..=$5FFF  program
+    $6000..=$6FFF  overlay overlays
+}
+
+data NAME = "H:SCORES.DAT"
+data OVERLAY = "H:GREET.XEX"
+data SAVED = "Saved "
+data LOADED = "Loaded"
+data SAME = "Same bytes\n"
+data DIFFERENT = "Different bytes\n"
+data SAVE = "Save"
+data LOAD = "Load"
+data FAILED = " failed: $"
+
+var scores: [u8; 8] = [$0A, $14, $1E, $28, $FF, $00, $C8, $9B]
+var loaded: [u8; 8]
+var hex: [u8; 2]
+
+fn main() {
+    if io.save(addr(NAME), len(NAME), addr(scores), len(scores)) {
+        failed(addr(SAVE), len(SAVE))
+        return
+    }
+    atari.print(addr(SAVED), len(SAVED))
+    atari.print(addr(NAME), len(NAME))
+    atari.put('\n')
+
+    if io.load(addr(NAME), len(NAME), addr(loaded), len(loaded)) {
+        failed(addr(LOAD), len(LOAD))
+        return
+    }
+    atari.print(addr(LOADED), len(LOADED))
+    for i in 0..len(loaded) {
+        atari.put(' ')
+        text.hex8(addr(hex), loaded[i])
+        atari.print(addr(hex), 2)
+    }
+    atari.put('\n')
+    if text.equal(addr(scores), addr(loaded), len(scores)) {
+        atari.print(addr(SAME), len(SAME))
+    } else {
+        atari.print(addr(DIFFERENT), len(DIFFERENT))
+    }
+
+    if io.load_xex(addr(OVERLAY), len(OVERLAY)) {
+        failed(addr(LOAD), len(LOAD))
+        return
+    }
+    greet.hello()
+}
+
+// Print what failed and CIO's status.
+fn failed(what: ptr u8, n: u8) {
+    atari.print(what, n)
+    atari.print(addr(FAILED), len(FAILED))
+    text.hex8(addr(hex), io.status())
+    atari.print(addr(hex), 2)
+    atari.put('\n')
+}
