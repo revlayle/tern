@@ -16,6 +16,7 @@ public class AtariIoTests
         public readonly List<string> Calls = [];
         public readonly Dictionary<string, byte[]> Files = [];
         public int DiskSpace = int.MaxValue;        // bytes a written file may have; more fails at close
+        public bool EndOfFileNext;                  // a read that ends at the file's last byte gives 3, as Atari DOS's disk handler may
 
         private readonly Dictionary<int, (string Name, bool Write, int Pos)> _open = [];
 
@@ -52,6 +53,7 @@ public class AtariIoTests
                     data.AsSpan(f.Pos, n).CopyTo(ram.AsSpan(buffer));
                     _open[x] = f with { Pos = f.Pos + n };
                     if (n < length) status = Eof;
+                    else if (EndOfFileNext && n > 0 && f.Pos + n == data.Length) status = 3;
                     ram[iocb + 8] = (byte)n;
                     ram[iocb + 9] = (byte)(n >> 8);
                     break;
@@ -87,6 +89,7 @@ public class AtariIoTests
     private static Run Go(string body, FakeCio cio, byte[]? fill = null) => Run.Program($$"""
         import io
         data NAME = "D1:SCORES.DAT"
+        data LEVEL = "D1:LEVEL1.XEX"
         const BUF = $4000
         var failed: bool
         var n: u16
@@ -318,6 +321,8 @@ public class AtariIoTests
     [InlineData(new byte[] { 0xFF, 0xFF, 0x00 }, Eof)]                  // ends inside the addresses
     [InlineData(new byte[] { 0xFF, 0xFF, 0x00, 0x40, 0x01, 0x40, 0x11 }, Eof)]   // ends inside the bytes
     [InlineData(new byte[] { 0xFF, 0xFF, 0x00, 0x40, 0x00, 0x40, 0x11, 0xFF, 0xFF, 0x00 }, Eof)]
+    [InlineData(new byte[] { 0xFF, 0xFF, 0x00, 0x40, 0xFF, 0x3F, 0x11 }, Ok)]   // last = first - 1
+    [InlineData(new byte[] { 0xFF, 0xFF, 0x00, 0x40, 0x00, 0x10, 0x11 }, Ok)]   // last far below first: would wrap
     public void Load_xex_fails_on_a_file_that_is_not_whole(byte[] file, int status)
     {
         var cio = new FakeCio();
@@ -341,5 +346,29 @@ public class AtariIoTests
             """, cio);
         Assert.NotEqual(0, r.U8("failed"));
         Assert.Equal(NotFound, r.U8("st"));
+    }
+
+    [Fact]
+    public void A_status_below_128_other_than_1_is_success()
+    {
+        // Review of the M25 follow-up, suggestion 3: the disk may answer 3, "end of file next".
+        var cio = new FakeCio { EndOfFileNext = true };
+        cio.Files["D1:SCORES.DAT"] = Pattern(10);
+        cio.Files["D1:LEVEL1.XEX"] = Xex((0x5000, Pattern(10, 3), false));
+        var r = Go("""
+            failed = io.load(addr(NAME), len(NAME), BUF, 10)
+            st = io.status()
+            failed = failed || io.load_xex(addr(LEVEL), len(LEVEL))
+            failed = failed || io.open(addr(NAME), len(NAME), io.READ)
+            n = io.read(BUF + 100, 10)
+            results[0] = io.status()
+            failed = failed || io.close()
+            """, cio);
+        Assert.Equal(0, r.U8("failed"));
+        Assert.Equal(Ok, r.U8("st"));                  // load ends with close's status
+        Assert.Equal(10, r.U16("n"));
+        Assert.Equal(3, r.U8("results"));
+        Assert.Equal(Pattern(10), Bytes(r, Buf, 10));
+        Assert.Equal(Pattern(10, 3), Bytes(r, 0x5000, 10));
     }
 }

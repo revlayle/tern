@@ -12,7 +12,8 @@
 // editor keeps IOCB 0 (atari.print).
 //
 // Errors. A function that returns a bool returns true on failure. status() gives CIO's code for the
-// last call: 1 is success, 128 and above an error (ST_ below).
+// last call: below 128 is success (usually ST_OK; the disk may give 3 when the byte just read is the
+// last of the file), 128 and above an error (ST_ below).
 const IOCB = 1
 
 const READ = 4                  // modes for open()
@@ -93,7 +94,7 @@ fn write(src: ptr u8, n: u16) -> bool {
     return cio()
 }
 
-// CIO's code for the last call: ST_OK, or 128 and above for an error.
+// CIO's code for the last call: below 128 for success (not only ST_OK), 128 and above for an error.
 inline fn status() -> u8 {
     return icsta
 }
@@ -125,7 +126,8 @@ fn save(name: ptr u8, n: u8, src: ptr u8, count: u16) -> bool {
 // Load a binary file (.xex) the way DOS does, each segment to its own address, e.g. an overlay, which
 // the compiler writes as a .xex without a run address. Nothing is run: a segment for RUNAD or INITAD
 // is loaded like any other. Returns true on failure: a missing file, a file that ends inside a
-// segment (status() ST_EOF), or one that does not start with $FF $FF (status() ST_OK).
+// segment (status() ST_EOF), and, with a success code in status(), one that does not start with
+// $FF $FF or has a segment whose last address is below its first.
 fn load_xex(name: ptr u8, n: u8) -> bool {
     if open(name, n, READ) {
         return close_after_error()
@@ -154,6 +156,9 @@ fn load_xex(name: ptr u8, n: u8) -> bool {
         first.hi = head[1]
         var size: u16 = head[2] as u16
         size.hi = head[3]
+        if size < first {
+            return close_after_error()  // the last address is below the first
+        }
         size = size - first + 1
         if read(first as ptr u8, size) != size {
             return close_after_error()
