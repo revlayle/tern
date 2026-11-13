@@ -611,6 +611,18 @@ In this order (decision 2026-11-07; renumbered 2026-11-08). Each starts with a s
 
 Done when: an example with a display list and a DLI color change runs in an Atari emulator (Altirra), on an 800 with 48 KB and on an 800XL, both with AltirraOS (decision 2026-11-13; the real OS-B and XL OS once their ROM images are installed), and the benchmarks compile for the Atari.
 
+### M25 follow-up: Atari `io` and hex letters (before M26)
+
+Spec: 10.1, 12.2. Decision 2026-11-13 (questions 131, 132).
+
+- `lib/atari/io`: files through CIO on an IOCB the module picks (1-7). `open(name, n, mode)` (4 read, 8 write), `close`, `read(dst, n)` and `write(src, n)` (get and put bytes), `status`, and whole-file `load` and `save`. Names are ATASCII with their device (`"D1:SCORES.DAT"`). Errors as in the C64's `io`: the functions return true on failure, and `status` gives CIO's code.
+- A loader for overlay files, which are built as `.xex` without a run address.
+- `tern run`: a stand-in for CIO's file calls that reads the build's own overlay files, as the C64's LOAD stand-in does (spec 13).
+- `text.hex8`/`hex16` write `A`-`F` in ATASCII on the Atari (`$41`-`$46`), through a platform folder's own version of a module (spec 2.2). No language change, and no copy of the whole `text` module (e.g. the digit table in a small module that `lib/atari/` replaces).
+- At the Altirra check, load the `.lbl` label file in Altirra's debugger, and fix the format if Altirra rejects it.
+
+Done when: emulator tests cover `io` and the hex letters on both targets, and an example that saves a file and loads it back runs in Altirra on an 800 with 48 KB (AltirraOS), through the `H:` device or a disk image.
+
 ### M26: Apple II
 
 - Platform description and memory map (no interrupt source by default, text and hi-res pages, soft switches as volatile areas), high-bit ASCII
