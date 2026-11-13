@@ -127,8 +127,8 @@ public class OverlayTests
         Assert.Equal(["level1", "level2"], r.Result.Overlays.Select(o => o.Name));
         Assert.All(r.Result.Overlays, o => Assert.Equal(0x6000, o.LoadAddress));
         Assert.All(r.Result.Overlays, o => Assert.Equal("levels", o.Area));
-        Assert.Equal(r.Result.Overlays[0].Image.Length + 2, r.Result.Overlays[0].Prg.Length);
-        Assert.Equal(new byte[] { 0x00, 0x60 }, r.Result.Overlays[0].Prg[..2]);
+        Assert.Equal(r.Result.Overlays[0].Image.Length + 2, r.Result.Overlays[0].File.Length);
+        Assert.Equal(new byte[] { 0x00, 0x60 }, r.Result.Overlays[0].File[..2]);
         // The resident program does not reach into the area, and both overlays' code and variables are in it.
         Assert.True(r.Result.LoadAddress + r.Result.Image.Length <= 0x6000);
         Assert.True(r.Address("level1.run") >= 0x6000 && r.Address("level2.run") >= 0x6000);

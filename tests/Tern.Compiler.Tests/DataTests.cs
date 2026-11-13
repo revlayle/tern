@@ -126,6 +126,51 @@ public class DataTests
     }
 
     [Fact]
+    public void Atari_encoding_tables()
+    {
+        var atascii = CharEncoding.Atascii;
+        var screen = CharEncoding.AtariScreen;
+        foreach (char c in " !09:@AZ[_")
+        {
+            Assert.Equal(c, atascii.Encode(c));
+            Assert.Equal(c - 0x20, screen.Encode(c));
+        }
+        foreach (char c in "az")
+        {
+            Assert.Equal(c, atascii.Encode(c));
+            Assert.Equal(c, screen.Encode(c));
+        }
+        Assert.Equal(0x9B, atascii.Encode('\n'));
+        Assert.Null(screen.Encode('\n'));
+        Assert.Equal(0x7C, atascii.Encode('|'));
+        Assert.Equal(0x7C, screen.Encode('|'));
+        Assert.Equal([0x00, 0x10, 0x60, 0x7B], "♥♣♦♠".Select(c => atascii.Encode(c)!.Value));
+        Assert.Equal([0x40, 0x50, 0x60, 0x7B], "♥♣♦♠".Select(c => screen.Encode(c)!.Value));
+        foreach (char c in "{}~`π£")
+        {
+            Assert.Null(atascii.Encode(c));
+            Assert.Null(screen.Encode(c));
+        }
+    }
+
+    [Fact]
+    public void Atari_encoding_prefixes()
+    {
+        var r = Run.Program("""
+            data a = atascii"Ab\n"
+            data s = atari_screen"A b"
+            var c: [u8; 2]
+            fn main() {
+                c[0] = atascii'a'
+                c[1] = atari_screen'0'
+            }
+            """);
+        Assert.Equal([0x41, 0x62, 0x9B], Bytes(r, "a", 3));
+        Assert.Equal([0x21, 0x00, 0x62], Bytes(r, "s", 3));
+        Assert.Equal([0x61, 0x10], Bytes(r, "c", 2));
+    }
+
+    [Fact]
     public void Encoding_prefixes_on_strings_and_chars()
     {
         var r = Run.Program("""
@@ -265,7 +310,7 @@ public class DataTests
     [InlineData("data d = \"A{\"\nfn main() { }", "'{' has no code in the petscii encoding")]
     [InlineData("data d = screen\"A\\n\"\nfn main() { }", "'\\n' has no code in the screen encoding")]
     [InlineData("var c: u8 = petscii_mixed'π'\nfn main() { }", "'π' has no code in the petscii_mixed encoding")]
-    [InlineData("data d = ascii\"A\"\nfn main() { }", "Unknown encoding 'ascii'. Use one of: petscii, petscii_mixed, screen, screen_mixed")]
+    [InlineData("data d = ascii\"A\"\nfn main() { }", "Unknown encoding 'ascii'. Use one of: petscii, petscii_mixed, screen, screen_mixed, atascii, atari_screen")]
     [InlineData("var c: u8\nfn main() { c = scren'A' }", "Unknown encoding 'scren'")]
     [InlineData("data d = include_bytes(screen\"x\")\nfn main() { }", "takes a file name in quotes")]
     [InlineData("data d = \"A\\q\"\nfn main() { }", "Unknown escape '\\q'")]

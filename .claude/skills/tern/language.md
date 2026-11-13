@@ -20,7 +20,7 @@ Each example is a whole program that compiles. The full rules are in the Tern re
   `encoding hud: screen { '♥' = $53 }` starts from another encoding. A module's encoding is
   `font.tiles"HI"`. `default encoding tiles` in the main file applies it to every unprefixed literal
   of the program's own files (library modules keep PETSCII). A character the encoding lacks is an
-  error; write it as `\$NN`. See `examples/statusline.tern`.
+  error; write it as `\$NN`. See `examples/c64/statusline.tern`.
 
 ## 2. Types and arithmetic
 
@@ -80,7 +80,7 @@ fn main() {
 ```
 
 ```console
-$ tern run arith.tern --dump offset --dump product --dump q --dump r --dump low
+$ tern run --target c64 arith.tern --dump offset --dump product --dump q --dump r --dump low
 Main returned: 606 cycles (554 in main)
 A=$1B X=$00 Y=$00 SP=$FF PC=$0831
 offset $0007 u16 = 283 ($011B)
@@ -159,7 +159,7 @@ fn main() {
 ```
 
 ```console
-$ tern run ring.tern --dump 'buf:2' --dump total --dump speeds
+$ tern run --target c64 ring.tern --dump 'buf:2' --dump total --dump speeds
 Main returned: 3217 cycles (472 in main)
 A=$1C X=$08 Y=$00 SP=$FF PC=$082D
 buf $0910 [u8; 256] (2 bytes):
@@ -211,7 +211,7 @@ fn main() {
 ```
 
 ```console
-$ tern run structs.tern --dump alive --dump 'player:3'
+$ tern run --target c64 structs.tern --dump alive --dump 'player:3'
 Main returned: 728 cycles (442 in main)
 A=$02 X=$08 Y=$08 SP=$FF PC=$081F
 alive $0002 u8 = 8 ($08)
@@ -255,7 +255,7 @@ fn main() {
 ```
 
 ```console
-$ tern run lines.tern --dump cols --dump lines
+$ tern run --target c64 lines.tern --dump cols --dump lines
 Main returned: 67 cycles (54 in main)
 A=$22 X=$02 Y=$00 SP=$FF PC=$0815
 cols $0002 u8 = 34 ($22)
@@ -294,7 +294,7 @@ fn main() {
 ```
 
 ```console
-$ tern run fill.tern --dump '$C000:4' --dump '$C1FC:4' --dump '$C200:1'
+$ tern run --target c64 fill.tern --dump '$C000:4' --dump '$C1FC:4' --dump '$C200:1'
 Main returned: 7248 cycles (7240 in main)
 A=$AA X=$02 Y=$00 SP=$FF PC=$0811
 $C000 (4 bytes):
@@ -340,7 +340,7 @@ fn main() {
 ```
 
 ```console
-$ tern run flow.tern --dump hits --dump n --dump 'log:10'
+$ tern run --target c64 flow.tern --dump hits --dump n --dump 'log:10'
 Main returned: 799 cycles (615 in main)
 A=$1F X=$00 Y=$12 SP=$FF PC=$0825
 hits $0003 u8 = 31 ($1F)
@@ -382,7 +382,7 @@ fn main() {
 ```
 
 ```console
-$ tern run dispatch.tern --dump acc
+$ tern run --target c64 dispatch.tern --dump acc
 Main returned: 206 cycles (193 in main)
 A=$68 X=$04 Y=$03 SP=$FF PC=$0815
 acc $0002 u8 = 104 ($68)
@@ -409,7 +409,7 @@ fn main() {
 ```
 
 ```console
-$ tern run calls.tern --dump r
+$ tern run --target c64 calls.tern --dump r
 Main returned: 2110 cycles (94 in main)
 A=$54 X=$2A Y=$00 SP=$FF PC=$081F
 r $0002 u8 = 84 ($54)
@@ -438,7 +438,7 @@ fn main() {
 ```
 
 ```console
-$ tern run kernal.tern --screen
+$ tern run --target c64 kernal.tern --screen
 Main returned: 112 cycles (104 in main)
 A=$4F X=$05 Y=$05 SP=$FF PC=$0811
 Printed:
@@ -482,7 +482,7 @@ fn main() {
 ```
 
 ```console
-$ tern run flags.tern --dump count
+$ tern run --target c64 flags.tern --dump count
 Main returned: 95 cycles (77 in main)
 A=$6F X=$00 Y=$00 SP=$FF PC=$0819
 count $0002 u8 = 111 ($6F)
@@ -533,7 +533,7 @@ fn main() {
 ```
 
 ```console
-$ tern run asm.tern --dump score --dump 'buffer:2'
+$ tern run --target c64 asm.tern --dump score --dump 'buffer:2'
 Main returned: 400 cycles (219 in main)
 A=$03 X=$03 Y=$00 SP=$FF PC=$0823
 score $0002 u16 = 260 ($0104)
@@ -583,7 +583,7 @@ fn main() {
 ```
 
 ```console
-$ tern run irq.tern --irq 20000 --dump band
+$ tern run --target c64 irq.tern --irq 20000 --dump band
 Main returned: 60076 cycles (60063 in main), 3 interrupts
 A=$03 X=$64 Y=$08 SP=$FF PC=$0815
 band $0002 u8 = 3 ($03)
@@ -603,7 +603,7 @@ band $0002 u8 = 3 ($03)
   `c64.set_kernal_irq(addr(raster))` instead of `kernal_off` / `set_irq`: it goes through `$0314`,
   and the same `interrupt fn` works. The KERNAL's keyboard scan stops (`getin` sees no keys), and its
   CIA 1 timer interrupt still reaches the handler: turn it off with `c64.cia_irqs_off()` first.
-  `examples/kernal_irq.tern` reads the drive's status while a raster split runs. `tern run` has no
+  `examples/c64/kernal_irq.tern` reads the drive's status while a raster split runs. `tern run` has no
   KERNAL, so check such a program in VICE.
 
 ## 12. Modules
@@ -633,13 +633,13 @@ fn main() {
 ```
 
 ```console
-$ tern run app.tern --dump a
+$ tern run --target c64 app.tern --dump a
 Main returned: 61 cycles (45 in main)
 A=$15 X=$00 Y=$00 SP=$FF PC=$0817
 a $0003 u8 = 21 ($15)
 ```
 
-- `import name` looks in the platform library (`lib/c64/`), the standard library (`lib/`), then the
+- `import name` looks in the platform library (`lib/c64/`, `lib/atari/`), the standard library (`lib/`), then the
   program's folder. Names are used with the module name. `private` hides a declaration. A module of
   your own may not have a library module's name (`io.tern`, `random.tern`): rename it.
 - Only what is reached is compiled. Module parameters: `import sprites(COUNT = 24)`; a module
@@ -653,12 +653,12 @@ a $0003 u8 = 21 ($15)
   the interface module `level_api` (routines at fixed addresses inside the area), so resident code
   calls `level_api.update()` and whichever level is loaded answers. Each function must match its
   routine's registers and `keeps`; each `volatile var` of the interface is `data` of the same name,
-  type and address in the module. See `examples/stages.tern`.
+  type and address in the module. See `examples/c64/stages.tern`.
 - Plug-ins: `export level_api` in a binary takes its entries from a hand-written interface module
   (routines at fixed addresses, with `setup` at the start of the binary's first program area, and
   `volatile var`s the binary defines as `data` at the same address); each function must match its
   routine's registers and `keeps`. A program with `main` can give plug-ins a table of its own:
-  `export add_score, show @ $0900` (and `name_api.tern` for them). See `examples/plugins/`.
+  `export add_score, show @ $0900` (and `name_api.tern` for them). See `examples/c64/plugins/`.
 
 ## 13. Compile-time code: `const fn` and generators
 
@@ -712,7 +712,7 @@ fn main() {
 ```
 
 ```console
-$ tern run wave.tern --dump out
+$ tern run --target c64 wave.tern --dump out
 Main returned: 101 cycles (60 in main)
 A=$20 X=$00 Y=$00 SP=$FF PC=$081B
 out $0974 [u8; 3] (3 bytes):
@@ -761,10 +761,14 @@ out $0974 [u8; 3] (3 bytes):
 | `random` | `seed`, `next8`, `next16`, `below(n)` |
 | `cpu` | `carry()`, `zero()`, `negative()`, `overflow()` after an `asm` block |
 | `c64` | `SCREEN`, `COLOR`, the 16 colors (`c64.BLACK` ... `c64.LIGHT_GREY`), `chrout`, `print`, `getin`, `cursor`, `load`; registers `vic`, `sid`, `cia1`, `cia2`; `sprite_xy` (the sprite positions as an array: x of sprite n at `2n`, y at `2n + 1`); `kernal_off`, `set_irq`, `set_kernal_irq`, `set_nmi`, `interrupts_on`, `interrupts_off` |
+| `atari` (Atari) | `put`, `print`, `cursor` (text through the screen editor, in ATASCII); registers `gtia`/`gtia_in`, `pokey`/`pokey_in`, `pia`, `antic`; shadow registers (`color`, `sdmctl`, `sdlst`, `chbas`, ...), `stick`, `strig`, `ch`, `rtclok`, `savmsc`; `wait_frame`, `exit`; `set_dli`, `set_vbi` (after the OS's frame work), `set_vbi_immediate`; display lists: `DL_` and `MODE_` constants, the const fn `display_list(mode, rows, screen, at, dli)` for `data list: [u8; _] @ LIST = ...`, `set_display_list` |
 | `io` (C64) | disk files through the KERNAL: `load`, `save`, `open`, `read`, `write`, `close`, the command channel |
 | `sprites` (C64) | a sprite multiplexer, 8 to 64 sprites |
 | `scroll` (C64) | smooth eight-way character scrolling |
 
 Strings and blocks are passed as a pointer and a length: `text.put(c64.SCREEN, addr(msg), len(msg))`.
+The digits `text`, `wide`, `bcd` and `float` write are `$30`-`$39` (with `-` `$2D` and `.` `$2E`): C64
+screen codes and also ATASCII, so on the Atari print them with `atari.print`; in Atari screen memory
+a digit is `$10`-`$19`. `text.hex8`/`hex16` write A-F as C64 screen codes.
 The library source is readable Tern in `lib/`; read it for the exact signatures.
 

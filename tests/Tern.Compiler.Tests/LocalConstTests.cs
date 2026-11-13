@@ -37,7 +37,7 @@ public class LocalConstTests
     {
         var with = TernCompiler.Compile("var a: u8\nfn main() {\n    const N = 7\n    a = N\n}");
         var without = TernCompiler.Compile("var a: u8\nfn main() {\n    a = 7\n}");
-        Assert.Equal(without.Prg, with.Prg);
+        Assert.Equal(without.File, with.File);
     }
 
     [Fact]

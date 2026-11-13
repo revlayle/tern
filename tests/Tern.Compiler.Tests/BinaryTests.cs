@@ -67,7 +67,7 @@ public class BinaryTests
         Assert.Equal(0xC000, b.Result.LoadAddress);
         Assert.Equal(0xC000, b.Result.Entry);
         Assert.Equal(new[] { ("setup", 0xC000), ("init", 0xC003), ("add", 0xC006), ("add_total", 0xC009) }, b.Result.Entries);
-        Assert.Equal(new byte[] { 0x00, 0xC0 }, b.Result.Prg[..2]);
+        Assert.Equal(new byte[] { 0x00, 0xC0 }, b.Result.File[..2]);
         for (int i = 0; i < 4; i++) Assert.Equal(0x4C, b.Result.Image[3 * i]);    // jmp
         int setup = b.Result.Image[1] | (b.Result.Image[2] << 8);
         Assert.Equal(0xC00C, setup);                                              // setup follows the table
@@ -398,7 +398,7 @@ public class BinaryTests
             foreach (var name in new[] { "player.tern", "player_host.tern" })
                 File.Copy(AsmTests.FindExample(name), Path.Combine(dir.FullName, name));
             var player = TernCompiler.Compile(File.ReadAllText(Path.Combine(dir.FullName, "player.tern")), sourcePath: Path.Combine(dir.FullName, "player.tern"));
-            File.WriteAllBytes(Path.Combine(dir.FullName, "player.prg"), player.Prg);
+            File.WriteAllBytes(Path.Combine(dir.FullName, "player.prg"), player.File);
             File.WriteAllText(Path.Combine(dir.FullName, player.ApiModuleName + ".tern"), player.ApiModule);
             string hostPath = Path.Combine(dir.FullName, "player_host.tern");
             var host = TernCompiler.Compile(File.ReadAllText(hostPath), sourcePath: hostPath);

@@ -64,7 +64,7 @@ fn main() {
 ```
 
 ```console
-$ tern run check.tern --dump after_right --dump after_up_left --dump ship.x --dump ship.shots
+$ tern run --target c64 check.tern --dump after_right --dump after_up_left --dump ship.x --dump ship.shots
 Main returned: 26414 cycles (26377 in main)
 A=$10 X=$00 Y=$00 SP=$FF PC=$0827
 after_right $0006 u16 = 320 ($0140)
@@ -79,7 +79,7 @@ moves left 100 from 320 to 220. No frame pressed fire.
 How long does one call take? `tern bench` measures one function of a program:
 
 ```console
-$ tern bench check.tern --fn ship.move
+$ tern bench --target c64 check.tern --fn ship.move
 variant     program  ship.move bytes   calls     cycles  per call    zp  other
 check.tern      174          83     301      20634        68     4      0
 Memory (zp: zero page bytes, other: the rest; the measured function's variables and the program's globals):
@@ -150,7 +150,7 @@ fn main() {
 ```
 
 ```console
-$ tern game.tern
+$ tern --target c64 game.tern
 Wrote game.prg
 Code and data: $0801-$0915 (277 bytes)
 Variables after the program: 0 bytes
@@ -170,7 +170,7 @@ $06  1  ship.move.joy
   To check what it put in memory without VICE, stop it after some cycles:
 
 ```console
-$ tern run game.tern --cycles 20000 --dump pointer0 --dump '$D000:2' --dump '$D015:1'
+$ tern run --target c64 game.tern --cycles 20000 --dump pointer0 --dump '$D000:2' --dump '$D015:1'
 Stopped after 20000 cycles; main had not returned: 20001 cycles (19973 in main)
 A=$00 X=$3F Y=$00 SP=$FB PC=$08A7
 pointer0 $07F8 u8 = 13 ($0D)
@@ -247,11 +247,11 @@ fn main() {
 `ship.move`). Two variants with the same file name are shown by their paths:
 
 ```console
-$ tern bench check.tern --fn move
+$ tern bench --target c64 check.tern --fn move
 variant     program  move bytes   calls     cycles  per call    zp  other
 check.tern  error: There is no function 'move' in the program. Use 'ship.move': a module's function is named with its module
 Memory (zp: zero page bytes, other: the rest; the measured function's variables and the program's globals):
-$ tern bench check.tern alt/check.tern --fn ship.move --dump after_right --dump after_up_left --dump ship.x
+$ tern bench --target c64 check.tern alt/check.tern --fn ship.move --dump after_right --dump after_up_left --dump ship.x
 variant         program  ship.move bytes   calls     cycles  per call    zp  other
 check.tern          174          83     301      20634        68     4      0
 alt/check.tern      180          89     301      19604        65     4      0

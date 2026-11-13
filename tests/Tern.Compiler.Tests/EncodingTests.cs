@@ -348,7 +348,7 @@ public sealed class EncodingTests : IDisposable
     [InlineData("encoding t { 'A' = 256 }", "256 is not a byte; an encoding gives each character one byte, $00 to $FF. Use a value in that range", 1, 20)]
     [InlineData("encoding t { 'A' = -1 }", "-1 is not a byte", 1, 20)]
     [InlineData("var v: u8\nencoding t { 'A' = v }", "An encoding's byte must be known at compile time. Use a number or a constant", 2, 20)]
-    [InlineData("encoding t: scren { }", "Unknown encoding 'scren'. Use one of: petscii, petscii_mixed, screen, screen_mixed, t", 1, 13)]
+    [InlineData("encoding t: scren { }", "Unknown encoding 'scren'. Use one of: petscii, petscii_mixed, screen, screen_mixed, atascii, atari_screen, t", 1, 13)]
     [InlineData("encoding a: b { }\nencoding b: a { }", "The encoding 'a' is based on itself, through 'b'. Change the base of one of them, or remove it", 1, 1)]
     [InlineData("encoding a: a { }", "The encoding 'a' is based on itself, through 'a'", 1, 1)]
     [InlineData("encoding screen { 'A' = 1 }", "'screen' is a built-in encoding, so the prefix screen\"...\" would have two meanings. Rename the encoding", 1, 1)]
@@ -366,7 +366,7 @@ public sealed class EncodingTests : IDisposable
     [InlineData("encoding t { 'A' = 1 'B' = 2 }", "Expected ',' or a line break after the byte", 1, 22)]
     [InlineData("encoding t { 'A' = 1", "Encoding 't' is not closed with '}'", 1, 1)]
     [InlineData("encoding t { A = 1 }", "Expected a character in quotes, such as 'A'", 1, 14)]
-    [InlineData("default encoding tiles", "Unknown encoding 'tiles'. Use one of: petscii, petscii_mixed, screen, screen_mixed", 1, 18)]
+    [InlineData("default encoding tiles", "Unknown encoding 'tiles'. Use one of: petscii, petscii_mixed, screen, screen_mixed, atascii, atari_screen", 1, 18)]
     [InlineData("encoding t { }\ndefault encoding t\ndefault encoding screen", "The program has one 'default encoding' line, at line 2. Remove one", 3, 1)]
     [InlineData("data d = font.tiles\"A\"", "'font' is not declared. Add 'import font' at the top of the file to use the module font", 1, 10)]
     public void Reports_errors(string source, string expected, int line, int column)

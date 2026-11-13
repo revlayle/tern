@@ -184,19 +184,8 @@ public sealed class ModuleTests : IDisposable
         var r = RunMain("import hw\nvar b: u16\nfn main() { b = hw.BORDER }");
         Assert.Equal(0xD020, r.U16("b"));
 
-        var other = new Platform
-        {
-            Name = "other",
-            Cpu = Platform.C64.Cpu,
-            LoadAddress = Platform.C64.LoadAddress,
-            Header = Platform.C64.Header,
-            ZeroPage = Platform.C64.ZeroPage,
-            RamEnd = Platform.C64.RamEnd,
-            VolatileAreas = Platform.C64.VolatileAreas,
-            DefaultEncoding = Platform.C64.DefaultEncoding,
-        };
-        var e = Assert.Throws<CompileError>(() => CompileMain("import hw\nfn main() { }", other));
-        Assert.Equal("'hw' is a module for the c64 platform; this program is compiled for other. Remove the import, or use a module for other", e.Description);
+        var e = Assert.Throws<CompileError>(() => CompileMain("import hw\nfn main() { }", Platform.Atari));
+        Assert.Equal("'hw' is a module for the c64 platform; this program is compiled for atari. Remove the import, or use a module for atari", e.Description);
     }
 
     [Fact]

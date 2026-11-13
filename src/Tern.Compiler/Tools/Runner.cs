@@ -52,40 +52,40 @@ public sealed record FunctionTime(string Name, long Calls, long Cycles);
 /// </summary>
 public sealed record RunResult(
     bool Returned, string Stop, long Cycles, long? MainCycles, int Interrupts, Ram Ram, Cpu6502 Cpu,
-    string Output, Profile Profile, IReadOnlyList<FunctionTime> Functions, IReadOnlyList<IndexError> IndexErrors);
+    string Output, Profile Profile, IReadOnlyList<FunctionTime> Functions, IReadOnlyList<IndexError> IndexErrors)
+{
+    /// <summary>The machine the program ran on.</summary>
+    public Platform Platform { get; init; } = Platform.C64;
+}
+
 
 /// <summary>
-/// Runs a compiled C64 program in the built-in emulator, from its start until main returns or a cycle
-/// limit: <c>tern run</c> and <c>tern bench</c>. Memory is plain RAM: the VIC-II, SID and CIAs are not
-/// emulated, so their registers read back what was written. The screen starts cleared (spaces). A few
-/// KERNAL routines have stand-ins that take no cycles: CHROUT ($FFD2) prints to the screen and to
-/// <see cref="RunResult.Output"/>, GETIN ($FFE4) returns 0 (no key), PLOT ($FFF0) sets or reads the
-/// cursor. SETNAM ($FFBD), SETLFS ($FFBA) and LOAD ($FFD5) load the build's own overlay files: the one whose
-/// module name, in capitals, is the file name (<c>c64.load</c> with "LEVEL1" loads level1.prg); any other
-/// name fails with carry set, as for a file not on the disk. Reaching any other ROM address stops the run.
-/// Array indexes and <c>indexed match</c> values are checked (<see cref="IndexChecker"/>); a match
-/// value outside its span stops the run, since its jump goes to an address no one chose.
+/// Runs a compiled program in the built-in emulator, from its start until main returns or a cycle
+/// limit: <c>tern run</c> and <c>tern bench</c>. Memory is plain RAM: the chips (the C64's VIC-II, SID
+/// and CIAs, the Atari's ANTIC, GTIA, POKEY and PIA) are not emulated, so their registers read back
+/// what was written. A few ROM routines have stand-ins that take no cycles (<see cref="C64Machine"/>,
+/// <see cref="AtariMachine"/>); text they print goes to the screen and to <see cref="RunResult.Output"/>.
+/// Reaching any other ROM address stops the run. Array indexes and <c>indexed match</c> values are
+/// checked (<see cref="IndexChecker"/>); a match value outside its span stops the run, since its jump
+/// goes to an address no one chose.
 /// </summary>
 public static class Runner
 {
-    public const int Screen = 0x0400, Columns = 40, Rows = 25;
-    private const int Chrout = 0xFFD2, Getin = 0xFFE4, Plot = 0xFFF0, Setnam = 0xFFBD, Setlfs = 0xFFBA, Load = 0xFFD5;
-
     public static RunResult Run(CompileResult program, RunOptions? options = null)
     {
         options ??= new RunOptions();
         if (program.HaltAddress < 0)
             throw new InvalidOperationException("A binary without main cannot be run on its own: run the program that loads and calls it");
+        var machine = Machine.For(program.Platform, program);
         var ram = new Ram();
-        // As after the C64 starts: a cleared screen in light blue.
-        ram.Bytes.AsSpan(Screen, Columns * Rows).Fill(32);
-        ram.Bytes.AsSpan(0xD800, Columns * Rows).Fill(14);
+        machine.Start(ram);
         ram.Load((ushort)program.LoadAddress, program.Image);
         foreach (var set in options.Sets) ram.Bytes[set.Address] = set.Value;
         var cpu = new Cpu6502(ram) { PC = (ushort)program.Entry, SP = 0xFF, I = true };
 
         var inProgram = program.Sections.Select(s => (s.Address, End: s.Address + s.Size)).ToList();
         bool InProgram(int pc) => inProgram.Any(s => pc >= s.Address && pc < s.End);
+        bool InRom(int pc) => program.Platform.Rom.Any(r => pc >= r.First && pc <= r.Last);
         var functions = program.Symbols
             .Where(s => program.Sections.Any(p => p.Name == s.Key && p.Address == s.Value))
             .GroupBy(s => s.Value).ToDictionary(g => g.Key, g => g.First().Key);
@@ -93,9 +93,6 @@ public static class Runner
 
         var profile = new Profile();
         var output = new StringBuilder();
-        var cursor = (Row: 0, Column: 0);
-        string fileName = "";
-        int secondary = 0;
         var calls = new Dictionary<string, (long Calls, long Cycles)>();
         var active = new Stack<(string Name, int Sp, long Start)>();
         long? mainStart = null;
@@ -116,11 +113,11 @@ public static class Runner
                 Entered(cpu.PC);
             }
             int pc = cpu.PC;
-            if (pc >= 0xA000 && !(pc is >= 0xC000 and < 0xD000) && !InProgram(pc))
+            if (InRom(pc) && !InProgram(pc))
             {
-                if (pc is Chrout or Getin or Plot or Setnam or Setlfs or Load)
+                if (machine.Has(pc))
                 {
-                    StandIn(pc);
+                    if (machine.Call(pc, cpu, ram, output) is { } why) { stop = why; break; }
                     // Return as rts would.
                     ushort low = ram.Bytes[0x100 + (byte)(cpu.SP + 1)], high = ram.Bytes[0x100 + (byte)(cpu.SP + 2)];
                     cpu.SP += 2;
@@ -128,7 +125,7 @@ public static class Runner
                     Left();
                     continue;
                 }
-                stop = $"reached ${pc:X4} in ROM, which the emulator does not have (stand-ins: CHROUT $FFD2, GETIN $FFE4, PLOT $FFF0, SETNAM $FFBD, SETLFS $FFBA, LOAD $FFD5)";
+                stop = $"reached ${pc:X4} in ROM, which the emulator does not have (stand-ins: {machine.StandIns})";
                 break;
             }
             byte opcode = ram.Bytes[pc];
@@ -147,7 +144,10 @@ public static class Runner
         // Up to halt: main's rts included, the jmp halt after it not run.
         long? mainCycles = cpu.Cycles - mainStart;
         var times = calls.Select(c => new FunctionTime(c.Key, c.Value.Calls, c.Value.Cycles)).OrderByDescending(t => t.Cycles).ToList();
-        return new RunResult(returned, stop, cpu.Cycles, mainCycles, interrupts, ram, cpu, output.ToString(), profile, times, checker.Errors);
+        return new RunResult(returned, stop, cpu.Cycles, mainCycles, interrupts, ram, cpu, output.ToString(), profile, times, checker.Errors)
+        {
+            Platform = program.Platform,
+        };
 
         void Entered(int at)
         {
@@ -165,104 +165,14 @@ public static class Runner
             var (n, c) = calls.GetValueOrDefault(f.Name);
             calls[f.Name] = (n + 1, c + cpu.Cycles - f.Start);
         }
-
-        void StandIn(int routine)
-        {
-            switch (routine)
-            {
-                case Chrout: Print(cpu.A); cpu.C = false; break;
-                case Getin: cpu.A = 0; cpu.Z = true; cpu.N = false; cpu.C = false; break;
-                case Setnam:
-                    fileName = string.Concat(Enumerable.Range(0, cpu.A).Select(i => (char)ram.Bytes[(cpu.X | cpu.Y << 8) + i & 0xFFFF]));
-                    return;
-                case Setlfs: secondary = cpu.Y; return;
-                case Load:
-                {
-                    // The build's overlays are the disk. Secondary address 0 loads to X/Y; X/Y return the end.
-                    var file = program.Overlays.FirstOrDefault(o => o.Name.ToUpperInvariant() == fileName);
-                    cpu.C = file is null;
-                    if (file is null) return;
-                    int at = secondary == 0 ? cpu.X | cpu.Y << 8 : file.LoadAddress;
-                    ram.Load((ushort)at, file.Image);
-                    int end = at + file.Image.Length;
-                    (cpu.X, cpu.Y) = ((byte)end, (byte)(end >> 8));
-                    return;
-                }
-                default:
-                    if (cpu.C) { cpu.X = (byte)cursor.Row; cpu.Y = (byte)cursor.Column; }
-                    else cursor = (Math.Min((int)cpu.X, Rows - 1), Math.Min((int)cpu.Y, Columns - 1));
-                    break;
-            }
-            ram.Bytes[0xD6] = (byte)cursor.Row;
-            ram.Bytes[0xD3] = (byte)cursor.Column;
-        }
-
-        // CHROUT in the upper-case character set: letters, digits and punctuation, return, clear,
-        // home and the four cursor moves; other control codes are ignored.
-        void Print(byte ch)
-        {
-            switch (ch)
-            {
-                case 13: output.Append('\n'); NewLine(); return;
-                case 147:
-                    ram.Bytes.AsSpan(Screen, Columns * Rows).Fill(32);
-                    cursor = (0, 0);
-                    return;
-                case 19: cursor = (0, 0); return;
-                case 17: if (cursor.Row < Rows - 1) cursor.Row++; return;
-                case 145: if (cursor.Row > 0) cursor.Row--; return;
-                case 29: if (cursor.Column < Columns - 1) cursor.Column++; return;
-                case 157: if (cursor.Column > 0) cursor.Column--; return;
-            }
-            int code = ch switch
-            {
-                >= 32 and < 64 => ch,
-                >= 64 and < 96 => ch - 64,
-                >= 96 and < 128 => ch - 32,
-                >= 160 and < 192 => ch - 64,
-                >= 192 and < 255 => ch - 128,
-                255 => 94,
-                _ => -1,
-            };
-            if (code < 0) return;
-            output.Append(ScreenChar((byte)code));
-            ram.Bytes[Screen + cursor.Row * Columns + cursor.Column] = (byte)code;
-            ram.Bytes[0xD800 + cursor.Row * Columns + cursor.Column] = ram.Bytes[0x0286] == 0 ? (byte)14 : ram.Bytes[0x0286];
-            if (++cursor.Column == Columns) NewLine();
-        }
-
-        void NewLine()
-        {
-            cursor.Column = 0;
-            if (cursor.Row < Rows - 1) { cursor.Row++; return; }
-            ram.Bytes.AsSpan(Screen + Columns, Columns * (Rows - 1)).CopyTo(ram.Bytes.AsSpan(Screen));
-            ram.Bytes.AsSpan(Screen + Columns * (Rows - 1), Columns).Fill(32);
-        }
     }
 
-    /// <summary>
-    /// A screen code as text, in the upper-case character set: letters, digits and punctuation as
-    /// themselves, reversed characters as the plain ones, graphics characters as '#'.
-    /// </summary>
-    public static char ScreenChar(byte code)
-    {
-        code &= 0x7F;
-        return code switch
-        {
-            0 => '@',
-            >= 1 and <= 26 => (char)('A' + code - 1),
-            27 => '[',
-            28 => '\\',
-            29 => ']',
-            30 => '^',
-            31 => '<',
-            >= 32 and < 64 => (char)code,
-            _ => '#',
-        };
-    }
+    /// <summary>The text screen's address, columns and rows after a run (the C64's at $0400, the Atari's at SAVMSC).</summary>
+    public static (int Address, int Columns, int Rows) Screen(RunResult run) => Machine.For(run.Platform).Screen(run.Ram);
 
-    /// <summary>The 25 lines of the screen at $0400 as text, without trailing spaces.</summary>
-    public static IReadOnlyList<string> ScreenText(Ram ram) =>
-        Enumerable.Range(0, Rows).Select(r => new string(Enumerable.Range(0, Columns)
-            .Select(c => ScreenChar(ram.Bytes[Screen + r * Columns + c])).ToArray()).TrimEnd()).ToList();
+    /// <summary>The lines of the text screen after a run, without trailing spaces.</summary>
+    public static IReadOnlyList<string> ScreenText(RunResult run) => Machine.For(run.Platform).ScreenText(run.Ram);
+
+    /// <summary>The lines of the C64's screen at $0400 in <paramref name="ram"/>, without trailing spaces.</summary>
+    public static IReadOnlyList<string> ScreenText(Ram ram) => Machine.For(Platform.C64).ScreenText(ram);
 }

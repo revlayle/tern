@@ -45,7 +45,7 @@ fn main() {
 ```
 
 ```console
-$ tern shapes.tern
+$ tern --target c64 shapes.tern
 Wrote shapes.prg
 Code and data: $0801-$08D4 (212 bytes)
 Variables after the program: 148 bytes, up to $0968
@@ -249,7 +249,7 @@ fn main() {
 ```
 
 ```console
-$ tern bench arrays.tern pointers.tern --fn advance --dump last
+$ tern bench --target c64 arrays.tern pointers.tern --fn advance --dump last
 variant        program  advance bytes   calls     cycles  per call    zp  other
 arrays.tern         71          18       1        711       711     1     96
 pointers.tern      108          35       1       1297      1297     3     96
@@ -308,7 +308,7 @@ fn main() {
 ```
 
 ```console
-$ tern bench pages.tern bytes.tern --fn same --dump r
+$ tern bench --target c64 pages.tern bytes.tern --fn same --dump r
 variant     program  same bytes   calls     cycles  per call    zp  other
 pages.tern       85          35       1       9283      9283     7      0
 bytes.tern       99          47       1      27703     27703     7      0
@@ -364,7 +364,7 @@ fn main() {
 ```
 
 ```console
-$ tern bench first.tern later.tern --fn move --dump 'enemies:32'
+$ tern bench --target c64 first.tern later.tern --fn move --dump 'enemies:32'
 variant     program  move bytes   calls     cycles  per call    zp  other
 first.tern       96          35      50      27508       550     1     32
 later.tern      100          39      50      32308       646     1     32
@@ -429,7 +429,7 @@ fn main() {
 ```
 
 ```console
-$ tern bench flag.tern break.tern --fn run --dump steps
+$ tern bench --target c64 flag.tern break.tern --fn run --dump steps
 variant     program   run bytes   calls     cycles  per call    zp  other
 flag.tern        88          46       1       1553      1553     3     64
 break.tern       74          32       1       1527      1527     2     64
@@ -479,7 +479,7 @@ fn main() {
 ```
 
 ```console
-$ tern bench call.tern inline.tern --dump count
+$ tern bench --target c64 call.tern inline.tern --dump count
 variant      program  main bytes   calls     cycles  per call    zp  other
 call.tern         80          42       1      13099     13099     2    200
 inline.tern       72          39       1       9499      9499     3    200
@@ -497,7 +497,7 @@ A plain parameter is memory, and the caller stores the argument straight into it
 the body needs the value in that register anyway, as an index or once in A:
 
 ```console
-$ tern bench --decl 'var t: [u8; 200]' --decl 'fn bump(i: u8) { t[i] += 1 }' --decl 'fn bumpx(i: u8 using X) { t[i] += 1 }' --code 'for i in 0..200 { bump(i) }' --code 'for i in 0..200 { bumpx(i) }' --dump 't:4'
+$ tern bench --target c64 --decl 'var t: [u8; 200]' --decl 'fn bump(i: u8) { t[i] += 1 }' --decl 'fn bumpx(i: u8 using X) { t[i] += 1 }' --code 'for i in 0..200 { bump(i) }' --code 'for i in 0..200 { bumpx(i) }' --dump 't:4'
 variant   program  main bytes   calls     cycles  per call    zp  other
 code 1         53          18       1       7610      7610     1    200
 code 2         50          17       1       6810      6810     1    200
@@ -513,7 +513,7 @@ When the body compares or combines two parameters, one has to go to memory anywa
 parameters are as fast or faster:
 
 ```console
-$ tern bench --decl 'var n: u8' --decl 'fn bigger(a: u8, b: u8) -> bool { return a > b }' --decl 'fn bigger_r(a: u8 using A, b: u8 using X) -> bool { return a > b }' --code 'for i in 0..200 { if bigger(i, 100) { n += 1 } }' --code 'for i in 0..200 { if bigger_r(i, 100) { n += 1 } }' --dump n
+$ tern bench --target c64 --decl 'var n: u8' --decl 'fn bigger(a: u8, b: u8) -> bool { return a > b }' --decl 'fn bigger_r(a: u8 using A, b: u8 using X) -> bool { return a > b }' --code 'for i in 0..200 { if bigger(i, 100) { n += 1 } }' --code 'for i in 0..200 { if bigger_r(i, 100) { n += 1 } }' --dump n
 variant   program  main bytes   calls     cycles  per call    zp  other
 code 1         55          26       1       9206      9206     2      0
 code 2         56          22       1       9606      9606     2      0
@@ -531,7 +531,7 @@ Results:
 and widening after; or use a `data` table, which is fastest at two bytes per entry:
 
 ```console
-$ tern bench --decl 'import math' --decl 'var offset: u16' --decl 'data rows: [u16; 25] = [0, 40, 80, 120, 160, 200, 240, 280, 320, 360, 400, 440, 480, 520, 560, 600, 640, 680, 720, 760, 800, 840, 880, 920, 960]' --code 'for row in 0..25 { var w: u16 = (row << 2) + row; offset += w << 3 }' --code 'for row in 0..25 { var w: u16 = row; offset += (w << 5) + (w << 3) }' --code 'for row in 0..25 { offset += math.mul8(row, 40) }' --code 'for row in 0..25 { offset += rows[row] }' --dump offset
+$ tern bench --target c64 --decl 'import math' --decl 'var offset: u16' --decl 'data rows: [u16; 25] = [0, 40, 80, 120, 160, 200, 240, 280, 320, 360, 400, 440, 480, 520, 560, 600, 640, 680, 720, 760, 800, 840, 880, 920, 960]' --code 'for row in 0..25 { var w: u16 = (row << 2) + row; offset += w << 3 }' --code 'for row in 0..25 { var w: u16 = row; offset += (w << 5) + (w << 3) }' --code 'for row in 0..25 { offset += math.mul8(row, 40) }' --code 'for row in 0..25 { offset += rows[row] }' --dump offset
 variant   program  main bytes   calls     cycles  per call    zp  other
 code 1        118          43       1       1707      1707     4      0
 code 2        164          89       1       4032      4032     4      0
@@ -627,7 +627,7 @@ fn main() {
 ```
 
 ```console
-$ tern bench chain.tern table.tern --fn run --dump acc
+$ tern bench --target c64 chain.tern table.tern --fn run --dump acc
 variant     program   run bytes   calls     cycles  per call    zp  other
 chain.tern      290         240       1       3946      3946     1     64
 table.tern      249         199       1       3110      3110     1     64
@@ -694,7 +694,7 @@ fn main() {
 ```
 
 ```console
-$ tern bench chain8.tern table8.tern --fn run --dump acc
+$ tern bench --target c64 chain8.tern table8.tern --fn run --dump acc
 variant      program   run bytes   calls     cycles  per call    zp  other
 chain8.tern      158         108       1       2623      2623     1     64
 table8.tern      154         104       1       2951      2951     1     64
@@ -723,7 +723,7 @@ The optimizer already does these, so write the plain form:
 - `return a > b` from a `-> bool` function is a subtract into the carry, with no branch.
 
 ```console
-$ tern bench --decl 'var a: [u8; 100]' --decl 'var n: u8' --code 'for i in 0..100 { a[i] = i ^ 5 }; for i in 0..99 { var v: u8 = a[i]; if a[i + 1] < v { n += 1 } }' --code 'for i in 0..100 { a[i] = i ^ 5 }; for i in 0..99 { if a[i + 1] < a[i] { n += 1 } }' --dump n
+$ tern bench --target c64 --decl 'var a: [u8; 100]' --decl 'var n: u8' --code 'for i in 0..100 { a[i] = i ^ 5 }; for i in 0..99 { var v: u8 = a[i]; if a[i + 1] < v { n += 1 } }' --code 'for i in 0..100 { a[i] = i ^ 5 }; for i in 0..99 { if a[i + 1] < a[i] { n += 1 } }' --dump n
 variant   program  main bytes   calls     cycles  per call    zp  other
 code 1         67          34       1       3458      3458     2    100
 code 2         67          34       1       3458      3458     1    100

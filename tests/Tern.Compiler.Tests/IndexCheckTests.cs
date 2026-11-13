@@ -204,12 +204,12 @@ public class IndexCheckTests
             string file = Path.Combine(dir, "bad.tern");
             File.WriteAllText(file, "var a: [u8; 10]\nvar i: u8 = 12\n\nfn main() {\n    a[i] = 1\n}\n");
             var output = new StringWriter();
-            Assert.Equal(3, Cli.Run(["run", file], output, output));
+            Assert.Equal(3, Cli.Run(["run", "--target", "c64", file], output, output));
             Assert.Contains("Index check (the program has no check; the emulator found these):\n  bad.tern:5: Index 12 is outside 'a', which has 10 elements\n      a[i] = 1\n",
                 output.ToString().Replace("\r\n", "\n"));
 
             output = new StringWriter();
-            Assert.Equal(3, Cli.Run(["run", file, "--json"], output, output));
+            Assert.Equal(3, Cli.Run(["run", "--target", "c64", file, "--json"], output, output));
             Assert.Contains("\"message\": \"Index 12 is outside 'a', which has 10 elements\"", output.ToString());
         }
         finally { Directory.Delete(dir, recursive: true); }

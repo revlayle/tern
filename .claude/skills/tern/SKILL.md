@@ -1,12 +1,13 @@
 ---
 name: tern
-description: Writing, checking and measuring programs in Tern, a small language that compiles to 6502 machine code for the Commodore 64 (files ending in .tern). The syntax and the restrictions a model would not guess (no recursion, no runtime multiply, arrays of at most 256, u8 indexes, `using` registers, roots and shared memory, flags as values), what each construct costs, how to write fast Tern, common compile errors and their fixes, inline assembly, and the compiler's tools - `tern --json` for errors, `tern run` to run a program in the built-in emulator and dump memory or the screen, `tern bench` to compare the bytes and cycles of two ways of writing the same code. Use when writing or changing .tern code, when a Tern program does not compile, or when deciding which way of writing Tern code is faster.
+description: Writing, checking and measuring programs in Tern, a small language that compiles to 6502 machine code for the Commodore 64 and the Atari 8-bit (files ending in .tern). The syntax and the restrictions a model would not guess (no recursion, no runtime multiply, arrays of at most 256, u8 indexes, `using` registers, roots and shared memory, flags as values), what each construct costs, how to write fast Tern, common compile errors and their fixes, inline assembly, and the compiler's tools - `tern --json` for errors, `tern run` to run a program in the built-in emulator and dump memory or the screen, `tern bench` to compare the bytes and cycles of two ways of writing the same code. Use when writing or changing .tern code, when a Tern program does not compile, or when deciding which way of writing Tern code is faster.
 ---
 
 # Tern
 
 Tern is a small language for the 6502 that compiles to compact, predictable machine code. The first
-target is the Commodore 64. You have not seen Tern code before: it looks a little like Rust and Go,
+targets are the Commodore 64 (`--target c64`) and the Atari 8-bit with 48 KB or more (`--target atari`);
+every command names one. The examples here are for the C64. You have not seen Tern code before: it looks a little like Rust and Go,
 but do not guess from them. Write what the examples here show, compile often, and read the errors,
 which say how to fix the problem.
 
@@ -31,10 +32,10 @@ the compiler is. The standard library is in `lib/` next to it.
 
 | Command | What it does |
 |---|---|
-| `tern game.tern` | compile: writes `game.prg`, `game.lst` (listing: every source line with its addresses, bytes and cycles), `game.vs` (VICE labels), `game.lines` (bytes and cycles per source line) and prints the memory report |
-| `tern --json game.tern` | the same, with the result and every error and warning as JSON: `file`, `line`, `column`, `severity`, `message`, `suggestion` |
-| `tern run game.tern` | compile and run in the built-in emulator until `main` returns; `--dump name` shows a variable, `--screen` the screen as text, `--profile` the cycles of each function and source line; `--set '$DC00=$7B'` writes a byte before the run |
-| `tern bench a.tern b.tern` | run each version and compare bytes and cycles; `--fn f` measures one function (a module's function with its module: `--fn ship.move`); `--code '...'` measures statements as the body of `main`, after `--decl '...'` lines |
+| `tern --target c64 game.tern` | compile: writes `game.prg`, `game.lst` (listing: every source line with its addresses, bytes and cycles), `game.vs` (VICE labels), `game.lines` (bytes and cycles per source line) and prints the memory report |
+| `tern --json --target c64 game.tern` | the same, with the result and every error and warning as JSON: `file`, `line`, `column`, `severity`, `message`, `suggestion` |
+| `tern run --target c64 game.tern` | compile and run in the built-in emulator until `main` returns; `--dump name` shows a variable, `--screen` the screen as text, `--profile` the cycles of each function and source line; `--set '$DC00=$7B'` writes a byte before the run |
+| `tern bench --target c64 a.tern b.tern` | run each version and compare bytes and cycles; `--fn f` measures one function (a module's function with its module: `--fn ship.move`); `--code '...'` measures statements as the body of `main`, after `--decl '...'` lines |
 
 Work in this loop: write a small piece, compile, `tern run` it with `--dump` to check the values,
 and `tern bench` two versions when speed matters. Quote `--code`, `--decl`, `--dump` and `--set` arguments
@@ -46,6 +47,13 @@ back what was last written (the joystick reads 0, which means every direction pr
 and `c64.load` loads the program's own overlay files ("LEVEL1" is `level1.prg`); any other KERNAL call stops the run. Keep game logic in functions that take their inputs as
 parameters, so that it can be run and measured (`sprite.md` shows how). Check the finished program
 in VICE: `x64sc -autostart game.prg`.
+
+For the Atari, `tern --target atari game.tern` writes `game.xex` (a load segment per area and the
+run address) and `game.lbl` (labels for Altirra) instead of `.prg` and `.vs`. Its `tern run` has
+plain RAM for ANTIC, GTIA, POKEY and PIA, and stand-ins for CIO's put bytes on IOCB 0 (the screen
+editor, which is what `atari.put` and `atari.print` use) and for SETVBV; `--screen` shows the text
+screen at SAVMSC (`$BC40`, 40 x 24, left margin 2). Display lists and DLIs only show in Altirra:
+`Altirra64.exe /hardware:800xl /kernel:default /memsize:64K /nobasic /run game.xex`.
 
 The program never checks an array index, but `tern run` does: an index outside its array, and an
 `indexed match` value outside its patterns (which also stops the run), are printed with the source
@@ -65,7 +73,7 @@ fn main() {
 ```
 
 ```console
-$ tern run bad.tern
+$ tern run --target c64 bad.tern
 Main returned: 249 cycles (153 in main)
 ...
 Index check (the program has no check; the emulator found these):
@@ -94,7 +102,7 @@ fn main() {
 ```
 
 ```console
-$ tern run count.tern --dump total --screen
+$ tern run --target c64 count.tern --dump total --screen
 Main returned: 3125 cycles (3109 in main)
 A=$04 X=$00 Y=$03 SP=$FF PC=$0817
 total $0002 u16 = 5050 ($13BA)
@@ -136,7 +144,7 @@ broken.tern:7:13: error: Expected u16, found bool
 ```
 
 ```console
-$ tern --json broken.tern
+$ tern --target c64 --json broken.tern
 {
   "ok": false,
   "files": [],
@@ -220,7 +228,7 @@ cycles of its instructions once each (`+` when a branch or page crossing can add
 ran and the cycles it took in the run. The same table without the run counts is in `count.lines`.
 
 ```console
-$ tern run count.tern --profile
+$ tern run --target c64 count.tern --profile
 Main returned: 3125 cycles (3109 in main)
 A=$04 X=$00 Y=$03 SP=$FF PC=$0817
 Functions (cycles include the functions they call):

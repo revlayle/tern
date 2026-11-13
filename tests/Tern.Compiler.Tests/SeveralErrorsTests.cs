@@ -510,7 +510,7 @@ public sealed class SeveralErrorsTests : IDisposable
     private static (int Code, string Output, string Error) Tern(params string[] args)
     {
         var (output, error) = (new StringWriter(), new StringWriter());
-        int code = Cli.Run(args, output, error);
+        int code = Cli.Run(Command.C64(args), output, error);
         return (code, output.ToString(), error.ToString());
     }
 

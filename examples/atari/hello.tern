@@ -1,0 +1,24 @@
+// Hello on the Atari: text through the OS's screen editor, and numbers written by the text module.
+//
+//   dotnet run --project src/Tern.Cli -- --target atari examples/atari/hello.tern
+//   dotnet run --project src/Tern.Cli -- run --target atari examples/atari/hello.tern --screen
+import atari
+import text
+import math
+
+data HELLO = "Hello from Tern!\n"
+data SQUARES = "Squares: "
+
+var digits: [u8; 5]
+
+fn main() {
+    atari.print(addr(HELLO), len(HELLO))
+    atari.print(addr(SQUARES), len(SQUARES))
+    for i in 1..=8 {
+        // text writes digits as $30-$39, which are also their ATASCII codes.
+        var n: u8 = text.dec8(addr(digits), math.mul8(i, i) as u8)
+        atari.print(addr(digits), n)
+        atari.put(' ')
+    }
+    atari.put('\n')
+}

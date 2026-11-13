@@ -337,6 +337,6 @@ public class StructLiteralTests
     {
         var with = TernCompiler.Compile("struct Point { x: u8, y: u8 }\ndata start = Point { x = 160, y = 140 }\nvar a: u8\nfn main() { a = start.y }");
         var without = TernCompiler.Compile("data start: [u8; 2] = [160, 140]\nvar a: u8\nfn main() { a = start[1] }");
-        Assert.Equal(without.Prg, with.Prg);
+        Assert.Equal(without.File, with.File);
     }
 }

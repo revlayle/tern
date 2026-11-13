@@ -65,14 +65,15 @@ public sealed record BenchResult(
 public static class Bench
 {
     /// <param name="maxErrors">Stop compiling after this many errors (<c>--max-errors</c>); null for no limit.</param>
-    public static BenchResult Measure(BenchVariant variant, string? function, IReadOnlyList<string> dumps, RunOptions? options = null, int? maxErrors = null)
+    /// <param name="platform">The target (<c>--target</c>); the C64 if null.</param>
+    public static BenchResult Measure(BenchVariant variant, string? function, IReadOnlyList<string> dumps, RunOptions? options = null, int? maxErrors = null, Platform? platform = null)
     {
         string measured = function ?? "main";
         CompileResult program;
         try
         {
             // No warnings: compared snippets often leave values unused on purpose (spec 13).
-            program = TernCompiler.Compile(variant.Source, sourcePath: variant.Path, maxErrors: maxErrors, warnings: WarningMode.Off);
+            program = TernCompiler.Compile(variant.Source, platform, sourcePath: variant.Path, maxErrors: maxErrors, warnings: WarningMode.Off);
         }
         catch (CompileError e)
         {

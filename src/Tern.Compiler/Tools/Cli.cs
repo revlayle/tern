@@ -11,11 +11,14 @@ public static class Cli
 {
     public const string Usage = """
         Usage:
-          tern [--json] [--max-errors <n>] [--no-warnings | --warnings-as-errors] <file.tern> [-o <output.prg>]
-          tern run <file.tern> [options]
-          tern bench [options] <file.tern>... | --code <statements>...
+          tern --target <machine> [--json] [--max-errors <n>] [--no-warnings | --warnings-as-errors] <file.tern> [-o <output>]
+          tern run --target <machine> <file.tern> [options]
+          tern bench --target <machine> [options] <file.tern>... | --code <statements>...
 
-        tern <file.tern> compiles a Tern program for the Commodore 64. Writes:
+        Every command names the machine it builds for: --target c64 (Commodore 64) or
+        --target atari (Atari 8-bit with 48 KB or more).
+
+        tern --target <machine> <file.tern> compiles a Tern program. Writes:
           <output>.prg   the program
           <output>.lst   listing with addresses, bytes and cycles
           <output>.vs    VICE label file (load in the monitor with: ll "<output>.vs")
@@ -43,8 +46,10 @@ public static class Cli
 
         tern run <file.tern> compiles the program and runs it in the built-in emulator until
         main returns, then prints the cycles taken and the registers. Memory is plain RAM (no
-        VIC-II, SID or CIA); CHROUT, GETIN and PLOT have stand-ins, other ROM calls stop the run.
-        SETNAM, SETLFS and LOAD load the program's own overlay files ("LEVEL1" is level1.prg).
+        VIC-II, SID or CIA; no ANTIC, GTIA, POKEY or PIA); a few ROM routines have stand-ins,
+        and other ROM calls stop the run. On the C64: CHROUT, GETIN and PLOT; SETNAM, SETLFS
+        and LOAD load the program's own overlay files ("LEVEL1" is level1.prg). On the Atari:
+        CIOV for put bytes on IOCB 0 (the screen editor), and SETVBV.
         The emulator reports an array index outside its array and an 'indexed match' value
         outside its span, with the source line (a match value outside stops the run). Exit
         code: 0 when main returned, 2 when it did not, 3 when it did but an index was outside.
@@ -55,7 +60,7 @@ public static class Cli
           --dump <what>    show memory after the run: a variable (score, main.count), a
                            variable with a byte count (table:4), $C000-$C0FF or $C000:16;
                            may be given more than once
-          --screen         show the screen at $0400 as text
+          --screen         show the text screen ($0400 on the C64, SAVMSC on the Atari)
           --profile        show the cycles of each function and each source line
           --max-errors <n>, --no-warnings, --warnings-as-errors  as for tern <file.tern>
           --json           print the result as JSON
@@ -94,6 +99,30 @@ public static class Cli
         }
     }
 
+    /// <summary>The value of <c>--target</c> (spec 12.2), which every command must give.</summary>
+    private sealed class TargetSwitch
+    {
+        private string? _name;
+        private bool _twice;
+
+        public bool Parse(string[] arguments, ref int i)
+        {
+            if (arguments[i] != "--target" || i + 1 >= arguments.Length) return false;
+            _twice |= _name is not null;
+            _name = arguments[++i];
+            return true;
+        }
+
+        /// <summary>The platform, or null with <paramref name="problem"/> saying what is wrong.</summary>
+        public Platform? Platform(out string problem)
+        {
+            problem = _twice ? "--target is given more than once: give one target"
+                : _name is null ? $"No target given: write {Compiler.Platform.Choices}"
+                : $"Unknown target '{_name}': write {Compiler.Platform.Choices}";
+            return _name is null || _twice ? null : Compiler.Platform.ByName(_name);
+        }
+    }
+
     /// <summary>Runs one <c>tern</c> command; returns the process exit code.</summary>
     public static int Run(string[] args, TextWriter output, TextWriter error)
     {
@@ -116,10 +145,12 @@ public static class Cli
             bool json = false;
             int maxErrors = 0;
             var warnings = new WarningSwitches();
+            var target = new TargetSwitch();
             string? input = null, outputPath = null;
             for (int i = 0; i < arguments.Length; i++)
             {
                 if (arguments[i] == "--json") json = true;
+                else if (target.Parse(arguments, ref i)) { }
                 else if (warnings.Parse(arguments[i])) { }
                 else if (arguments[i] == "-o" && i + 1 < arguments.Length) outputPath = arguments[++i];
                 else if (arguments[i] == "--max-errors" && i + 1 < arguments.Length && int.TryParse(arguments[i + 1], out maxErrors) && maxErrors > 0) i++;
@@ -128,9 +159,10 @@ public static class Cli
             }
             if (input is null) return Usage1("No source file given");
             if (warnings.Problem is { } both) return Usage1(both);
-            outputPath ??= Path.ChangeExtension(input, ".prg");
+            if (target.Platform(out var noTarget) is not { } platform) return Usage1(noTarget);
+            outputPath ??= Path.ChangeExtension(input, platform.FileExtension);
 
-            var result = CompileFile(input, json, maxErrors, warnings.Mode);
+            var result = CompileFile(input, platform, json, maxErrors, warnings.Mode);
             if (result is null) return 1;
             var files = new List<string>();
             void Write(string path, Action<string> write)
@@ -138,13 +170,13 @@ public static class Cli
                 write(path);
                 files.Add(path);
             }
-            Write(outputPath, p => File.WriteAllBytes(p, result.Prg));
+            Write(outputPath, p => File.WriteAllBytes(p, result.File));
             Write(Path.ChangeExtension(outputPath, ".lst"), p => File.WriteAllText(p, result.Listing));
-            Write(Path.ChangeExtension(outputPath, ".vs"), p => File.WriteAllText(p, result.ViceLabels));
+            Write(Path.ChangeExtension(outputPath, platform.LabelExtension), p => File.WriteAllText(p, result.ViceLabels));
             Write(Path.ChangeExtension(outputPath, ".lines"), p => File.WriteAllText(p, LineTable.Format(LineTable.Rows(result, Path.GetFileName(input)))));
             string directory = Path.GetDirectoryName(Path.GetFullPath(outputPath))!;
             foreach (var overlay in result.Overlays)
-                Write(Path.Combine(directory, overlay.Name + ".prg"), p => File.WriteAllBytes(p, overlay.Prg));
+                Write(Path.Combine(directory, overlay.Name + platform.FileExtension), p => File.WriteAllBytes(p, overlay.File));
             if (result.ApiModule is not null)
                 Write(Path.Combine(directory, result.ApiModuleName + ".tern"), p => File.WriteAllText(p, result.ApiModule));
 
@@ -166,6 +198,7 @@ public static class Cli
             bool json = false, screen = false, profile = false;
             int maxErrors = 0;
             var warnings = new WarningSwitches();
+            var target = new TargetSwitch();
             string? input = null;
             long cycles = new RunOptions().MaxCycles, irq = 0;
             var dumps = new List<string>();
@@ -176,6 +209,7 @@ public static class Cli
                 bool hasValue = i + 1 < arguments.Length;
                 if (a == "--json") json = true;
                 else if (warnings.Parse(a)) { }
+                else if (target.Parse(arguments, ref i)) { }
                 else if (a == "--set" && hasValue)
                 {
                     try { sets.Add(MemorySet.Parse(arguments[++i])); }
@@ -192,8 +226,9 @@ public static class Cli
             }
             if (input is null) return Usage1("No source file given");
             if (warnings.Problem is { } both) return Usage1(both);
+            if (target.Platform(out var noTarget) is not { } platform) return Usage1(noTarget);
 
-            var program = CompileFile(input, json, maxErrors, warnings.Mode);
+            var program = CompileFile(input, platform, json, maxErrors, warnings.Mode);
             if (program is null) return 1;
             List<MemoryDump> parsed;
             try { parsed = dumps.Select(d => MemoryDump.Parse(d, program)).ToList(); }
@@ -218,11 +253,13 @@ public static class Cli
             var dumps = new List<string>();
             var variants = new List<(string? Path, string? Code)>();
             var sets = new List<MemorySet>();
+            var target = new TargetSwitch();
             for (int i = 0; i < arguments.Length; i++)
             {
                 string a = arguments[i];
                 bool hasValue = i + 1 < arguments.Length;
                 if (a == "--json") json = true;
+                else if (target.Parse(arguments, ref i)) { }
                 else if (a == "--set" && hasValue)
                 {
                     try { sets.Add(MemorySet.Parse(arguments[++i])); }
@@ -239,6 +276,7 @@ public static class Cli
                 else return Usage1($"Unknown or incomplete argument: {a}");
             }
             if (variants.Count == 0) return Usage1("No variant given: name .tern files or give --code");
+            if (target.Platform(out var noTarget) is not { } platform) return Usage1(noTarget);
 
             var results = new List<BenchResult>();
             int snippets = 0;
@@ -255,7 +293,7 @@ public static class Cli
                     try { variant = new BenchVariant(name, File.ReadAllText(path!), path); }
                     catch (IOException e) { return Fail(json, new Diagnostic(path!, 0, 0, "error", $"Cannot read {path}: {e.Message}", null), $"Cannot read {path}: {e.Message}"); }
                 }
-                results.Add(Bench.Measure(variant, function, dumps, new RunOptions { MaxCycles = cycles, IrqEvery = irq, Sets = sets }, maxErrors > 0 ? maxErrors : null));
+                results.Add(Bench.Measure(variant, function, dumps, new RunOptions { MaxCycles = cycles, IrqEvery = irq, Sets = sets }, maxErrors > 0 ? maxErrors : null, platform));
             }
             output.Write(json ? Bench.Json(results) + Environment.NewLine : Bench.Text(results));
             return results.All(r => r.Error is null && r.Returned && r.IndexErrors.Count == 0) ? 0 : 1;
@@ -263,7 +301,7 @@ public static class Cli
 
         // ---------- shared ----------
 
-        CompileResult? CompileFile(string input, bool json, int maxErrors, WarningMode warnings)
+        CompileResult? CompileFile(string input, Platform platform, bool json, int maxErrors, WarningMode warnings)
         {
             string source;
             try
@@ -278,7 +316,7 @@ public static class Cli
             }
             try
             {
-                var result = TernCompiler.Compile(source, sourcePath: input, maxErrors: maxErrors > 0 ? maxErrors : null, warnings: warnings);
+                var result = TernCompiler.Compile(source, platform, sourcePath: input, maxErrors: maxErrors > 0 ? maxErrors : null, warnings: warnings);
                 // In JSON the warnings are in the result's diagnostics.
                 if (!json && result.Warnings.Count > 0) Print(result.Warnings, false);
                 return result;

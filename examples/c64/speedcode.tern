@@ -11,8 +11,8 @@
 // tern bench, on a frame that moves the colours (everything above main is the
 // declarations; run in examples/):
 //   D="$(sed '/^fn main/,$d' speedcode.tern)"
-//   tern bench --decl "$D" --code 'tick = 1; _cycle_plain()' --fn _cycle_plain
-//   tern bench --decl "$D" --code 'tick = 1; cycle_unrolled()' --fn cycle_unrolled
+//   tern bench --target c64 --decl "$D" --code 'tick = 1; _cycle_plain()' --fn _cycle_plain
+//   tern bench --target c64 --decl "$D" --code 'tick = 1; cycle_unrolled()' --fn cycle_unrolled
 //
 //   _cycle_plain:    66 bytes, 29,537 cycles
 //   cycle_unrolled: 422 bytes,  8,697 cycles
@@ -25,7 +25,7 @@
 //
 // Check it in VICE:
 //   tern examples/speedcode.tern
-//   x64sc -autostart examples/speedcode.prg
+//   x64sc -autostart examples/c64/speedcode.prg
 import c64
 import text
 

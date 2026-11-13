@@ -603,10 +603,13 @@ public sealed class RepositoryWarningTests
 {
     private static string Line(CompileError w) => $"{Path.GetFileName(w.Pos.File)}:{w.Pos.Line}: {w.Description}";
 
-    [Fact]
-    public void The_examples_compile_with_no_warnings()
+    [Theory]
+    [InlineData("c64", 15)]
+    [InlineData("atari", 2)]
+    public void The_examples_compile_with_no_warnings(string target, int programs_at_least)
     {
-        var examples = Path.GetDirectoryName(AsmTests.FindExample("hello.tern"))!;
+        var platform = Platform.ByName(target)!;
+        var examples = Path.GetDirectoryName(AsmTests.FindExample("hello.tern", target))!;
         var dir = Directory.CreateTempSubdirectory("tern");
         try
         {
@@ -628,16 +631,16 @@ public sealed class RepositoryWarningTests
                 foreach (var path in programs.ToList())
                 {
                     CompileResult result;
-                    try { result = TernCompiler.Compile(File.ReadAllText(path), sourcePath: path); }
+                    try { result = TernCompiler.Compile(File.ReadAllText(path), platform, sourcePath: path); }
                     catch (CompileError e) when (e.Description.StartsWith("Cannot") && pass < 2) { continue; }
                     programs.Remove(path);
                     compiled++;
-                    File.WriteAllBytes(Path.ChangeExtension(path, ".prg"), result.Prg);
+                    File.WriteAllBytes(Path.ChangeExtension(path, platform.FileExtension), result.File);
                     if (result.ApiModule is not null) File.WriteAllText(Path.Combine(Path.GetDirectoryName(path)!, result.ApiModuleName + ".tern"), result.ApiModule);
                     warnings.AddRange(result.Warnings.Select(Line));
                 }
             }
-            Assert.True(compiled >= 15, $"only {compiled} examples compiled");
+            Assert.True(compiled >= programs_at_least, $"only {compiled} examples compiled");
             Assert.True(warnings.Count == 0, string.Join("\n", warnings));
         }
         finally { dir.Delete(recursive: true); }
@@ -648,12 +651,13 @@ public sealed class RepositoryWarningTests
     {
         var library = TernCompiler.DefaultLibraryDirectory;
         var warnings = new List<string>();
-        foreach (var file in Directory.GetFiles(library, "*.tern").Concat(Directory.GetFiles(Path.Combine(library, "c64"), "*.tern")))
-        {
-            string name = Path.GetFileNameWithoutExtension(file);
-            var result = TernCompiler.Compile($"import {name}\nfn main() {{ }}\n", warnLibrary: true);
-            warnings.AddRange(result.Warnings.Where(w => w.Pos.File is not null).Select(Line));
-        }
+        foreach (var platform in Platform.All)
+            foreach (var file in Directory.GetFiles(library, "*.tern").Concat(Directory.GetFiles(Path.Combine(library, platform.Name), "*.tern")))
+            {
+                string name = Path.GetFileNameWithoutExtension(file);
+                var result = TernCompiler.Compile($"import {name}\nfn main() {{ }}\n", platform, warnLibrary: true);
+                warnings.AddRange(result.Warnings.Where(w => w.Pos.File is not null).Select(Line));
+            }
         Assert.True(warnings.Count == 0, string.Join("\n", warnings.Distinct()));
     }
 }

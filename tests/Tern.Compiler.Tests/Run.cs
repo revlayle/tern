@@ -17,9 +17,9 @@ public sealed class Run
     public IReadOnlyList<Tools.IndexError> IndexErrors { get; }
 
     private Run(string source, long maxCycles, string? sourcePath, Action<Ram>? setup, string? libraryDirectory, long irqEvery,
-        IReadOnlyDictionary<int, Action<Run>>? traps, bool checkIndexes)
+        IReadOnlyDictionary<int, Action<Run>>? traps, bool checkIndexes, Platform? platform)
     {
-        Result = TernCompiler.Compile(source, sourcePath: sourcePath, libraryDirectory: libraryDirectory);
+        Result = TernCompiler.Compile(source, platform, sourcePath: sourcePath, libraryDirectory: libraryDirectory);
         Ram.Load((ushort)Result.LoadAddress, Result.Image);
         setup?.Invoke(Ram);
         Cpu = new Cpu6502(Ram) { PC = (ushort)Result.Entry, SP = 0xFF, I = true }; // as after reset: no IRQ until the program enables it
@@ -58,9 +58,11 @@ public sealed class Run
     /// <param name="setup">Prepares memory after loading the program, e.g. with stand-ins for ROM routines.</param>
     /// <param name="irqEvery">If set, raises an IRQ this many cycles after the last one was taken (taken once interrupts are enabled).</param>
     /// <param name="traps">Stand-ins for ROM routines: when the CPU reaches the address, the action runs and the routine returns without executing.</param>
+    /// <param name="platform">The target; the C64 if null.</param>
     public static Run Program(string source, long maxCycles = 5_000_000, string? sourcePath = null, Action<Ram>? setup = null,
-        string? libraryDirectory = null, long irqEvery = 0, IReadOnlyDictionary<int, Action<Run>>? traps = null, bool checkIndexes = true) =>
-        new(source, maxCycles, sourcePath, setup, libraryDirectory, irqEvery, traps, checkIndexes);
+        string? libraryDirectory = null, long irqEvery = 0, IReadOnlyDictionary<int, Action<Run>>? traps = null, bool checkIndexes = true,
+        Platform? platform = null) =>
+        new(source, maxCycles, sourcePath, setup, libraryDirectory, irqEvery, traps, checkIndexes, platform);
 
     public int Address(string name) =>
         Result.Symbols.TryGetValue(name, out var a) ? a : throw new KeyNotFoundException($"No symbol '{name}'");
@@ -72,4 +74,12 @@ public sealed class Run
 
     /// <summary>Element <paramref name="i"/> of a split [u16; n] array.</summary>
     public ushort U16At(string name, int i, int length) => (ushort)(U8(name, i) | (U8(name, length + i) << 8));
+}
+
+/// <summary>Command lines for <see cref="Tools.Cli.Run"/>.</summary>
+public static class Command
+{
+    /// <summary>A tern command line built for the C64: <c>--target c64</c> after the subcommand (run, bench), or first.</summary>
+    public static string[] C64(params string[] args) =>
+        args.Length > 0 && args[0] is "run" or "bench" ? [args[0], "--target", "c64", .. args[1..]] : ["--target", "c64", .. args];
 }
