@@ -293,8 +293,11 @@ public static class Allocator
         foreach (var f in callersFirst.Where(f => !PlacedLast(f)).Concat(callersFirst.Where(PlacedLast)))
         {
             // A routine at a fixed address has no frame; it may be called from main and from handlers.
+            // One with implementations (spec 8.5) follows its callers, so that the implementations do too;
+            // a caller of another root comes later, but then the implementations have two roots and are placed last.
             offsets[f] = (f.IsInterrupt && !f.IsPart) || PlacedLast(f) ? end
-                : f.FixedAddress is not null || callers[f].Count == 0 ? 0
+                : f.FixedAddress is not null ? (f.Callees.Count == 0 ? 0 : callers[f].Where(offsets.ContainsKey).Select(c => offsets[c] + size(c)).DefaultIfEmpty(0).Max())
+                : callers[f].Count == 0 ? 0
                 : callers[f].Max(c => offsets[c] + size(c));
             end = Math.Max(end, offsets[f] + size(f));
         }

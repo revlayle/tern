@@ -257,6 +257,46 @@ public class ImplementsTests
     }
 
     [Fact]
+    public void An_implementation_does_not_share_memory_with_the_function_that_calls_the_interface()
+    {
+        var r = Compile($$"""
+            {{Header}}
+            var a: u8
+            var b: u8
+            fn play(keep: u8) -> u8 {
+                var mine: u8 = keep + 1
+                var got = level_api.update()
+                return mine + got - keep
+            }
+            fn main() {
+                load(1)
+                a = play(40)        // 41 + 11 - 40
+                load(2)
+                b = play(40)        // 41 + 50 - 40
+            }
+            """, Files(level1: """
+            fn init(n: u8 using A) { }
+            fn update() -> u8 using A {
+                var t: u8 = 11
+                var u: u8 = 22
+                return t + u - 22
+            }
+            """, level2: """
+            fn init(n: u8 using A) { }
+            fn update() -> u8 using A {
+                var w: u8 = 50
+                var z: u8 = 60
+                return w + z - 60
+            }
+            """));
+        Assert.Equal(12, r.U8("a"));
+        Assert.Equal(51, r.U8("b"));
+        var play = r.Result.Variables.Values.Where(v => v.Function == "play").Max(v => v.Address + v.Size);
+        foreach (var level in new[] { "level1.update", "level2.update" })
+            Assert.True(r.Result.Variables.Values.Where(v => v.Function == level).Min(v => v.Address) >= play, level);
+    }
+
+    [Fact]
     public void A_function_called_from_both_an_implementation_and_main_does_not_share_its_frame_with_it()
     {
         var helper = ("util", """
