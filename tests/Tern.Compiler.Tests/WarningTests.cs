@@ -648,12 +648,13 @@ public sealed class RepositoryWarningTests
     {
         var library = TernCompiler.DefaultLibraryDirectory;
         var warnings = new List<string>();
-        foreach (var file in Directory.GetFiles(library, "*.tern").Concat(Directory.GetFiles(Path.Combine(library, "c64"), "*.tern")))
-        {
-            string name = Path.GetFileNameWithoutExtension(file);
-            var result = TernCompiler.Compile($"import {name}\nfn main() {{ }}\n", warnLibrary: true);
-            warnings.AddRange(result.Warnings.Where(w => w.Pos.File is not null).Select(Line));
-        }
+        foreach (var platform in Platform.All)
+            foreach (var file in Directory.GetFiles(library, "*.tern").Concat(Directory.GetFiles(Path.Combine(library, platform.Name), "*.tern")))
+            {
+                string name = Path.GetFileNameWithoutExtension(file);
+                var result = TernCompiler.Compile($"import {name}\nfn main() {{ }}\n", platform, warnLibrary: true);
+                warnings.AddRange(result.Warnings.Where(w => w.Pos.File is not null).Select(Line));
+            }
         Assert.True(warnings.Count == 0, string.Join("\n", warnings.Distinct()));
     }
 }

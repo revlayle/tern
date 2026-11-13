@@ -1,0 +1,344 @@
+// Atari 8-bit (48 KB or more, any OS version): chip registers, OS shadow registers, text through
+// the screen editor, interrupts and display lists.
+//
+// Only the OS's documented entry points and vectors are used, so this works with the 800's OS and the
+// XL/XE OS alike. Nothing here writes PORTB ($D301): on the XL/XE it switches memory.
+
+// ---------- OS routines (spec 6.6: called directly in ROM) ----------
+
+const CIOV = $E456              // central I/O
+const SETVBV = $E45C            // set a VBI vector or timer safely
+const XITVBV = $E462            // end of the deferred VBI: pulls Y, X, A, then rti
+const SYSVBV = $E45F            // the OS's frame work, from an immediate VBI handler
+
+// ---------- Hardware registers (volatile: every read and write happens) ----------
+
+// GTIA at $D000, as written: player-missile graphics, colors, priority, console speaker.
+struct Gtia {
+    hposp: [u8; 4] @ $00            // horizontal position of players 0-3
+    hposm: [u8; 4] @ $04            // ... and of missiles 0-3
+    sizep: [u8; 4] @ $08            // width of players 0-3
+    sizem: u8 @ $0C
+    grafp: [u8; 4] @ $0D            // player graphics, when not from DMA
+    grafm: u8 @ $11
+    colpm: [u8; 4] @ $12            // player and missile colors
+    colpf: [u8; 4] @ $16            // playfield colors 0-3
+    colbk: u8 @ $1A                 // background and border color
+    prior: u8 @ $1B                 // priority and GTIA modes
+    vdelay: u8 @ $1C
+    gractl: u8 @ $1D                // player-missile DMA to GTIA, trigger latches
+    hitclr: u8 @ $1E                // any write clears the collisions
+    consol: u8 @ $1F                // console speaker (bit 3)
+}
+var gtia: Gtia @ $D000
+
+// GTIA as read: collisions, triggers and console keys.
+struct GtiaIn {
+    mpf: [u8; 4] @ $00              // missile 0-3 to playfield collisions
+    ppf: [u8; 4] @ $04              // player 0-3 to playfield
+    mpl: [u8; 4] @ $08              // missile 0-3 to player
+    ppl: [u8; 4] @ $0C              // player 0-3 to player
+    trig: [u8; 4] @ $10             // joystick triggers: 0 = pressed
+    pal: u8 @ $14                   // bits 1-3: 0 on a PAL machine
+    consol: u8 @ $1F                // console keys, 0 = pressed: bit 0 Start, 1 Select, 2 Option
+}
+var gtia_in: GtiaIn @ $D000
+
+// POKEY at $D200, as written: four sound channels, timers, serial port, keyboard.
+struct Pokey {
+    audf1: u8 @ $00                 // channel 1 frequency divider
+    audc1: u8 @ $01                 // channel 1 distortion (bits 4-7) and volume (bits 0-3)
+    audf2: u8 @ $02
+    audc2: u8 @ $03
+    audf3: u8 @ $04
+    audc3: u8 @ $05
+    audf4: u8 @ $06
+    audc4: u8 @ $07
+    audctl: u8 @ $08                // clocks, filters and joined channels
+    stimer: u8 @ $09                // any write restarts the timers
+    skres: u8 @ $0A                 // any write clears the serial status
+    potgo: u8 @ $0B                 // starts the paddle scan
+    serout: u8 @ $0D
+    irqen: u8 @ $0E                 // interrupt enable; the OS keeps a copy in POKMSK ($10)
+    skctl: u8 @ $0F
+}
+var pokey: Pokey @ $D200
+
+// POKEY as read.
+struct PokeyIn {
+    pot: [u8; 8] @ $00              // paddle positions
+    allpot: u8 @ $08
+    kbcode: u8 @ $09                // the last key's code
+    random: u8 @ $0A                // a new random byte on each read
+    serin: u8 @ $0D
+    irqst: u8 @ $0E                 // interrupt status, 0 = pending
+    skstat: u8 @ $0F
+}
+var pokey_in: PokeyIn @ $D200
+
+// PIA at $D300. Port A reads joysticks 0 and 1. Leave PORTB alone (see the top of this file).
+struct Pia {
+    porta: u8 @ $00
+    portb: u8 @ $01
+    pactl: u8 @ $02
+    pbctl: u8 @ $03
+}
+var pia: Pia @ $D300
+
+// ANTIC at $D400. Most programs write the OS's shadow registers instead (below), which the OS copies
+// here every frame; write ANTIC directly from a DLI or with the OS's frame work turned off.
+struct Antic {
+    dmactl: u8 @ $00                // playfield width, DMA for the display list and player-missiles
+    chactl: u8 @ $01                // inverse and upside-down characters
+    dlist: u16 @ $02                // the display list's address
+    hscrol: u8 @ $04
+    vscrol: u8 @ $05
+    pmbase: u8 @ $07                // high byte of the player-missile memory
+    chbase: u8 @ $09                // high byte of the character set
+    wsync: u8 @ $0A                 // any write waits for the end of the current scan line
+    vcount: u8 @ $0B                // the scan line counter, divided by two (read)
+    penh: u8 @ $0C
+    penv: u8 @ $0D
+    nmien: u8 @ $0E                 // bit 7 display-list interrupts, bit 6 the vertical blank
+    nmires: u8 @ $0F                // any write clears NMIST, which reads at the same address
+}
+var antic: Antic @ $D400
+
+// ---------- OS memory ----------
+
+// Shadow registers: written by the program, copied to the chips by the OS every frame.
+var sdmctl: u8 @ $022F              // -> antic.dmactl; $22 is a normal playfield with the display list
+var sdlst: u16 @ $0230              // -> antic.dlist; use set_display_list to change it
+var gprior: u8 @ $026F              // -> gtia.prior
+var pcolr: [u8; 4] @ $02C0          // -> gtia.colpm
+var color: [u8; 5] @ $02C4          // -> gtia.colpf (0-3) and gtia.colbk (4)
+var chact: u8 @ $02F3               // -> antic.chactl
+var chbas: u8 @ $02F4               // -> antic.chbase
+
+// Controllers and keyboard, read by the OS every frame.
+var paddl: [u8; 8] @ $0270
+var stick: [u8; 4] @ $0278          // joystick directions: bits 0-3 up, down, left, right, 0 = pressed; 15 = centered
+var ptrig: [u8; 8] @ $027C
+var strig: [u8; 4] @ $0284          // joystick buttons: 0 = pressed
+var ch: u8 @ $02FC                  // the last key pressed, $FF for none; write $FF to take it
+
+// Vectors.
+var vdslst: u16 @ $0200             // the display-list interrupt handler; use set_dli
+var vvblki: u16 @ $0222             // the immediate VBI; use set_vbi_immediate
+var vvblkd: u16 @ $0224             // the deferred VBI; use set_vbi
+var dosvec: u16 @ $000A             // where exit() goes
+
+// Clock and screen.
+var rtclok: [u8; 3] @ $0012         // the frame counter, high byte first: rtclok[2] counts every frame
+var atract: u8 @ $004D              // attract mode counter: write 0 to keep the colors from cycling
+var savmsc: u16 @ $0058             // the text screen, where put() and print() write
+var lmargn: u8 @ $0052              // the screen editor's left margin (2 after startup)
+var rmargn: u8 @ $0053              // ... and right margin (39)
+var rowcrs: u8 @ $0054              // the cursor's row
+var colcrs: u16 @ $0055             // ... and column
+var crsinh: u8 @ $02F0              // 1 hides the cursor (from the next character printed)
+
+// I/O control block 0, the screen editor (E:), which the OS opens at startup.
+private var iccom: u8 @ $0342
+private var icbuf: ptr u8 @ $0344
+private var iclen: u16 @ $0348
+
+// ---------- Text on the screen ----------
+
+// Print one ATASCII character at the cursor through the screen editor ('\n' ends the line, $7D
+// clears the screen). CIO's put bytes on IOCB 0 with a length of 0, which prints the byte in A.
+asm fn put(c: u8 using A) {
+    ldx #$0B
+    stx iccom
+    ldx #0
+    stx iclen
+    stx iclen+1
+    jmp CIOV                        // X = 0: IOCB 0
+}
+
+// Print n ATASCII characters through the screen editor (one CIO call).
+fn print(text: ptr u8, n: u8) {
+    iccom = $0B
+    icbuf = text
+    iclen = n
+    ciov()
+}
+
+// Move the cursor; the next character printed goes there. Rows are 0-23, columns 0-39 (the screen
+// editor's left margin is 2).
+fn cursor(row: u8, col: u8) {
+    rowcrs = row
+    colcrs = col
+}
+
+private fn ciov(0 using X) @ $E456
+
+// ---------- Frames ----------
+
+// Wait for the next frame: until the OS's vertical blank changes the frame counter.
+fn wait_frame() {
+    var t: u8 = rtclok[2]
+    while rtclok[2] == t { }
+}
+
+// Return to DOS (jmp (DOSVEC)). Without a DOS the OS opens its self-test or memo pad.
+asm fn exit() {
+    jmp (dosvec)
+}
+
+// ---------- Interrupts ----------
+//
+// The OS takes every interrupt and calls the program's handlers through vectors in page 2. A handler
+// is an 'interrupt fn'; it saves the registers it changes and ends with rti. addr() is a plain u16,
+// so that it is one is not checked.
+//
+//     atari.set_dli(addr(dli))            // display-list interrupts: rows with bit 7 set in the list
+//     atari.set_vbi(addr(frame))          // once a frame, after the OS's own frame work
+
+// Install a display-list interrupt handler: atari.set_dli(addr(handler)). Turns DLIs off while VDSLST
+// changes, then turns them on with the vertical blank ($C0 into NMIEN). The OS jumps through VDSLST
+// with nothing pushed but the CPU's own, so the handler runs as an 'interrupt fn' expects.
+asm fn set_dli(handler: u16 using XY) {
+    lda #$40
+    sta antic.nmien                 // vertical blank only
+    stx vdslst
+    sty vdslst+1
+    lda #$C0
+    sta antic.nmien                 // display-list interrupts and the vertical blank
+    rts
+}
+
+// Install a handler that runs once a frame, after the OS's frame work (shadow registers, clock,
+// attract mode): the deferred VBI, set through SETVBV. The OS has pushed A, X and Y before it jumps
+// through the vector, which then points to a stub that pulls them again and jumps to the handler, so
+// that the handler's rti does what the OS's XITVBV would (about 20 cycles a frame). The OS skips the
+// deferred VBI when it interrupted time-critical I/O.
+asm fn set_vbi(handler: u16 using XY) {
+    stx vbi_deferred
+    sty vbi_deferred+1
+    lda #7
+    ldy #deferred_entry.lo
+    ldx #deferred_entry.hi
+    jmp SETVBV
+}
+
+// Install a handler that runs first in every vertical blank: the immediate VBI. The OS's frame work
+// then no longer runs, so the shadow registers are not copied to the chips, the clock stops and
+// keys and controllers are not read. A handler that continues into the OS's frame work (jmp SYSVBV)
+// is written in assembly, with the OS's pushes still on the stack.
+asm fn set_vbi_immediate(handler: u16 using XY) {
+    stx vbi_immediate
+    sty vbi_immediate+1
+    lda #6
+    ldy #immediate_entry.lo
+    ldx #immediate_entry.hi
+    jmp SETVBV
+}
+
+private var vbi_deferred: u16
+private var vbi_immediate: u16
+
+// Reached through VVBLKD: undoes the OS's pushes of A, X and Y, then goes to the handler.
+private asm fn deferred_entry() {
+    pla
+    tay
+    pla
+    tax
+    pla
+    jmp (vbi_deferred)
+}
+
+// Reached through VVBLKI, as above.
+private asm fn immediate_entry() {
+    pla
+    tay
+    pla
+    tax
+    pla
+    jmp (vbi_immediate)
+}
+
+// ---------- Display lists ----------
+//
+// A display list is data: ANTIC reads it every frame. Each byte is an instruction; a mode line may
+// add LMS (followed by the address of its screen memory) and DLI.
+
+const DL_BLANK1 = $00           // 1 blank line; DL_BLANK1 + (n - 1) * 16 for n lines, up to 8
+const DL_BLANK8 = $70           // 8 blank lines
+const DL_JMP = $01              // jump to the address that follows (to cross a 1 KB boundary)
+const DL_JVB = $41              // jump to the address that follows and wait for the vertical blank
+const DL_LMS = $40              // + mode: load the screen memory address that follows
+const DL_DLI = $80              // + instruction: a display-list interrupt at its last line
+const DL_VSCROLL = $20          // + mode: vertical fine scrolling
+const DL_HSCROLL = $10          // + mode: horizontal fine scrolling
+
+// ANTIC's modes (the OS's graphics mode in brackets).
+const MODE_TEXT = 2             // 40 columns of text, 8 lines a row (0)
+const MODE_TEXT_BIG = 6         // 20 columns of text in 4 colors (1)
+const MODE_TEXT_TALL = 7        // 20 columns, 16 lines a row (2)
+const MODE_PIXELS = $0F         // 320 pixels across, 1 line a row (8)
+
+// The bytes of screen memory one row of each ANTIC mode takes, at the normal playfield width.
+const fn row_bytes(mode: int) -> int {
+    assert mode >= 2 && mode <= 15, "atari.row_bytes: an ANTIC mode is 2 to 15"
+    if mode == 8 || mode == 9 {
+        return 10
+    }
+    if mode == 6 || mode == 7 || (mode >= 10 && mode <= 12) {
+        return 20
+    }
+    return 40
+}
+
+// A display list for a whole screen: 24 blank lines, then `rows` rows of ANTIC mode `mode`, the
+// first loading `screen`, then a jump back to the list's own address `at`. A row whose bit is set
+// in `dli` (bit 0 for the first row, up to row 63) ends with a display-list interrupt. Place the
+// list at `at`:
+//
+//     const LIST = $3000
+//     data list: [u8; _] @ LIST = atari.display_list(atari.MODE_TEXT, 24, SCREEN, LIST, 0)
+//
+// The list may not cross a 1 KB boundary, nor the screen a 4 KB one (ANTIC's counters wrap there).
+const fn display_list(mode: int, rows: int, screen: int, at: int, dli: int) -> [int; _] {
+    var size = row_bytes(mode) * rows
+    assert screen / 4096 == (screen + size - 1) / 4096, "atari.display_list: the screen crosses a 4 KB boundary. Move it, or split it with a second LMS"
+    var list = repeat(0, 3 + rows + 2 + 3)
+    list[0] = DL_BLANK8
+    list[1] = DL_BLANK8
+    list[2] = DL_BLANK8
+    var at_byte = 3
+    for row in 0..rows {
+        var op = mode
+        if row < 64 && (dli >> row) & 1 == 1 {
+            op = op | DL_DLI
+        }
+        if row == 0 {
+            list[at_byte] = op | DL_LMS
+            list[at_byte + 1] = screen & $FF
+            list[at_byte + 2] = screen >> 8
+            at_byte += 3
+        } else {
+            list[at_byte] = op
+            at_byte += 1
+        }
+    }
+    list[at_byte] = DL_JVB
+    list[at_byte + 1] = at & $FF
+    list[at_byte + 2] = at >> 8
+    assert at / 1024 == (at + len(list) - 1) / 1024, "atari.display_list: the list crosses a 1 KB boundary. Place it at another address"
+    return list
+}
+
+// Show the display list at `list` from the next frame. Turns the display off through SDMCTL while
+// SDLST changes, so that the OS never copies half an address to ANTIC (at worst one frame is blank).
+asm fn set_display_list(list: u16 using XY) {
+    lda sdmctl
+    pha
+    lda #0
+    sta sdmctl
+    stx sdlst
+    sty sdlst+1
+    pla
+    sta sdmctl
+    rts
+}
