@@ -4,11 +4,20 @@ Owned by the coding session. Updated at the end of every coding session.
 
 ## Current
 
-- **Milestone:** M25, Atari 8-bit (roadmap; spec 2.1, 12.2; decisions 2026-11-12 and 2026-11-13). Done except the Atari `io` module (question 131); ready for `/review`.
-- **Branch:** `m25-atari`, from `main` at `b080d5d`. 3431 compiler tests pass plus 36 CPU tests. No benchmark changed (1254 / 350780); `SkillTests` pass.
-- **Next step:** `/review m25-atari`. Then the spec session answers questions 131-136.
+- **Milestone:** M25, Atari 8-bit (roadmap; spec 2.1, 12.2; decisions 2026-11-12 and 2026-11-13). Review (`docs/reviews/m25.md`): not ready to merge. Findings 1, 2 and 4-7 are fixed. Finding 3 (the done-when check on the real OS-B and XL OS) waits for the developer: register the OS ROM images in Altirra, or have the spec session accept AltirraOS (question 137). The Atari `io` module is open (question 131).
+- **Branch:** `m25-atari`, from `main` at `b080d5d`, `main` merged in (the review, `4165682`). 3436 compiler tests pass plus 36 CPU tests. No benchmark changed (1254 / 350780); `SkillTests` pass.
+- **Next step:** once the ROM images are registered, rerun `dli.xex` and `hello.xex` with `pwsh tests/tools/altirra-shot.ps1` on an 800 (`/hardware:800 /kernel:osb /memsize:48K`) and an 800XL (`/hardware:800xl` with the XL kernel, e.g. `/kernel:xl`, `/memsize:64K`), both with `/skipsetup /nobasic`; record the result here, then `/review m25-atari` again. If the spec session accepts AltirraOS instead, re-review directly.
 
 ## Done
+
+- **M25 review** (2026-11-13, `docs/reviews/m25.md`): not ready to merge.
+  - Must-fix 1 (`676ffc4`): `atari.print(text, 0)` printed the byte in A (CIO's put bytes with a length of 0); it now returns at once. Test `Print_of_0_characters_prints_nothing`.
+  - Must-fix 2 (`676ffc4`): `set_vbi`/`set_vbi_immediate` wrote the handler's address while the vector could already point to the stub, so a VBI between the two stores jumped to half an address. The vector now goes back to `XITVBV`/`SYSVBV` through SETVBV while the address changes (the handler may miss one frame). Test `A_vbi_handler_can_be_replaced_while_vertical_blanks_happen`: a second handler (in another page) is installed while a VBI is raised before each instruction of main in turn, through stand-ins for the OS's entry, SETVBV, SYSVBV and XITVBV; it failed before the fix.
+  - Must-fix 3 (done when, the real OS-B and XL OS): not done here, question 137. The DLI example's comment gives `/kernel:default`, which runs on this machine.
+  - Suggestion 4 (`676ffc4`): `display_list` asserts at least 1 row. The optional check that the list fits 240 scan lines is not built.
+  - Suggestion 5 (`afa24dd`): on the Atari the report lists the segments and their bytes ("Code and data: $2000-$2022, $3000-$3007 (43 bytes)").
+  - Suggestion 6 (`afa24dd`): `Platform.FileOf` takes the image the compiler built.
+  - Note 7 (`afa24dd`): a second `--target` is "--target is given more than once: give one target".
 
 - **M25: Atari 8-bit** (2026-11-13, branch `m25-atari`).
   - *`--target`* (`10a0390`): `tern`, `tern run` and `tern bench` require `--target c64` or `--target atari` (anywhere in the command); missing or unknown is a usage error listing the choices ("No target given: write --target c64 or --target atari"). `Platform.All`/`ByName`; `CompileResult.Platform`. The API (`TernCompiler.Compile`, `Bench.Measure`) keeps an optional platform, the C64 when null, so direct test compiles are unchanged. Test command lines (`Command.C64` in `Run.cs`), the skill's commands and the examples' comments name `--target c64`. `TargetTests`.
@@ -720,13 +729,13 @@ Not bugs; things to improve, mostly in M7 (optimizer).
 - The color redraw (`COLORS = true`) is untested against the beam (the stand-in VIC does not read color RAM). It can fall behind the beam in the lower rows when combined with the multiplexer's interrupts (review finding 4); the scroll header says so.
 - `src/lib/wide.tern` has the 24- and 32-bit code written out twice (generated once from a template).
 - An asm `jmp` that leaves the function (a tail call into ROM, as `atari.put`'s `jmp CIOV`) adds no register effects to the block's summary: the listing says `put` changes only X. Callers are safe (the optimizer forgets every register after a `jsr`, and a register loop rejects any call), but the summary comment is wrong; it should count such a `jmp` like a `jsr`.
-- On the Atari the report's "Code and data" range counts the gap between areas (e.g. a display list at `$3C00`), though the `.xex` does not contain it.
 - `w = addr(map) - 1` (or `+`) into a 16-bit variable stores `addr(map)` and then subtracts at run time; `CodeGen.AddressBytes` could make it two `lda #` / `sta` pairs, as it already does for `.lo` / `.hi`.
 
 ## Questions for the spec session
 
 Open, from M25 (provisional, as built):
 
+137. **The done-when check on the real OS ROMs** (review M25, finding 3). Altirra has no OS-B or XL OS ROM image on this machine, so the examples ran on AltirraOS only (800 and XL versions). Either the developer registers the ROM images in Altirra (Configure System, Firmware) and the coding session reruns the check, or the roadmap's done-when accepts AltirraOS for M25.
 131. **The Atari's `io` module is not built.** Spec 12.2 asks for "the Atari's versions of platform modules C64 programs use (`io`, screen text), where they make sense", listed by the coding session. Screen text is in `atari` (`put`, `print`, `cursor`), as `chrout`, `print` and `cursor` are in `c64`. For `io`, proposed: CIO on an IOCB the module picks (1-7): `open(name, n, mode)` (4 read, 8 write), `close`, `read(dst, n)` / `write(src, n)` (get/put bytes), `status`, and whole-file `load`/`save` through `D:`; names in ATASCII (`"D1:SCORES.DAT"`). It needs a `tern run` stand-in for files (the build's overlay files, as the C64's LOAD has) and an Altirra check with a disk or the `H:` device. With it: a loader for overlay files, which are built as `.xex` without a run address (no loader yet).
 132. **The library's digits on the Atari.** `text`, `wide`, `bcd` and `float` write digits as `$30-$39`, `-` as `$2D`, `.` as `$2E`: C64 screen codes, and also ATASCII, so `atari.print` shows them (`examples/atari/hello.tern`). Two things differ: `text.hex8`/`hex16` write A-F as C64 screen codes (`$01-$06`, Atari control and graphics characters), and Atari screen memory wants internal codes (a digit is `$10-$19`). Built: the modules unchanged ("work unchanged", roadmap); the skill says so. To decide: an Atari `text` with ATASCII hex letters (a platform module of the same name, 2.2), digits in the target's screen code, or as built.
 133. **The Altirra command, for `CLAUDE.md`.** Altirra cannot run without a window: its debugger has no screenshot or quit command (`/debugcmd` takes only debugger commands). What works: `pwsh tests/tools/altirra-shot.ps1 file.xex shot.png 8 /skipsetup /hardware:800 /kernel:default /memsize:48K /nobasic` (and `/hardware:800xl /memsize:64K` for the XL); it starts Altirra with `/run`, brings the window forward, copies it from the screen after the given seconds and closes Altirra. Portable mode: an `Altirra.ini` in `C:\Altirra` (created empty; Altirra fills it); `/portable` alone did not switch while the process was killed. **No OS-B ROM image is installed**, so `/kernel:osb` stops at Altirra's "NoKernel" placeholder; the checks used Altirra's own OS for the 800 (title "800 ATOS") and the XL. A check on the real OS-B needs its ROM image registered in Altirra (Configure System, Firmware).
