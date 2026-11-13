@@ -794,3 +794,7 @@ Spec 4.1 left these open; settled before M22's coding session.
 - **`atascii` default, `atari_screen`** (2.1), as planned in the founding encodings decision.
 - **`tern run` stands in for CIO screen output** only, so tests run in the built-in emulator as on the C64; display lists and DLIs are checked in Altirra. Reason: the tests need text output, while emulating ANTIC is Altirra's job.
 - **`lib/atari`**: chip register structs, OS routines at fixed addresses, the interrupt installers, display-list helpers, and the Atari's `io` and screen text where they make sense (the coding session lists them).
+
+## 2026-11-13: M25's Altirra checks on AltirraOS
+
+- **137: M25 is checked on AltirraOS**, Altirra's replacement OS, on an 800 with 48 KB and on an 800XL (roadmap M25, done when). No OS-B or XL OS ROM image is installed. Once they are registered in Altirra, the next Atari check reruns the examples on the real OS. Spec 12.2 is unchanged: programs still target the 800's OS (revision A or B) and the XL/XE OS. Reason: the library uses only the documented entry points and vectors, and AltirraOS follows them closely, including the two M25 depends on: the registers pushed before a VBI handler (A, X, Y) and the DLI's `jmp (VDSLST)`. A difference from the real ROMs is unlikely, and the ROM images are not available on this machine.

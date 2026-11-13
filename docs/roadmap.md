@@ -609,7 +609,7 @@ In this order (decision 2026-11-07; renumbered 2026-11-08). Each starts with a s
 - Altirra checks in portable mode, with a command line that runs without a window and saves a screenshot (written into `CLAUDE.md` through a status question)
 - Library modules that are not C64-only (`math`, `mem`, `text`, `wide`, `bcd`, `random`, `cpu`, the M24 floats) work unchanged
 
-Done when: an example with a display list and a DLI color change runs in an Atari emulator (Altirra), on an 800 with OS-B and 48 KB and on an 800XL, and the benchmarks compile for the Atari.
+Done when: an example with a display list and a DLI color change runs in an Atari emulator (Altirra), on an 800 with 48 KB and on an 800XL, both with AltirraOS (decision 2026-11-13; the real OS-B and XL OS once their ROM images are installed), and the benchmarks compile for the Atari.
 
 ### M26: Apple II
 
