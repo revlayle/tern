@@ -1,0 +1,4 @@
+// The digits the library writes numbers with, in ATASCII: 0-9 ($30-$39) and the hex letters A-F
+// ($41-$46), as atari.print shows them. Replaces lib/digits.tern on the Atari.
+
+data DIGITS = atascii"0123456789ABCDEF"
