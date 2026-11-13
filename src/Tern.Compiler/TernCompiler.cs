@@ -265,7 +265,7 @@ public static class TernCompiler
         int fileEnd = code.Segments.Max(s => s.Address + s.Bytes.Length);
         var image = new byte[fileEnd - loadAddress];
         foreach (var (address, bytes) in code.Segments) bytes.CopyTo(image, address - loadAddress);
-        var file = platform.FileOf(code.Segments, binary ? null : start.Address);
+        var file = platform.FileOf(loadAddress, image, code.Segments, binary ? null : start.Address);
 
         var symbols = new Dictionary<string, int>();
         var variables = new Dictionary<string, VariableInfo>();
@@ -386,11 +386,14 @@ public static class TernCompiler
             var overlayImage = new byte[segments.Max(s => s.Address + s.Bytes.Length) - first];
             foreach (var (address, bytes) in segments) bytes.CopyTo(overlayImage, address - first);
             overlayFiles.Add(new OverlayFile(module.Name, module.OverlayArea!, first, overlayImage,
-                platform.FileOf([(first, overlayImage)], null)));
+                platform.FileOf(first, overlayImage, [(first, overlayImage)], null)));
         }
 
         var report = new StringBuilder();
-        report.AppendLine($"Code and data: ${loadAddress:X4}-${fileEnd - 1:X4} ({image.Length} bytes)");
+        // A .prg holds the gaps between areas; a .xex holds only its segments.
+        report.AppendLine(platform.Format == OutputFormat.Prg
+            ? $"Code and data: ${loadAddress:X4}-${fileEnd - 1:X4} ({image.Length} bytes)"
+            : $"Code and data: {string.Join(", ", code.Segments.Select(s => $"${s.Address:X4}-${s.Address + s.Bytes.Length - 1:X4}"))} ({code.Segments.Sum(s => s.Bytes.Length)} bytes)");
         report.AppendLine(code.Variables is { } vars
             ? $"Variables after the program: {plan.TotalSize} bytes, up to ${vars.Last:X4}"
               + (plan.PageArrays.Count > 0

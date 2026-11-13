@@ -3,7 +3,8 @@
 // of each; the DLI handler sets the next row's color; a VBI handler starts the colors again each frame.
 //
 //   dotnet run --project src/Tern.Cli -- --target atari examples/atari/dli.tern
-//   C:\Altirra\Altirra64.exe /portable /hardware:800 /kernel:osb /memsize:48K /nobasic /run examples\atari\dli.xex
+//   C:\Altirra\Altirra64.exe /hardware:800 /kernel:default /memsize:48K /nobasic /run examples\atari\dli.xex
+// (/kernel:osb for the 800's own OS, once its ROM image is registered in Altirra.)
 import atari
 
 const SCREEN = $4000                // 40 x 24 characters, 960 bytes

@@ -50,14 +50,13 @@ public sealed class Platform
     /// from the lowest to the highest address, a .xex has one load segment per run and, if
     /// <paramref name="run"/> is given, a last segment that writes it to RUNAD.
     /// </summary>
-    public byte[] FileOf(IReadOnlyList<(int Address, byte[] Bytes)> segments, int? run)
+    /// <param name="first">The lowest address of the segments.</param>
+    /// <param name="image">The segments' bytes from <paramref name="first"/> on, gaps as zeros: the .prg's contents.</param>
+    public byte[] FileOf(int first, byte[] image, IReadOnlyList<(int Address, byte[] Bytes)> segments, int? run)
     {
         var file = new List<byte>();
         if (Format == OutputFormat.Prg)
         {
-            int first = segments.Min(s => s.Address);
-            var image = new byte[segments.Max(s => s.Address + s.Bytes.Length) - first];
-            foreach (var (address, bytes) in segments) bytes.CopyTo(image, address - first);
             file.AddRange([(byte)first, (byte)(first >> 8)]);
             file.AddRange(image);
             return file.ToArray();

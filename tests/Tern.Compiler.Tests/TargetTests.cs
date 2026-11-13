@@ -43,6 +43,15 @@ public sealed class TargetTests : IDisposable
     }
 
     [Fact]
+    public void A_second_target_is_an_error()
+    {
+        // Review M25, note 7.
+        var (code, _, error) = Tern("--target", "c64", "--target", "atari", Write("fn main() { }\n"));
+        Assert.Equal(1, code);
+        Assert.Equal("--target is given more than once: give one target. Run 'tern --help' for the options.", error);
+    }
+
+    [Fact]
     public void The_target_may_come_anywhere_in_the_command()
     {
         var path = Write("var n: u8\nfn main() { n = 7 }\n");

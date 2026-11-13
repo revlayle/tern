@@ -103,10 +103,12 @@ public static class Cli
     private sealed class TargetSwitch
     {
         private string? _name;
+        private bool _twice;
 
         public bool Parse(string[] arguments, ref int i)
         {
             if (arguments[i] != "--target" || i + 1 >= arguments.Length) return false;
+            _twice |= _name is not null;
             _name = arguments[++i];
             return true;
         }
@@ -114,9 +116,10 @@ public static class Cli
         /// <summary>The platform, or null with <paramref name="problem"/> saying what is wrong.</summary>
         public Platform? Platform(out string problem)
         {
-            problem = _name is null ? $"No target given: write {Compiler.Platform.Choices}"
+            problem = _twice ? "--target is given more than once: give one target"
+                : _name is null ? $"No target given: write {Compiler.Platform.Choices}"
                 : $"Unknown target '{_name}': write {Compiler.Platform.Choices}";
-            return _name is null ? null : Compiler.Platform.ByName(_name);
+            return _name is null || _twice ? null : Compiler.Platform.ByName(_name);
         }
     }
 

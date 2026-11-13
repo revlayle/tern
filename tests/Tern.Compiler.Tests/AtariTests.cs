@@ -71,6 +71,9 @@ public class AtariTests
         Assert.Equal(2 + segments.Sum(s => 4 + s.Bytes.Length), r.File.Length);
         Assert.Equal(r.Segments.Select(s => s.Address), segments.Take(2).Select(s => s.First));
         Assert.Equal(r.Segments[1].Bytes, segments[1].Bytes);
+        // Review M25, finding 5: the report counts the segments' bytes, not the gap between them.
+        int code = segments[0].Bytes.Length;
+        Assert.StartsWith($"Code and data: $2000-${0x2000 + code - 1:X4}, $9000-$9002 ({code + 3} bytes)", r.Report);
     }
 
     [Fact]
