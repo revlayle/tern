@@ -4,7 +4,7 @@ Branch `implements` (6 commits from `main` at `76a378e`), reviewed 2026-11-12 ag
 
 ## Verdict
 
-**Not ready to merge** until must-fix 1 is done. Decision 120 was settled (`04183c2`, on `main`) after the branch's last commit, and the roadmap asks for it to be built on the branch before the review. The rest of the milestone is complete and correct: 3265 compiler tests and 36 CPU tests pass, no benchmark changed, and the example runs in `tern run`.
+**Ready to merge** (re-review, below). First review: **not ready to merge** until must-fix 1 is done. Decision 120 was settled (`04183c2`, on `main`) after the branch's last commit, and the roadmap asks for it to be built on the branch before the review. The rest of the milestone is complete and correct: 3265 compiler tests and 36 CPU tests pass, no benchmark changed, and the example runs in `tern run`.
 
 ## Findings
 
@@ -54,6 +54,15 @@ Spec 8.5 says the interface, "imported by the main file, is resident". With `imp
 - [x] Each error in 8.5 has a test: not placed in an overlay, routine or volatile variable outside the area, overlapping tables, no routines, plus 119's "not a module the main file imports".
 - [x] Example: `stages.tern` with two stages loaded in turn and called through `stage_api`. It runs in `tern run` (test) and, per status, in VICE.
 - [x] The skill mentions `implements` next to overlays (`language.md` section 12). The guide has it in section 3 (spec session).
-- [ ] Questions 119-122: 119, 121 and 122 as built. **120 is not built** (must fix 1).
+- [x] Questions 119-122: 119, 121 and 122 as built; 120 built in the review fixes (`186771b`).
 - [x] Tests: calls through the interface reach the loaded overlay, frames shared with other code, each check and error, a plain call next to an interface call.
 - [x] Tests and example pass.
+
+## Re-review (2026-11-12, `186771b`, `f2f95a4`, `6ba750a`)
+
+**Ready to merge.** 3270 compiler tests and 36 CPU tests pass; no benchmark changed.
+
+- **Must fix 1, done** (`186771b`). `CheckNotBinaryData`, called from `UseGlobal`, reports "'api.title' is this module's data 'title'. Use 'title'" when the module being checked implements the interface. Tests cover a read with an index, a write, `addr()` and an asm operand (each at the name), and resident code and an interface helper called from main and from a level. Probes with a rebuilt CLI: the example from finding 1 gives the error at `l1.tern:4:31`; an interface `inline fn first() -> u8 { return title[0] }` called from `l1` compiles, so a helper expanded inside the module is still checked as the interface's code.
+- **Suggestion 2:** sent to the spec session as question 123 (`docs/status.md`). Nothing to build until it is settled.
+- **Suggestion 3, done** (`f2f95a4`). `RoutineOffset` is a local function; behavior unchanged (benchmarks and allocator tests are the same).
+- The done-when item for questions 119-122 is now met.
