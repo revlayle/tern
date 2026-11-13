@@ -162,6 +162,23 @@ public class FloatTests
         }
     }
 
+    /// <summary>The result pointer may be the operand pointer: each routine reads both before it stores (review M24).</summary>
+    [Theory, MemberData(nameof(Operations))]
+    public void An_operand_may_be_the_result(string name)
+    {
+        lock (Float)
+            foreach (var a in Values)
+            {
+                Store(P, a);
+                Overflow = false;
+                Float.Set16($"float.{name}.p", P);
+                Float.Set16($"float.{name}.q", P);
+                Float.Call($"float.{name}");
+                var expected = Model(name, a, a);
+                Assert.True(expected.Bytes.SequenceEqual(Load(P)) && expected.Overflow == Overflow, $"{name}({Show(a)}, same): found {Show(Load(P))}");
+            }
+    }
+
     [Fact]
     public void Overflow_gives_the_largest_value_and_results_too_small_become_0()
     {

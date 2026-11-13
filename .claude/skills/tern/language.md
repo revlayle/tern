@@ -763,3 +763,7 @@ out $0974 [u8; 3] (3 bytes):
 
 Strings and blocks are passed as a pointer and a length: `text.put(c64.SCREEN, addr(msg), len(msg))`.
 The library source is readable Tern in `lib/`; read it for the exact signatures.
+
+`float.of(x)` of a value larger than the largest float (about 1.7e38) fails with
+"float.tern:NN: Index 1 is outside the array ... (called from your line)": the index is out of range
+on purpose, as a const fn has no error of its own. Fix the value at your line, not the library.

@@ -4,11 +4,18 @@ Owned by the coding session. Updated at the end of every coding session.
 
 ## Current
 
-- **Milestone:** M24, floats as a library (roadmap; spec 10.1 `float`, 3.3; decision 2026-11-13). Done; ready for `/review`.
-- **Branch:** `m24-floats`, from `main` at `004d57c`. 3366 compiler tests pass plus 36 CPU tests. No benchmark changed (1254 / 350780); `SkillTests` pass.
-- **Next step:** `/review` of `m24-floats`. The spec session can copy the bytes and cycles below ("M24: float sizes and cycles") into the spec 10.1 table, and answer questions 126-130.
+- **Milestone:** M24, floats as a library (roadmap; spec 10.1 `float`, 3.3; decision 2026-11-13). Done; review (`docs/reviews/m24.md`): ready to merge, suggestions only, all handled. Ready for `/merge m24-floats`.
+- **Branch:** `m24-floats`, from `main` at `004d57c`, `main` merged in (the review, `03993a6`). 3370 compiler tests pass plus 36 CPU tests. No benchmark changed (1254 / 350780); `SkillTests` pass.
+- **Next step:** `/merge m24-floats`. The spec session can copy the bytes and cycles below ("M24: float sizes and cycles") into the spec 10.1 table (with the 19 bytes of zero page, review suggestion 2), and answer questions 126-130.
 
 ## Done
+
+- **M24 review** (2026-11-13, `docs/reviews/m24.md`): ready to merge, four suggestions and notes.
+  - Suggestion 1: the skill (`language.md`, under the library table) says what the "Index 1 is outside the array" error from `float.of` means and that the fix is at the caller's line, until question 128 is settled. (Not in `errors.md`: its examples are compiled by `SkillTests`, and this error names the library's path, which differs per machine.)
+  - Suggestion 2 (work bytes in zero page for `mul`/`div`): left as is, a trade-off for later; the 19 bytes of zero page are in "M24: float sizes and cycles" for the spec table.
+  - Note 3: question 129 reworded: `add`/`sub` with a 0 operand store nothing, so a 0 the program wrote with other mantissa bytes stays as it is.
+  - Note 4: the `Replace` in `InlineAsmTests` that matched nothing is removed.
+  - The review's untested case: `FloatTests.An_operand_may_be_the_result` (add, sub, mul, div with q equal to p, over the 71 values).
 
 - **M24: floats as a library** (2026-11-13, branch `m24-floats`).
   - *Language* (`0ddf2b4`): a struct literal's array field takes an array from a `const fn`, `repeat()` or a list built with `for` (spec 3.3), checked by `ArrayBytes` like a table (each element against the field's element type); a `[u16; n]` field is split into low and high bytes inside the record. A wrong length: "The field 't' is [u8; 4]: expected 4 values, found an array of 3. Return an array of 4 values". Tests in `StructLiteralTests` (a const fn, `repeat`, a list with `for`, `data` of structs, a `[u16; 2]` field; a wrong length, an element out of range, a real element).
@@ -700,7 +707,7 @@ Open, from M24 (provisional, as built):
 126. **What "exponent plus $80" means.** Built as Microsoft BASIC: the value is 0.1mmm (binary) × 2^(byte 3 - $80), the mantissa from 1/2 to 1, which gives the range in 10.1 (2^-128, about 2.9e-39, to (1 - 2^-24) × 2^127, about 1.7e38); 1.0 is `00 00 00 81`, -1.0 is `00 00 80 81`. Proposed: say so in 10.1, with these two examples.
 127. **`float.dec` details.** Built: `decimals` 0 to 9, more is written as 9; a `-` only when the text is not all zeros (-0.004 with 2 decimals is `0.00`); at least one digit before the point (`0.05`); no point when `decimals` is 0; at most 50 characters (39 digits for the largest values). Proposed: write these in 10.1, with "dst needs room for 50 characters, or for the program's largest value".
 128. **An error from a `const fn`.** `float.of` of a value too large must be an error (10.1), but a const fn cannot report one of its own: it is an index out of range on purpose, "float.tern:NN: Index 1 is outside the array (length 1) (called from main.tern:3)", at a line whose comment says the value is too large. Proposed: an `assert` statement inside a `const fn` (`assert e <= 127, "float.of: the value is larger than the largest float, about 1.7e38"`), reported at its line with "(called from ...)".
-129. **Small behaviors.** Built: division by zero gives the largest value with p's sign (0 / 0 the positive largest); `neg` leaves 0 as 0, so no -0 is made; any value with exponent 0 is 0 (`cmp`, `is_zero`, the operations); `to_u16` of -0.5 is 0 without `overflow` (toward zero it is 0), `round_u16` of -0.5 is 0 with `overflow` (it rounds to -1); every routine stores 0 as four zero bytes. Proposed: as built.
+129. **Small behaviors.** Built: division by zero gives the largest value with p's sign (0 / 0 the positive largest); `neg` leaves 0 as 0, so no -0 is made; any value with exponent 0 is 0 (`cmp`, `is_zero`, the operations); `to_u16` of -0.5 is 0 without `overflow` (toward zero it is 0), `round_u16` of -0.5 is 0 with `overflow` (it rounds to -1); every routine that stores 0 writes four zero bytes (`add`/`sub` with a 0 operand store nothing, so a 0 the program wrote with other mantissa bytes stays as it is; every routine reads it as 0). Proposed: as built.
 130. **A module function named like a compile-time built-in** (`floor`, `trunc` and `abs` in `float`) hides the built-in in that module's const fns: `floor(x)` in `float.of` is "'floor' runs on the 6502, so compile-time code cannot call it". `float.of` uses `round` instead. Proposed: keep it (one meaning per name inside a module), and say so in 4.1.
 
 Open, from the encodings milestone (provisional, as built):
