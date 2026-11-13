@@ -288,6 +288,42 @@ public class StructLiteralTests
     public void Reports_errors(string source, string expected) => Assert.Contains(expected, Error(source));
 
     [Fact]
+    public void An_array_field_takes_an_array_from_a_const_fn()
+    {
+        // Spec 3.3: a const fn's array, repeat() and a list built with for fill an array field; a
+        // [u16; n] field is split into low and high bytes inside the record.
+        var r = Run.Program("""
+            struct F { bytes: [u8; 4] }
+            struct W { tag: u8, ws: [u16; 2] }
+            const fn four(x: int) -> [int; _] {
+                return [(x >> (8 * i)) & $FF for i in 0..4]
+            }
+            const fn pair() -> [int; _] { return [$1234, $ABCD] }
+            var f = F { bytes = four($11223344) }
+            data g = F { bytes = repeat(7, 4) }
+            data fs: [F; 2] = [F { bytes = [i * 2 for i in 0..4] }, F { bytes = four(-1) }]
+            var w = W { tag = 9, ws = pair() }
+            var out: [u8; 4]
+            fn main() {
+                for i in 0..4 { out[i] = g.bytes[i] }
+            }
+            """);
+        Assert.Equal(new byte[] { 0x44, 0x33, 0x22, 0x11 }, Memory(r, "f", 4));
+        Assert.Equal(new byte[] { 7, 7, 7, 7 }, Memory(r, "out", 4));
+        Assert.Equal(new byte[] { 0, 0xFF, 2, 0xFF, 4, 0xFF, 6, 0xFF }, Memory(r, "fs", 8));
+        Assert.Equal(new byte[] { 9, 0x34, 0xCD, 0x12, 0xAB }, Memory(r, "w", 5));
+    }
+
+    [Theory]
+    [InlineData("const fn three() -> [int; _] { return [1, 2, 3] }\nstruct N { t: [u8; 4] }\nvar n = N { t = three() }\nfn main() { }",
+        "The field 't' is [u8; 4]: expected 4 values, found an array of 3. Return an array of 4 values")]
+    [InlineData("struct N { t: [u8; 2] }\nvar n = N { t = [i * 300 for i in 0..2] }\nfn main() { }",
+        "Element 1 is 300")]
+    [InlineData("const fn r() -> [real; _] { return [1.5, 2.5] }\nstruct N { t: [u8; 2] }\nvar n = N { t = r() }\nfn main() { }",
+        "Element 0 is the real number 1.5")]
+    public void An_array_from_a_const_fn_is_checked_against_the_field(string source, string expected) => Assert.Contains(expected, Error(source));
+
+    [Fact]
     public void Data_of_structs_is_read_only()
     {
         Assert.Contains("'start.x' is data, which is read-only",

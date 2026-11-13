@@ -796,8 +796,22 @@ public sealed partial class Checker
             text.CopyTo(record, offset);
             return;
         }
+        if (IsCompileTimeArray(value))
+        {
+            // An array from a const fn, repeat() or a list built with for (spec 3.3).
+            var array = CompileTimeArray(value);
+            if (array.Items.Length != n)
+                throw new CompileError(value.Pos, $"The field '{field.Name}' is {type}: expected {n} values, found an array of {array.Items.Length}. Return an array of {n} values");
+            var items = ArrayBytes(array, type, value.Pos);
+            for (int i = 0; i < n; i++)
+            {
+                record[offset + i] = items[i * element.Size];
+                if (element.Size == 2) record[offset + n + i] = items[i * 2 + 1];
+            }
+            return;
+        }
         if (value is not ArrayLiteralExpr list)
-            throw new CompileError(value.Pos, $"The field '{field.Name}' is {type}, so its value is a list. Write [ ... ] with {n} values");
+            throw new CompileError(value.Pos, $"The field '{field.Name}' is {type}, so its value is a list or an array from a const fn. Write [ ... ] with {n} values");
         if (list.Elements.Count != n)
             throw new CompileError(value.Pos, $"The field '{field.Name}' is {type}: expected {n} values, found {list.Elements.Count}. Write {n} values");
         for (int i = 0; i < n; i++)
