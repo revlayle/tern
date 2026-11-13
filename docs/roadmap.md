@@ -601,12 +601,13 @@ In this order (decision 2026-11-07; renumbered 2026-11-08). Each starts with a s
 ### M25: Atari 8-bit
 
 - `--target` (spec 12.2, decision 2026-11-12): required on `tern`, `tern run` and `tern bench` once the Atari exists; scripts, tests' command lines, the skill and the guide name `--target c64`
+- One `atari` target for every model with 48 KB or more, any OS version (spec 12.2, decision 2026-11-13); the library uses only the documented OS entry points and never writes PORTB
 - Platform description: memory map, free zero page, volatile areas (hardware registers, OS variables), ATASCII and screen-code encodings
 - `.xex` output (load segments, run address); the `memory` block's areas map to segments
 - `lib/atari`: OS routines (CIO) as routines at a fixed address; register structs for ANTIC, GTIA, POKEY, PIA; display lists; VBI and DLI handlers through the OS vectors
 - Library modules that are not C64-only (`math`, `mem`, `text`, `wide`, `bcd`, `random`, `cpu`, the M24 floats) work unchanged
 
-Done when: an example with a display list and a DLI color change runs in an Atari emulator (Altirra), and the benchmarks compile for the Atari.
+Done when: an example with a display list and a DLI color change runs in an Atari emulator (Altirra), on an 800 with OS-B and 48 KB and on an 800XL, and the benchmarks compile for the Atari.
 
 ### M26: Apple II
 
@@ -685,6 +686,7 @@ Each has a reason to wait; the spec session schedules one when that reason chang
 - **Quoted import paths and aliases** (decision 2026-11-09; spec 2.2, planned): `import "levels/level1.tern"` (relative to the importing file, `/` only) for subfolders, and `import my_io = "./io.tern"` to use a module under another name. Paths when a program wants subfolders; an alias when renaming a file cannot solve a clash. The points to settle first are in the decision.
 - **Constant parts of a pointer or 16-bit sum folded together** (decision 2026-11-09, gap 26; spec 11 row `p = q + e + K`): `p = rows[r] + (c << 1) + (COLOR_RAM - SCREEN)` as one 8-bit add with `adc #$18` in the high byte (about 18 bytes and 26 cycles, today 31 and 44; 37 and 54 with the constant first). The port writes it as two plain statements (21 bytes, 30 cycles), so nothing waits on it. Built with the optimizer work after M21, with the measurement set above.
 - **C64 cartridge output** (decision 2026-11-13): `.crt` images with modules in banks (spec 14.1), for EasyFlash, Ocean and Magic Desk cartridges (8 or 16 KB windows at `$8000`/`$A000`, a bank register at `$DE00`), with a platform function that selects the bank. Scheduled after M27, reusing the bank syntax the NES spec session settles.
+- **Atari banks and cartridges** (decision 2026-11-13): a spec session after M27 settles both, reusing the NES session's bank syntax. Banks: the 130XE's four 16 KB banks at `$4000–$7FFF`, selected through PORTB, with separate CPU and ANTIC access (bits 4 and 5), and perhaps the larger third-party expansions that extend the scheme. Cartridges: 8 and 16 KB images with no banks, and bank-switched ones such as the XEGS's (an 8 KB window at `$8000` with a fixed last bank at `$A000`); the image format (`.car` with its header, or raw `.rom`) is settled then. Scheduled with C64 cartridge output.
 - **An `reu` library module** (decision 2026-11-13): block copies between C64 RAM and a RAM Expansion Unit by DMA (`reu.fetch`, `reu.stash`), and the REU as a place overlays are loaded from (8.5). Not bank switching: the 6502 cannot run code or read data in the REU directly. GeoRAM (a 256-byte window at `$DE00`) is considered with it. Scheduled with or after cartridge output.
 
 After the compiler is complete (far off, not planned):

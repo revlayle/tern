@@ -1140,6 +1140,15 @@ A platform description gives: CPU variant, free zero-page ranges, RAM ranges for
   | `$D000–$DFFF` | VIC, SID, color RAM, CIAs, cartridge I/O |
 - Default encoding: `petscii` (2.1).
 
+**Atari 8-bit (M25; the rest of its description is settled in the M25 spec session)**
+
+- One target, `--target atari`, for every Atari 8-bit with at least 48 KB: the 800, a 400 expanded to 48 KB, and every XL/XE model, with the 800's OS (revision A or B) or the XL/XE OS. A 64 KB XL/XE gives a program no more usable RAM than a 48 KB 800, since its extra 16 KB lies under the OS ROM, and Tern programs keep the OS.
+- The library calls only the OS's documented entry points and vectors (CIO at `$E456`, `SETVBV` at `$E45C`, `XITVBV` at `$E462`, the vectors in page 2), the same on every model; never the XL OS's internal routines, which moved between versions.
+- The platform's library never writes PORTB (`$D301`): on the 400/800 it reads joystick ports 3 and 4, on the XL/XE it switches BASIC, the OS ROM and the 130XE's banks. Anything that needs it is an XL/XE-only module.
+- The startup code does not switch BASIC off. On the 400/800 BASIC is a cartridge left out; on an XL/XE the user (or the loader: DOS, Altirra) boots without it.
+- Machines with 16 KB (an unexpanded 400, the 600XL) are reached through the `memory` block (8.4), e.g. `$2000..=$3BFF program`; there is no separate target.
+- Not in M25: the 130XE's extra 64 KB (four 16 KB banks at `$4000–$7FFF`, selected through PORTB) and cartridge images, including the XEGS's bank-switched cartridges. Both follow the bank model of 14.1, after M27.
+
 **Planned**, in this order: Atari 8-bit (`.xex`), Apple II (binary for DOS 3.3/ProDOS), NES (iNES, `ricoh2a03`, PRG/CHR banks), Commander X16 (`wdc65c02`). After them, the Commodore 128 in native mode (`.prg` at `$1C01`).
 
 ### 12.3 Programs without `main`

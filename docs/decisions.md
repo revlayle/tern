@@ -770,3 +770,10 @@ Spec 4.1 left these open; settled before M22's coding session.
 
 - **C64 cartridges with banks** (EasyFlash, Ocean, Magic Desk) follow the bank model of spec 14.1: a module in a bank on its import, a platform call that writes the bank register. Output is a `.crt` image. Not scheduled; after M27, so it reuses the NES session's bank syntax. Reason: these cartridges map a window the 6502 runs from, which is exactly what 14.1 describes.
 - **The REU is a library and an overlay source, not a bank.** An `reu` module copies blocks by DMA; overlays (8.5) may be loaded from it. Not scheduled. Reason: REU memory is never mapped into the address space, so code cannot run from it and nothing in the language changes; it is a faster disk.
+
+## 2026-11-13: one Atari target for 48 KB and up; Atari banks and cartridges later
+
+- **One target, `atari`, for every Atari 8-bit with 48 KB or more** (spec 12.2): the 800, an expanded 400, and the XL/XE line, on any OS version. Reason: 48 KB was the common floor for disk software, from the 800 to the XE line, and a 64 KB XL/XE gives a program no more usable RAM, since its extra 16 KB is under the OS ROM and Tern keeps the OS. Many developers target the 400/800, so the 800XL must not be the only machine programs run on.
+- **The library uses only the OS's documented entry points and vectors, and never writes PORTB.** Reason: those entry points are the same on every OS version, while the XL OS's internal routines moved; PORTB reads joysticks 3 and 4 on the 400/800 and switches memory on the XL/XE. XL/XE-only features go in their own module.
+- **16 KB machines (400, 600XL) through the `memory` block**, not a target of their own. Reason: the block already replaces the platform's areas (8.4); a second target would only differ in one range.
+- **The 130XE's banks and cartridge images, the XEGS's bank-switched ones included, come after M27**, in a spec session with C64 cartridges (roadmap, Not scheduled). Reason: both follow the bank model of 14.1, whose syntax the NES session settles.
