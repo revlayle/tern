@@ -1,0 +1,31 @@
+// Hello on the Apple II: text through the ROM's COUT, in normal and inverse, and numbers written by the
+// text module.
+//
+//   dotnet run --project src/Tern.Cli -- --target apple2 examples/apple2/hello.tern
+//   dotnet run --project src/Tern.Cli -- run --target apple2 examples/apple2/hello.tern --screen
+//   pwsh tests/tools/apple2-disk.ps1 examples/apple2/hello.system hello.po    (then boot hello.po in AppleWin)
+import apple2
+import text
+import math
+
+data HELLO = "HELLO FROM TERN!\n"
+data SQUARES = "SQUARES: "
+data INVERSE = "INVERSE"
+
+var digits: [u8; 5]
+
+fn main() {
+    apple2.print(addr(HELLO), len(HELLO))
+    apple2.print(addr(SQUARES), len(SQUARES))
+    for i in 1..=8 {
+        // text writes digits in apple2 codes, $B0-$B9, which COUT prints.
+        var n: u8 = text.dec8(addr(digits), math.mul8(i, i) as u8)
+        apple2.print(addr(digits), n)
+        apple2.put(' ')
+    }
+    apple2.cursor(4, 0)
+    apple2.inverse()
+    apple2.print(addr(INVERSE), len(INVERSE))
+    apple2.normal()
+    apple2.put('\n')
+}

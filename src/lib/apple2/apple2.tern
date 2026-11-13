@@ -74,16 +74,8 @@ var cv: u8 @ $0025                  // the cursor's row
 var basl: u16 @ $0028               // the address of the cursor's row, which COUT writes through
 var invflg: u8 @ $0032              // the mask COUT applies to characters: $FF normal, $3F inverse, $7F flashing
 
-// The address of each text row from `base`: TEXT for page 1, $0800 for page 2.
-const fn text_rows(base: int) -> [int; _] {
-    var rows = repeat(0, 24)
-    for r in 0..24 {
-        rows[r] = base + 128 * (r % 8) + 40 * (r / 8)
-    }
-    return rows
-}
-
-data TEXT_ROWS: [u16; 24] = text_rows(TEXT)
+// The address of each row of text page 1.
+data TEXT_ROWS: [u16; 24] = [TEXT + 128 * (r % 8) + 40 * (r / 8) for r in 0..24]
 
 // Print n characters through COUT.
 fn print(text: ptr u8, n: u8) {
@@ -156,34 +148,11 @@ const HIRES2 = $4000
 var draw_page: u8 = $20
 
 // Each row's offset from the page's start.
-const fn hires_rows() -> [int; _] {
-    var rows = repeat(0, 192)
-    for y in 0..192 {
-        rows[y] = 1024 * (y % 8) + 128 * (y / 8 % 8) + 40 * (y / 64)
-    }
-    return rows
-}
+data HIRES_ROWS: [u16; 192] = [1024 * (y % 8) + 128 * (y / 8 % 8) + 40 * (y / 64) for y in 0..192]
 
 // x / 7 and the bit of x % 7, for x from 0 to 255; x from 256 to 279 adds 4 (256 = 7 * 36 + 4).
-const fn div7() -> [int; _] {
-    var t = repeat(0, 256)
-    for x in 0..256 {
-        t[x] = x / 7
-    }
-    return t
-}
-
-const fn bit7() -> [int; _] {
-    var t = repeat(0, 256)
-    for x in 0..256 {
-        t[x] = 1 << (x % 7)
-    }
-    return t
-}
-
-data HIRES_ROWS: [u16; 192] = hires_rows()
-private data DIV7: [u8; 256] = div7()
-private data BIT7: [u8; 256] = bit7()
+private data DIV7: [u8; 256] = [x / 7 for x in 0..256]
+private data BIT7: [u8; 256] = [1 << (x % 7) for x in 0..256]
 
 // Clear the draw page (8 KB of zeros: black).
 asm fn clear() {

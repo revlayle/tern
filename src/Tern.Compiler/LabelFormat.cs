@@ -35,7 +35,10 @@ public sealed class LabelFormat
         Line = (address, name) => $"00\t{address:X4}\t{name}",
     };
 
-    /// <summary>AppleWin's symbol tables: "ADDRESS NAME", ';' starts a comment. Loaded in the debugger with "symuser load".</summary>
+    /// <summary>
+    /// AppleWin's symbol tables: "ADDRESS NAME", ';' starts a comment. Loaded in AppleWin's debugger with
+    /// symuser load "..\path\game.sym": the path in quotes, relative to AppleWin's folder (checked in 1.32).
+    /// </summary>
     public static readonly LabelFormat AppleWin = new()
     {
         Extension = ".sym",

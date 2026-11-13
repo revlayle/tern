@@ -346,6 +346,34 @@ public class Apple2LibraryTests
     }
 
     [Fact]
+    public void Hello_example_prints_squares_and_inverse_text()
+    {
+        var path = AsmTests.FindExample("hello.tern", "apple2");
+        var run = Runner.Run(TernCompiler.Compile(File.ReadAllText(path), Platform.Apple2, sourcePath: path));
+        Assert.True(run.Returned, run.Stop);
+        Assert.Equal(["HELLO FROM TERN!", "SQUARES: 1 4 9 16 25 36 49 64", "", "", "INVERSE"], Runner.ScreenText(run).Take(5));
+        Assert.Equal(0x09, run.Ram.Bytes[0x0600]);   // row 4: inverse 'I'
+    }
+
+    [Fact]
+    public void Hires_example_runs_above_the_hires_pages_and_draws_its_frame()
+    {
+        var path = AsmTests.FindExample("hires.tern", "apple2");
+        var result = TernCompiler.Compile(File.ReadAllText(path), Platform.Apple2, sourcePath: path);
+        // Done when (roadmap M26): the code is above the hi-res pages, placed there by the memory block.
+        Assert.All(result.Segments, s => Assert.True(s.Address >= 0x6000, $"${s.Address:X4}"));
+        var run = Runner.Run(result);
+        Assert.True(run.Returned, run.Stop);
+        // The frame's corners: (20, 8), (259, 8), (20, 151), (259, 151).
+        foreach (var (x, y) in new[] { (20, 8), (259, 8), (20, 151), (259, 151) })
+            Assert.NotEqual(0, run.Ram.Bytes[0x2000 + HiresRow(y) + x / 7] & (1 << (x % 7)));
+        Assert.Equal(0, run.Ram.Bytes[0x2000 + HiresRow(160)]);
+        var screen = Runner.ScreenText(run);
+        Assert.Equal(" TERN ON THE APPLE II: HI-RES AND TEXT", screen[21]);
+        Assert.StartsWith(" PIXELS PLOTTED: ", screen[22]);
+    }
+
+    [Fact]
     public void The_benchmarks_run_on_the_apple_ii_with_the_same_results()
     {
         string dir = BenchmarkTests.Directory_;

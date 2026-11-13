@@ -1,0 +1,87 @@
+; Per source line: bytes, and the cycles of its instructions once each (+: a branch or page crossing adds more).
+; file         line bytes  cycles  addresses                source
+  hires.tern     31     1       6  $628D                    fn plot(x: u16, y: u8) {
+  hires.tern     32    15      24  $6278-$6286              apple2.plot(x, y)
+  hires.tern     33     6     12+  $6287-$628C              count += 1
+  hires.tern     36     1       6  $61D9                    fn main() {
+  hires.tern     37     3       6  $608E-$6090              apple2.clear()
+  hires.tern     38    33     42+  $6091-$6098 $60B7-$60CF  for x in LEFT..=RIGHT {
+  hires.tern     39    15      23  $6099-$60A7              plot(x, TOP)
+  hires.tern     40    15      23  $60A8-$60B6              plot(x, BOTTOM)
+  hires.tern     42    12     17+  $60D0-$60D3 $60F2-$60F9  for y in TOP..=BOTTOM {
+  hires.tern     43    15      22  $60D4-$60E2              plot(LEFT, y)
+  hires.tern     44    15      22  $60E3-$60F1              plot(RIGHT, y)
+  hires.tern     47     8      10  $60FA-$6101              var x: u16 = LEFT
+  hires.tern     48     4       5  $6102-$6105              var y: u8 = TOP
+  hires.tern     49     8     12+  $6106-$6109 $6147-$614A  for _ in 0..48 {
+  hires.tern     50    15      24  $610A-$6118              plot(x, y)
+  hires.tern     51    28      42  $6119-$6134              plot(RIGHT + LEFT - x, y)
+  hires.tern     52    11     17+  $6135-$613F              x += 5
+  hires.tern     53     7      10  $6140-$6146              y += 3
+  hires.tern     55    12     17+  $614B-$614E $6164-$616B  for i in 0..240 {
+  hires.tern     56    21     30+  $614F-$6163              plot(LEFT + i as u16, WAVE[i])
+  hires.tern     59     3       6  $616C-$616E              apple2.home()
+  hires.tern     60    11      16  $616F-$6179              apple2.cursor(21, 1)
+  hires.tern     61    15      21  $617A-$6188              apple2.print(addr(TITLE), len(TITLE))
+  hires.tern     62    11      16  $6189-$6193              apple2.cursor(22, 1)
+  hires.tern     63    15      21  $6194-$61A2              apple2.print(addr(PIXELS), len(PIXELS))
+  hires.tern     64    21      31  $61A3-$61B7              var n: u8 = text.dec16(addr(digits), count)
+  hires.tern     65     3       6  $61B8-$61BA              apple2.inverse()
+  hires.tern     66    15      22  $61BB-$61C9              apple2.print(addr(digits), n)
+  hires.tern     67     3       6  $61CA-$61CC              apple2.normal()
+  hires.tern     69     3       6  $61CD-$61CF              apple2.show_hires()
+  hires.tern     70     3       6  $61D0-$61D2              apple2.show_mixed()
+  hires.tern     71     3       6  $61D3-$61D5              apple2.show_page1()
+  hires.tern     72     3       6  $61D6-$61D8              apple2.show_graphics()
+  apple2.tern    81     1       6  $6262                    fn print(text: ptr u8, n: u8) {
+  apple2.tern    82    11     14+  $6252-$6257 $625D-$6261  for i in 0..n using Y {
+  apple2.tern    83     5     11+  $6258-$625C              put(text[i])
+  apple2.tern    88     1       6  $6277                    fn cursor(row: u8, col: u8) {
+  apple2.tern    89     4       6  $6263-$6266              cv = row
+  apple2.tern    90     4       6  $6267-$626A              ch = col
+  apple2.tern    91    12     17+  $626B-$6276              basl = TEXT_ROWS[row]
+  apple2.tern    95     1       6  $61FB                    fn inverse() {
+  apple2.tern    96     4       5  $61F7-$61FA              invflg = $3F
+  apple2.tern   103     1       6  $61F6                    fn normal() {
+  apple2.tern   104     4       5  $61F2-$61F5              invflg = $FF
+  apple2.tern   120     6      12  $61DA-$61DF              fn show_graphics() { sw_graphics = 0 }      // graphics, as the other switches say
+  apple2.tern   123     6      12  $61E6-$61EB              fn show_mixed() { sw_mixed = 0 }            // graphics with 4 rows of text at the bottom
+  apple2.tern   124     6      12  $61E0-$61E5              fn show_page1() { sw_page1 = 0 }            // show page 1 (text at $0400, hi-res at $2000)
+  apple2.tern   127     6      12  $61EC-$61F1              fn show_hires() { sw_hires = 0 }
+  apple2.tern   160     2       2  $62D3-$62D4              lda #0
+  apple2.tern   161     2       3  $62D5-$62D6              sta p
+  apple2.tern   162     2       3  $62D7-$62D8              lda draw_page
+  apple2.tern   163     2       3  $62D9-$62DA              sta p+1
+  apple2.tern   164     2       2  $62DB-$62DC              ldx #32
+  apple2.tern   165     2       2  $62DD-$62DE              lda #0
+  apple2.tern   166     1       2  $62DF                    tay
+  apple2.tern   168     2       6  $62E0-$62E1              sta (p),y
+  apple2.tern   169     1       2  $62E2                    iny
+  apple2.tern   170     2      2+  $62E3-$62E4              bne .loop
+  apple2.tern   171     2       5  $62E5-$62E6              inc p+1
+  apple2.tern   172     1       2  $62E7                    dex
+  apple2.tern   173     3      8+  $62E8-$62EA              bne .loop
+  apple2.tern   177     1       6  $62D2                    fn plot(x: u16, y: u8) {
+  apple2.tern   178     4       6  $628E-$6291              var i: u8 = x.lo
+  apple2.tern   179     4       5  $6292-$6295              var column: u8 = 0
+  apple2.tern   180     4      5+  $6296-$6299              if x.hi != 0 {
+  apple2.tern   181     7      10  $629A-$62A0              i += 4
+  apple2.tern   182     4       5  $62A1-$62A4              column = 36
+  apple2.tern   184     8     12+  $62A5-$62AC              column += DIV7[i]
+  apple2.tern   185    13     18+  $62AD-$62B9              var at: u16 = HIRES_ROWS[y] + column
+  apple2.tern   186     5       8  $62BA-$62BE              at.hi += draw_page
+  apple2.tern   187     8      12  $62BF-$62C6              var p: ptr u8 = at as ptr u8
+  apple2.tern   188    11     20+  $62C7-$62D1              p[0] = p[0] | BIT7[i]
+  text.tern      43     4       5  $61FC-$61FF              var n: u8 = 0
+  text.tern      44    10     15+  $6200-$6201 $623B-$6242  for k in 0..4 {
+  text.tern      45    11     16+  $6202-$620C              var power: u16 = POWERS[k]
+  text.tern      46     2       2  $620D-$620E              var d: u8 = 0
+  text.tern      47    14     19+  $620F-$6212 $6221-$622A  while value >= power {
+  text.tern      48    13      20  $6213-$621F              value -= power
+  text.tern      49     1       2  $6220                    d += 1
+  text.tern      51     7      9+  $622B-$6231              if d != 0 || n != 0 {
+  text.tern      52     7     13+  $6232-$6238              dst[n] = text_digits.DIGITS[d]
+  text.tern      53     2       5  $6239-$623A              n += 1
+  text.tern      56     9     16+  $6243-$624B              dst[n] = text_digits.DIGITS[value.lo]
+  text.tern      57     6      13  $624C-$6251              return n + 1
+                  -   127    197+  $6000-$6078 $607C-$6081  (startup)
