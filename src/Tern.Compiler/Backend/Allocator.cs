@@ -72,8 +72,8 @@ public static class Allocator
             .ToList();
         var inZp = new HashSet<VariableSymbol>();
 
-        // The free zero-page bytes in address order; a variable must lie in consecutive ones.
-        var zeroPage = layout.ZeroPage.OrderBy(r => r.First).SelectMany(r => Enumerable.Range(r.First, r.Size)).ToList();
+        // The free zero-page bytes in the order they are filled; a variable must lie in consecutive ones.
+        var zeroPage = layout.ZeroPage.SelectMany(r => Enumerable.Range(r.First, r.Size)).ToList();
         int zpCapacity = zeroPage.Count;
 
         int ZpNeeded()

@@ -348,7 +348,7 @@ public sealed class EncodingTests : IDisposable
     [InlineData("encoding t { 'A' = 256 }", "256 is not a byte; an encoding gives each character one byte, $00 to $FF. Use a value in that range", 1, 20)]
     [InlineData("encoding t { 'A' = -1 }", "-1 is not a byte", 1, 20)]
     [InlineData("var v: u8\nencoding t { 'A' = v }", "An encoding's byte must be known at compile time. Use a number or a constant", 2, 20)]
-    [InlineData("encoding t: scren { }", "Unknown encoding 'scren'. Use one of: petscii, petscii_mixed, screen, screen_mixed, atascii, atari_screen, t", 1, 13)]
+    [InlineData("encoding t: scren { }", "Unknown encoding 'scren'. Use one of: petscii, petscii_mixed, screen, screen_mixed, atascii, atari_screen, apple2, t", 1, 13)]
     [InlineData("encoding a: b { }\nencoding b: a { }", "The encoding 'a' is based on itself, through 'b'. Change the base of one of them, or remove it", 1, 1)]
     [InlineData("encoding a: a { }", "The encoding 'a' is based on itself, through 'a'", 1, 1)]
     [InlineData("encoding screen { 'A' = 1 }", "'screen' is a built-in encoding, so the prefix screen\"...\" would have two meanings. Rename the encoding", 1, 1)]

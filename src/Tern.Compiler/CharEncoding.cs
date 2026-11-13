@@ -84,13 +84,25 @@ public sealed class CharEncoding
         var a => a,
     });
 
+    /// <summary>
+    /// The Apple II's ASCII with the high bit set (spec 2.1): space to '~' are $A0-$FE, and '\n' is the
+    /// return code $8D. These are the codes COUT prints and, for normal text, the codes in screen
+    /// memory. A II+ shows lower case as other characters.
+    /// </summary>
+    public static readonly CharEncoding Apple2 = new("apple2", c => c switch
+    {
+        >= ' ' and <= '~' => c | 0x80,
+        '\n' => 0x8D,
+        _ => null,
+    });
+
     /// <summary>An encoding the program declares (spec 2.1): <paramref name="codes"/>, then the characters of <paramref name="baseEncoding"/>.</summary>
     public static CharEncoding Declared(string name, CharEncoding? baseEncoding, IReadOnlyDictionary<char, int> codes) =>
         new(name, c => codes.TryGetValue(c, out int code) ? code : baseEncoding?.Encode(c));
 
     /// <summary>The built-in encodings.</summary>
     public static IReadOnlyDictionary<string, CharEncoding> ByName { get; } =
-        new[] { Petscii, PetsciiMixed, Screen, ScreenMixed, Atascii, AtariScreen }.ToDictionary(e => e.Name);
+        new[] { Petscii, PetsciiMixed, Screen, ScreenMixed, Atascii, AtariScreen, Apple2 }.ToDictionary(e => e.Name);
 
     /// <summary>Characters with the same code in both PETSCII character sets.</summary>
     private static int? PetsciiCommon(char c) => c switch

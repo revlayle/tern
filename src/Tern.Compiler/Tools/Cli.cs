@@ -15,13 +15,17 @@ public static class Cli
           tern run --target <machine> <file.tern> [options]
           tern bench --target <machine> [options] <file.tern>... | --code <statements>...
 
-        Every command names the machine it builds for: --target c64 (Commodore 64) or
-        --target atari (Atari 8-bit with 48 KB or more).
+        Every command names the machine it builds for: --target c64 (Commodore 64),
+        --target atari (Atari 8-bit with 48 KB or more) or --target apple2 (Apple II with
+        64 KB under ProDOS 8).
 
         tern --target <machine> <file.tern> compiles a Tern program. Writes:
           <output>.prg   the program
           <output>.lst   listing with addresses, bytes and cycles
           <output>.vs    VICE label file (load in the monitor with: ll "<output>.vs")
+        On the Atari the program is <output>.xex and the labels <output>.lbl (Altirra loads
+        them with the program); on the Apple II the program is <output>.system, a ProDOS
+        system file, and the labels <output>.sym (in AppleWin's debugger: symuser load).
           <output>.lines bytes, cycles and addresses of each source line
 
         A program with 'export' lines and no main is a binary for another program to call;
@@ -49,7 +53,8 @@ public static class Cli
         VIC-II, SID or CIA; no ANTIC, GTIA, POKEY or PIA); a few ROM routines have stand-ins,
         and other ROM calls stop the run. On the C64: CHROUT, GETIN and PLOT; SETNAM, SETLFS
         and LOAD load the program's own overlay files ("LEVEL1" is level1.prg). On the Atari:
-        CIOV for put bytes on IOCB 0 (the screen editor), and SETVBV.
+        CIOV for put bytes on IOCB 0 (the screen editor), and SETVBV. On the Apple II:
+        COUT, HOME, the startup code's ROM calls, and the MLI's CLOSE and QUIT.
         The emulator reports an array index outside its array and an 'indexed match' value
         outside its span, with the source line (a match value outside stops the run). Exit
         code: 0 when main returned, 2 when it did not, 3 when it did but an index was outside.
@@ -60,7 +65,8 @@ public static class Cli
           --dump <what>    show memory after the run: a variable (score, main.count), a
                            variable with a byte count (table:4), $C000-$C0FF or $C000:16;
                            may be given more than once
-          --screen         show the text screen ($0400 on the C64, SAVMSC on the Atari)
+          --screen         show the text screen ($0400 on the C64 and the Apple II, SAVMSC
+                           on the Atari)
           --profile        show the cycles of each function and each source line
           --max-errors <n>, --no-warnings, --warnings-as-errors  as for tern <file.tern>
           --json           print the result as JSON
@@ -160,10 +166,9 @@ public static class Cli
             if (input is null) return Usage1("No source file given");
             if (warnings.Problem is { } both) return Usage1(both);
             if (target.Platform(out var noTarget) is not { } platform) return Usage1(noTarget);
-            outputPath ??= Path.ChangeExtension(input, platform.FileExtension);
-
             var result = CompileFile(input, platform, json, maxErrors, warnings.Mode);
             if (result is null) return 1;
+            outputPath ??= Path.ChangeExtension(input, result.HaltAddress < 0 ? platform.BinaryExtension : platform.FileExtension);
             var files = new List<string>();
             void Write(string path, Action<string> write)
             {
@@ -176,7 +181,7 @@ public static class Cli
             Write(Path.ChangeExtension(outputPath, ".lines"), p => File.WriteAllText(p, LineTable.Format(LineTable.Rows(result, Path.GetFileName(input)))));
             string directory = Path.GetDirectoryName(Path.GetFullPath(outputPath))!;
             foreach (var overlay in result.Overlays)
-                Write(Path.Combine(directory, overlay.Name + platform.FileExtension), p => File.WriteAllBytes(p, overlay.File));
+                Write(Path.Combine(directory, overlay.Name + platform.BinaryExtension), p => File.WriteAllBytes(p, overlay.File));
             if (result.ApiModule is not null)
                 Write(Path.Combine(directory, result.ApiModuleName + ".tern"), p => File.WriteAllText(p, result.ApiModule));
 

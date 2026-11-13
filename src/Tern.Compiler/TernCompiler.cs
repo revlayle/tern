@@ -65,7 +65,7 @@ public sealed class CompileResult
 /// <summary>What the compiler does with warnings (spec 13).</summary>
 public enum WarningMode { Report, Off, AsErrors }
 
-public static class TernCompiler
+public static partial class TernCompiler
 {
     /// <summary>The standard library: the <c>lib</c> folder next to the compiler.</summary>
     public static string DefaultLibraryDirectory => Path.Combine(AppContext.BaseDirectory, "lib");
@@ -140,6 +140,14 @@ public static class TernCompiler
         var halt = new Label("halt");
         var bss = new Label("bss");
         var setup = new Label("setup");
+        // Apple II: the copies the startup code makes (spec 12.2). They are known only once the program
+        // is assembled, and the copying code moves what follows it, so assembly repeats until they agree.
+        bool system = platform.Format == OutputFormat.System && !binary;
+        var moved = new Label("moved");
+        var quit = new Label("quit");
+        List<AreaMove> moves = [];
+        byte[]? systemFile = null;
+        int passes = 0;
         // Indexed reads only: a store or a read-modify-write takes the same cycles across a page.
         var indexed = new Dictionary<VariableSymbol, List<int>>();
         foreach (var i in functionCode.OfType<Instr>())
@@ -147,7 +155,7 @@ public static class TernCompiler
                 && AsmEffects.ReadsMemory(i.Mnemonic, i.Mode) && !AsmEffects.WritesMemory(i.Mnemonic, i.Mode)
                 && i.Operand is VarOperand { Variable: var v } o)
                 (indexed.TryGetValue(v.Storage, out var list) ? list : indexed[v.Storage] = []).Add(v.AliasOffset + o.Offset);
-        for (bool byPage = true; ; byPage = false)
+        for (bool byPage = true; ;)
         {
             plan = Allocator.Allocate(program, platform, byPage, indexed);
             foreach (var v in program.Globals.Concat(program.Functions.SelectMany(f => f.FrameVariables)))
@@ -168,10 +176,11 @@ public static class TernCompiler
             if (!binary)
             {
                 items = [new SectionStart("startup"), new DataBytes(platform.Header), new LabelDef(start), new Comment("startup")];
-                items.AddRange(Startup(plan, bss, gen.LabelOf));
+                items.AddRange(Startup(plan, bss, gen.LabelOf, system ? Apple2Start(moves, moved, quit) : []));
                 items.Add(new Instr(Jsr, Absolute, new LabelOperand(gen.LabelOf(program.Main))));
                 items.Add(new LabelDef(halt));
                 items.Add(new Instr(Jmp, Absolute, new LabelOperand(halt)));
+                if (system) items.AddRange(Apple2Quit(quit));
             }
             else
             {
@@ -191,7 +200,7 @@ public static class TernCompiler
                 }
                 items.Add(new SectionStart("setup"));
                 items.Add(new LabelDef(setup));
-                items.AddRange(Startup(plan, bss, gen.LabelOf));
+                items.AddRange(Startup(plan, bss, gen.LabelOf, []));
                 items.Add(new Instr(Rts));
             }
             items.AddRange(functionCode);
@@ -256,9 +265,20 @@ public static class TernCompiler
                     foreach (var (v, offset) in plan.FrameVariables) v.Address = bss.Address + offset;
                 }, overlayAreas, program.Modules.Where(m => m.ImportedBy is not null && m.OverlayArea is not null).ToDictionary(m => m.Name, m => m.ImportedBy!.Pos));
                 CheckFixedAddresses(program, platform, code, plan);
+                if (system)
+                {
+                    var (built, needed) = SystemFile(platform, code.Segments, start.Address, moves.Count > 0 ? moved.Address - start.Address : 0, program.Main.Pos);
+                    if (!needed.SequenceEqual(moves))
+                    {
+                        if (++passes > 8) throw new InvalidOperationException("The Apple II's startup copies did not settle");
+                        moves = needed;
+                        continue;
+                    }
+                    systemFile = built;
+                }
                 break;
             }
-            catch (Exception e) when (byPage && plan.PageArrays.Count > 0 && e is Assembler.NoPageStart or CompileError) { }
+            catch (Exception e) when (byPage && plan.PageArrays.Count > 0 && e is Assembler.NoPageStart or CompileError) { byPage = false; }
         }
 
         // The file covers every byte from the lowest to the highest address used; gaps are zeros.
@@ -266,7 +286,7 @@ public static class TernCompiler
         int fileEnd = code.Segments.Max(s => s.Address + s.Bytes.Length);
         var image = new byte[fileEnd - loadAddress];
         foreach (var (address, bytes) in code.Segments) bytes.CopyTo(image, address - loadAddress);
-        var file = platform.FileOf(loadAddress, image, code.Segments, binary ? null : start.Address);
+        var file = systemFile ?? platform.FileOf(loadAddress, image, code.Segments, binary ? null : start.Address);
 
         var symbols = new Dictionary<string, int>();
         var variables = new Dictionary<string, VariableInfo>();
@@ -352,7 +372,7 @@ public static class TernCompiler
 
             string baseName = sourcePath is null ? "binary" : Path.GetFileNameWithoutExtension(sourcePath);
             apiName = baseName + "_api";
-            apiModule = BinaryInterface.Generate(baseName + platform.FileExtension, apiName, table, fileRange, others);
+            apiModule = BinaryInterface.Generate(baseName + platform.BinaryExtension, apiName, table, fileRange, others);
         }
 
         if (program.ExportTableAddress is int tableAddress)
@@ -389,10 +409,13 @@ public static class TernCompiler
         }
 
         var report = new StringBuilder();
-        // A .prg holds the gaps between areas; a .xex holds only its segments.
+        // A .prg holds the gaps between areas; a .xex and a system file hold only the runs of bytes.
         report.AppendLine(platform.Format == OutputFormat.Prg
             ? $"Code and data: ${loadAddress:X4}-${fileEnd - 1:X4} ({image.Length} bytes)"
             : $"Code and data: {string.Join(", ", code.Segments.Select(s => $"${s.Address:X4}-${s.Address + s.Bytes.Length - 1:X4}"))} ({code.Segments.Sum(s => s.Bytes.Length)} bytes)");
+        if (systemFile is not null)
+            report.AppendLine($"System file: {systemFile.Length} bytes, loaded at ${platform.LoadAddress:X4}-${platform.LoadAddress + systemFile.Length - 1:X4}"
+                + (moves.Count > 0 ? $"; the startup code copies {Plural(moves.Count, "area", "areas")} into place: {string.Join(", ", moves.Select(m => $"${m.From:X4} to ${m.To:X4}, {m.Count} bytes"))}" : ""));
         report.AppendLine(code.Variables is { } vars
             ? $"Variables after the program: {plan.TotalSize} bytes, up to ${vars.Last:X4}"
               + (plan.PageArrays.Count > 0
@@ -419,7 +442,7 @@ public static class TernCompiler
             var inArea = overlayFiles.Where(o => o.Area == area.Key).ToList();
             report.AppendLine($"Overlay area {area.Key} {area.Value}" + (inArea.Count == 0 ? ": no overlay" : ":"));
             foreach (var o in inArea)
-                report.AppendLine($"  {o.Name}{platform.FileExtension}: {o.Image.Length} of {area.Value.Size} bytes (${o.LoadAddress:X4}-${o.LoadAddress + o.Image.Length - 1:X4})");
+                report.AppendLine($"  {o.Name}{platform.BinaryExtension}: {o.Image.Length} of {area.Value.Size} bytes (${o.LoadAddress:X4}-${o.LoadAddress + o.Image.Length - 1:X4})");
         }
         if (binary)
         {
@@ -449,7 +472,7 @@ public static class TernCompiler
             Segments = code.Segments,
             LoadAddress = loadAddress,
             Platform = platform,
-            Entry = start.Address,
+            Entry = system ? platform.LoadAddress : start.Address,
             HaltAddress = halt.Address,
             Listing = code.Listing,
             Symbols = symbols,
@@ -468,6 +491,8 @@ public static class TernCompiler
     }
 
     private static string Bytes(int n) => n == 1 ? "1 byte" : $"{n} bytes";
+
+    private static string Plural(int n, string one, string many) => n == 1 ? $"1 {one}" : $"{n} {many}";
 
     /// <summary>A program's export table is placed like fixed data: in a program or reserved area (spec 12.3).</summary>
     private static void CheckExportTable(CheckedProgram program, AddressRange range)
@@ -557,10 +582,14 @@ public static class TernCompiler
         }
     }
 
-    /// <summary>Startup code: set up zero-page globals and clear the uninitialized ones in RAM (except noinit ones).</summary>
-    private static List<AsmItem> Startup(RamPlan plan, Label bss, Func<FunctionSymbol, Label> labelOf)
+    /// <summary>
+    /// Startup code: the platform's own first steps (<paramref name="prelude"/>), then set up zero-page
+    /// globals and clear the uninitialized ones in RAM (except noinit ones).
+    /// </summary>
+    private static List<AsmItem> Startup(RamPlan plan, Label bss, Func<FunctionSymbol, Label> labelOf, IEnumerable<AsmItem> prelude)
     {
         var items = new List<AsmItem> { new Instr(Cld) };
+        items.AddRange(prelude);
 
         int? a = null;
         foreach (var g in plan.ZeroPageGlobals.Where(g => !g.NoInit))
