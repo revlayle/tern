@@ -25,6 +25,7 @@ public class UnderscoreLoopTests
         [
             "0..10", "0..=255", "9..=0 step -1", "255..=0 step -1", "0..2", "0..=0", "0..20 step 3", "20..=0 step -2",
             "0..m", "1..=m", "m..=0 step -1", "m..0 step -1", "0..m step 2", "0..300", "0..=256",
+            "-5..5", "-128..=127", "-1..=-10 step -1",
         ];
         string[] bodies =
         [
@@ -36,6 +37,8 @@ public class UnderscoreLoopTests
             "n += 1\n if n == 100 { break }",
             "if k == 5 { continue }\n k += 1\n w += 1",
             "w += 1",
+            "for _ in 0..3 { n += 1 }",
+            "buf[n] = 1\n while k < 10 { k += 1 }",
         ];
         int[] counts = [0, 1, 255];
         var data = new TheoryData<string, string, int>();

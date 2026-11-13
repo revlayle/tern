@@ -4,11 +4,13 @@ Owned by the coding session. Updated at the end of every coding session.
 
 ## Current
 
-- **Milestone:** `for _` follow-up (roadmap "`for _` follow-up"; spec 5.1, 11; decision 118). Done, ready for `/review`.
-- **Branch:** `for-followup`, from `main` at `1b991c1`. 3144 compiler tests pass plus 36 CPU tests. No benchmark changed (1254 / 350780); `SkillTests` pass (two skill outputs rewritten, see below).
-- **Next step:** `/review for-followup`. After this: `implements`, encodings, M24.
+- **Milestone:** `for _` follow-up (roadmap "`for _` follow-up"; spec 5.1, 11; decision 118). Done and reviewed (`docs/reviews/for-followup.md`: ready to merge; suggestion 1 done, note 2 needs no change).
+- **Branch:** `for-followup`, from `main` at `1b991c1`. 3224 compiler tests pass plus 36 CPU tests. No benchmark changed (1254 / 350780); `SkillTests` pass (two skill outputs rewritten, see below).
+- **Next step:** `/merge for-followup`. After this: `implements`, encodings, M24.
 
 ## Done
+
+- **`for _` follow-up, review** (2026-11-12, `docs/reviews/for-followup.md`): ready to merge. Suggestion 1: `UnderscoreLoopTests` also has signed ranges (`-5..5`, `-128..=127`, `-1..=-10 step -1`, which take the repeat path too) and two nested-loop bodies (`for _ in 0..3`, a `while`): 280 cases, all pass. Note 2 (a constant count of 0 compiles to no code for both spellings): no change.
 
 - **`for _` follow-up** (2026-11-12, branch `for-followup`, `0a80f43`). Decision 118: a `for _` loop is never slower than the same loop with a named counter the body does not read.
   - `CodeGen.GenRepeat` (a `for _` with a constant count, `ldx #n` ... `dex` / `bne`, 8- and 16-bit) now calls `HoldInRegister` after loading the counter, as the named path does, and `ReleaseHeld` after the loop's end (where `break` goes). `for _ in 9..=0 step -1 { n += 1 }`: 107 cycles before, 83 now (`ldx #$0A` / `ldy n` / `iny` / `dex` / `bne` / `sty n`), as `for i`. A `for _` with a variable count already took the named path. When nothing is held, the spec 11 shape is unchanged.
