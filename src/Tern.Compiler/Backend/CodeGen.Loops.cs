@@ -372,13 +372,20 @@ public sealed partial class CodeGen
         MatchStmt m => m.Subject == use,
         _ => false,
     };
+    /// <summary>
+    /// A <c>for _</c> loop with a constant count: the counter counts down to 0. A variable is held in
+    /// the free index register as in the named-counter path (<see cref="HoldInRegister"/>), so that
+    /// <c>_</c> is never slower than a named counter (spec 5.1).
+    /// </summary>
     private void GenRepeat(ForStmt f, VariableSymbol c, long count, Label top, Label cont, Label end)
     {
         _out.Add(new Comment($"repeat {count} times"));
+        VariableSymbol? inRegister;
         if (c.Type.Size == 1)
         {
             LoadCounterConst(c, count & 0xFF);
             if (c.Register is { } held) _reserved.Add(held);
+            inRegister = HoldInRegister(f.Body, null, c);
             Place(top);
             _loops.Add((end, cont));
             _loopDepth++;
@@ -395,6 +402,7 @@ public sealed partial class CodeGen
         {
             Op(Lda, Byte(count)); Op(Sta, Var(c));
             Op(Lda, Byte(count >> 8)); Op(Sta, Var(c, 1));
+            inRegister = HoldInRegister(f.Body, null, c);
             Place(top);
             _loops.Add((end, cont));
             _loopDepth++;
@@ -411,6 +419,7 @@ public sealed partial class CodeGen
             Branch(Bne, top);
         }
         Place(end);
+        ReleaseHeld(inRegister, f.Body);
     }
 
     private void SetCounter(VariableSymbol c, Expr from)

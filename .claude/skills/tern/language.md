@@ -335,12 +335,12 @@ fn main() {
 
 ```console
 $ tern run flow.tern --dump hits --dump n --dump 'log:10'
-Main returned: 826 cycles (642 in main)
-A=$1F X=$00 Y=$00 SP=$FF PC=$0825
+Main returned: 799 cycles (615 in main)
+A=$1F X=$00 Y=$12 SP=$FF PC=$0825
 hits $0003 u8 = 31 ($1F)
 n $0004 u8 = 18 ($12)
-log $08BA [u8; 16] (10 bytes):
-  $08BA  01 02 03 04 05 06 07 08 08 09
+log $08C0 [u8; 16] (10 bytes):
+  $08C0  01 02 03 04 05 06 07 08 08 09
 ```
 
 - There is no C-style `for (;;)` and no `do`/`until`. `a..b` excludes `b`, `a..=b` includes it.

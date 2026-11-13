@@ -47,8 +47,8 @@ fn main() {
 ```console
 $ tern shapes.tern
 Wrote shapes.prg
-Code and data: $0801-$08D3 (211 bytes)
-Variables after the program: 148 bytes, up to $0967
+Code and data: $0801-$08D4 (212 bytes)
+Variables after the program: 148 bytes, up to $0968
 Zero page:
 $02  1  math.w0
 $03  1  math.w1
@@ -93,9 +93,9 @@ instruction; a pointer is `(p),y`:
                                 ;   23: a[i] = x
 $0859  A5 04     lda x                 ; 3
 $085B  A6 06     ldx i                 ; 3
-$085D  9D D4 08  sta a,x               ; 5
+$085D  9D D5 08  sta a,x               ; 5
                                 ;   24: enemies[i].hp -= 1
-$0860  DE 58 09  dec enemies+32,x      ; 7
+$0860  DE 59 09  dec enemies+32,x      ; 7
                                 ;   25: p = $C000
 $0863  A9 00     lda #$00              ; 2
 $0865  85 0A     sta p                 ; 3
@@ -108,7 +108,8 @@ $086F  91 0A     sta (p),y             ; 6
 ```
 
 Compares branch on the flags directly; a `for` loop with a register counter, and a repeat loop that
-counts down:
+counts down and keeps `y` in the Y register (its store after the loop is left out, since line 31
+overwrites `y`):
 
 ```lst
                                 ;   27: if x == 0 { y = 1 }
@@ -128,7 +129,7 @@ main.endif3:
 $0883  A2 00     ldx #$00              ; 2
 main.for6:
 $0885  A9 00     lda #$00              ; 2
-$0887  9D D4 08  sta a,x               ; 5
+$0887  9D D5 08  sta a,x               ; 5
 main.fnext5:
 $088A  E8        inx                   ; 2
 $088B  E0 0A     cpx #$0A              ; 2
@@ -137,11 +138,12 @@ main.fend4:
                                 ;   30: for _ in 0..10 { y += 1 }
                                 ; repeat 10 times
 $088F  A2 0A     ldx #$0A              ; 2
+$0891  A4 05     ldy y                 ; 3
 main.for9:
-$0891  E6 05     inc y                 ; 5
+$0893  C8        iny                   ; 2
 main.fnext8:
-$0893  CA        dex                   ; 2
-$0894  D0 FB     bne main.for9         ; 2+
+$0894  CA        dex                   ; 2
+$0895  D0 FC     bne main.for9         ; 2+
 main.fend7:
 ```
 
@@ -151,27 +153,27 @@ subtract:
 
 ```lst
                                 ;   32: big = math.mul8(x, b)
-$089C  A6 09     ldx b                 ; 3
-$089E  A5 04     lda x                 ; 3
-$08A0  20 BB 08  jsr math.mul8         ; 6
-$08A3  85 0C     sta big               ; 3
-$08A5  86 0D     stx big+1             ; 3
+$089D  A6 09     ldx b                 ; 3
+$089F  A5 04     lda x                 ; 3
+$08A1  20 BC 08  jsr math.mul8         ; 6
+$08A4  85 0C     sta big               ; 3
+$08A6  86 0D     stx big+1             ; 3
                                 ;   33: if below(y) { y = 0 }
-$08A7  A5 05     lda y                 ; 3
-$08A9  85 0E     sta below.v           ; 3
-$08AB  20 B5 08  jsr below             ; 6
-$08AE  90 04     bcc main.endif10      ; 2+
-$08B0  A9 00     lda #$00              ; 2
-$08B2  85 05     sta y                 ; 3
+$08A8  A5 05     lda y                 ; 3
+$08AA  85 0E     sta below.v           ; 3
+$08AC  20 B6 08  jsr below             ; 6
+$08AF  90 04     bcc main.endif10      ; 2+
+$08B1  A9 00     lda #$00              ; 2
+$08B3  85 05     sta y                 ; 3
 main.endif10:
                                 ;   18: fn main() {
-$08B4  60        rts                   ; 6
+$08B5  60        rts                   ; 6
                                 ;   16: fn below(v: u8) -> bool { return v < 100 }
 below:
-$08B5  A9 64     lda #$64              ; 2
-$08B7  18        clc                   ; 2
-$08B8  E5 0E     sbc below.v           ; 3
-$08BA  60        rts                   ; 6
+$08B6  A9 64     lda #$64              ; 2
+$08B8  18        clc                   ; 2
+$08B9  E5 0E     sbc below.v           ; 3
+$08BB  60        rts                   ; 6
 ```
 
 Other shapes: `-x` is `lda #0 / sec / sbc x`; `x << 2` is `asl` twice; a 16-bit shift by 8 to 15
