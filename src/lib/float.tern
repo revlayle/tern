@@ -68,12 +68,7 @@ const fn of(x: real) -> [int; _] {
             e += 1
         }
     }
-    if e + 128 > 255 {
-        // x is larger than the largest float, about 1.7e38. The index is out of range on purpose,
-        // so that the error is reported here.
-        var too_large = [0]
-        return too_large[1 + e - e]
-    }
+    assert e + 128 <= 255, "float.of: the value is larger than the largest float, about 1.7e38"
     if e + 128 < 1 { return [0, 0, 0, 0] }
     return [m & $FF, (m >> 8) & $FF, ((m >> 16) & $7F) | sign, e + 128]
 }
