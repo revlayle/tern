@@ -1,0 +1,31 @@
+// The scroll example's sprites, in bank 1 (scroll.tern places it): four balls that bounce between
+// the top of the screen and the ground.
+
+import nes
+import art
+
+const COUNT = 4
+
+var x: [u8; COUNT] = [40, 90, 150, 200]
+var y: [u8; COUNT] = [50, 90, 130, 30]
+var dx: [i8; COUNT] = [1, -2, 2, -1]
+var dy: [i8; COUNT] = [2, 1, -1, -2]
+
+// Moves each ball one step, turning it at the edges, and writes it to the sprite buffer, which
+// the NMI handler sends to the PPU.
+fn update() {
+    for i in 0..COUNT {
+        x[i] += dx[i] as u8
+        if x[i] < 8 || x[i] > 240 {
+            dx[i] = -dx[i]
+        }
+        y[i] += dy[i] as u8
+        if y[i] < 16 || y[i] > art.GROUND * 8 - 9 {
+            dy[i] = -dy[i]
+        }
+        nes.oam[i].y = y[i]
+        nes.oam[i].tile = art.BALL
+        nes.oam[i].attributes = 0
+        nes.oam[i].x = x[i]
+    }
+}

@@ -607,6 +607,7 @@ public sealed class RepositoryWarningTests
     [InlineData("c64", 15)]
     [InlineData("atari", 3)]
     [InlineData("apple2", 2)]
+    [InlineData("nes", 2)]
     public void The_examples_compile_with_no_warnings(string target, int programs_at_least)
     {
         var platform = Platform.ByName(target)!;

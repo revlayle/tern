@@ -164,6 +164,49 @@ public class NesLibraryTests
         finally { dir.Delete(recursive: true); }
     }
 
+    // ---------- The examples ----------
+
+    [Fact]
+    public void The_hello_example_writes_its_text_in_the_nametable()
+    {
+        var path = AsmTests.FindExample("hello.tern", "nes");
+        var program = TernCompiler.Compile(File.ReadAllText(path), Platform.Nes, sourcePath: path);
+        var run = Runner.Run(program);
+        Assert.True(run.Returned, run.Stop);
+        Assert.Equal("           HELLO NES!", Runner.ScreenText(run)[14]);
+        Assert.Equal(0x1E, run.Nes!.Mask);
+        // The font is in CHR ROM: 'H' is tile 1, its first row $66.
+        Assert.Equal(0x66, run.Nes.Ppu[16]);
+    }
+
+    [Fact]
+    public void The_scroll_example_scrolls_and_moves_its_sprites_with_code_in_two_banks()
+    {
+        // The done-when example of M27: checked in Mesen too.
+        var path = AsmTests.FindExample("scroll.tern", "nes");
+        var program = TernCompiler.Compile(File.ReadAllText(path), Platform.Nes, sourcePath: path);
+        Assert.Equal(4, program.File[4]);
+        Assert.InRange(program.Symbols["art.load"], 0x8000, 0xBFFF);
+        Assert.InRange(program.Symbols["motion.update"], 0x8000, 0xBFFF);
+        // Ten frames, then ten more.
+        var first = Runner.Run(program, new RunOptions { MaxCycles = 12 * NesBus.FrameCycles });
+        var later = Runner.Run(program, new RunOptions { MaxCycles = 22 * NesBus.FrameCycles });
+        Assert.False(later.Returned);
+        Assert.Equal(1, later.Nes!.SelectedBank);
+        Assert.Equal(0x1E, later.Nes.Mask);
+        Assert.Equal(later.Nes.ScrollX, first.Nes!.ScrollX + 10);
+        // The tiles in CHR RAM, the ground of bricks (tile 1) from row 22, the balls on the ball tile (3).
+        Assert.Equal(0xFF, later.Nes.Ppu[16]);
+        Assert.All(later.Nes.Nametable(0)[22], t => Assert.Equal(1, t));
+        Assert.All(later.Nes.Nametable(1)[29], t => Assert.Equal(1, t));
+        for (int i = 0; i < 4; i++)
+        {
+            Assert.Equal(3, later.Nes.Oam[4 * i + 1]);
+            Assert.NotEqual(first.Nes.Oam[4 * i + 3], later.Nes.Oam[4 * i + 3]);
+        }
+        Assert.Equal(0xFF, later.Nes.Oam[4 * 4]);       // the other sprites hidden
+    }
+
     [Fact]
     public void Buttons_follow_the_frame()
     {

@@ -1,0 +1,51 @@
+// A scrolling background with moving sprites on UxROM, with code in two banks: the graphics and
+// their loading in bank 0 (art.tern), the sprites' motion in bank 1 (motion.tern). The main loop,
+// the NMI handler and the library are in the fixed bank.
+//
+// tern --target nes scroll.tern writes scroll.nes; Mesen runs it.
+
+import nes
+import uxrom
+import art @ world[ART]
+import motion @ world[MOTION]
+
+memory {
+    cartridge uxrom vertical
+    $8000..=$BFFF bank world
+}
+
+const ART = 0
+const MOTION = 1
+
+var scroll_x: u8
+var nametable: u8           // NAMETABLE_2400 while the second nametable is at the left edge
+
+// Vblank: the sprites first, then the scroll position, last.
+interrupt fn frame() {
+    nes.vblank()
+    nes.ppu.ctrl = nes.NMI_ON | nametable
+    nes.scroll(scroll_x, 0)
+}
+data nmi_vector: u16 @ $FFFA = addr(frame)
+
+fn main() {
+    // Rendering is off after the startup code: load the graphics from bank 0.
+    uxrom.select(ART)
+    art.load()
+    nes.hide_sprites()
+
+    // Bank 1 stays selected from here on.
+    uxrom.select(MOTION)
+    nes.ppu.ctrl = nes.NMI_ON
+    nes.wait_frame()
+    nes.render_on()
+    while true {
+        nes.wait_frame()
+        // Vertical mirroring puts the two nametables side by side: 512 pixels that wrap.
+        scroll_x += 1
+        if scroll_x == 0 {
+            nametable ^= nes.NAMETABLE_2400
+        }
+        motion.update()
+    }
+}

@@ -1,0 +1,54 @@
+// The scroll example's graphics, in bank 0 (scroll.tern places it): tiles for CHR RAM, the palette,
+// and two nametables side by side, a night sky over a brick ground.
+
+import nes
+
+const EMPTY = 0
+const BRICK = 1
+const STAR = 2
+const BALL = 3
+
+// Tiles: 16 bytes each, bitplane 0 then bitplane 1. A pixel's color is plane 0's bit plus twice
+// plane 1's: 1 for mortar and stars, 2 for bricks, 3 for the ball's highlight.
+data TILES: [u8; _] = [
+    $00, $00, $00, $00, $00, $00, $00, $00,   $00, $00, $00, $00, $00, $00, $00, $00,     // empty
+    $FF, $80, $80, $80, $FF, $08, $08, $08,   $00, $7F, $7F, $7F, $00, $F7, $F7, $F7,     // brick
+    $00, $00, $10, $38, $10, $00, $00, $00,   $00, $00, $00, $00, $00, $00, $00, $00,     // star
+    $3C, $7E, $FF, $FF, $FF, $FF, $7E, $3C,   $00, $18, $3C, $3C, $18, $00, $00, $00,     // ball
+]
+
+// Background palette 0: black sky, white mortar and stars, red bricks. Sprite palette 0: a green ball.
+data PALETTE: [u8; 32] = [$0F, $30, $16, $27,  $0F, $30, $16, $27,  $0F, $30, $16, $27,  $0F, $30, $16, $27,
+                          $0F, $2A, $1A, $30,  $0F, $2A, $1A, $30,  $0F, $2A, $1A, $30,  $0F, $2A, $1A, $30]
+
+// The ground starts at this row; above it, one star per column, at a row that varies.
+const GROUND = 22
+data STAR_ROW: [u8; _] = [(i * 7 + 3) % 20 for i in 0..64]
+
+// Copies the tiles to CHR RAM, sets the palette and fills both nametables. With rendering off.
+fn load() {
+    nes.ppu_copy(addr(TILES), $0000, len(TILES))
+    nes.set_palette(addr(PALETTE))
+    fill($2000, 0)
+    fill($2400, 32)
+}
+
+// One nametable: 30 rows of 32 tiles, then 64 bytes of attributes (palette 0 everywhere).
+// first is the first column's index in STAR_ROW.
+fn fill(base: u16, first: u8) {
+    nes.ppu_address(base)
+    for row in 0..30 {
+        for column in 0..32 {
+            var tile: u8 = EMPTY
+            if row >= GROUND {
+                tile = BRICK
+            } else if row == STAR_ROW[first + column] {
+                tile = STAR
+            }
+            nes.ppu.value = tile
+        }
+    }
+    for _ in 0..64 {
+        nes.ppu.value = 0
+    }
+}

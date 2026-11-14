@@ -255,9 +255,12 @@ public static class Allocator
                 if (Spans(g, indexed) is { } list) spans[g] = list;
         var noinit = ram.Where(g => g.NoInit).ToList();
         int offset = PlaceByPage(noinit.Where(g => g.Alignment > 1).ToList(), 0, plan.NoinitGlobals, spans);
+        // On a cartridge the startup code clears all of RAM, so the zeroed variables need not be one
+        // block: the aligned ones go first too, with no gap before them.
+        offset = PlaceByPage(ram.Where(g => rom && g.InitialBytes is null && !g.NoInit && g.Alignment > 1).ToList(), offset, plan.ZeroedGlobals, spans);
         offset = PlaceByPage(ram.Where(g => rom && !g.IsData && g.InitialBytes is not null).ToList(), offset, plan.CopiedGlobals, spans);
         plan.ZeroedStart = offset;
-        offset = PlaceByPage(ram.Where(g => g.InitialBytes is null && !g.NoInit).ToList(), offset, plan.ZeroedGlobals, spans);
+        offset = PlaceByPage(ram.Where(g => g.InitialBytes is null && !g.NoInit && !(rom && g.Alignment > 1)).ToList(), offset, plan.ZeroedGlobals, spans);
         int zeroedEnd = offset;
         offset = PlaceByPage(noinit.Where(g => g.Alignment == 1).ToList(), offset, plan.NoinitGlobals, spans);
         var globals = plan.ZeroedGlobals.Concat(plan.NoinitGlobals).Concat(plan.CopiedGlobals).ToList();
