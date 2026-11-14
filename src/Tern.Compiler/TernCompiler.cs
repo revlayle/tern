@@ -176,7 +176,7 @@ public static partial class TernCompiler
             if (!binary)
             {
                 items = [new SectionStart("startup"), new DataBytes(platform.Header), new LabelDef(start), new Comment("startup")];
-                items.AddRange(Startup(plan, bss, gen.LabelOf, system ? Apple2Start(moves, moved, quit) : []));
+                items.AddRange(Startup(plan, bss, gen.LabelOf, system ? Apple2Start(moves, moved, quit, exact: passes < 4) : []));
                 items.Add(new Instr(Jsr, Absolute, new LabelOperand(gen.LabelOf(program.Main))));
                 items.Add(new LabelDef(halt));
                 items.Add(new Instr(Jmp, Absolute, new LabelOperand(halt)));

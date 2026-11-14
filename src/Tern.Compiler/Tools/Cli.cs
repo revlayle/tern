@@ -23,11 +23,11 @@ public static class Cli
           <output>.prg   the program
           <output>.lst   listing with addresses, bytes and cycles
           <output>.vs    VICE label file (load in the monitor with: ll "<output>.vs")
+          <output>.lines bytes, cycles and addresses of each source line
         On the Atari the program is <output>.xex and the labels <output>.lbl (Altirra loads
         them with the program); on the Apple II the program is <output>.system, a ProDOS
         system file, and the labels <output>.sym (in AppleWin's debugger: symuser load
         "<path>", the path in quotes and relative to AppleWin's folder).
-          <output>.lines bytes, cycles and addresses of each source line
 
         A program with 'export' lines and no main is a binary for another program to call;
         it also writes <name>_api.tern, the module a Tern program imports to call it. A program

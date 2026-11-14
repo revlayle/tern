@@ -30,14 +30,15 @@ public static partial class TernCompiler
     /// The startup code's first part on the Apple II. The copies run from the file at $2000, before
     /// the code is in its place, so they use only relative branches, then jump to <paramref name="moved"/>.
     /// Then: 40-column text, page 1, full window, the ROM's hooks, and the reset vector to <paramref name="quit"/>.
+    /// With <paramref name="exact"/>, each copy has only the loops its count needs (see <see cref="Copy"/>).
     /// </summary>
-    private static List<AsmItem> Apple2Start(IReadOnlyList<AreaMove> moves, Label moved, Label quit)
+    private static List<AsmItem> Apple2Start(IReadOnlyList<AreaMove> moves, Label moved, Label quit, bool exact)
     {
         var items = new List<AsmItem>();
         if (moves.Count > 0)
         {
             items.Add(new Comment("copy the areas from the file at $2000 to their places"));
-            for (int i = 0; i < moves.Count; i++) items.AddRange(Copy(moves[i], $"move{i}_"));
+            for (int i = 0; i < moves.Count; i++) items.AddRange(Copy(moves[i], $"move{i}_", exact));
             items.Add(new Instr(Jmp, Absolute, new LabelOperand(moved)));
             items.Add(new LabelDef(moved));
         }
@@ -64,13 +65,18 @@ public static partial class TernCompiler
 
     /// <summary>
     /// Copies one area: upwards in memory from its last byte down, otherwise from its first byte up,
-    /// so that an area may overlap its own place in the file.
+    /// so that an area may overlap its own place in the file. With <paramref name="exact"/>, only the
+    /// loops the count needs: one over the whole pages, one over the rest. Otherwise both, each skipped
+    /// at run time when its count is 0, so that the code's size does not depend on the count; the
+    /// startup code uses that form when the copies do not settle in a few passes (the copying code's
+    /// size changes the counts).
     /// </summary>
-    private static List<AsmItem> Copy(AreaMove m, string name)
+    private static List<AsmItem> Copy(AreaMove m, string name, bool exact)
     {
         var items = new List<AsmItem>();
         bool down = m.To > m.From;
         int pages = m.Count >> 8, rest = m.Count & 0xFF;
+        bool pageLoop = !exact || pages > 0, restLoop = !exact || rest > 0;
         // Copying down starts at the last whole page's end, which the rest of the area follows.
         int from = down ? m.From + (pages << 8) : m.From, to = down ? m.To + (pages << 8) : m.To;
         foreach (var (address, value) in new[] { (CopyFrom, from), (CopyTo, to) })
@@ -80,58 +86,73 @@ public static partial class TernCompiler
             items.Add(new Instr(Lda, Immediate, new Imm(value >> 8)));
             items.Add(new Instr(Sta, ZeroPage, new AddrOperand(address + 1)));
         }
-        Label page = new(name + "page"), part = new(name + "part"), restLoop = new(name + "rest"), done = new(name + "done");
+        Label page = new(name + "page"), bytes = new(name + "bytes"), part = new(name + "part"), restBytes = new(name + "rest"), done = new(name + "done");
         var copyByte = new AsmItem[]
         {
             new Instr(Lda, IndirectIndexed, new AddrOperand(CopyFrom)),
             new Instr(Sta, IndirectIndexed, new AddrOperand(CopyTo)),
         };
+        // A count in X; when the count is not known to be above 0, a branch past the loop.
+        void Count(Tern.Cpu.Mnemonic load, int value, Label skip)
+        {
+            items.Add(new Instr(load, Immediate, new Imm(value)));
+            if (!exact) items.Add(new Instr(Beq, Relative, new LabelOperand(skip)));
+        }
         if (!down)
         {
             items.Add(new Instr(Ldy, Immediate, new Imm(0)));
-            items.Add(new Instr(Ldx, Immediate, new Imm(pages)));
-            items.Add(new Instr(Beq, Relative, new LabelOperand(part)));
-            items.Add(new LabelDef(page));
-            items.AddRange(copyByte);
-            items.Add(new Instr(Iny));
-            items.Add(new Instr(Bne, Relative, new LabelOperand(page)));
-            items.Add(new Instr(Inc, ZeroPage, new AddrOperand(CopyFrom + 1)));
-            items.Add(new Instr(Inc, ZeroPage, new AddrOperand(CopyTo + 1)));
-            items.Add(new Instr(Dex));
-            items.Add(new Instr(Bne, Relative, new LabelOperand(page)));
-            items.Add(new LabelDef(part));
-            items.Add(new Instr(Ldx, Immediate, new Imm(rest)));
-            items.Add(new Instr(Beq, Relative, new LabelOperand(done)));
-            items.Add(new LabelDef(restLoop));
-            items.AddRange(copyByte);
-            items.Add(new Instr(Iny));
-            items.Add(new Instr(Dex));
-            items.Add(new Instr(Bne, Relative, new LabelOperand(restLoop)));
+            if (pageLoop)
+            {
+                Count(Ldx, pages, part);
+                items.Add(new LabelDef(page));
+                items.AddRange(copyByte);
+                items.Add(new Instr(Iny));
+                items.Add(new Instr(Bne, Relative, new LabelOperand(page)));
+                items.Add(new Instr(Inc, ZeroPage, new AddrOperand(CopyFrom + 1)));
+                items.Add(new Instr(Inc, ZeroPage, new AddrOperand(CopyTo + 1)));
+                items.Add(new Instr(Dex));
+                items.Add(new Instr(Bne, Relative, new LabelOperand(page)));
+                items.Add(new LabelDef(part));
+            }
+            if (restLoop)
+            {
+                Count(Ldx, rest, done);
+                items.Add(new LabelDef(restBytes));
+                items.AddRange(copyByte);
+                items.Add(new Instr(Iny));
+                items.Add(new Instr(Dex));
+                items.Add(new Instr(Bne, Relative, new LabelOperand(restBytes)));
+            }
         }
         else
         {
             // The rest above the whole pages first, then each page, every one from its top byte down.
-            items.Add(new Instr(Ldy, Immediate, new Imm(rest)));
-            items.Add(new Instr(Beq, Relative, new LabelOperand(part)));
-            items.Add(new LabelDef(restLoop));
-            items.Add(new Instr(Dey));
-            items.AddRange(copyByte);
-            items.Add(new Instr(Tya));
-            items.Add(new Instr(Bne, Relative, new LabelOperand(restLoop)));
-            items.Add(new LabelDef(part));
-            items.Add(new Instr(Ldx, Immediate, new Imm(pages)));
-            items.Add(new Instr(Beq, Relative, new LabelOperand(done)));
-            items.Add(new LabelDef(page));
-            items.Add(new Instr(Dec, ZeroPage, new AddrOperand(CopyFrom + 1)));
-            items.Add(new Instr(Dec, ZeroPage, new AddrOperand(CopyTo + 1)));
-            var bytes = new Label(name + "bytes");
-            items.Add(new LabelDef(bytes));
-            items.Add(new Instr(Dey));
-            items.AddRange(copyByte);
-            items.Add(new Instr(Tya));
-            items.Add(new Instr(Bne, Relative, new LabelOperand(bytes)));
-            items.Add(new Instr(Dex));
-            items.Add(new Instr(Bne, Relative, new LabelOperand(page)));
+            // Each loop ends with Y = 0, where the page loop starts.
+            if (restLoop)
+            {
+                Count(Ldy, rest, part);
+                items.Add(new LabelDef(restBytes));
+                items.Add(new Instr(Dey));
+                items.AddRange(copyByte);
+                items.Add(new Instr(Tya));
+                items.Add(new Instr(Bne, Relative, new LabelOperand(restBytes)));
+                items.Add(new LabelDef(part));
+            }
+            else items.Add(new Instr(Ldy, Immediate, new Imm(0)));
+            if (pageLoop)
+            {
+                Count(Ldx, pages, done);
+                items.Add(new LabelDef(page));
+                items.Add(new Instr(Dec, ZeroPage, new AddrOperand(CopyFrom + 1)));
+                items.Add(new Instr(Dec, ZeroPage, new AddrOperand(CopyTo + 1)));
+                items.Add(new LabelDef(bytes));
+                items.Add(new Instr(Dey));
+                items.AddRange(copyByte);
+                items.Add(new Instr(Tya));
+                items.Add(new Instr(Bne, Relative, new LabelOperand(bytes)));
+                items.Add(new Instr(Dex));
+                items.Add(new Instr(Bne, Relative, new LabelOperand(page)));
+            }
         }
         items.Add(new LabelDef(done));
         return items;

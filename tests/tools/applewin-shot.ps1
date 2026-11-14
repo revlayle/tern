@@ -1,5 +1,6 @@
 # Boots a disk image in AppleWin (portable mode: C:\AppleWin\AppleWin.ini), saves a screenshot of its
-# window after a few seconds, then closes it. AppleWin needs a window, as Altirra does.
+# window after a few seconds, then closes it. AppleWin needs a window, as Altirra does. The window is
+# captured with PrintWindow, so other windows in front of it do not matter.
 #   pwsh tests/tools/applewin-shot.ps1 <disk.po> <shot.png> <seconds> <AppleWin switches...>
 # e.g. ... disk.po shot.png 10 -model apple2ee
 #      ... disk.po shot.png 10 -model apple2p -s0 languagecard
@@ -12,7 +13,7 @@ Add-Type @"
 using System;
 using System.Runtime.InteropServices;
 public static class Win {
-    [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
+    [DllImport("user32.dll")] public static extern bool PrintWindow(IntPtr h, IntPtr dc, uint flags);
     [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out RECT r);
     public struct RECT { public int Left, Top, Right, Bottom; }
 }
@@ -23,13 +24,13 @@ $p = Start-Process -FilePath 'C:\AppleWin\AppleWin-x64.exe' -ArgumentList $argum
 Start-Sleep -Seconds $Seconds
 $p.Refresh()
 $h = $p.MainWindowHandle
-[void][Win]::SetForegroundWindow($h)
-Start-Sleep -Milliseconds 500
 $r = New-Object Win+RECT
 [void][Win]::GetWindowRect($h, [ref]$r)
 $bmp = New-Object System.Drawing.Bitmap ($r.Right - $r.Left), ($r.Bottom - $r.Top)
 $g = [System.Drawing.Graphics]::FromImage($bmp)
-$g.CopyFromScreen($r.Left, $r.Top, 0, 0, $bmp.Size)
+$dc = $g.GetHdc()
+[void][Win]::PrintWindow($h, $dc, 2)      # PW_RENDERFULLCONTENT
+$g.ReleaseHdc($dc)
 $bmp.Save($Shot, [System.Drawing.Imaging.ImageFormat]::Png)
 "title: " + $p.MainWindowTitle
 if (-not $p.CloseMainWindow()) { $p | Stop-Process -Force }

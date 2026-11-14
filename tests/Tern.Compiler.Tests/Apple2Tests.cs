@@ -254,6 +254,31 @@ public class Apple2Tests
     }
 
     [Fact]
+    public void A_copy_of_whole_pages_has_no_loop_for_the_rest_and_no_test_of_its_counts()
+    {
+        // Review M26, suggestion 5: 256 bytes copied up to $9000 and 512 copied down to $0800.
+        var r = RunApple2($$"""
+            memory {
+                $0800..=$09FF reserved
+                $9000..=$90FF reserved
+            }
+            data low: [u8; 256] @ $0800 = [{{string.Join(", ", Enumerable.Range(0, 256).Select(i => (i * 3) & 0xFF))}}]
+            data low2: [u8; 256] @ $0900 = [{{string.Join(", ", Enumerable.Range(0, 256).Select(i => (i * 5 + 1) & 0xFF))}}]
+            data high: [u8; 256] @ $9000 = [{{string.Join(", ", Enumerable.Range(0, 256).Select(i => (i * 7 + 2) & 0xFF))}}]
+            var n: u8
+            fn main() { n = low[1] + low2[1] + high[1] }
+            """);
+        Assert.Equal(Enumerable.Range(0, 256).Select(i => (byte)(i * 3)), r.Ram.Bytes[0x0800..0x0900]);
+        Assert.Equal(Enumerable.Range(0, 256).Select(i => (byte)(i * 5 + 1)), r.Ram.Bytes[0x0900..0x0A00]);
+        Assert.Equal(Enumerable.Range(0, 256).Select(i => (byte)(i * 7 + 2)), r.Ram.Bytes[0x9000..0x9100]);
+        var listing = r.Result.Listing;
+        Assert.DoesNotContain("_rest:", listing);
+        Assert.DoesNotContain("beq move", listing);
+        Assert.Contains("move0_page:", listing);
+        Assert.Contains("move1_page:", listing);
+    }
+
+    [Fact]
     public void An_area_over_the_running_copier_is_an_error()
     {
         var e = Assert.Throws<CompileError>(() => Compile("""
