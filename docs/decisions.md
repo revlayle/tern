@@ -821,3 +821,17 @@ Spec 4.1 left these open; settled before M22's coding session.
 - **No interrupt helpers or vertical blank waits in M26**: the Apple II has no interrupt source without a card, and the vertical blank is read differently on the IIe, IIc and IIgs.
 - **`io` through the MLI is an M26 follow-up**, as the Atari's was; it settles the system bit map and the page-aligned file buffer.
 - **Checks in AppleWin** (its ROMs are built in), on an enhanced IIe and a II+ with 64 KB. The compiler writes no disk image: a test script uses CiderPress II's `cp2` with a ProDOS 2.4.3 boot image. The label file is in AppleWin's symbol format (rule of question 138).
+
+## 2026-11-13: M26 questions 140-148
+
+All as built; spec 8.4, 10.1 and 12.2 now say so.
+
+- **140: platform zero-page ranges are filled in the platform's order**, the Apple II's `$50–$FF` first, so an ordinary program meets the gap between ranges only after 176 bytes; a `memory` block's ranges stay in address order. A variable the compiler chose for zero page never crosses a gap. Rejected: skipping to the next range when a variable does not fit, which loses bytes and makes frame offsets harder. Filling a `memory` block's lines in the order written was considered and left until a program needs it.
+- **141: Apple II overlays and binaries are headerless `.bin` files**, provisional: the M26 follow-up settles the format and the ProDOS file type (likely BIN, `$06`, with the load address as its aux type) along with the overlay loader.
+- **142: the startup code moves the areas first**, since it runs from the file at `$2000` before anything is in place; the 80-column firmware is turned off by printing `$95` through COUT when CSWH is `$C3`. That path did not run in AppleWin (ProDOS 2.4.3 starts programs with the 40-column hooks); the follow-up checks it once with the firmware on (`PR#3`, then start the program).
+- **143: `lib/apple2`'s names and shapes** (listed in 12.2): `put` is COUT, the soft switches are `show_*` functions so none reads like the `text` module, `plot` only sets a pixel, `mli` returns the error code, `exit()` does not go through the reset vector.
+- **144: the file starts with the run that holds the start address**, then the others by address; the copying loops and their costs, the overlap errors and the fallback after 4 assemblies are in 12.2.
+- **145: `text_digits` holds `DIGITS`, `ZERO`, `MINUS` and `POINT`** on every platform, and the number modules take every character from it, so a platform replaces one module to change how numbers look.
+- **146: `tern run`'s Apple II stand-ins include the routines the startup code and `exit()` call** (SETNORM, INIT, SETVID, SETKBD, the MLI's CLOSE); other ROM calls stop the run, which shows the missing stand-in.
+- **147: the float table's new counts** (spec 10.1), moved by `float` using `text_digits`.
+- **148: `examples/apple2` outputs are ignored** (`.gitignore`), as for the other example folders.

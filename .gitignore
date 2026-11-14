@@ -24,6 +24,11 @@ examples/atari/*.vs
 examples/atari/*.lbl
 examples/atari/*.lines
 examples/atari/*.d64
+examples/apple2/*.system
+examples/apple2/*.sym
+examples/apple2/*.bin
+examples/apple2/*.lst
+examples/apple2/*.lines
 examples/c64/player_api.tern
 examples/c64/plugins/*_api.tern
 !examples/c64/plugins/level_api.tern
