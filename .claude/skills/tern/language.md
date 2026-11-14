@@ -119,7 +119,12 @@ fn main() {
 }
 ```
 
-- `@` always means "located at": an address, `zp`, or a region of the `memory` block.
+- `@` always means "located at": an address, `zp`, `align(n)`, or a region of the `memory` block.
+- `@ align(n)` puts a global `var` or `data` where the compiler would, but at a multiple of `n` (a
+  power of two, 2 to 32768): `noinit var chars: [u8; 2048] @ align(2048)`, `@ align(64)` for sprite
+  data. No code; up to `n - 1` bytes of padding, which the report shows (`Aligned chars: $3000
+  (@ align(2048)), 200 bytes of padding before it`). Not on locals, never in zero page (so not on a
+  pointer that is dereferenced); in an overlay the padding is in its file.
 - Globals with no initial value are zeroed at startup, so `x = 0` at the start of `main` costs nothing.
 - A local's memory is shared with functions that never run at the same time, so it holds leftovers on
   entry: scalars need an initial value. Local arrays do not, and hold leftovers.
@@ -648,7 +653,7 @@ a $0003 u8 = 21 ($15)
   overlay areas and zero page. A main file with `export` lines and no `main` is a binary for another
   program (`name_api.tern` is written for the host). See `docs/guide.md` sections 3.11 and 3.12.
 - Overlays: `import level1 @ levels` puts a module in an overlay area; it gets its own file
-  (`level1.prg`, on the Atari `level1.xex`, on the Apple II `level1.bin`), loaded with `c64.load` or the Atari's `io.load_xex`, and
+  (`level1.prg`, on the Atari `level1.xex`, on the Apple II `level1.bin`), loaded with `c64.load`, the Atari's `io.load_xex` or the Apple II's `io.load_bin`, and
   modules in one area share memory. With
   `import level1 @ levels implements level_api`, level1's file also has a `jmp` at each routine of
   the interface module `level_api` (routines at fixed addresses inside the area), so resident code
@@ -765,6 +770,7 @@ out $0974 [u8; 3] (3 bytes):
 | `atari` (Atari) | `put`, `print`, `cursor` (text through the screen editor, in ATASCII); registers `gtia`/`gtia_in`, `pokey`/`pokey_in`, `pia`, `antic`; shadow registers (`color`, `sdmctl`, `sdlst`, `chbas`, ...), `stick`, `strig`, `ch`, `rtclok`, `savmsc`; `wait_frame`, `exit`; `set_dli`, `set_vbi` (after the OS's frame work), `set_vbi_immediate`; display lists: `DL_` and `MODE_` constants, the const fn `display_list(mode, rows, screen, at, dli)` for `data list: [u8; _] @ LIST = ...`, `set_display_list` |
 | `apple2` (Apple II) | `put` (COUT itself), `print`, `cursor`, `inverse`, `flashing`, `normal`, `home`, `put_hex`, `read_key`, `bell`, `wait`; `TEXT_ROWS`; soft switches `show_text`, `show_graphics`, `show_mixed`, `show_full`, `show_page1`, `show_page2`, `show_lores`, `show_hires`; hi-res: `draw_page` (`$20` or `$40`), `clear`, `plot(x, y)`, `HIRES_ROWS`; `kbd`, `key()`, `click`, `tone`; `mli(command, parameters)`, `exit` |
 | `io` (C64) | disk files through the KERNAL: `load`, `save`, `open`, `read`, `write`, `close`, the command channel |
+| `io` (Apple II) | files through the ProDOS MLI, one open at a time (a 1 KB buffer `@ align(256)`), ProDOS paths in `apple2` codes, partial (`"SCORES"`, next to the program) or full (`"/GAMES/SCORES"`), at most 64 characters, lowercase allowed: the Atari's `open` (`io.READ`, `io.WRITE`: creates a BIN file or empties it), `read`, `write`, `close`, `load`, `save` (a BIN file with `src` as its aux type), `status()` (the MLI's code: 0 is success; `ST_EOF` `$4C`, `ST_NOT_FOUND` `$46`), and `load_bin(name, n)` for overlay files (a BIN file loads at its aux type; another type or aux type 0 fails with `$4A`); `true` means it failed |
 | `io` (Atari) | files through CIO on IOCB 1, one open at a time, names with their device (`"D1:SCORES.DAT"`, `"H:..."`): `open(name, n, io.READ or io.WRITE)`, `read(dst, n: u16)` (returns the count), `write`, `close`, `status()` (CIO's code: below 128 is success, not only `ST_OK`; `ST_EOF`, `ST_NOT_FOUND`), `load(name, n, dst, max)`, `save(name, n, src, count)`, `load_xex(name, n)` for overlay files; `true` means it failed |
 | `sprites` (C64) | a sprite multiplexer, 8 to 64 sprites |
 | `scroll` (C64) | smooth eight-way character scrolling |
