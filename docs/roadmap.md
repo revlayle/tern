@@ -342,7 +342,7 @@ Done when an agent with only the skill and tools can write, check and measure a 
 
 ## Developer guide (spec session, from M19 on)
 
-Decision 2026-11-07, scheduled 2026-11-08. User documentation that explains how the language behaves on the machine, with examples; it informs and does not forbid. It grows out of the quick guide in `docs/guide.md`, whose section 6 lists these behaviors briefly. Written by the spec session after M19 (which with M17 gives most of its content), extended as each later milestone lands, and complete before the first release (below), with wrapping arithmetic and unchecked indexes covered in detail. It must cover each behavior below; the spec session adds to this list whenever a decision leaves a behavior that the programmer may rely on, or that may surprise them:
+Decision 2026-11-07, scheduled 2026-11-08. User documentation that explains how the language behaves on the machine, with examples; it informs and does not forbid. It is chapter 10 of the guide, `docs/guide/10-behavior.md` (decision 2026-11-14: the guide in chapters), each behavior with an example. Written by the spec session after M19 (which with M17 gives most of its content), extended as each later milestone lands, and complete before the first release (below), with wrapping arithmetic and unchecked indexes covered in detail. It must cover each behavior below; the spec session adds to this list whenever a decision leaves a behavior that the programmer may rely on, or that may surprise them:
 
 - all arithmetic wraps, including index expressions: `buf[head + 1]` with `head = 255` is `buf[0]` (3.1, 3.2); when the optimizer folds a constant offset into the address
 - an index outside the array is not checked, as in C, and the optimizer assumes it does not happen; reaching other memory on purpose uses a pointer; the emulator reports a bad index in test runs (3.2, 14.4)
@@ -366,6 +366,7 @@ Decision 2026-11-07, scheduled 2026-11-08. User documentation that explains how 
 - on negative constants `/` rounds toward zero and `%` takes the left operand's sign, while `>>` rounds down (3.1)
 - when `main` returns, the program stops in an endless loop and interrupt handlers keep running; there is no return to BASIC (12.2)
 - fields left out of a struct literal are 0 (3.3)
+- which ROM bank is selected is not checked: a call into a bank area runs whatever bank is selected (8.5, 14.1)
 
 ## M20: Index checks in the emulator, and signed loop variables
 
@@ -666,7 +667,7 @@ Done when: an example scrolls a background and moves sprites in a NES emulator (
 
 ## First release (after M27)
 
-Decision 2026-11-08, changed 2026-11-13: the first release comes once the four platforms C64, Atari, Apple II and NES work; the Commander X16 and the Commodore 128 come after it. Done when: M27 is merged, the developer guide covers every behavior in its list, `docs/guide.md` and spec 10.1 describe the compiler and library as built, and every example builds for its platforms.
+Decision 2026-11-08, changed 2026-11-13: the first release comes once the four platforms C64, Atari, Apple II and NES work; the Commander X16 and the Commodore 128 come after it. Done when: M27 is merged, the developer guide covers every behavior in its list, the guide (`docs/guide/`) and spec 10.1 describe the compiler and library as built, and every example builds for its platforms.
 
 ## After the first release
 
