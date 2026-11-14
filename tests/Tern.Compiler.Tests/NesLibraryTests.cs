@@ -205,6 +205,11 @@ public class NesLibraryTests
             Assert.NotEqual(first.Nes.Oam[4 * i + 3], later.Nes.Oam[4 * i + 3]);
         }
         Assert.Equal(0xFF, later.Nes.Oam[4 * 4]);       // the other sprites hidden
+        // Banks share $8000-$BFFF: the index check and the profile tell their code apart by the selected bank (review M27, finding 3).
+        Assert.Empty(later.IndexErrors);
+        Assert.Equal(1, later.Functions.Single(f => f.Name == "art.load").Calls);
+        Assert.Equal(2, later.Functions.Single(f => f.Name == "art.fill").Calls);
+        Assert.InRange(later.Functions.Single(f => f.Name == "motion.update").Calls, 5, 20);
     }
 
     [Fact]

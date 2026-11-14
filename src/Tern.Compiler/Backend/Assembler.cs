@@ -20,8 +20,29 @@ public sealed record PlacedArea(AddressRange Free, int UsedEnd, List<string> Nam
 /// <see cref="File"/> is null for the main file, else the module's file name. <see cref="Cycles"/> is
 /// the base count; <see cref="MoreCycles"/> is set for a branch or a read that can cross a page.
 /// </summary>
+/// <see cref="Overlay"/> is the overlay or bank its section is in ("levels[1]"), or null.
 public sealed record PlacedInstruction(int Address, int Size, string Text, int Cycles, bool MoreCycles, string? File, int? Line, string? Source, string Section,
-    CheckedIndex? Index = null);
+    CheckedIndex? Index = null, string? Overlay = null)
+{
+    /// <summary>The bank it is in (spec 8.5), or -1 outside banks.</summary>
+    public int Bank => CodePlace.BankOf(Overlay);
+    /// <summary>Where it is: its address, told apart from the same address in other banks (<see cref="CodePlace"/>).</summary>
+    public int Place => CodePlace.Of(Address, Bank);
+}
+
+/// <summary>
+/// A place in the program's code: an address, and for code in a bank (spec 8.5) the bank, since banks
+/// share their addresses. The emulator's index check, profile and function entries are keyed by place.
+/// </summary>
+public static class CodePlace
+{
+    /// <summary>The address, with the bank above its 16 bits; the address alone outside banks (<paramref name="bank"/> -1).</summary>
+    public static int Of(int address, int bank) => bank < 0 ? address : (bank + 1) << 16 | address;
+
+    /// <summary>The bank of an overlay or bank unit ("levels[1]" is 1); -1 for an overlay or none.</summary>
+    public static int BankOf(string? unit) =>
+        unit is not null && unit.EndsWith(']') && int.TryParse(unit[(unit.IndexOf('[') + 1)..^1], out int n) ? n : -1;
+}
 
 /// <summary>
 /// An array index or <c>indexed match</c> table read that the emulator checks (M20): the address
@@ -371,7 +392,7 @@ public static class Assembler
                         Encoder.Encode(i.Mnemonic, s.Mode, OperandValue(i, s.Mode), s.Address, bytes);
                     var (text, cycles, more) = ListInstruction(listing, s, i, bytes.Skip(begin).ToArray());
                     instructions.Add(new PlacedInstruction(s.Address, bytes.Count - begin, text, cycles, more, source?.File, source?.Line, source?.Text.Trim(), sectionName,
-                        Checked(i, s.Mode)));
+                        Checked(i, s.Mode), overlay));
                     break;
                 }
                 case DataBytes d:

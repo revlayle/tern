@@ -80,24 +80,24 @@ public static class LineTable
     }
 }
 
-/// <summary>How often the instruction at each address ran, and the cycles it took, in a run of the emulator.</summary>
+/// <summary>How often the instruction at each place (<see cref="CodePlace"/>: an address, with its bank) ran, and the cycles it took, in a run of the emulator.</summary>
 public sealed class Profile
 {
     private readonly Dictionary<int, long> _runs = [];
     private readonly Dictionary<int, long> _cycles = [];
 
-    public void Add(int address, long cycles)
+    public void Add(int place, long cycles)
     {
-        _runs[address] = _runs.GetValueOrDefault(address) + 1;
-        _cycles[address] = _cycles.GetValueOrDefault(address) + cycles;
+        _runs[place] = _runs.GetValueOrDefault(place) + 1;
+        _cycles[place] = _cycles.GetValueOrDefault(place) + cycles;
     }
 
     public long Total => _cycles.Values.Sum();
 
     /// <summary>The cycles of the instructions, including the jmp of a long branch, which starts inside its entry.</summary>
     public long CyclesOf(IEnumerable<PlacedInstruction> instructions) =>
-        instructions.Sum(i => Enumerable.Range(i.Address, i.Size).Sum(a => _cycles.GetValueOrDefault(a)));
+        instructions.Sum(i => Enumerable.Range(i.Address, i.Size).Sum(a => _cycles.GetValueOrDefault(CodePlace.Of(a, i.Bank))));
 
     /// <summary>How often the first of the instructions (by address) ran.</summary>
-    public long RunsOf(IEnumerable<PlacedInstruction> instructions) => _runs.GetValueOrDefault(instructions.Min(i => i.Address));
+    public long RunsOf(IEnumerable<PlacedInstruction> instructions) => _runs.GetValueOrDefault(instructions.MinBy(i => i.Address)!.Place);
 }

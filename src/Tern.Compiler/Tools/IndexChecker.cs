@@ -21,10 +21,11 @@ public sealed record IndexError(string File, int? Line, string Source, string Me
 /// before each one runs, the address it reads or writes must lie in its table. Pointer accesses and
 /// asm blocks are not checked. Nothing is added to the program, so it runs the same either way.
 /// </summary>
-public sealed class IndexChecker(CompileResult program, string mainFile)
+/// <param name="placeOf">The place (<see cref="CodePlace"/>) of the instruction at an address, with the bank selected now; null: the address.</param>
+public sealed class IndexChecker(CompileResult program, string mainFile, Func<int, int>? placeOf = null)
 {
     private readonly Dictionary<int, PlacedInstruction> _checks =
-        program.Instructions.Where(i => i.Index is not null).GroupBy(i => i.Address).ToDictionary(g => g.Key, g => g.First());
+        program.Instructions.Where(i => i.Index is not null).GroupBy(i => i.Place).ToDictionary(g => g.Key, g => g.First());
     // One error per access (line, array or match, and where its index is), counted at the instruction that first reported it: the two
     // bytes of a 16-bit element, and the scaled index of a linear array, are one access.
     private readonly Dictionary<(string File, int? Line, string Table, int Column), (IndexError Error, int At)> _seen = [];
@@ -38,7 +39,7 @@ public sealed class IndexChecker(CompileResult program, string mainFile)
     /// </summary>
     public bool Before(Cpu6502 cpu)
     {
-        if (!_checks.TryGetValue(cpu.PC, out var instruction)) return false;
+        if (!_checks.TryGetValue(placeOf?.Invoke(cpu.PC) ?? cpu.PC, out var instruction)) return false;
         var c = instruction.Index!;
         var check = c.Check;
         int register = check.InA ? cpu.A : c.UsesY ? cpu.Y : cpu.X;

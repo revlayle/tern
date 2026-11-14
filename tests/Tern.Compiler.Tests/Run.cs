@@ -41,7 +41,8 @@ public sealed class Run
         Cpu = new Cpu6502(Nes is null ? Ram : Nes, Result.Platform.Cpu) { PC = (ushort)Result.Entry, SP = 0xFF, I = true };
         if (Nes is not null) Nes.Cpu = Cpu;
         long nextIrq = irqEvery;
-        var checker = new Tools.IndexChecker(Result, sourcePath is null ? "program.tern" : Path.GetFileName(sourcePath));
+        var checker = new Tools.IndexChecker(Result, sourcePath is null ? "program.tern" : Path.GetFileName(sourcePath),
+            Nes is null ? null : pc => Result.PlaceOf(pc, Nes.SelectedBank));
         IndexErrors = checker.Errors;
         while (Cpu.PC != Result.HaltAddress)
         {

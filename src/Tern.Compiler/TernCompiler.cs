@@ -58,6 +58,11 @@ public sealed class CompileResult
     public IReadOnlyDictionary<string, VariableInfo> Variables { get; init; } = new Dictionary<string, VariableInfo>();
     /// <summary>Every function declared in the program and its modules ("module.name"), compiled or not.</summary>
     public IReadOnlySet<string> DeclaredFunctions { get; init; } = new HashSet<string>();
+    /// <summary>The window where banks are switched (UxROM's $8000-$BFFF), or null: code there is told apart by the selected bank.</summary>
+    public AddressRange? BankWindow { get; init; }
+    /// <summary>The place (<see cref="CodePlace"/>) of the code at <paramref name="address"/>, with <paramref name="selectedBank"/> shown in <see cref="BankWindow"/>.</summary>
+    public int PlaceOf(int address, int selectedBank) =>
+        BankWindow is { } w && address >= w.First && address <= w.Last ? CodePlace.Of(address, selectedBank) : address;
     /// <summary>The encoding of the program's literals without a prefix, for showing its screen as text (NES: its nametable); null when it has none.</summary>
     public CharEncoding? TextEncoding { get; init; }
     /// <summary>The warnings (spec 13), sorted by place; none with <see cref="WarningMode.Off"/>.</summary>
@@ -562,6 +567,7 @@ public static partial class TernCompiler
             Variables = variables,
             DeclaredFunctions = program.Modules.SelectMany(m => m.Scope.Values.OfType<FunctionSymbol>()).Select(f => f.Name).ToHashSet(),
             TextEncoding = program.TextEncoding,
+            BankWindow = layout.Banks.Count > 0 ? cartridge?.Board.BankArea : null,
         };
     }
 

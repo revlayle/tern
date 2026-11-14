@@ -1,4 +1,5 @@
 using System.Text;
+using Tern.Compiler.Backend;
 using Tern.Cpu;
 
 namespace Tern.Compiler.Tools;
@@ -97,9 +98,11 @@ public static class Runner
         var inProgram = program.Sections.Select(s => (s.Address, End: s.Address + s.Size)).ToList();
         bool InProgram(int pc) => inProgram.Any(s => pc >= s.Address && pc < s.End);
         bool InRom(int pc) => program.Platform.Rom.Any(r => pc >= r.First && pc <= r.Last);
-        var functions = program.Symbols
-            .Where(s => program.Sections.Any(p => p.Name == s.Key && p.Address == s.Value))
-            .GroupBy(s => s.Value).ToDictionary(g => g.Key, g => g.First().Key);
+        // By place: code in two banks may share an address (spec 8.5).
+        int PlaceOf(int pc) => nes is null ? pc : program.PlaceOf(pc, nes.SelectedBank);
+        var functions = program.Sections
+            .Where(p => program.Symbols.TryGetValue(p.Name, out int at) && at == p.Address)
+            .GroupBy(p => CodePlace.Of(p.Address, CodePlace.BankOf(p.Overlay))).ToDictionary(g => g.Key, g => g.First().Name);
         int main = program.Symbols.GetValueOrDefault("main", -1);
 
         var profile = new Profile();
@@ -111,7 +114,7 @@ public static class Runner
         int interrupts = 0;
         string stop;
         bool returned = false;
-        var checker = new IndexChecker(program, options.MainFile);
+        var checker = new IndexChecker(program, options.MainFile, nes is null ? null : PlaceOf);
 
         while (true)
         {
@@ -144,6 +147,7 @@ public static class Runner
             if (pc == main && mainStart is null) mainStart = cpu.Cycles;
             if (checker.Before(cpu)) { stop = "stopped at an 'indexed match' value outside its span (see the index check)"; break; }
             long before = cpu.Cycles;
+            int place = PlaceOf(pc);
             try { cpu.Step(); }
             catch (IllegalOpcodeException e) { stop = $"illegal opcode ${e.Opcode:X2} at ${e.Address:X4}"; break; }
             if (nes is not null)
@@ -152,7 +156,7 @@ public static class Runner
                 nes.Tick(cpu);
                 if (nes.Nmis > nmis) { interrupts++; Entered(cpu.PC); }
             }
-            profile.Add(pc, cpu.Cycles - before);
+            profile.Add(place, cpu.Cycles - before);
             if (opcode == 0x20) Entered(cpu.PC);   // jsr
             Left();
         }
@@ -170,7 +174,7 @@ public static class Runner
 
         void Entered(int at)
         {
-            if (functions.TryGetValue(at, out var name)) active.Push((name, cpu.SP, cpu.Cycles));
+            if (functions.TryGetValue(PlaceOf(at), out var name)) active.Push((name, cpu.SP, cpu.Cycles));
         }
 
         // A function's frame ends when the stack pointer rises above where it was on entry (rts, rti).
