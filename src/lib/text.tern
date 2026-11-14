@@ -1,10 +1,9 @@
 // Text in memory, platform independent. Texts are a pointer plus a length.
-// Digits come from the module text_digits: C64 screen codes (the same as PETSCII for 0-9), or on the
-// Atari ATASCII.
+// Digits, '-' and '.' come from the module text_digits: C64 screen codes (the same as PETSCII for
+// 0-9), ATASCII on the Atari, apple2 codes on the Apple II.
 
 import text_digits
 
-private const MINUS = $2D   // screen code of "-"
 private data POWERS: [u16; 4] = [10000, 1000, 100, 10]
 
 // Copy n bytes of text to dst, e.g. a screen"..." string to screen memory.
@@ -96,7 +95,7 @@ fn find(s: ptr u8, n: u8, ch: u8) -> u8 {
 // Returns the number of characters (1 to 4).
 fn dec8s(dst: ptr u8, value: i8) -> u8 {
     if value < 0 {
-        dst[0] = MINUS
+        dst[0] = text_digits.MINUS
         var magnitude: u8 = (0 - (value as u8))
         return dec8(dst + 1, magnitude) + 1
     }
@@ -107,7 +106,7 @@ fn dec8s(dst: ptr u8, value: i8) -> u8 {
 // Returns the number of characters (1 to 6).
 fn dec16s(dst: ptr u8, value: i16) -> u8 {
     if value < 0 {
-        dst[0] = MINUS
+        dst[0] = text_digits.MINUS
         var magnitude: u16 = (0 - (value as u16))
         return dec16(dst + 1, magnitude) + 1
     }

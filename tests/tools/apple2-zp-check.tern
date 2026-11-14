@@ -1,0 +1,91 @@
+// Checks in AppleWin that zero page $00-$1F is free on the Apple II under ProDOS (spec 12.2, M26): fills
+// it with a pattern, then prints enough to scroll the screen, clears it (HOME), and makes MLI calls that
+// run the disk driver (READ_BLOCK of block 2 on slot 6, drive 1; ON_LINE). Shows "ZP $00-$1F KEPT", or
+// each changed address. Run on an enhanced IIe and on a II+ with a language card:
+//
+//   dotnet run --project src/Tern.Cli -- --target apple2 tests/tools/apple2-zp-check.tern
+//   pwsh tests/tools/apple2-disk.ps1 tests/tools/apple2-zp-check.system zp.po
+//   pwsh tests/tools/applewin-shot.ps1 zp.po zp.png 12 -model apple2ee
+import apple2
+import text
+
+const MLI_READ_BLOCK = $80
+const MLI_ON_LINE = $C5
+
+data LINE = "SCROLLING THE SCREEN\n"
+data KEPT = "ZP $00-$1F KEPT"
+data CHANGED = "CHANGED: "
+data MLI_ERROR = "MLI ERROR "
+
+var block: [u8; 6]
+var online: [u8; 4]
+var buffer: [u8; 256] @ $9000       // READ_BLOCK's 512 bytes: $9000-$91FF
+var buffer2: [u8; 256] @ $9100
+var hex: [u8; 2]
+var changed: u8
+
+fn fill() {
+    asm {
+        ldx #31
+    .loop:
+        txa
+        eor #$A5
+        sta $00,x
+        dex
+        bpl .loop
+    }
+}
+
+fn check(err: u8) {
+    if err != 0 {
+        apple2.print(addr(MLI_ERROR), len(MLI_ERROR))
+        text.hex8(addr(hex), err)
+        apple2.print(addr(hex), 2)
+        apple2.put('\n')
+    }
+}
+
+fn main() {
+    fill()
+    for _ in 0..30 {
+        apple2.print(addr(LINE), len(LINE))
+    }
+    apple2.home()
+
+    // READ_BLOCK: 3 parameters, unit $60 (slot 6, drive 1), a 512-byte buffer, block 2.
+    var at: u16 = addr(buffer)
+    block[0] = 3
+    block[1] = $60
+    block[2] = at.lo
+    block[3] = at.hi
+    block[4] = 2
+    block[5] = 0
+    check(apple2.mli(MLI_READ_BLOCK, addr(block)))
+    // ON_LINE: 2 parameters, unit 0 (every volume), a 256-byte buffer.
+    online[0] = 2
+    online[1] = 0
+    online[2] = at.lo
+    online[3] = at.hi
+    check(apple2.mli(MLI_ON_LINE, addr(online)))
+
+    for i in 0..32 {
+        var now: u8 = 0
+        asm {
+            ldx i
+            lda $00,x
+            sta now
+        }
+        if now != (i ^ $A5) {
+            if changed == 0 {
+                apple2.print(addr(CHANGED), len(CHANGED))
+            }
+            changed += 1
+            text.hex8(addr(hex), i)
+            apple2.print(addr(hex), 2)
+            apple2.put(' ')
+        }
+    }
+    if changed == 0 {
+        apple2.print(addr(KEPT), len(KEPT))
+    }
+}

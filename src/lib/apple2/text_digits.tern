@@ -1,0 +1,8 @@
+// The codes the library writes numbers with, in the apple2 encoding: 0-9 ($B0-$B9), the hex letters
+// A-F ($C1-$C6), '-' ($AD) and '.' ($AE). COUT prints them, and in screen memory they are normal
+// text. Replaces lib/text_digits.tern on the Apple II.
+
+data DIGITS = apple2"0123456789ABCDEF"
+const ZERO = $B0                // '0', DIGITS[0]
+const MINUS = $AD               // '-'
+const POINT = $AE               // '.'

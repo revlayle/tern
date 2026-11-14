@@ -9,6 +9,11 @@ public enum OutputFormat
     Prg,
     /// <summary>Atari DOS: $FF $FF, then load segments (first address, last address, bytes), then the run address in RUNAD.</summary>
     Xex,
+    /// <summary>
+    /// A ProDOS 8 system file: one block of bytes, loaded at $2000 and started there. A program's areas
+    /// follow each other with no gaps; the startup code moves them into place (spec 12.2).
+    /// </summary>
+    System,
 }
 
 /// <summary>Everything the compiler needs to know about a target machine.</summary>
@@ -20,8 +25,12 @@ public sealed class Platform
     public required int LoadAddress { get; init; }
     /// <summary>Bytes placed at <see cref="LoadAddress"/> before the code, e.g. a BASIC SYS line.</summary>
     public required byte[] Header { get; init; }
-    /// <summary>Zero-page bytes the program may use: first and last address, inclusive.</summary>
-    public required (int First, int Last) ZeroPage { get; init; }
+    /// <summary>
+    /// Zero-page bytes the program may use: first and last address of each range, inclusive, in the
+    /// order the compiler fills them. A variable cannot cross from one range to the next, so the
+    /// largest range comes first.
+    /// </summary>
+    public required (int First, int Last)[] ZeroPage { get; init; }
     /// <summary>Last RAM address usable for variables after the program.</summary>
     public required int RamEnd { get; init; }
     /// <summary>
@@ -32,13 +41,15 @@ public sealed class Platform
     /// <summary>Encoding of char and string literals without a prefix.</summary>
     public required CharEncoding DefaultEncoding { get; init; }
     public required OutputFormat Format { get; init; }
-    /// <summary>The program file's extension: ".prg", ".xex".</summary>
-    public string FileExtension => Format == OutputFormat.Prg ? ".prg" : ".xex";
+    /// <summary>The program file's extension: ".prg", ".xex", ".system".</summary>
+    public string FileExtension => Format switch { OutputFormat.Prg => ".prg", OutputFormat.Xex => ".xex", _ => ".system" };
     /// <summary>
-    /// The label file's extension: ".vs" for VICE, in VICE's format ("al C:0810 .main"); ".lbl" for
-    /// Altirra, as MADS's label table, which Altirra loads with a program of the same name.
+    /// The extension of an overlay's file and of a binary without main: as the program's, except on
+    /// the Apple II, where they are plain binary files (".bin"), not system files.
     /// </summary>
-    public string LabelExtension => Format == OutputFormat.Prg ? ".vs" : ".lbl";
+    public string BinaryExtension => Format == OutputFormat.System ? ".bin" : FileExtension;
+    /// <summary>The label file's format: the one the platform's main emulator loads (question 138).</summary>
+    public required LabelFormat Labels { get; init; }
     /// <summary>ROM and I/O, where <c>tern run</c> finds no program code: first and last address, inclusive.</summary>
     public required (int First, int Last)[] Rom { get; init; }
 
@@ -48,13 +59,16 @@ public sealed class Platform
     /// <summary>
     /// The file holding <paramref name="segments"/> (merged runs of bytes): a .prg covers every byte
     /// from the lowest to the highest address, a .xex has one load segment per run and, if
-    /// <paramref name="run"/> is given, a last segment that writes it to RUNAD.
+    /// <paramref name="run"/> is given, a last segment that writes it to RUNAD. On the Apple II this is
+    /// the file of an overlay or a binary, the bytes from the lowest to the highest address; a
+    /// program's system file is built with its startup code (<c>TernCompiler.Apple2</c>).
     /// </summary>
     /// <param name="first">The lowest address of the segments.</param>
     /// <param name="image">The segments' bytes from <paramref name="first"/> on, gaps as zeros: the .prg's contents.</param>
     public byte[] FileOf(int first, byte[] image, IReadOnlyList<(int Address, byte[] Bytes)> segments, int? run)
     {
         var file = new List<byte>();
+        if (Format == OutputFormat.System) return image;
         if (Format == OutputFormat.Prg)
         {
             file.AddRange([(byte)first, (byte)(first >> 8)]);
@@ -78,13 +92,13 @@ public sealed class Platform
     public bool IsVolatile(int first, int last) => VolatileAreas.Any(a => first <= a.Last && last >= a.First);
 
     /// <summary>The platforms a build can name with <c>--target</c> (spec 12.2).</summary>
-    public static IReadOnlyList<Platform> All => [C64, Atari];
+    public static IReadOnlyList<Platform> All => [C64, Atari, Apple2];
 
     /// <summary>The platform named <paramref name="name"/>, or null.</summary>
     public static Platform? ByName(string name) => All.FirstOrDefault(p => p.Name == name);
 
-    /// <summary>"--target c64 or --target atari", for messages that name the choices.</summary>
-    public static string Choices => string.Join(" or ", All.Select(p => "--target " + p.Name));
+    /// <summary>"--target c64, --target atari or --target apple2", for messages that name the choices.</summary>
+    public static string Choices => string.Join(", ", All.Take(All.Count - 1).Select(p => "--target " + p.Name)) + " or --target " + All[^1].Name;
 
     /// <summary>
     /// Commodore 64: a .prg loaded at $0801 that starts with the BASIC line "10 SYS 2061".
@@ -104,7 +118,7 @@ public sealed class Platform
             0x00,                   // end of line
             0x00, 0x00,             // end of program
         ],
-        ZeroPage = (0x02, 0x8F),
+        ZeroPage = [(0x02, 0x8F)],
         RamEnd = 0x9FFF,
         VolatileAreas =
         [
@@ -120,6 +134,7 @@ public sealed class Platform
         ],
         DefaultEncoding = CharEncoding.Petscii,
         Format = OutputFormat.Prg,
+        Labels = LabelFormat.Vice,
         Rom =
         [
             (0xA000, 0xBFFF),   // BASIC
@@ -137,7 +152,7 @@ public sealed class Platform
         Cpu = CpuVariant.Nmos6502,
         LoadAddress = 0x2000,
         Header = [],
-        ZeroPage = (0x80, 0xFF),
+        ZeroPage = [(0x80, 0xFF)],
         RamEnd = 0xBC1F,
         VolatileAreas =
         [
@@ -148,9 +163,37 @@ public sealed class Platform
         ],
         DefaultEncoding = CharEncoding.Atascii,
         Format = OutputFormat.Xex,
+        Labels = LabelFormat.Mads,
         Rom =
         [
             (0xC000, 0xFFFF),   // OS ROM (from $C000 on the XL/XE), I/O at $D000-$D7FF
+        ],
+    };
+
+    /// <summary>
+    /// Apple II with 64 KB under ProDOS 8 (spec 12.2): a system file loaded and started at $2000;
+    /// variables up to $BEFF, below ProDOS's global page. The zero page leaves the monitor's, the
+    /// disk drivers' and the MLI's bytes ($20-$4F) alone.
+    /// </summary>
+    public static readonly Platform Apple2 = new()
+    {
+        Name = "apple2",
+        Cpu = CpuVariant.Nmos6502,
+        LoadAddress = 0x2000,
+        Header = [],
+        ZeroPage = [(0x50, 0xFF), (0x00, 0x1F)],    // filled from $50, so a variable meets the gap only after 176 bytes
+        RamEnd = 0xBEFF,
+        VolatileAreas =
+        [
+            (0xC000, 0xCFFF),   // soft switches, I/O and slot ROMs: a read alone can have an effect
+        ],
+        DefaultEncoding = CharEncoding.Apple2,
+        Format = OutputFormat.System,
+        Labels = LabelFormat.AppleWin,
+        Rom =
+        [
+            (0xBF00, 0xBFFF),   // ProDOS's global page: the MLI's entry at $BF00
+            (0xC000, 0xFFFF),   // I/O, slot ROMs, BASIC and the monitor
         ],
     };
 }

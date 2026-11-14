@@ -10,8 +10,12 @@ namespace Tern.Compiler.Tools;
 internal abstract class Machine
 {
     /// <summary>The platform's machine, for a run of <paramref name="program"/> (whose overlay files the C64's LOAD finds).</summary>
-    public static Machine For(Platform platform, CompileResult? program = null) =>
-        platform.Format == OutputFormat.Xex ? new AtariMachine(program?.Overlays ?? []) : new C64Machine(program?.Overlays ?? []);
+    public static Machine For(Platform platform, CompileResult? program = null) => platform.Format switch
+    {
+        OutputFormat.Xex => new AtariMachine(program?.Overlays ?? []),
+        OutputFormat.System => new Apple2Machine(),
+        _ => new C64Machine(program?.Overlays ?? []),
+    };
 
     /// <summary>The routines with stand-ins, for the message when the run reaches another ROM address.</summary>
     public abstract string StandIns { get; }
@@ -34,12 +38,19 @@ internal abstract class Machine
     /// <summary>A byte of screen memory as text: letters, digits and punctuation as themselves, others as '#'.</summary>
     public abstract char ScreenChar(byte code);
 
+    /// <summary>The address of the screen's row <paramref name="row"/>: rows follow each other, except on the Apple II.</summary>
+    public virtual int RowAddress(Ram ram, int row)
+    {
+        var (address, columns, _) = Screen(ram);
+        return address + row * columns;
+    }
+
     /// <summary>The screen's lines as text, without trailing spaces.</summary>
     public IReadOnlyList<string> ScreenText(Ram ram)
     {
-        var (address, columns, rows) = Screen(ram);
+        var (_, columns, rows) = Screen(ram);
         return Enumerable.Range(0, rows).Select(r => new string(Enumerable.Range(0, columns)
-            .Select(c => ScreenChar(ram.Bytes[(address + r * columns + c) & 0xFFFF])).ToArray()).TrimEnd()).ToList();
+            .Select(c => ScreenChar(ram.Bytes[(RowAddress(ram, r) + c) & 0xFFFF])).ToArray()).TrimEnd()).ToList();
     }
 }
 

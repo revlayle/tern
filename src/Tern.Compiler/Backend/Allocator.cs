@@ -72,8 +72,8 @@ public static class Allocator
             .ToList();
         var inZp = new HashSet<VariableSymbol>();
 
-        // The free zero-page bytes in address order; a variable must lie in consecutive ones.
-        var zeroPage = layout.ZeroPage.OrderBy(r => r.First).SelectMany(r => Enumerable.Range(r.First, r.Size)).ToList();
+        // The free zero-page bytes in the order they are filled; a variable must lie in consecutive ones.
+        var zeroPage = layout.ZeroPage.SelectMany(r => Enumerable.Range(r.First, r.Size)).ToList();
         int zpCapacity = zeroPage.Count;
 
         int ZpNeeded()
@@ -110,32 +110,58 @@ public static class Allocator
 
         var plan = new RamPlan();
 
-        // Zero-page addresses: globals first, then the overlaid frames.
+        // Zero-page addresses: globals first, then the overlaid frames. A variable the compiler chose
+        // (step 2) that would cross the end of a range goes to RAM instead, and the rest are placed again.
+        // A variable the program requires there that would cross makes room the same way: the least used
+        // variable the compiler chose and placed before it goes to RAM. Only when there is none is it an
+        // error (review M26, findings 1 and 8).
+        VariableSymbol? crossing = null;
+        (VariableSymbol Var, int Index)? required = null;
         int ZeroPageAddress(int index, VariableSymbol v)
         {
             int address = zeroPage[index];
             if (zeroPage[index + v.Type.Size - 1] - address != v.Type.Size - 1)
-                throw new CompileError(v.Pos,
-                    $"'{v.QualifiedName}' ({v.Type.Size} bytes) would cross the end of a zero-page range at ${zeroPage[index + v.Type.Size - 1]:X2}. " +
-                    $"Zero-page ranges: {MemoryLayout.ListZeroPage(layout.ZeroPage)}. Join the ranges or reorder the variables");
+            {
+                if (!v.ForcedZeroPage) crossing ??= v;
+                else required ??= (v, index);
+            }
             return address;
         }
-        int zp = 0;
-        foreach (var g in program.Globals.Where(inZp.Contains))
+        while (true)
         {
-            g.Address = ZeroPageAddress(zp, g);
-            zp += g.Type.Size;
-            plan.ZeroPageGlobals.Add(g);
-        }
-        var zpOffsets = FrameOffsets(functions, callers, f => f.FrameVariables.Where(inZp.Contains).Sum(v => v.Type.Size));
-        foreach (var f in functions)
-        {
-            int at = zp + zpOffsets[f];
-            foreach (var v in f.FrameVariables.Where(inZp.Contains))
+            crossing = null;
+            required = null;
+            plan.ZeroPageGlobals.Clear();
+            int zp = 0;
+            foreach (var g in program.Globals.Where(inZp.Contains))
             {
-                v.Address = ZeroPageAddress(at, v);
-                at += v.Type.Size;
+                g.Address = ZeroPageAddress(zp, g);
+                zp += g.Type.Size;
+                plan.ZeroPageGlobals.Add(g);
             }
+            var zpOffsets = FrameOffsets(functions, callers, f => f.FrameVariables.Where(inZp.Contains).Sum(v => v.Type.Size));
+            foreach (var f in functions)
+            {
+                int at = zp + zpOffsets[f];
+                foreach (var v in f.FrameVariables.Where(inZp.Contains))
+                {
+                    v.Address = ZeroPageAddress(at, v);
+                    at += v.Type.Size;
+                }
+            }
+            var leave = crossing;
+            if (leave is null && required is var (needed, index))
+            {
+                leave = inZp.Where(v => !v.ForcedZeroPage && zeroPage.IndexOf(v.Address) < index)
+                    .OrderBy(v => v.Weight).ThenBy(v => v.QualifiedName, StringComparer.Ordinal).FirstOrDefault();
+                if (leave is null)
+                    throw new CompileError(needed.Pos,
+                        $"'{needed.QualifiedName}' ({needed.Type.Size} bytes) would cross the end of a zero-page range at ${zeroPage[index + needed.Type.Size - 1]:X2}. " +
+                        $"Zero-page ranges: {MemoryLayout.ListZeroPage(layout.ZeroPage)}. Join the ranges or reorder the variables");
+            }
+            if (leave is null) break;
+            inZp.Remove(leave);
+            leave.Address = -1;     // not placed yet: the assembler must not size its instructions for zero page
         }
 
         // Variables and data placed in a region, in the order they are declared: zeroed variables first

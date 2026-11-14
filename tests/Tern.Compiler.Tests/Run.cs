@@ -20,7 +20,14 @@ public sealed class Run
         IReadOnlyDictionary<int, Action<Run>>? traps, bool checkIndexes, Platform? platform)
     {
         Result = TernCompiler.Compile(source, platform, sourcePath: sourcePath, libraryDirectory: libraryDirectory);
-        Ram.Load((ushort)Result.LoadAddress, Result.Image);
+        if (Result.Platform.Format == OutputFormat.System)
+        {
+            // An Apple II system file loads at $2000, and its startup code moves the areas into place. The
+            // ROM routines the startup calls (COUT, SETNORM, INIT, SETVID, SETKBD, HOME) return at once.
+            Ram.Load((ushort)Result.Platform.LoadAddress, Result.File);
+            foreach (int routine in new[] { 0xFDED, 0xFE84, 0xFB2F, 0xFE93, 0xFE89, 0xFC58 }) Ram.Bytes[routine] = 0x60;
+        }
+        else Ram.Load((ushort)Result.LoadAddress, Result.Image);
         setup?.Invoke(Ram);
         Cpu = new Cpu6502(Ram) { PC = (ushort)Result.Entry, SP = 0xFF, I = true }; // as after reset: no IRQ until the program enables it
         long nextIrq = irqEvery;

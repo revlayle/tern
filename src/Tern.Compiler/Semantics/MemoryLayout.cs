@@ -19,7 +19,10 @@ public sealed class MemoryLayout
 {
     /// <summary>Areas for code, data and variables, in the order the compiler fills them.</summary>
     public List<AddressRange> Program { get; private init; } = [];
-    /// <summary>Zero-page bytes the compiler may allocate (spec 8.2), in address order.</summary>
+    /// <summary>
+    /// Zero-page bytes the compiler may allocate (spec 8.2), in the order it fills them: the platform's
+    /// order (<see cref="Platform.ZeroPage"/>), or address order for a memory block's zeropage lines.
+    /// </summary>
     public List<AddressRange> ZeroPage { get; private init; } = [];
     /// <summary>Memory the compiler places nothing in, except what the program puts there with <c>@</c>.</summary>
     public List<AddressRange> Reserved { get; } = [];
@@ -39,8 +42,10 @@ public sealed class MemoryLayout
     public static MemoryLayout Default(Platform platform) => new()
     {
         Program = [new AddressRange(platform.LoadAddress, platform.RamEnd)],
-        ZeroPage = [new AddressRange(platform.ZeroPage.First, platform.ZeroPage.Last)],
+        ZeroPage = PlatformZeroPage(platform),
     };
+
+    private static List<AddressRange> PlatformZeroPage(Platform platform) => platform.ZeroPage.Select(z => new AddressRange(z.First, z.Last)).ToList();
 
     /// <summary>Applies the lines of the main file's memory block to the platform's map (spec 8.4).</summary>
     public static MemoryLayout Build(Platform platform, IReadOnlyList<(MemoryLine Line, long First, long Last)> lines)
@@ -99,7 +104,7 @@ public sealed class MemoryLayout
         {
             Program = programAreas,
             ProgramReplaced = program.Count > 0,
-            ZeroPage = zeroPage.Count > 0 ? zeroPage : Subtract([new AddressRange(platform.ZeroPage.First, platform.ZeroPage.Last)], taken.Concat(program)),
+            ZeroPage = zeroPage.Count > 0 ? zeroPage.OrderBy(z => z.First).ToList() : Subtract(PlatformZeroPage(platform), taken.Concat(program)),
         };
         layout.Reserved.AddRange(reserved);
         foreach (var (name, range) in regions) layout.Regions[name] = range;

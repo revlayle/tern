@@ -1,0 +1,73 @@
+// Hi-res graphics with text under them on the Apple II: a frame, its diagonals and a sine wave on hi-res
+// page 1, and the bottom four rows of text page 1 (mixed mode).
+//
+// The default layout puts the program at $2000, on hi-res page 1, so the memory block places it above
+// both hi-res pages. ProDOS loads the system file at $2000 all the same; the startup code copies it to
+// $6000, and main then clears page 1. ($0800-$1FFF is free too, for a larger program: add a line.)
+//
+//   dotnet run --project src/Tern.Cli -- --target apple2 examples/apple2/hires.tern
+//   pwsh tests/tools/apple2-disk.ps1 examples/apple2/hires.system hires.po    (then boot hires.po in AppleWin)
+import apple2
+import text
+
+memory {
+    $6000..=$BEFF program
+}
+
+const LEFT = 20
+const RIGHT = 259
+const TOP = 8
+const BOTTOM = 151
+
+// One period of a sine wave across the frame, 60 pixels high, centered on its middle.
+data WAVE: [u8; 240] = [round(80 + 30 * sin(i * TAU / 240)) for i in 0..240]
+
+data TITLE = "TERN ON THE APPLE II: HI-RES AND TEXT"
+data PIXELS = "PIXELS PLOTTED: "
+
+var count: u16
+var digits: [u8; 5]
+
+fn plot(x: u16, y: u8) {
+    apple2.plot(x, y)
+    count += 1
+}
+
+fn main() {
+    apple2.clear()
+    for x in LEFT..=RIGHT {
+        plot(x, TOP)
+        plot(x, BOTTOM)
+    }
+    for y in TOP..=BOTTOM {
+        plot(LEFT, y)
+        plot(RIGHT, y)
+    }
+    // The diagonals: about 240 across and 144 down, so y moves 3 for every 5 of x.
+    var x: u16 = LEFT
+    var y: u8 = TOP
+    for _ in 0..48 {
+        plot(x, y)
+        plot(RIGHT + LEFT - x, y)
+        x += 5
+        y += 3
+    }
+    for i in 0..240 {
+        plot(LEFT + i as u16, WAVE[i])
+    }
+
+    apple2.home()
+    apple2.cursor(21, 1)
+    apple2.print(addr(TITLE), len(TITLE))
+    apple2.cursor(22, 1)
+    apple2.print(addr(PIXELS), len(PIXELS))
+    var n: u8 = text.dec16(addr(digits), count)
+    apple2.inverse()
+    apple2.print(addr(digits), n)
+    apple2.normal()
+
+    apple2.show_hires()
+    apple2.show_mixed()
+    apple2.show_page1()
+    apple2.show_graphics()
+}

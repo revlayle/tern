@@ -79,7 +79,9 @@ public static class Runner
         var machine = Machine.For(program.Platform, program);
         var ram = new Ram();
         machine.Start(ram);
-        ram.Load((ushort)program.LoadAddress, program.Image);
+        // An Apple II system file is one block at $2000, which its startup code moves into place.
+        if (program.Platform.Format == OutputFormat.System) ram.Load((ushort)program.Platform.LoadAddress, program.File);
+        else ram.Load((ushort)program.LoadAddress, program.Image);
         foreach (var set in options.Sets) ram.Bytes[set.Address] = set.Value;
         var cpu = new Cpu6502(ram) { PC = (ushort)program.Entry, SP = 0xFF, I = true };
 
