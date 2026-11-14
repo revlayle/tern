@@ -71,6 +71,7 @@ public static partial class TernCompiler
     /// When ProDOS started the program with an empty prefix, the prefix becomes the folder of the path
     /// at $0280 (up to its last '/'), so that io's partial names find files next to the program (spec
     /// 12.2). The prefix is read into the input buffer at $0200; a partial path at $0280 leaves it empty.
+    /// Bit 7 of the path's characters is cleared: Bitsy Bye leaves it set (AppleWin, M26 follow-up).
     /// <paramref name="parameters"/> is the list for GET_PREFIX and SET_PREFIX (<see cref="Apple2Quit"/>).
     /// </summary>
     private static List<AsmItem> Prefix(Label parameters)
@@ -84,6 +85,7 @@ public static partial class TernCompiler
         items.Add(new Instr(Beq, Relative, new LabelOperand(done)));
         items.Add(new LabelDef(find));
         items.Add(new Instr(Lda, AbsoluteX, new AddrOperand(StartPath)));
+        items.Add(new Instr(And, Immediate, new Imm(0x7F)));
         items.Add(new Instr(Cmp, Immediate, new Imm('/')));
         items.Add(new Instr(Beq, Relative, new LabelOperand(found)));
         items.Add(new Instr(Dex));
@@ -93,6 +95,7 @@ public static partial class TernCompiler
         items.Add(new Instr(Stx, Absolute, new AddrOperand(InputBuffer)));
         items.Add(new LabelDef(copy));
         items.Add(new Instr(Lda, AbsoluteX, new AddrOperand(StartPath)));
+        items.Add(new Instr(And, Immediate, new Imm(0x7F)));
         items.Add(new Instr(Sta, AbsoluteX, new AddrOperand(InputBuffer)));
         items.Add(new Instr(Dex));
         items.Add(new Instr(Bne, Relative, new LabelOperand(copy)));

@@ -494,7 +494,7 @@ public class Apple2IoTests
     // ---------- The startup's prefix ----------
 
     /// <summary>Runs a program whose startup finds <paramref name="prefix"/> as the prefix and <paramref name="started"/> at $0280.</summary>
-    private static (Run Run, List<string> Prefixes) StartWith(string prefix, string started)
+    private static (Run Run, List<string> Prefixes) StartWith(string prefix, string started, int bit7 = 0)
     {
         var set = new List<string>();
         void Mli(Run run)
@@ -519,7 +519,7 @@ public class Apple2IoTests
             setup: ram =>
             {
                 ram.Bytes[0x280] = (byte)started.Length;
-                for (int i = 0; i < started.Length; i++) ram.Bytes[0x281 + i] = (byte)started[i];
+                for (int i = 0; i < started.Length; i++) ram.Bytes[0x281 + i] = (byte)(started[i] | bit7);
             });
         return (run, set);
     }
@@ -530,6 +530,15 @@ public class Apple2IoTests
         var (run, set) = StartWith("", "/GAMES/TERN/HELLO.SYSTEM");
         Assert.Equal(1, run.U8("x"));
         Assert.Equal(["/GAMES/TERN/"], set);
+    }
+
+    [Fact]
+    public void A_path_with_bit_7_set_gives_the_prefix_with_bit_7_cleared()
+    {
+        // Bitsy Bye leaves the path at $0280 with bit 7 set.
+        var (run, set) = StartWith("", "/GAMES/HELLO.SYSTEM", bit7: 0x80);
+        Assert.Equal(1, run.U8("x"));
+        Assert.Equal(["/GAMES/"], set);
     }
 
     [Fact]

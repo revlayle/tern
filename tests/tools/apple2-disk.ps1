@@ -10,9 +10,10 @@
 # first address, as the compiler's report gives it: "level1.bin: ... ($6000-$60FF)"). Each goes on
 # the disk as a BIN file (type $06) with that address as its aux type, named as the file in capitals
 # (LEVEL1.BIN), so io.load_bin loads it there. Uses CiderPress II's cp2.
+[CmdletBinding(PositionalBinding = $false)]
 param(
-    [Parameter(Mandatory)] [string] $Program,
-    [Parameter(Mandatory)] [string] $Disk,
+    [Parameter(Mandatory, Position = 0)] [string] $Program,
+    [Parameter(Mandatory, Position = 1)] [string] $Disk,
     [Parameter(ValueFromRemainingArguments)] [string[]] $Files = @(),
     [string] $Prodos = "C:\AppleWin\ProDOS_2_4_3.po",
     [string] $Cp2 = "C:\Program Files\CiderPress\cp2.exe"
@@ -40,11 +41,11 @@ try {
     Copy-Item $Program (Join-Path $staging $names[0])
     foreach ($file in $Files) {
         if ($file -notmatch '^(.+)@\$?([0-9A-Fa-f]{1,4})$') { throw "Give each .bin file with its load address: level1.bin@`$6000, not $file" }
-        $name = [IO.Path]::GetFileName($Matches[1]).ToUpperInvariant()
+        $path, $aux = $Matches[1], [Convert]::ToInt32($Matches[2], 16).ToString("x4")
+        $name = [IO.Path]::GetFileName($path).ToUpperInvariant()
         if ($name -notmatch '^[A-Z][A-Z0-9.]{0,14}$') { throw "$name is not a ProDOS name (1-15 letters, digits and dots, starting with a letter)" }
-        $aux = [Convert]::ToInt32($Matches[2], 16).ToString("x4")
         $names += "$name#06$aux"
-        Copy-Item $Matches[1] (Join-Path $staging $names[-1])
+        Copy-Item $path (Join-Path $staging $names[-1])
     }
     # Added by bare names, from their folder: cp2 would otherwise make the paths' folders on the disk.
     Push-Location $staging

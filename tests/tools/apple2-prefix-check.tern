@@ -1,0 +1,73 @@
+// Checks in AppleWin the prefix a Tern program runs with and lowercase names (spec 12.2 and 10.1,
+// M26 follow-up). Shows the path ProDOS started the program with ($0280), the prefix after the
+// startup code, and "SET BY PRODOS" when the path is partial (the startup code then leaves the
+// prefix alone, so a prefix that is set came from ProDOS). Then saves and loads the file "lc.test"
+// through io, with a lowercase name, and shows each call's MLI code (0 for success).
+//
+//   dotnet run --project src/Tern.Cli -- --target apple2 tests/tools/apple2-prefix-check.tern
+//   pwsh tests/tools/apple2-disk.ps1 tests/tools/apple2-prefix-check.system prefix.po
+//   pwsh tests/tools/applewin-shot.ps1 prefix.po prefix.png 10 -model apple2ee
+import apple2
+import io
+import text
+
+const MLI_GET_PREFIX = $C7
+
+data PATH = "PATH:   "
+data PREFIX = "PREFIX: "
+data FIRST = "FIRST BYTE: $"
+data BY_PRODOS = "SET BY PRODOS\n"
+data SAVE = "SAVE lc.test: $"
+data LOAD = "LOAD lc.test: $"
+data NAME = "lc.test"
+data SAME = "SAME BYTES\n"
+
+var started: [u8; 65] @ $0280
+var prefix: [u8; 65]
+var list: [u8; 3] = [1, 0, 0]
+var hex: [u8; 2]
+var bytes: [u8; 4] = [1, 2, 3, 4]
+var back: [u8; 4]
+
+// A ProDOS path (a length, then ASCII) through COUT.
+fn path(p: ptr u8) {
+    for i in 1..=p[0] {
+        apple2.put(p[i] | $80)
+    }
+    apple2.put('\n')
+}
+
+fn code(what: ptr u8, n: u8, err: u8) {
+    apple2.print(what, n)
+    text.hex8(addr(hex), err)
+    apple2.print(addr(hex), 2)
+    apple2.put('\n')
+}
+
+fn main() {
+    apple2.print(addr(PATH), len(PATH))
+    path(addr(started))
+    code(addr(FIRST), len(FIRST), started[1])
+    var at = addr(prefix) as u16
+    list[1] = at.lo
+    list[2] = at.hi
+    apple2.mli(MLI_GET_PREFIX, addr(list) as u16)
+    apple2.print(addr(PREFIX), len(PREFIX))
+    path(addr(prefix))
+    var full = false
+    for i in 1..=started[0] {
+        if (started[i] & $7F) == $2F {     // '/', with or without bit 7
+            full = true
+        }
+    }
+    if !full && prefix[0] != 0 {
+        apple2.print(addr(BY_PRODOS), len(BY_PRODOS))
+    }
+    io.save(addr(NAME), len(NAME), addr(bytes), 4)
+    code(addr(SAVE), len(SAVE), io.status())
+    io.load(addr(NAME), len(NAME), addr(back), 4)
+    code(addr(LOAD), len(LOAD), io.status())
+    if text.equal(addr(bytes), addr(back), 4) {
+        apple2.print(addr(SAME), len(SAME))
+    }
+}
