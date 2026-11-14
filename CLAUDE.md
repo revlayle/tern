@@ -87,6 +87,12 @@ emu.addEventCallback(function()
 end, emu.eventType.endFrame)
 ```
 
+`tests/tools/mesen-shot.ps1` wraps this: it saves a screenshot after each given frame count (`shot-<frame>.png` when there are several) and stops after 60 seconds:
+
+```
+pwsh tests/tools/mesen-shot.ps1 game.nes shot.png 60 120
+```
+
 ## Design rules
 
 These come from the spec and `docs/decisions.md`. Apply them to every change.
