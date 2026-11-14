@@ -358,7 +358,7 @@ Decision 2026-11-07, scheduled 2026-11-08. User documentation that explains how 
 - a binary's entries are one root: the host must not call one from an interrupt while another runs (12.3)
 - a plug-in's memory is checked only against its own `memory` block, not against the game or other slots; gaps in an interface's jump table are zeros (`brk`) (12.3)
 - a game's exported functions are an unknown root: globals they share are always read from memory, and the two-roots check cannot see a plug-in calling them from an interrupt (12.3, 6.5)
-- evaluation order: in `a[i] = v` the index is evaluated first; with a call in the index, and inside expressions, the order is unspecified (5)
+- evaluation order: calls and `volatile` reads in one statement happen left to right, the index of `a[f()] = g()` first; a variable that a call in the same statement changes may be read before or after the call (5)
 - a fixed address outside the platform's volatile areas is ordinary memory: unlisted hardware needs `volatile` (4)
 - `@ align(n)` can leave up to `n - 1` bytes of padding, shown in the report; in `data` or an overlay the padding is in the file (4)
 - a function shared by main and a handler may have loop counters only in registers; only `using X` / `using Y` guarantees one (8.1)

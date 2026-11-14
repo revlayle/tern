@@ -842,7 +842,7 @@ The standard library is ordinary Tern and `asm fn` source in the compiler's `lib
 
 **Strings and memory blocks are passed as a pointer plus a length**, matching `len()` on literals. The library has no zero-terminated variants.
 
-The tables below describe the library as built (M4, M5, M10, M11, M14, M19 and the M20 follow-up). Work variables and tables that callers should not use are `private` (2.2).
+The tables below describe the library as built for the first release (through M27). Work variables and tables that callers should not use are `private` (2.2).
 
 **`math`**: cycle-heavy arithmetic (the operators only work on constants, 3.1)
 
@@ -855,8 +855,8 @@ The tables below describe the library as built (M4, M5, M10, M11, M14, M19 and t
 | `div16` | `(n: u16, d: u16) -> u16` | Shift-and-subtract loop. Also sets `math.remainder16` |
 | `shl8`, `shr8` | `(x: u8 using A, n: u8 using X) -> u8` | Loop of `n` shifts |
 | `shl16`, `shr16` | `(x: u16 using AX, n: u8 using Y) -> u16` | Loop of `n` shifts |
-| `abs8` | `(x: i8 using A) -> u8 using A` | Absolute value; `abs8(-128)` is 128 |
-| `abs16` | `(x: i16 using AX) -> u16 using AX` | Absolute value |
+| `abs8` | `(x: i8 using A) -> u8` | Absolute value; `abs8(-128)` is 128 |
+| `abs16` | `(x: i16 using AX) -> u16` | Absolute value |
 | `muls8` | `(a: i8 using A, b: i8 using X) -> i16` | Signed multiply |
 | `divs8` | `(a: i8 using A, b: i8 using X) -> i8` | Signed divide, rounding towards zero. `math.remainder8` has the sign of `a`. -128 / -1 is -128 |
 | `min8`, `max8` | `(a: u8 using A, b: u8 using X) -> u8` | `inline asm fn`: no `jsr` |
@@ -1041,8 +1041,9 @@ Each is an empty-body `inline asm fn` (section 7), so a call adds no instruction
 |---|---|---|
 | `setlfs`, `setnam`, `kernal_open`, `close`, `chkin`, `chkout`, `clrchn`, `chrin`, `chrout`, `readst` | routines at a fixed address (6.6) | The raw KERNAL routines (`kernal_open` is `OPEN`; `io.chrout` is the same routine as `c64.chrout`) |
 | `kernal_load` | `(0 using A, address: ptr u8 using XY) -> bool using carry @ $FFD5` | Raw `LOAD`; `SAVE` has no raw form (it needs a zero-page pointer) |
+| `kernal_load_own` | `(0 using A) -> bool using carry @ $FFD5` | Raw `LOAD` to the file's own address (after `setlfs` with secondary address 1) |
 | `load` | `(name: ptr u8, n: u8, device: u8, address: ptr u8) -> bool` | Load a whole file to `address` |
-| `save` | `(name: ptr u8, n: u8, device: u8, first: ptr u8, last: ptr u8) -> bool` | Save `first` to `last`, `last` included (like `..=`); `last` must be below `$FFFF` (a KERNAL limit) |
+| `save` | `(name: ptr u8, n: u8, device: u8, first: ptr u8, last: ptr u8) -> bool using carry` | Save `first` to `last`, `last` included (like `..=`); `last` must be below `$FFFF` (a KERNAL limit) |
 | `open` | `(lfn: u8, device: u8, channel: u8, name: ptr u8, n: u8) -> bool` | Open a sequential file |
 | `read` | `(lfn: u8, dst: ptr u8, max: u8) -> u8` | Read up to `max` bytes; stops at end of file (the last byte counts) or a timeout (counts nothing, e.g. a missing file) |
 | `write` | `(lfn: u8, src: ptr u8, n: u8) -> bool` | Write `n` bytes; true on carry or any status bit |
@@ -1053,6 +1054,33 @@ Each is an empty-body `inline asm fn` (section 7), so a call adds no instruction
 | `command_once` | `(device: u8, cmd: ptr u8, n: u8) -> bool` | Open, send, close; only when no file is open on the drive |
 
 `c64.load` (8.5) is built on the same routines. Fast loaders are out of scope.
+
+**`atari`**: Atari 8-bit only (M25). It calls only the OS's documented entry points and vectors and never writes PORTB (12.2), so it works with the 800's OS and the XL/XE OS.
+
+| Name | Purpose |
+|---|---|
+| `gtia: Gtia @ $D000`, `gtia_in: GtiaIn @ $D000` | GTIA as written (`hposp`, `hposm`, `sizep`, `sizem`, `grafp`, `grafm`, `colpm`, `colpf`, `colbk`, `prior`, `vdelay`, `gractl`, `hitclr`, `consol`) and as read (collisions `mpf`, `ppf`, `mpl`, `ppl`; `trig`, `pal`, `consol`): two structs, since reads and writes at one address are different registers |
+| `pokey: Pokey @ $D200`, `pokey_in: PokeyIn @ $D200` | POKEY as written (`audf1`-`audf4`, `audc1`-`audc4`, `audctl`, `stimer`, `skres`, `potgo`, `serout`, `irqen`, `skctl`) and as read (`pot`, `allpot`, `kbcode`, `random`, `serin`, `irqst`, `skstat`) |
+| `pia: Pia @ $D300` | `porta`, `portb`, `pactl`, `pbctl` |
+| `antic: Antic @ $D400` | `dmactl`, `chactl`, `dlist: u16`, `hscrol`, `vscrol`, `pmbase`, `chbase`, `wsync`, `vcount`, `penh`, `penv`, `nmien`, `nmires` |
+| `sdmctl`, `sdlst`, `gprior`, `pcolr`, `color`, `chact`, `chbas` | The OS's shadow registers, copied to the chips each frame: `color: [u8; 5]` is `colpf` 0-3 and `colbk` |
+| `paddl`, `stick`, `ptrig`, `strig`, `ch` | Controllers and keyboard as the OS reads them each frame: `stick[n]` bits 0-3 are 0 when pressed (15 centered), `strig[n]` 0 when pressed, `ch` the last key (`$FF` for none) |
+| `vdslst`, `vvblki`, `vvblkd`, `dosvec` | The vectors that `set_dli`, `set_vbi_immediate`, `set_vbi` and `exit` use |
+| `rtclok: [u8; 3]`, `atract`, `savmsc`, `lmargn`, `rmargn`, `rowcrs`, `colcrs: u16`, `crsinh` | Frame clock (`rtclok[2]` counts every frame), attract mode, the text screen and the screen editor's margins and cursor |
+| `CIOV`, `SETVBV`, `XITVBV`, `SYSVBV` | OS entry points, for assembly |
+| `put(c: u8 using A)` | Print one ATASCII character through the screen editor (CIO on IOCB 0) |
+| `print(text: ptr u8, n: u8)` | Print `n` characters in one CIO call; nothing for `n = 0` |
+| `cursor(row: u8, col: u8)` | Move the cursor (rows 0-23, columns 0-39; the left margin is 2) |
+| `wait_frame()` | Wait until the OS's vertical blank changes `rtclok[2]` |
+| `exit()` | Return to DOS (`jmp (DOSVEC)`) |
+| `set_dli(handler: u16 using XY)` | Install an `interrupt fn` as the display-list interrupt and turn DLIs on (`NMIEN = $C0`) |
+| `set_vbi(handler: u16 using XY)` | Install an `interrupt fn` as the deferred VBI, after the OS's frame work, through a stub that pulls the OS's pushes (about 20 cycles a frame) |
+| `set_vbi_immediate(handler: u16 using XY)` | The same for the immediate VBI; the OS's frame work then no longer runs (no shadow registers, clock or controllers) |
+| `DL_BLANK1`, `DL_BLANK8`, `DL_JMP`, `DL_JVB`, `DL_LMS`, `DL_DLI`, `DL_VSCROLL`, `DL_HSCROLL` | Display-list instructions and their option bits |
+| `MODE_TEXT`, `MODE_TEXT_BIG`, `MODE_TEXT_TALL`, `MODE_PIXELS` | ANTIC modes 2, 6, 7 and 15 |
+| `row_bytes(mode: int) -> int` | `const fn`: the screen bytes one row of an ANTIC mode takes |
+| `display_list(mode: int, rows: int, screen: int, at: int, dli: int) -> [int; _]` | `const fn`: a whole-screen display list placed at `at`: 24 blank lines, `rows` rows of `mode` from `screen`, a DLI on each row whose bit is set in `dli`, then a jump back to `at`. An error when the list crosses a 1 KB boundary or the screen a 4 KB one |
+| `set_display_list(list: u16 using XY)` | Show a display list from the next frame (the display is off while `SDLST` changes) |
 
 **`io` on the Atari**: files through CIO (M25 follow-up; decision 2026-11-13, question 139). Same name as the C64's module, different functions: each follows its machine. Everything uses IOCB 1 (`io.IOCB`), so one file is open at a time; a program that needs more calls CIO itself. Names are ATASCII with their device (`"D1:SCORES.DAT"`, `"H:SCORES.DAT"`); `open` copies the name into a 40-byte buffer and ends it with an end-of-line, so a longer name is cut to 39 characters (a DOS 2 name with its device has at most 15). Counts are `u16`, as CIO's are; a count of 0 does nothing. Results that are `bool` are true on failure.
 
@@ -1068,6 +1096,32 @@ Each is an empty-body `inline asm fn` (section 7), so a call adds no instruction
 | `load_xex` | `(name: ptr u8, n: u8) -> bool` | Load every segment of an executable, including any `RUNAD` and `INITAD` segments, and run nothing: the loader for overlays (8.5). A file that does not start with `$FF $FF` fails with a success code in `status()`, since CIO has no code for it |
 
 `load`, `save` and `load_xex` always close the file, and `status()` then gives the first error.
+
+**`apple2`**: Apple II only (M26). The ROM routines are the monitor's documented entry points, the same on the II+, IIe, IIc and IIgs, declared as routines at a fixed address (6.6).
+
+| Name | Purpose |
+|---|---|
+| `put(ch: u8 using A) @ $FDED keeps A, Y` | Print one character through the output hook (COUT) |
+| `home() @ $FC58` | Clear the text window, cursor to its top left (HOME) |
+| `put_hex(b: u8 using A) @ $FDDA` | Print a byte as two hex digits (PRBYTE) |
+| `read_key() -> u8 using A @ $FD0C` | Wait for a key with a flashing cursor; its code with bit 7 set (RDKEY) |
+| `bell() @ $FF3A`, `wait(t: u8 using A) @ $FCA8` | BELL; WAIT, about (26 + 27t + 5t²) / 2 cycles, 0 meaning 256 |
+| `mli(command: u8 using A, parameters: u16 using XY) -> u8 using A` | An MLI call with its parameter list; returns ProDOS's error code, 0 for success. `MLI_QUIT`, `MLI_CLOSE` |
+| `exit()` | Close every file, make reset no longer return to the program, and quit to ProDOS (QUIT) |
+| `TEXT`, `TEXT_ROWS: [u16; 24]` | Text page 1 (`$0400`) and the address of each row, which are not in order |
+| `ch`, `cv`, `basl`, `invflg` | The monitor's cursor column, row, row address and character mask |
+| `print(text: ptr u8, n: u8)` | Print `n` characters through COUT |
+| `cursor(row: u8, col: u8)` | Move the cursor (rows 0-23, columns 0-39) |
+| `inverse()`, `flashing()`, `normal()` | How COUT shows what follows (sets `invflg`) |
+| `show_text()`, `show_graphics()`, `show_full()`, `show_mixed()`, `show_page1()`, `show_page2()`, `show_lores()`, `show_hires()` | The display's soft switches |
+| `HIRES1`, `HIRES2`, `HIRES_ROWS: [u16; 192]` | The hi-res pages (`$2000`, `$4000`) and each row's offset from a page's start |
+| `draw_page: u8` | The high byte of the page `clear` and `plot` draw on: `$20` (the default) or `$40` |
+| `clear()` | Clear the draw page (8 KB of zeros) |
+| `plot(x: u16, y: u8)` | Set the pixel at x 0-279, y 0-191 on the draw page; no color or erase |
+| `kbd`, `key() -> u8` | The keyboard register; `key()` gives the waiting key's code with bit 7 set and takes it, or 0 |
+| `click()`, `tone(half: u8 using A, count: u8 using X)` | Move the speaker once; a square wave of `count` clicks, `half` steps of 5 cycles apart |
+
+Not in M26: interrupt helpers and waiting for the vertical blank (12.2). In `tern run`, `put_hex`, `read_key`, `bell` and `wait` stop the run, since they have no stand-in.
 
 **`io` on the Apple II**: files through the ProDOS MLI (M26 follow-up; decision 2026-11-13). The same functions as the Atari's where the machine allows. One file is open at a time, since each open file needs its own 1 KB buffer, which ProDOS uses until the file is closed: `io` declares it as `private noinit var buffer: [u8; 1024] @ align(256)` (4). A program that needs more files calls `apple2.mli` itself. Names are ProDOS paths in the `apple2` encoding, partial (relative to the prefix) or full (`"/GAMES/SCORES"`); `open` copies the name into a buffer with a length byte, clearing bit 7 of each character, and cuts it at 64 characters. A partial name is relative to the prefix ProDOS set when it started the program. Counts are `u16`; a count of 0 does nothing. Results that are `bool` are true on failure.
 
@@ -1100,6 +1154,52 @@ Each is an empty-body `inline asm fn` (section 7), so a call adds no instruction
 Example: `c64.vic.border = c64.BLACK` is `lda #0` / `sta $D020`.
 
 KERNAL routines that fit 6.1 are declared as routines at a fixed address (6.6), so calls go straight to the ROM. The others are `asm fn` wrappers.
+
+**`nes`**: NES only (M27). The program owns the NMI vector: its handler calls `nes.vblank()` first, then does its own vblank work, with `scroll` last; `main` waits for each frame with `wait_frame()`. PPU memory is written with rendering off, or in vblank.
+
+```
+interrupt fn frame() {
+    nes.vblank()                 // sprites, frame count
+    nes.scroll(x, 0)             // last in vblank
+}
+data nmi_vector: u16 @ $FFFA = addr(frame)
+
+fn main() {
+    nes.ppu.ctrl = nes.NMI_ON
+    while true { nes.wait_frame(); update() }
+}
+```
+
+| Name | Purpose |
+|---|---|
+| `ppu: Ppu @ $2000` | `ctrl`, `mask`, `status`, `oam_address`, `oam_data`, `scroll`, `address`, and `value` for PPUDATA (`data` is a keyword) |
+| `NMI_ON`, `SPRITES_8X16`, `BG_TILES_1000`, `SPRITE_TILES_1000`, `INCREMENT_32`, `NAMETABLE_2400`, `NAMETABLE_2800` | `ppu.ctrl` bits |
+| `SHOW_SPRITES`, `SHOW_BG`, `SHOW_LEFT_SPRITES`, `SHOW_LEFT_BG`, `GRAYSCALE` | `ppu.mask` bits |
+| `VBLANK`, `SPRITE0_HIT`, `OVERFLOW` | `ppu.status` bits |
+| `apu: Apu @ $4000` | `pulse1`, `pulse2`, `triangle`, `noise`, `dmc` (each `[u8; 4]`), `status`, `frame_counter` |
+| `oam_dma @ $4014`, `pad_port: [u8; 2] @ $4016` | OAM DMA; the controller ports |
+| `struct Sprite { y, tile, attributes, x }`, `FLIP_Y`, `FLIP_X`, `BEHIND_BG` | One hardware sprite and its attribute bits (palette in bits 0-1); a `y` of 239 or more hides it |
+| `oam: [Sprite; 64]` | The sprite buffer, `linear` and `@ align(256)`, which `vblank()` sends to the PPU |
+| `hide_sprites()` | Set every sprite's `y` to `$FF` |
+| `frames: u8` | Frames counted by `vblank()` |
+| `interrupt fn vblank()` | A part (6.3) for the program's NMI handler: OAM DMA, then count the frame |
+| `wait_frame()` | Wait until `vblank()` counts a new frame |
+| `ppu_address(at: u16 using XY)` | Set the PPU address (reads `ppu.status` first, which resets the address latch) |
+| `ppu_copy(src: ptr u8, dest: u16, n: u16)` | Copy to PPU memory: tiles to CHR RAM, a nametable, a palette |
+| `ppu_fill(dest: u16, value: u8, n: u16)` | Fill PPU memory |
+| `set_palette(p: ptr u8)` | The 32 palette bytes: 4 background palettes, then 4 sprite palettes |
+| `scroll(x: u8, y: u8)` | Set the scroll position; last in vblank, since PPU address writes change it |
+| `render_on()`, `render_off()` | Draw background and sprites, also in the leftmost 8 pixels; draw nothing |
+| `BTN_A`, `BTN_B`, `BTN_SELECT`, `BTN_START`, `BTN_UP`, `BTN_DOWN`, `BTN_LEFT`, `BTN_RIGHT` | Button bits, `$80` down to `$01` |
+| `pad(n: u8 using X) -> u8 using A` | The buttons of pad 1 or 2, 1 for pressed |
+
+Not in M27: sound, text helpers, and the DMC's interference with controller reads.
+
+**`uxrom`**: the UxROM board (`lib/nes/uxrom.tern`, M27).
+
+| Function | Signature | Purpose |
+|---|---|---|
+| `select` | `(n: u8 using A)` | Show bank `n` at `$8000-$BFFF`. Writes `n` into a 16-byte table of the values 0-15 in the fixed bank, so the ROM's byte matches the CPU's (bus conflicts, 12.2) |
 
 ## 11. Code shapes
 
@@ -1204,8 +1304,8 @@ A platform description gives: CPU variant, free zero-page ranges, RAM ranges for
 - Free zero page: `$80–$FF`. BASIC is out, and the OS's floating-point routines (`$D4–$FF`) are never called: Tern's floats are a library (10.1).
 - Startup: zero globals, copy initialized data, call `main`. When `main` returns, the program stops in an endless loop, as on the C64; `atari.exit()` returns to DOS.
 - Default encoding: `atascii`; `atari_screen` gives the screen's internal codes (2.1).
-- `tern run` has stand-ins for CIO's screen output (put a byte and print text to the screen editor), as it has for the C64's KERNAL, so library and benchmark tests run in the built-in emulator. Display lists and DLIs are checked in Altirra. The stand-in's screen is the OS's on a 48 KB machine: at `$BC40`, with a left margin of 2, so a line holds 38 characters; a line that fills them moves the cursor to the next line, so an end-of-line right after it leaves a blank line. The screen editor's logical lines (3 screen lines each) and the cursor's inverse cell are not modelled.
-- `lib/atari`: register structs for ANTIC, GTIA, POKEY and PIA; OS routines as routines at a fixed address (6.6); `set_dli`, `set_vbi`, `set_vbi_immediate`, `exit`; helpers that build display lists; and screen text (`put`, `print`, `cursor`), as `c64` has it. Files are in the Atari's `io` (10.1).
+- `tern run` has stand-ins for CIO's screen output (put a byte and print text to the screen editor), as it has for the C64's KERNAL, so library and benchmark tests run in the built-in emulator, and (M25 follow-up) for CIO's open, read and close of the build's own overlay files, served by the overlay's file name in capitals after the device (`"D1:LEVEL1.XEX"`); any other name fails as a missing file, and opening a file for writing stops the run. Display lists and DLIs are checked in Altirra. The stand-in's screen is the OS's on a 48 KB machine: at `$BC40`, with a left margin of 2, so a line holds 38 characters; a line that fills them moves the cursor to the next line, so an end-of-line right after it leaves a blank line. The screen editor's logical lines (3 screen lines each) and the cursor's inverse cell are not modelled.
+- `lib/atari`: the `atari` module (10.1): register structs for ANTIC, GTIA, POKEY and PIA, the OS's shadow registers and vectors, `set_dli`, `set_vbi`, `set_vbi_immediate`, `exit`, display lists built by `const fn`s, and screen text (`put`, `print`, `cursor`), as `c64` has it. Files are in the Atari's `io` (10.1).
 
 - One target, `--target atari`, for every Atari 8-bit with at least 48 KB: the 800, a 400 expanded to 48 KB, and every XL/XE model, with the 800's OS (revision A or B) or the XL/XE OS. A 64 KB XL/XE gives a program no more usable RAM than a 48 KB 800, since its extra 16 KB lies under the OS ROM, and Tern programs keep the OS.
 - The library calls only the OS's documented entry points and vectors (CIO at `$E456`, `SETVBV` at `$E45C`, `XITVBV` at `$E462`, the vectors in page 2), the same on every model; never the XL OS's internal routines, which moved between versions.
@@ -1237,11 +1337,11 @@ A platform description gives: CPU variant, free zero-page ranges, RAM ranges for
 - Volatile areas (4): `$C000–$CFFF`, the soft switches, I/O and slot ROMs, where a read alone can have an effect. Nothing else changes outside a call: the Apple II has no interrupt source of its own, and the cursor, the screen holes and the global page change only inside ROM or MLI calls, which make the optimizer forget what it holds (4).
 - Soft switches need no language change: nearly all of them also respond to a write, so the library wraps them as functions (`apple2.show_hires()`, `apple2.show_page2()`, the keyboard strobe, the speaker), written in assembly where a read is needed.
 - `tern run` has stand-ins for COUT (`$FDED`), HOME (`$FC58`), the routines the startup code calls (SETNORM, INIT, SETVID, SETKBD) and the MLI's CLOSE and QUIT calls, and (M26 follow-up) the MLI's file calls for reading the build's own overlay files, served by the overlay's file name in capitals (`LEVEL1.BIN`) as on the Atari; a call to another ROM routine (RDKEY, BELL, WAIT, PRBYTE) stops the run. The screen is 40×24 text at `$0400` in the Apple II's row order, so library and benchmark tests run in the built-in emulator. Graphics are checked in AppleWin.
-- `lib/apple2`: ROM and MLI entry points as routines at a fixed address (6.6); screen text with a row address table: `put` is COUT itself (`keeps A, Y`, as `c64.chrout`), `print`, `cursor`, and `inverse()`, `flashing()` and `normal()`, which set INVFLG; hi-res graphics on `draw_page` (`$20` or `$40`): row address table, clear, `plot` (sets a pixel; no color or erase); `key()` (0, or the code with bit 7 set, taking the key) and `tone(half, count)`; the soft switches as `show_*` functions (`show_text`, `show_hires`, ...), so none reads like the `text` module; `mli(command, parameters) -> u8`, which returns ProDOS's error code; `exit()`, a routine of its own rather than a jump through the reset vector, so it works after a program changes the vector. Not in M26: interrupt helpers (an interrupt needs a card; under ProDOS it is installed through the MLI's `ALLOC_INTERRUPT`) and waiting for the vertical blank, which differs between the IIe, IIc and IIgs. Files are the Apple II's `io`, through the MLI (M26 follow-up).
+- `lib/apple2`: the `apple2` module (10.1): ROM and MLI entry points as routines at a fixed address (6.6); screen text with a row address table (`put` is COUT itself, `keeps A, Y`, as `c64.chrout`), and `inverse()`, `flashing()` and `normal()`, which set INVFLG; hi-res graphics on `draw_page`; the keyboard and the speaker; the soft switches as `show_*` functions, so none reads like the `text` module; `exit()`, a routine of its own rather than a jump through the reset vector, so it works after a program changes the vector. Not in M26: interrupt helpers (an interrupt needs a card; under ProDOS it is installed through the MLI's `ALLOC_INTERRUPT`) and waiting for the vertical blank, which differs between the IIe, IIc and IIgs. Files are the Apple II's `io`, through the MLI (M26 follow-up).
 - Overlays and binaries (8.5) are `.bin` files: the bytes from the area's lowest to its highest address, gaps as zeros, no header (a binary's interface module names `counter.bin`). On the disk they are BIN files (type `$06`) with the load address as their aux type, ProDOS's own convention, so BASIC.SYSTEM's BLOAD loads them too; `io.load_bin` reads the address from there (10.1). The disk script gives each file its type and aux type.
 - Disk images are not made by the compiler: a test script puts the `.system` file on a ProDOS 2.4.3 boot image with CiderPress II's `cp2`, and AppleWin boots it.
 
-**NES (M27)** (decisions 2026-11-14; being settled)
+**NES (M27)** (decisions 2026-11-14)
 
 - CPU: `ricoh2a03`. Every NES program is a cartridge image, so its `memory` block names the board (8.4).
 - **Memory map** (decision 2026-11-14):
@@ -1259,18 +1359,7 @@ A platform description gives: CPU variant, free zero-page ranges, RAM ranges for
 - **Output:** a `.nes` file: a 16-byte iNES 1.0 header (mapper number, PRG size in 16 KB units, CHR size in 8 KB units, 0 for CHR RAM, the mirroring bit), then PRG ROM (banks in order, the fixed bank last), then CHR ROM. One build, one file; banks make no files of their own. Unused PRG bytes are `$FF`, the value of erased ROM: unused banks, and gaps inside NROM's ROM and inside banks (the zeros of 8.4 are for program files that are loaded).
 - **`memory` lines:** `reserved` and `region` lines take their range out of ROM or RAM as on other targets. A `program` line is an error: the board gives the code areas (ROM) and the variables are in RAM, so the line would have no meaning (decision 2026-11-14).
 - Default encoding: none (2.1); a NES program declares one.
-- **`lib/nes`** (decision 2026-11-14): register structs for the PPU (`nes.ppu`, `$2000–$2007`: fields `ctrl`, `mask`, `status`, `oam_address`, `oam_data`, `scroll`, `address`, and `value` for PPUDATA, since `data` is a keyword) and APU (`nes.apu`), with bit constants; OAM DMA (`$4014`) and the controller ports; a 256-byte sprite buffer `nes.oam` `@ align(256)` (64 sprites of y, tile, attributes, x), `nes.hide_sprites()`; `nes.vblank()`, an `interrupt fn` part (6.3) the program calls from its own NMI handler, which sends the sprites by DMA and counts the frame, and `nes.wait_frame()`, which waits for the count to change; PPU memory through `$2006`/`$2007`, for use with rendering off or in vblank: `ppu_copy(src, dest, n)` (also to load CHR RAM on `uxrom`), `ppu_fill(dest, value, n)`, `set_palette(p)`, `scroll(x, y)`, `render_on()`, `render_off()`; `pad(n) -> u8`, the buttons of pad 1 or 2 as bits (`BTN_A` ... `BTN_RIGHT`), read through `nes.pad_port` (`$4016`, `$4017`); `nes.frames`, the frame count. `uxrom` (`lib/nes/uxrom.tern`, `import uxrom`): `select(n)`. Not in M27: sound, text helpers, and the DMC's interference with controller reads.
-  ```
-  interrupt fn frame() {
-      nes.vblank()                 // sprites, frame count
-      nes.scroll(x, 0)             // last in vblank
-  }
-  data nmi_vector: u16 @ $FFFA = addr(frame)
-
-  fn main() {
-      while true { nes.wait_frame(); update() }
-  }
-  ```
+- **`lib/nes`** (decision 2026-11-14): the `nes` and `uxrom` modules (10.1): register structs for the PPU and APU with bit constants, OAM DMA and the controller ports, a sprite buffer `@ align(256)`, the frame loop through the `nes.vblank()` part (6.3) the program calls from its own NMI handler, PPU memory writes (also to load CHR RAM on `uxrom`), and the controllers. Not in M27: sound, text helpers, and the DMC's interference with controller reads.
 - **`tern run`** models PPU memory, not pixels: writes through `$2006`/`$2007` go to a 16 KB PPU memory and OAM DMA to a 256-byte OAM, which tests check and `tern run` dumps (a nametable as text, as the C64 screen). `$2002` reports vblank once a frame and a read clears it; with bit 7 of `$2000` set an NMI fires every 29,781 cycles (one NTSC frame). The controllers read as no buttons, or as a test scripts them per frame. Writes to the UxROM latch switch the bank seen at `$8000`. Not modelled: rendering, sprite 0 hits, sprite overflow, sound, timing within a frame; graphics are checked in Mesen.
 - **Boards in M27:**
 
@@ -1297,7 +1386,7 @@ A platform description gives: CPU variant, free zero-page ranges, RAM ranges for
   - Any `data` initializer works: lists, `[expr for i in range]`, `const fn` results, `include_bytes`. A tile is 16 bytes (bitplane 0, then bitplane 1).
   - Only `data` may be placed there: no code, no `var`. The CPU cannot read it, so code may use only `addr(x)` (its PPU address, a `u16`) and `len(x)`; `x[i]` or a pointer to it is an error.
   - Errors: data past the area, overlapping data, an address outside the area.
-  - On `uxrom` the tiles are in CHR RAM, empty at power-on: they are ordinary `data` in PRG ROM, which the program copies to the PPU (a library routine, 10.1). A `chr` line is an error there that says so. After the release: the Commander X16 (`wdc65c02`), then the Commodore 128 in native mode (`.prg` at `$1C01`).
+  - On `uxrom` the tiles are in CHR RAM, empty at power-on: they are ordinary `data` in PRG ROM, which the program copies to the PPU (a library routine, 10.1). A `chr` line is an error there that says so.
 - **Interrupt vectors** (decision 2026-11-14). The 6502 takes the NMI, reset and IRQ handlers' addresses from `$FFFA`, `$FFFC` and `$FFFE`. On the NES these are the cartridge's own ROM (on `uxrom`, its fixed bank), so the program sets them when the image is built, with `data`; there is no run-time installation:
   ```
   interrupt fn frame() { ... }
@@ -1315,6 +1404,8 @@ A platform description gives: CPU variant, free zero-page ranges, RAM ranges for
     }
     ```
   - Reset (`$FFFC`) is the compiler's: it points to the startup code for the board, and `data` there is an error. A handler that changes at run time is the program's own: a fixed handler that jumps through a RAM variable.
+
+**After the first release:** the Commander X16 (`wdc65c02`), then the Commodore 128 in native mode (`.prg` at `$1C01`); roadmap M29 and M30.
 
 ### 12.3 Programs without `main`
 
