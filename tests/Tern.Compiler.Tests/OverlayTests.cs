@@ -840,7 +840,7 @@ public class OverlayTests
     [InlineData("memory {\n $0801..=$5FFF program\n $6000..=$6FFF overlay levels\n $7000..=$7FFF overlay levels\n}\nfn main() { }", "The overlay area 'levels' is declared twice")]
     [InlineData("memory {\n $0801..=$5FFF program\n $6000..=$6FFF overlay levels\n $7000..=$7FFF region levels\n}\nfn main() { }", "declared twice")]
     [InlineData("memory {\n $0801..=$5FFF program\n $6000..=$6FFF overlay levels\n $6800..=$7FFF reserved\n}\nfn main() { }", "overlaps")]
-    [InlineData("import level2 @ 5\nmemory {\n $0801..=$5FFF program\n $6000..=$6FFF overlay levels\n}\nfn main() { }", "the name of an overlay area after '@'")]
+    [InlineData("import level2 @ 5\nmemory {\n $0801..=$5FFF program\n $6000..=$6FFF overlay levels\n}\nfn main() { }", "the name of an overlay or bank area after '@'")]
     public void Placement_errors(string main, string expected) => Assert.Contains(expected, Message(main));
 
     [Fact]

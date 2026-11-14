@@ -13,11 +13,14 @@ public sealed class Run
     /// <summary>The number of IRQs the CPU took.</summary>
     public int Interrupts { get; }
 
+    /// <summary>On the NES: the PPU's memory, OAM, frames and banks (<see cref="Tools.NesBus"/>); null elsewhere.</summary>
+    public Tools.NesBus? Nes { get; }
+
     /// <summary>Array indexes and indexed match values outside their tables (M20). A run with any fails, unless checkIndexes is false.</summary>
     public IReadOnlyList<Tools.IndexError> IndexErrors { get; }
 
     private Run(string source, long maxCycles, string? sourcePath, Action<Ram>? setup, string? libraryDirectory, long irqEvery,
-        IReadOnlyDictionary<int, Action<Run>>? traps, bool checkIndexes, Platform? platform)
+        IReadOnlyDictionary<int, Action<Run>>? traps, bool checkIndexes, Platform? platform, Func<long, int, byte>? buttons)
     {
         Result = TernCompiler.Compile(source, platform, sourcePath: sourcePath, libraryDirectory: libraryDirectory);
         if (Result.Platform.Format == OutputFormat.System)
@@ -31,11 +34,15 @@ public sealed class Run
             byte[] mli = [0x68, 0x18, 0x69, 0x03, 0xA8, 0x68, 0x69, 0x00, 0x48, 0x98, 0x48, 0xA9, 0x00, 0x18, 0x60];
             mli.CopyTo(Ram.Bytes, 0xBF00);
         }
+        else if (Result.Platform.Format == OutputFormat.Nes) Nes = new Tools.NesBus(Ram, Result.File) { Buttons = buttons };
         else Ram.Load((ushort)Result.LoadAddress, Result.Image);
         setup?.Invoke(Ram);
-        Cpu = new Cpu6502(Ram) { PC = (ushort)Result.Entry, SP = 0xFF, I = true }; // as after reset: no IRQ until the program enables it
+        // As after reset: no IRQ until the program enables it.
+        Cpu = new Cpu6502(Nes is null ? Ram : Nes, Result.Platform.Cpu) { PC = (ushort)Result.Entry, SP = 0xFF, I = true };
+        if (Nes is not null) Nes.Cpu = Cpu;
         long nextIrq = irqEvery;
-        var checker = new Tools.IndexChecker(Result, sourcePath is null ? "program.tern" : Path.GetFileName(sourcePath));
+        var checker = new Tools.IndexChecker(Result, sourcePath is null ? "program.tern" : Path.GetFileName(sourcePath),
+            Nes is null ? null : pc => Result.PlaceOf(pc, Nes.SelectedBank));
         IndexErrors = checker.Errors;
         while (Cpu.PC != Result.HaltAddress)
         {
@@ -59,6 +66,7 @@ public sealed class Run
             }
             if (checker.Before(Cpu)) break;   // an indexed match value outside its span: the jump goes nowhere chosen
             Cpu.Step();
+            Nes?.Tick(Cpu);
             if (Cpu.Cycles > maxCycles)
                 throw new Xunit.Sdk.XunitException($"Program did not finish within {maxCycles} cycles (PC=${Cpu.PC:X4})\n{Result.Listing}");
         }
@@ -70,10 +78,11 @@ public sealed class Run
     /// <param name="irqEvery">If set, raises an IRQ this many cycles after the last one was taken (taken once interrupts are enabled).</param>
     /// <param name="traps">Stand-ins for ROM routines: when the CPU reaches the address, the action runs and the routine returns without executing.</param>
     /// <param name="platform">The target; the C64 if null.</param>
+    /// <param name="buttons">On the NES: the buttons of pad 1 or 2 in a frame (<see cref="Tools.NesBus.Buttons"/>).</param>
     public static Run Program(string source, long maxCycles = 5_000_000, string? sourcePath = null, Action<Ram>? setup = null,
         string? libraryDirectory = null, long irqEvery = 0, IReadOnlyDictionary<int, Action<Run>>? traps = null, bool checkIndexes = true,
-        Platform? platform = null) =>
-        new(source, maxCycles, sourcePath, setup, libraryDirectory, irqEvery, traps, checkIndexes, platform);
+        Platform? platform = null, Func<long, int, byte>? buttons = null) =>
+        new(source, maxCycles, sourcePath, setup, libraryDirectory, irqEvery, traps, checkIndexes, platform, buttons);
 
     public int Address(string name) =>
         Result.Symbols.TryGetValue(name, out var a) ? a : throw new KeyNotFoundException($"No symbol '{name}'");

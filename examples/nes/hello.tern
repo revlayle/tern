@@ -1,0 +1,47 @@
+// Hello on the NES (NROM): a small font in CHR ROM, a line of text in the nametable, a palette.
+//
+// tern --target nes hello.tern writes hello.nes; Mesen runs it.
+
+import nes
+
+memory {
+    cartridge nrom vertical
+    $0000..=$1FFF chr tiles
+}
+
+// The game chooses which tile is which character (spec 2.1): the NES has no character set.
+encoding font { ' ' = 0, 'H' = 1, 'E' = 2, 'L' = 3, 'O' = 4, 'N' = 5, 'S' = 6, '!' = 7 }
+default encoding font
+
+// One glyph per tile: 8 rows, bit 7 is the leftmost pixel.
+data GLYPHS: [u8; _] = [
+    $00, $00, $00, $00, $00, $00, $00, $00,     // ' '
+    $66, $66, $66, $7E, $66, $66, $66, $00,     // H
+    $7E, $60, $60, $7C, $60, $60, $7E, $00,     // E
+    $60, $60, $60, $60, $60, $60, $7E, $00,     // L
+    $3C, $66, $66, $66, $66, $66, $3C, $00,     // O
+    $66, $76, $7E, $7E, $6E, $66, $66, $00,     // N
+    $3C, $66, $60, $3C, $06, $66, $3C, $00,     // S
+    $18, $18, $18, $18, $18, $00, $18, $00,     // !
+]
+
+// A tile is 16 bytes: bitplane 0 (the glyph), then bitplane 1 (zeros), so the glyph has color 1.
+data FONT_TILES: [u8; _] @ tiles = [GLYPHS[i / 16 * 8 + i % 8] * (1 - i / 8 % 2) for i in 0..128]
+
+// Background: dark blue, then white text; the sprite palettes are unused.
+data PALETTE: [u8; 32] = [$01, $30, $10, $00, $01, $30, $10, $00, $01, $30, $10, $00, $01, $30, $10, $00,
+                          $01, $30, $10, $00, $01, $30, $10, $00, $01, $30, $10, $00, $01, $30, $10, $00]
+
+data HELLO = "HELLO NES!"
+
+const ROW = 14
+const COLUMN = 11
+
+fn main() {
+    // Rendering is off after the startup code, so PPU memory can be written now.
+    nes.set_palette(addr(PALETTE))
+    nes.ppu_copy(addr(HELLO), $2000 + ROW * 32 + COLUMN, len(HELLO))
+    nes.hide_sprites()
+    nes.scroll(0, 0)
+    nes.render_on()
+}

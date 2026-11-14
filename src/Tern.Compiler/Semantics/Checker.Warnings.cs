@@ -67,10 +67,11 @@ public sealed partial class Checker
                 Warn(pos, $"'{name}' is never used. Remove it, or start its name with '_' to keep it");
             }
 
-            // Unused imports. One that sets module parameters is used by the module itself.
+            // Unused imports. One that sets module parameters is used by the module itself; one that
+            // places a module in a bank (@ area[n]) puts its code there (provisional, question 163).
             foreach (var import in syntax.Imports)
             {
-                if (import.Args.Count > 0 || !module.Imports.ContainsKey(import.Name)) continue;
+                if (import.Args.Count > 0 || import.Bank is not null || !module.Imports.ContainsKey(import.Name)) continue;
                 if (_usedImports.Contains((module, import.Name)) || module.IsMain && exported.Contains(import.Name)) continue;
                 Warn(import.Pos, $"'{import.Name}' is imported but not used. Remove the import");
             }

@@ -14,6 +14,7 @@ internal abstract class Machine
     {
         OutputFormat.Xex => new AtariMachine(program?.Overlays ?? []),
         OutputFormat.System => new Apple2Machine(program?.Overlays ?? []),
+        OutputFormat.Nes => new NesMachine(),
         _ => new C64Machine(program?.Overlays ?? []),
     };
 

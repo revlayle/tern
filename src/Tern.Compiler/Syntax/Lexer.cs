@@ -51,7 +51,7 @@ public enum TokenKind
 
     // Keywords
     Const, Var, Data, Fn, Return, If, Else, While, For, In, Using, Break, Continue,
-    True, False, As, Zp, Struct, Match, Bank, Linear, Inline, Interrupt, Asm, Noinit, Keeps, Import, Private, Volatile, Module, Assert, Export, Implements,
+    True, False, As, Zp, Struct, Match, Linear, Inline, Interrupt, Asm, Noinit, Keeps, Import, Private, Volatile, Module, Assert, Export, Implements,
 
     // Punctuation and operators
     LParen, RParen, LBracket, RBracket, LBrace, RBrace, Comma, Colon, Semicolon,
@@ -91,7 +91,7 @@ public static class Lexer
         ["break"] = TokenKind.Break, ["continue"] = TokenKind.Continue,
         ["true"] = TokenKind.True, ["false"] = TokenKind.False, ["as"] = TokenKind.As,
         ["zp"] = TokenKind.Zp, ["struct"] = TokenKind.Struct, ["match"] = TokenKind.Match,
-        ["bank"] = TokenKind.Bank, ["linear"] = TokenKind.Linear, ["inline"] = TokenKind.Inline,
+        ["linear"] = TokenKind.Linear, ["inline"] = TokenKind.Inline,
         ["interrupt"] = TokenKind.Interrupt, ["asm"] = TokenKind.Asm, ["noinit"] = TokenKind.Noinit,
         ["keeps"] = TokenKind.Keeps, ["import"] = TokenKind.Import, ["private"] = TokenKind.Private,
         ["volatile"] = TokenKind.Volatile, ["module"] = TokenKind.Module, ["assert"] = TokenKind.Assert, ["export"] = TokenKind.Export,

@@ -20,6 +20,8 @@ public sealed class CheckedProgram(
     public Dictionary<FunctionSymbol, FunctionSymbol> ExportedAs { get; init; } = [];
     /// <summary>The address of a program's export table (<c>export f, g @ $0900</c>), or null.</summary>
     public int? ExportTableAddress { get; init; }
+    /// <summary>The encoding of the program's literals without a prefix: its 'default encoding', or the platform's; null when neither (the NES).</summary>
+    public CharEncoding? TextEncoding { get; init; }
     /// <summary>A binary without <c>main</c>, which starts with its jump table.</summary>
     public bool IsBinary => Exports.Count > 0 && ExportTableAddress is null;
     /// <summary>The entries of the overlays' interface tables (<c>implements</c>, spec 8.5).</summary>
@@ -139,19 +141,37 @@ public sealed partial class Checker
             module.Declared = true;
         }
 
+        // Every NES program is a cartridge, so its memory block names the board (spec 8.4).
+        if (_platform.Boards.Count > 0 && modules[^1].Syntax.Memory is null && !modules[^1].Syntax.HasSyntaxErrors)
+            Recover(() => throw new CompileError(new SourcePos(1, 1, modules[^1].Path), MemoryLayout.NeedsCartridge(_platform)));
+
         // "@ name" means a region or an address, never either depending on other declarations (spec 8.4).
-        foreach (var line in modules[^1].Syntax.Memory?.Lines.Where(l => l.Kind == "region") ?? [])
+        foreach (var line in modules[^1].Syntax.Memory?.Lines.Where(l => l.Kind is "region" or "chr") ?? [])
             if (modules[^1].Scope.TryGetValue(line.Name!, out var clash) && clash is not ErrorSymbol || modules[^1].Imports.ContainsKey(line.Name!))
                 Recover(() => throw new CompileError(line.Pos,
-                    $"The region '{line.Name}' has the name of {(clash is null ? "an imported module" : $"a {KindName(clash)} of the main file (line {clash.Pos.Line})")}, so '@ {line.Name}' would be ambiguous. Rename the region"));
+                    $"The {(line.Kind == "chr" ? "chr area" : "region")} '{line.Name}' has the name of {(clash is null ? "an imported module" : $"a {KindName(clash)} of the main file (line {clash.Pos.Line})")}, so '@ {line.Name}' would be ambiguous. Rename the region"));
 
         foreach (var import in modules[^1].Syntax.Imports.Where(i => i.Area is not null))
         {
-            if (_layout.Overlays.ContainsKey(import.Area!)) continue;
+            // The block had an error: its areas are not known (review M27, suggestion 9).
+            if (_memoryFailed) break;
+            if (_layout.Overlays.ContainsKey(import.Area!))
+            {
+                if (import.Bank is not null)
+                    Recover(() => throw new CompileError(import.Bank.Pos,
+                        $"'{import.Area}' is an overlay area, which holds one module at a time, loaded from disk; it has no banks. Remove '[...]'"));
+                continue;
+            }
+            if (_layout.Banks.ContainsKey(import.Area!))
+            {
+                Recover(() => InModule(modules[^1], () => import.BankNumber = BankNumber(import)));
+                continue;
+            }
             Recover(() => throw new CompileError(import.AreaPos, _layout.Regions.ContainsKey(import.Area!)
                 ? $"'{import.Area}' is a region, not an overlay area; '@' on an import names an area declared with 'overlay {import.Area}' in the memory block. Use the name of an overlay area"
                 : $"The memory block has no overlay area '{import.Area}'. Add a line 'first..=last overlay {import.Area}' to it"));
         }
+        CheckBoardModules(modules);
 
         var implementations = CheckImplements(modules);
 
@@ -249,18 +269,28 @@ public sealed partial class Checker
         // of a module cost nothing. The main file's globals are all kept.
         // An overlay's interface table points to its functions, so they are compiled even if nothing calls the interface.
         var tableTargets = implementations.Select(i => i.Function).ToList();
-        MarkParts(main, mainModule, tableTargets);
-        var reachable = OrderRoots(main, mainModule, tableTargets);
+        var kept = KeptGlobals(mainModule);
+        MarkParts(main, mainModule, tableTargets, kept);
+        var reachable = OrderRoots(main, mainModule, tableTargets, kept);
         if (exports.Count > 0 && exportTable is null) reachable.Remove(main);   // the root of a binary's entries has no code
         CheckPrivateGlobalsPerRoot(modules, reachable);
         MarkGlobalsUsedFromTwoRoots(reachable);
-        var used = reachable.SelectMany(f => f.UsedGlobals).Concat(mainModule.Scope.Values.OfType<VariableSymbol>()).Concat(_tableData).ToHashSet();
+        var used = reachable.SelectMany(f => f.UsedGlobals).Concat(kept).Concat(_tableData).ToHashSet();
         // A kept global keeps the globals whose addresses are in its initial value.
         foreach (var g in used.ToList()) used.UnionWith(GlobalsNamedBy(g.Storage));
-        return new CheckedProgram(modules, _globals.Where(used.Contains).ToList(), reachable, main) { Layout = _layout, Exports = exports, ExportedAs = exportedAs, ExportTableAddress = exportTable, Implementations = implementations };
+        return new CheckedProgram(modules, _globals.Where(used.Contains).ToList(), reachable, main) { Layout = _layout, Exports = exports, ExportedAs = exportedAs, ExportTableAddress = exportTable, Implementations = implementations, TextEncoding = _programDefault ?? _platform.DefaultEncoding };
     }
 
     /// <summary>A global and the globals whose addresses are in its initial value, and in theirs (spec 4).</summary>
+    /// <summary>
+    /// The globals kept whether or not compiled code names them: the main file's, and <c>data</c> with a
+    /// placement in any module, which hardware may read where no code names it (decision 2026-11-14).
+    /// </summary>
+    private List<VariableSymbol> KeptGlobals(Module mainModule) =>
+        mainModule.Scope.Values.OfType<VariableSymbol>()
+            .Concat(_globals.Where(g => g.IsData && (g.FixedAddress is not null || g.Region is not null) && g.Module != mainModule))
+            .ToList();
+
     private static List<VariableSymbol> GlobalsNamedBy(VariableSymbol g)
     {
         var all = new List<VariableSymbol> { g };

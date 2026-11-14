@@ -27,8 +27,15 @@ public sealed class RamPlan
     /// <summary>Function frames (parameters, locals, temporaries), after the globals.</summary>
     public List<(VariableSymbol Var, int Offset)> FrameVariables { get; } = [];
     public int TotalSize { get; set; }
-    /// <summary>Globals with an initial value that live in the program image.</summary>
+    /// <summary>Globals with an initial value that live in the program image (on a cartridge, only <c>data</c>).</summary>
     public List<VariableSymbol> ImageGlobals { get; } = [];
+    /// <summary>
+    /// On a cartridge (code in ROM): variables with an initial value, in the block from <see cref="CopiedStart"/>,
+    /// <see cref="CopiedSize"/> bytes. Their initial values are a table in ROM that the startup code copies (spec 12.2).
+    /// </summary>
+    public List<(VariableSymbol Var, int Offset)> CopiedGlobals { get; } = [];
+    public int CopiedStart { get; set; }
+    public int CopiedSize { get; set; }
     /// <summary>Globals in zero page, initialized by the startup code.</summary>
     public List<VariableSymbol> ZeroPageGlobals { get; } = [];
     public string ZeroPageMap { get; set; } = "";
@@ -40,6 +47,10 @@ public sealed class RamPlan
     public List<AddressRange> RegionClears { get; } = [];
     /// <summary>Where the first and last variable in each region are, for the report.</summary>
     public Dictionary<string, AddressRange> RegionUse { get; } = [];
+    /// <summary>Tile data in the chr areas (NES), at PPU addresses: bytes of the image's CHR ROM.</summary>
+    public List<VariableSymbol> ChrGlobals { get; } = [];
+    /// <summary>The bytes of each chr area that its data covers, for the report.</summary>
+    public Dictionary<string, int> ChrUse { get; } = [];
 }
 
 /// <summary>
@@ -174,31 +185,55 @@ public static class Allocator
         }
 
         // Variables and data placed in a region, in the order they are declared: zeroed variables first
-        // (one block to clear at startup), then noinit ones, then data.
-        foreach (var (name, range) in layout.Regions)
+        // (one block to clear at startup), then noinit ones, then data. One placed at an offset
+        // ('@ region + offset') is at that offset, and may not overlap the others (spec 4). A chr area
+        // holds only data, in the PPU's memory (spec 12.2).
+        foreach (var (name, range, chr) in layout.Regions.Select(r => (r.Key, r.Value, false)).Concat(layout.Chr.Select(c => (c.Key, c.Value, true))))
         {
             var inRegion = program.Globals.Where(g => g.Region == name).ToList();
+            var placed = new List<VariableSymbol>();
+            void Overlaps(VariableSymbol g)
+            {
+                foreach (var other in placed)
+                    if (g.Address < other.Address + other.Type.Size && other.Address < g.Address + g.Type.Size)
+                    {
+                        var (first, second) = other.Pos.Line <= g.Pos.Line ? (other, g) : (g, other);
+                        throw new CompileError(second.Pos,
+                            $"'{second.Name}' at {new AddressRange(second.Address, second.Address + second.Type.Size - 1)} overlaps '{first.Name}' at {new AddressRange(first.Address, first.Address + first.Type.Size - 1)} in '{name}'. Move one of them, with '@ {name} + offset'");
+                    }
+                placed.Add(g);
+            }
+            foreach (var g in inRegion.Where(g => g.RegionOffset is not null))
+            {
+                g.Address = range.First + g.RegionOffset!.Value;
+                Overlaps(g);
+            }
             int at = range.First;
             void PlaceAll(IEnumerable<VariableSymbol> vars)
             {
-                foreach (var g in vars)
+                foreach (var g in vars.Where(g => g.RegionOffset is null))
                 {
                     if (at + g.Type.Size - 1 > range.Last)
                         throw new CompileError(g.Pos,
-                            $"Region '{name}' ({range}, {range.Size} bytes) is full: '{g.Name}' needs {g.Type.Size} bytes at ${at:X4}, " +
-                            $"{Math.Max(0, range.Last + 1 - at)} are left. Place it elsewhere or make the region larger");
+                            $"{(chr ? "The chr area" : "Region")} '{name}' ({range}, {range.Size} bytes) is full: '{g.Name}' needs {g.Type.Size} bytes at ${at:X4}, " +
+                            $"{Math.Max(0, range.Last + 1 - at)} are left. Place it elsewhere or make the {(chr ? "area" : "region")} larger");
                     g.Address = at;
                     at += g.Type.Size;
+                    Overlaps(g);
                 }
             }
             var zeroed = inRegion.Where(g => !g.IsData && !g.NoInit).ToList();
             PlaceAll(zeroed);
             if (at > range.First) plan.RegionClears.Add(new AddressRange(range.First, at - 1));
+            foreach (var g in zeroed.Where(g => g.RegionOffset is not null))
+                plan.RegionClears.Add(new AddressRange(g.Address, g.Address + g.Type.Size - 1));
             PlaceAll(inRegion.Where(g => !g.IsData && g.NoInit));
             var data = inRegion.Where(g => g.IsData).ToList();
             PlaceAll(data);
-            plan.FixedImageGlobals.AddRange(data);
-            if (at > range.First) plan.RegionUse[name] = new AddressRange(range.First, at - 1);
+            (chr ? plan.ChrGlobals : plan.FixedImageGlobals).AddRange(data);
+            if (placed.Count == 0) continue;
+            if (chr) plan.ChrUse[name] = placed.Sum(g => g.Type.Size);
+            else plan.RegionUse[name] = new AddressRange(placed.Min(g => g.Address), placed.Max(g => g.Address + g.Type.Size) - 1);
         }
         plan.FixedImageGlobals.AddRange(program.Globals.Where(g => g.FixedAddress is not null && g.IsData));
         plan.OverlayGlobals.AddRange(program.Globals.Where(g => g.IsOverlayImage));
@@ -208,32 +243,45 @@ public static class Allocator
         // through an index register are placed so that no such read crosses a page, and aligned
         // variables at a multiple of their alignment (spec 4), counting the offsets from a block that
         // starts at a multiple of the largest alignment (256 with such arrays, F12).
+        // On a cartridge the initial values are in ROM and the variables in RAM: the variables are in the
+        // block, after the aligned noinit ones, and the startup code copies their values (spec 12.2).
         var ram = program.Globals.Where(g => g.FixedAddress is null && g.Region is null && !g.IsOverlayImage && !inZp.Contains(g)).ToList();
-        plan.ImageGlobals.AddRange(ram.Where(g => g.InitialBytes is not null));
+        bool rom = layout.Variables.Count > 0;
+        bool InBlock(VariableSymbol g) => g.InitialBytes is null || (rom && !g.IsData);
+        plan.ImageGlobals.AddRange(ram.Where(g => !InBlock(g)));
         var spans = new Dictionary<VariableSymbol, List<(int From, int To)>>();
         if (byPage && indexed is not null)
-            foreach (var g in ram.Where(g => g.InitialBytes is null))
+            foreach (var g in ram.Where(InBlock))
                 if (Spans(g, indexed) is { } list) spans[g] = list;
         var noinit = ram.Where(g => g.NoInit).ToList();
         int offset = PlaceByPage(noinit.Where(g => g.Alignment > 1).ToList(), 0, plan.NoinitGlobals, spans);
+        // On a cartridge the startup code clears all of RAM, so the zeroed variables need not be one
+        // block: the aligned ones go first too, with no gap before them.
+        offset = PlaceByPage(ram.Where(g => rom && g.InitialBytes is null && !g.NoInit && g.Alignment > 1).ToList(), offset, plan.ZeroedGlobals, spans);
+        offset = PlaceByPage(ram.Where(g => rom && !g.IsData && g.InitialBytes is not null).ToList(), offset, plan.CopiedGlobals, spans);
         plan.ZeroedStart = offset;
-        offset = PlaceByPage(ram.Where(g => g.InitialBytes is null && !g.NoInit).ToList(), offset, plan.ZeroedGlobals, spans);
+        offset = PlaceByPage(ram.Where(g => g.InitialBytes is null && !g.NoInit && !(rom && g.Alignment > 1)).ToList(), offset, plan.ZeroedGlobals, spans);
         int zeroedEnd = offset;
         offset = PlaceByPage(noinit.Where(g => g.Alignment == 1).ToList(), offset, plan.NoinitGlobals, spans);
-        plan.PageArrays.AddRange(spans.Keys.OrderBy(v => plan.ZeroedGlobals.Concat(plan.NoinitGlobals).First(e => e.Var == v).Offset));
+        var globals = plan.ZeroedGlobals.Concat(plan.NoinitGlobals).Concat(plan.CopiedGlobals).ToList();
+        plan.PageArrays.AddRange(spans.Keys.OrderBy(v => globals.First(e => e.Var == v).Offset));
         // Only the block's own variables count: data and initialized variables are aligned in the file (review M26 follow-up, finding 1).
-        int modulus = Math.Max(spans.Count > 0 ? 256 : 1, plan.ZeroedGlobals.Concat(plan.NoinitGlobals).Select(e => e.Var.Alignment).DefaultIfEmpty(1).Max());
+        int modulus = Math.Max(spans.Count > 0 ? 256 : 1, globals.Select(e => e.Var.Alignment).DefaultIfEmpty(1).Max());
         // Space before the first variable is not needed: the block starts that far past a multiple of the modulus instead.
-        var globals = plan.ZeroedGlobals.Concat(plan.NoinitGlobals).ToList();
         if (modulus > 1 && globals.Count > 0 && globals.Min(e => e.Offset) is int lead and > 0)
         {
-            foreach (var list in new[] { plan.ZeroedGlobals, plan.NoinitGlobals })
+            foreach (var list in new[] { plan.ZeroedGlobals, plan.NoinitGlobals, plan.CopiedGlobals })
                 for (int k = 0; k < list.Count; k++) list[k] = (list[k].Var, list[k].Offset - lead);
             plan.ZeroedStart = Math.Max(0, plan.ZeroedStart - lead);
             zeroedEnd -= lead;
             offset -= lead;
         }
         plan.ZeroedSize = zeroedEnd - plan.ZeroedStart;
+        if (plan.CopiedGlobals.Count > 0)
+        {
+            plan.CopiedStart = plan.CopiedGlobals.Min(e => e.Offset);
+            plan.CopiedSize = plan.CopiedGlobals.Max(e => e.Offset + e.Var.Type.Size) - plan.CopiedStart;
+        }
         if (modulus > 1)
         {
             plan.StartModulus = modulus;

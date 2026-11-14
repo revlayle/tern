@@ -313,6 +313,9 @@ public sealed partial class Checker
         if (AsmEffects.ReadsMemory(ins.Mnemonic, ins.Mode)) effects.VariablesRead.Add(variable);
         if (AsmEffects.WritesMemory(ins.Mnemonic, ins.Mode))
         {
+            // On a cartridge, data is ROM: a store leaves it as it is and reaches the board's latch, as
+            // uxrom.select's bus-conflict table needs (provisional, question 159).
+            if (variable.IsData && _platform.Boards.Count > 0) return;
             if (variable.IsData) throw new CompileError(ins.Operand!.Pos, $"'{variable.Name}' is data, which is read-only. Declare it with 'var' to change it");
             if (variable.ReadOnly)
                 throw new CompileError(ins.Operand!.Pos, $"Loop variable '{variable.Name}' cannot be changed inside the loop. Use a 'while' loop to change the counter yourself");

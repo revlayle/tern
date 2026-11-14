@@ -30,7 +30,7 @@ public sealed partial class Checker
                         throw new CompileError(firstPos,
                             $"'implements' puts a jump table in an overlay's file, but '{import.Name}' is not placed in an overlay area. " +
                             $"Place it with 'import {import.Name} @ area implements {firstName}'; a resident program offers entries with 'export f, g @ address'");
-                    if (!importer.IsMain || !_layout.Overlays.TryGetValue(import.Area, out var area)) throw new FollowOnError();
+                    if (!importer.IsMain || _layout.PlacedArea(import.Area) is not { } area) throw new FollowOnError();
                     if (!importer.Imports.TryGetValue(import.Name, out var module)) throw new FollowOnError();
                     var tables = new List<(string Interface, AddressRange Range)>();
                     var named = new HashSet<string>();

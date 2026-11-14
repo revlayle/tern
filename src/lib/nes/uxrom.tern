@@ -1,0 +1,12 @@
+// UxROM (mapper 2): 16 KB banks at $8000-$BFFF; the last bank is fixed at $C000-$FFFF.
+//
+// The board's latch sees the ROM's byte at the address written as well as the CPU's (a bus
+// conflict), so select() writes the bank number over a byte of a table that holds that number.
+
+private data BANKS: [u8; 16] = [n for n in 0..16]
+
+// Shows bank n (0-15) at $8000-$BFFF.
+asm fn select(n: u8 using A) {
+    tax
+    sta BANKS,x
+}

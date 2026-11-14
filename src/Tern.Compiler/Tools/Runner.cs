@@ -1,4 +1,5 @@
 using System.Text;
+using Tern.Compiler.Backend;
 using Tern.Cpu;
 
 namespace Tern.Compiler.Tools;
@@ -14,6 +15,8 @@ public sealed record RunOptions
     public string MainFile { get; init; } = "program.tern";
     /// <summary>Bytes written into memory after the program is loaded, before it starts (<c>--set</c>).</summary>
     public IReadOnlyList<MemorySet> Sets { get; init; } = [];
+    /// <summary>On the NES: the buttons of pad 1 or 2 in a frame (<see cref="NesBus.Buttons"/>); null for none.</summary>
+    public Func<long, int, byte>? Buttons { get; init; }
 }
 
 /// <summary>
@@ -56,6 +59,10 @@ public sealed record RunResult(
 {
     /// <summary>The machine the program ran on.</summary>
     public Platform Platform { get; init; } = Platform.C64;
+    /// <summary>On the NES: the PPU's memory, OAM and frames (<see cref="NesBus"/>); null elsewhere.</summary>
+    public NesBus? Nes { get; init; }
+    /// <summary>The program's text encoding, for the NES's nametable as text.</summary>
+    public CharEncoding? TextEncoding { get; init; }
 }
 
 
@@ -80,17 +87,22 @@ public static class Runner
         var ram = new Ram();
         machine.Start(ram);
         // An Apple II system file is one block at $2000, which its startup code moves into place.
+        NesBus? nes = null;
         if (program.Platform.Format == OutputFormat.System) ram.Load((ushort)program.Platform.LoadAddress, program.File);
+        else if (program.Platform.Format == OutputFormat.Nes) nes = new NesBus(ram, program.File) { Buttons = options.Buttons };
         else ram.Load((ushort)program.LoadAddress, program.Image);
         foreach (var set in options.Sets) ram.Bytes[set.Address] = set.Value;
-        var cpu = new Cpu6502(ram) { PC = (ushort)program.Entry, SP = 0xFF, I = true };
+        var cpu = new Cpu6502(nes is null ? ram : nes, program.Platform.Cpu) { PC = (ushort)program.Entry, SP = 0xFF, I = true };
+        if (nes is not null) nes.Cpu = cpu;
 
         var inProgram = program.Sections.Select(s => (s.Address, End: s.Address + s.Size)).ToList();
         bool InProgram(int pc) => inProgram.Any(s => pc >= s.Address && pc < s.End);
         bool InRom(int pc) => program.Platform.Rom.Any(r => pc >= r.First && pc <= r.Last);
-        var functions = program.Symbols
-            .Where(s => program.Sections.Any(p => p.Name == s.Key && p.Address == s.Value))
-            .GroupBy(s => s.Value).ToDictionary(g => g.Key, g => g.First().Key);
+        // By place: code in two banks may share an address (spec 8.5).
+        int PlaceOf(int pc) => nes is null ? pc : program.PlaceOf(pc, nes.SelectedBank);
+        var functions = program.Sections
+            .Where(p => program.Symbols.TryGetValue(p.Name, out int at) && at == p.Address)
+            .GroupBy(p => CodePlace.Of(p.Address, CodePlace.BankOf(p.Overlay))).ToDictionary(g => g.Key, g => g.First().Name);
         int main = program.Symbols.GetValueOrDefault("main", -1);
 
         var profile = new Profile();
@@ -102,7 +114,7 @@ public static class Runner
         int interrupts = 0;
         string stop;
         bool returned = false;
-        var checker = new IndexChecker(program, options.MainFile);
+        var checker = new IndexChecker(program, options.MainFile, nes is null ? null : PlaceOf);
 
         while (true)
         {
@@ -135,9 +147,16 @@ public static class Runner
             if (pc == main && mainStart is null) mainStart = cpu.Cycles;
             if (checker.Before(cpu)) { stop = "stopped at an 'indexed match' value outside its span (see the index check)"; break; }
             long before = cpu.Cycles;
+            int place = PlaceOf(pc);
             try { cpu.Step(); }
             catch (IllegalOpcodeException e) { stop = $"illegal opcode ${e.Opcode:X2} at ${e.Address:X4}"; break; }
-            profile.Add(pc, cpu.Cycles - before);
+            if (nes is not null)
+            {
+                int nmis = nes.Nmis;
+                nes.Tick(cpu);
+                if (nes.Nmis > nmis) { interrupts++; Entered(cpu.PC); }
+            }
+            profile.Add(place, cpu.Cycles - before);
             if (opcode == 0x20) Entered(cpu.PC);   // jsr
             Left();
         }
@@ -149,11 +168,13 @@ public static class Runner
         return new RunResult(returned, stop, cpu.Cycles, mainCycles, interrupts, ram, cpu, output.ToString(), profile, times, checker.Errors)
         {
             Platform = program.Platform,
+            Nes = nes,
+            TextEncoding = program.TextEncoding,
         };
 
         void Entered(int at)
         {
-            if (functions.TryGetValue(at, out var name)) active.Push((name, cpu.SP, cpu.Cycles));
+            if (functions.TryGetValue(PlaceOf(at), out var name)) active.Push((name, cpu.SP, cpu.Cycles));
         }
 
         // A function's frame ends when the stack pointer rises above where it was on entry (rts, rti).
@@ -169,11 +190,13 @@ public static class Runner
         }
     }
 
-    /// <summary>The text screen's address, columns and rows after a run (the C64's at $0400, the Atari's at SAVMSC).</summary>
-    public static (int Address, int Columns, int Rows) Screen(RunResult run) => Machine.For(run.Platform).Screen(run.Ram);
+    /// <summary>The text screen's address, columns and rows after a run (the C64's at $0400, the Atari's at SAVMSC, the NES's nametable at $2000 in PPU memory).</summary>
+    public static (int Address, int Columns, int Rows) Screen(RunResult run) =>
+        run.Nes is not null ? (0x2000, 32, 30) : Machine.For(run.Platform).Screen(run.Ram);
 
-    /// <summary>The lines of the text screen after a run, without trailing spaces.</summary>
-    public static IReadOnlyList<string> ScreenText(RunResult run) => Machine.For(run.Platform).ScreenText(run.Ram);
+    /// <summary>The lines of the text screen after a run, without trailing spaces. On the NES: nametable 0 (<see cref="NesMachine.Text"/>).</summary>
+    public static IReadOnlyList<string> ScreenText(RunResult run) =>
+        run.Nes is not null ? NesMachine.Text(run.Nes, run.TextEncoding) : Machine.For(run.Platform).ScreenText(run.Ram);
 
     /// <summary>The lines of the C64's screen at $0400 in <paramref name="ram"/>, without trailing spaces.</summary>
     public static IReadOnlyList<string> ScreenText(Ram ram) => Machine.For(Platform.C64).ScreenText(ram);

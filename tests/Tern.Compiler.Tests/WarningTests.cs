@@ -607,6 +607,7 @@ public sealed class RepositoryWarningTests
     [InlineData("c64", 15)]
     [InlineData("atari", 3)]
     [InlineData("apple2", 2)]
+    [InlineData("nes", 2)]
     public void The_examples_compile_with_no_warnings(string target, int programs_at_least)
     {
         var platform = Platform.ByName(target)!;
@@ -656,7 +657,11 @@ public sealed class RepositoryWarningTests
             foreach (var file in Directory.GetFiles(library, "*.tern").Concat(Directory.GetFiles(Path.Combine(library, platform.Name), "*.tern")))
             {
                 string name = Path.GetFileNameWithoutExtension(file);
-                var result = TernCompiler.Compile($"import {name}\nfn main() {{ }}\n", platform, warnLibrary: true);
+                // A NES program names its board (spec 8.4).
+                // A board's own module (uxrom) is built for that board.
+                var board = platform.Boards.FirstOrDefault(b => b.BankModule?.EndsWith("/" + name) == true) ?? platform.Boards.FirstOrDefault();
+                string memory = board is not null ? $"memory {{\n    cartridge {board.Name} vertical\n}}\n" : "";
+                var result = TernCompiler.Compile($"import {name}\n{memory}fn main() {{ }}\n", platform, warnLibrary: true);
                 warnings.AddRange(result.Warnings.Where(w => w.Pos.File is not null).Select(Line));
             }
         Assert.True(warnings.Count == 0, string.Join("\n", warnings.Distinct()));

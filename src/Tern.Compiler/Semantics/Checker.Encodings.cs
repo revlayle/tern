@@ -57,7 +57,11 @@ public sealed partial class Checker
     /// <summary>The encoding of literals without a prefix in <paramref name="module"/>: the program's default, but never in a library module.</summary>
     /// <param name="pos">The literal, for the error when it is in a byte of the default encoding itself.</param>
     private CharEncoding DefaultEncodingFor(Module module, SourcePos pos) =>
-        module.IsLibrary || _mainModule.Syntax.DefaultEncodings.Count == 0 ? _platform.DefaultEncoding : ProgramDefault(pos);
+        module.IsLibrary || _mainModule.Syntax.DefaultEncodings.Count == 0
+            ? _platform.DefaultEncoding ?? throw new CompileError(pos,
+                $"The {_platform.Name.ToUpperInvariant()} has no default encoding: its text is tile numbers, which each game chooses (spec 2.1). " +
+                "Write a 'default encoding' line in the main file, or write an encoding's prefix before the quote")
+            : ProgramDefault(pos);
 
     private CharEncoding ProgramDefault(SourcePos pos)
     {

@@ -104,6 +104,8 @@ public abstract class Symbol(string name, SourcePos pos)
     public Module? Module { get; set; }
     /// <summary>The overlay area of that file (spec 8.5), or null for resident code and data.</summary>
     public string? OverlayArea => Module?.OverlayArea;
+    /// <summary>The overlay or bank its module is placed in (<see cref="Semantics.Module.Unit"/>), or null.</summary>
+    public string? OverlayUnit => Module?.Unit;
 }
 
 public sealed class ConstSymbol(string name, SourcePos pos, TernType type, long value) : Symbol(name, pos)
@@ -188,13 +190,17 @@ public sealed class VariableSymbol(string name, SourcePos pos, TernType type, Va
     public bool IsLoopCounter { get; init; }
     /// <summary>Set for <c>@ $addr</c> variables.</summary>
     public int? FixedAddress { get; set; }
-    /// <summary>Set for <c>@ region</c> variables and data: the region's name. The allocator gives them an address in it.</summary>
+    /// <summary>Set for <c>@ region</c> variables and data: the region's (or chr area's) name. The allocator gives them an address in it.</summary>
     public string? Region { get; set; }
+    /// <summary>Set by <c>@ region + offset</c>: the offset from the area's start (spec 4).</summary>
+    public int? RegionOffset { get; set; }
+    /// <summary>Tile data in a <c>chr</c> area (NES): its address is in the PPU's memory, which the CPU cannot read (spec 12.2).</summary>
+    public bool InChr { get; set; }
     public bool RequireZeroPage { get; set; }
     /// <summary>Set by <c>@ align(n)</c>: the address is a multiple of this (spec 4); 1 when not aligned.</summary>
     public int Alignment { get; set; } = 1;
     /// <summary>A global of an overlay module that is placed with the module's code (not at a fixed address or in a region).</summary>
-    public bool IsOverlayImage => Kind == VariableKind.Global && OverlayArea is not null && FixedAddress is null && Region is null;
+    public bool IsOverlayImage => Kind == VariableKind.Global && OverlayArea is not null && Module?.InBank != true && FixedAddress is null && Region is null;
     /// <summary>Set for loop variables that live in a register (<c>using X</c>). They have no memory.</summary>
     public Register? Register { get; set; }
     /// <summary>Set for parameters passed in a register. The function stores them into its frame on entry.</summary>

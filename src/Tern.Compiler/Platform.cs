@@ -14,6 +14,11 @@ public enum OutputFormat
     /// follow each other with no gaps; the startup code moves them into place (spec 12.2).
     /// </summary>
     System,
+    /// <summary>
+    /// An iNES 1.0 cartridge image (spec 12.2): a 16-byte header, PRG ROM (banks in order, the fixed bank
+    /// last), then CHR ROM.
+    /// </summary>
+    Nes,
 }
 
 /// <summary>Everything the compiler needs to know about a target machine.</summary>
@@ -38,11 +43,21 @@ public sealed class Platform
     /// changes): first and last address, inclusive. Variables placed there are volatile (spec 4).
     /// </summary>
     public required (int First, int Last)[] VolatileAreas { get; init; }
-    /// <summary>Encoding of char and string literals without a prefix.</summary>
-    public required CharEncoding DefaultEncoding { get; init; }
+    /// <summary>Encoding of char and string literals without a prefix; null on the NES, where the program declares one (spec 2.1).</summary>
+    public required CharEncoding? DefaultEncoding { get; init; }
     public required OutputFormat Format { get; init; }
-    /// <summary>The program file's extension: ".prg", ".xex", ".system".</summary>
-    public string FileExtension => Format switch { OutputFormat.Prg => ".prg", OutputFormat.Xex => ".xex", _ => ".system" };
+    /// <summary>The program file's extension: ".prg", ".xex", ".system", ".nes".</summary>
+    public string FileExtension => Format switch { OutputFormat.Prg => ".prg", OutputFormat.Xex => ".xex", OutputFormat.Nes => ".nes", _ => ".system" };
+    /// <summary>
+    /// The cartridge boards the <c>cartridge</c> line may name (spec 8.4, 12.2), the default first. On the
+    /// NES every program is a cartridge, so the line is required.
+    /// </summary>
+    public IReadOnlyList<Board> Boards { get; init; } = [];
+    /// <summary>
+    /// RAM for variables, when code is in ROM (the NES): the variables' block goes there instead of after
+    /// the program, and initial values are copied from ROM. Null: variables follow the program.
+    /// </summary>
+    public (int First, int Last)? VariableRam { get; init; }
     /// <summary>
     /// The extension of an overlay's file and of a binary without main: as the program's, except on
     /// the Apple II, where they are plain binary files (".bin"), not system files.
@@ -92,12 +107,12 @@ public sealed class Platform
     public bool IsVolatile(int first, int last) => VolatileAreas.Any(a => first <= a.Last && last >= a.First);
 
     /// <summary>The platforms a build can name with <c>--target</c> (spec 12.2).</summary>
-    public static IReadOnlyList<Platform> All => [C64, Atari, Apple2];
+    public static IReadOnlyList<Platform> All => [C64, Atari, Apple2, Nes];
 
     /// <summary>The platform named <paramref name="name"/>, or null.</summary>
     public static Platform? ByName(string name) => All.FirstOrDefault(p => p.Name == name);
 
-    /// <summary>"--target c64, --target atari or --target apple2", for messages that name the choices.</summary>
+    /// <summary>"--target c64, --target atari, --target apple2 or --target nes", for messages that name the choices.</summary>
     public static string Choices => string.Join(", ", All.Take(All.Count - 1).Select(p => "--target " + p.Name)) + " or --target " + All[^1].Name;
 
     /// <summary>
@@ -195,5 +210,30 @@ public sealed class Platform
             (0xBF00, 0xBFFF),   // ProDOS's global page: the MLI's entry at $BF00
             (0xC000, 0xFFFF),   // I/O, slot ROMs, BASIC and the monitor
         ],
+    };
+
+    /// <summary>
+    /// NES (spec 12.2): every program is a cartridge image (.nes) for the board its memory block names.
+    /// Code and data in ROM, variables in the 2 KB of RAM above the stack, all of zero page free; the
+    /// PPU, APU and controller registers are volatile. No default encoding.
+    /// </summary>
+    public static readonly Platform Nes = new()
+    {
+        Name = "nes",
+        Cpu = CpuVariant.Ricoh2A03,
+        LoadAddress = 0x8000,
+        Header = [],
+        ZeroPage = [(0x00, 0xFF)],
+        RamEnd = 0x07FF,
+        VariableRam = (0x0200, 0x07FF),
+        VolatileAreas =
+        [
+            (0x2000, 0x401F),   // PPU, APU, controller and OAM DMA registers
+        ],
+        DefaultEncoding = null,
+        Format = OutputFormat.Nes,
+        Labels = LabelFormat.Mesen,
+        Rom = [],
+        Boards = [Board.Nrom, Board.Uxrom],
     };
 }

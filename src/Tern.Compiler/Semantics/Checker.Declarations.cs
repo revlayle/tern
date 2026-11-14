@@ -35,7 +35,7 @@ public sealed partial class Checker
             CheckExpr(e);
             return e.ConstValue ?? throw new CompileError(e.Pos, "A memory range must be known at compile time. Use numbers and constants");
         }
-        return MemoryLayout.Build(_platform, memory.Lines.Select(l => (l, Value(l.First), Value(l.Last))).ToList());
+        return MemoryLayout.Build(_platform, memory.Lines.Select(l => (l, Value(l.First), Value(l.Last))).ToList(), memory.Cartridge, memory.Pos);
     }
 
     /// <param name="name">The name in this file's scope; for top-level declarations of a module, without the module name.</param>
@@ -194,11 +194,16 @@ public sealed partial class Checker
     private void UseGlobal(VariableSymbol v, SourcePos pos)
     {
         CheckNotBinaryData(v, pos);
+        if (v.InChr)
+            throw new CompileError(pos,
+                $"'{v.Name}' is tile data in the chr area '{v.Region}', in the PPU's memory, which the CPU cannot read. Use addr({v.Name}) for its PPU address, or len({v.Name})");
         if (v.Kind != VariableKind.Global || _function is null) return;
         // Overlays in one area share their memory: another one's variables are not there while this one runs.
-        if (_function.OverlayArea is { } area && v.OverlayArea == area && v.Module != _function.Module && (v.FixedAddress is null || v.IsData) && v.Region is null)
+        // A bank's variables are resident, in RAM; its data is in the bank.
+        if (_function.OverlayArea is { } area && v.OverlayArea == area && v.OverlayUnit != _function.OverlayUnit && (v.FixedAddress is null || v.IsData) && v.Region is null
+            && (v.IsData || !v.Module!.InBank))
             throw new CompileError(pos,
-                $"'{v.Name}' belongs to {v.Module!.Name}, which is in the same overlay area '{area}' as {_function.Module!.Name}. They are never loaded together and share their memory. " +
+                $"'{v.Name}' belongs to {v.Module!.Name}, which is {NeverTogether(v.Module, _function.Module!)} as {_function.Module!.Name}. They are never loaded together and share their memory. " +
                 "Keep shared state in a resident module or the main file");
         if (_dead) return;
         _function.UsedGlobals.Add(v);
@@ -552,8 +557,10 @@ public sealed partial class Checker
         if (decl.IsNoinit && v.FixedAddress is not null)
             throw new CompileError(decl.Pos, $"'{decl.Name}' is at a fixed address, which is never zeroed; leave out 'noinit'");
 
-        if (decl.IsData && !type.IsArray && !type.IsStruct)
-            throw new CompileError(decl.Pos, "Data must be an array, a string or a struct. Use 'const' for a single value");
+        // A single value placed with '@' is bytes the hardware reads, such as the NES's interrupt vectors
+        // (spec 12.2: data nmi_vector: u16 @ $FFFA = addr(frame)); provisional, question 157.
+        if (decl.IsData && !type.IsArray && !type.IsStruct && v.FixedAddress is null && v.Region is null)
+            throw new CompileError(decl.Pos, "Data must be an array, a string or a struct, unless it is placed with '@'. Use 'const' for a single value");
         if (decl.Init is not null)
         {
             if (v.FixedAddress is not null && !decl.IsData)
@@ -660,52 +667,6 @@ public sealed partial class Checker
         CheckExpr(decl.Init);
         if (decl.Init.Type.IsStruct) Coerce(decl.Init, decl.Init.Type); // "A struct cannot be used as a value"
         return DefaultType(decl.Init);
-    }
-
-    private void ApplyPlacement(VarDecl decl, VariableSymbol v, bool allowAddress)
-    {
-        switch (decl.Placement.Kind)
-        {
-            case PlacementKind.ZeroPage:
-                v.RequireZeroPage = true;
-                break;
-            case PlacementKind.Align:
-                if (!allowAddress)
-                    throw new CompileError(decl.Pos, "Only global variables and data can be aligned: a local's memory is shared with other functions' (spec 8.1). Move the variable out of the function");
-                var n = decl.Placement.Alignment!;
-                CheckExpr(n);
-                if (n.ConstValue is not long align)
-                    throw new CompileError(n.Pos, "The alignment must be known at compile time. Use a number or a constant, as in '@ align(256)'");
-                if (align < 2 || align > 32768 || (align & (align - 1)) != 0)
-                    throw new CompileError(n.Pos, $"The alignment must be a power of two from 2 to 32768, not {align}. Use one such as 64, 256 or 2048");
-                v.Alignment = (int)align;
-                break;
-            case PlacementKind.Address:
-                if (!allowAddress) throw new CompileError(decl.Pos, "Only global variables can have a fixed address. Move the variable out of the function");
-                var addr = decl.Placement.Address!;
-                // Only a region name needs the memory block; a constant address does not.
-                if (addr is NameExpr placed && _module.Syntax.Memory?.Lines.Any(l => l.Kind == "region" && l.Name == placed.Name) == true)
-{
-                    EnsureMemoryLayout();
-                    if (_memoryFailed) throw new FollowOnError();
-                }
-                if (addr is NameExpr region && _layout.Regions.ContainsKey(region.Name) && Lookup(region.Name) is null)
-                {
-                    v.Region = region.Name;
-                    // A region that touches volatile memory is volatile as a whole: its addresses are not known yet.
-                    var span = _layout.Regions[region.Name];
-                    v.InVolatileArea = _layout.IsVolatile(span.First, span.Last) || _platform.IsVolatile(span.First, span.Last);
-                    break;
-                }
-                CheckExpr(addr);
-                if (addr.ConstValue is not long a)
-                    throw new CompileError(addr.Pos, "The address must be known at compile time. Use a number or a constant");
-                if (a < 0 || a + v.Type.Size > 0x10000)
-                    throw new CompileError(addr.Pos, $"Address ${a:X} is outside memory. Use an address up to $FFFF, less the variable's size");
-                v.FixedAddress = (int)a;
-                v.InVolatileArea = _platform.IsVolatile((int)a, (int)a + v.Type.Size - 1);
-                break;
-        }
     }
 
     /// <param name="target">Collects the function addresses (<c>addr(f)</c>) in the value.</param>
@@ -878,9 +839,10 @@ public sealed partial class Checker
                 "An address in an initial value is filled in when the program is placed, so it can only be used alone, plus or minus a constant, or as .lo / .hi. Assign other values at the start of main");
         // Overlays in one area share their memory: the other one's code or data is not there while this one is loaded (spec 8.5).
         var (otherArea, otherModule, name) = function is not null ? (function.OverlayArea, function.Module, function.Name) : (variable!.OverlayArea, variable.Module, variable.QualifiedName);
-        if (target.OverlayArea is { } area && otherArea == area && otherModule != target.Module && (variable is null || variable.FixedAddress is null || variable.IsData))
+        if (target.OverlayArea is { } area && otherArea == area && otherModule!.Unit != target.Module!.Unit && (variable is null || variable.FixedAddress is null || variable.IsData)
+            && (variable is null || variable.IsData || !otherModule.InBank))
             throw new CompileError(init.Pos,
-                $"'{name}' is in {otherModule!.Name}, which is in the same overlay area '{area}' as {target.Module!.Name}. They are never loaded together, so the address would point at the wrong memory. " +
+                $"'{name}' is in {otherModule!.Name}, which is {NeverTogether(otherModule, target.Module)} as {target.Module!.Name}. They are never loaded together, so the address would point at the wrong memory. " +
                 "Take the address in resident code, or put one of them in another area");
         var (fillVariable, fillOffset) = (variable?.AliasOf ?? variable, (int)offset + (variable?.AliasOffset ?? 0));
         if (part == AddressPart.Word && highAt is { } h && h != at + 1)

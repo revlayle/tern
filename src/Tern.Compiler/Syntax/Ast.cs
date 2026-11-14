@@ -456,9 +456,13 @@ public sealed class ImportDecl(SourcePos pos, string name) : Node(pos)
     public string Name { get; } = name;
     /// <summary>Module parameters set by <c>import name(P = value)</c>.</summary>
     public List<ImportArg> Args { get; init; } = [];
-    /// <summary>The overlay area in <c>import name @ area</c> (spec 8.5), or null.</summary>
+    /// <summary>The overlay or bank area in <c>import name @ area</c> or <c>@ area[n]</c> (spec 8.5), or null.</summary>
     public string? Area { get; init; }
     public SourcePos AreaPos { get; init; }
+    /// <summary>The bank's number in <c>import name @ area[n]</c>, a constant expression, or null.</summary>
+    public Expr? Bank { get; init; }
+    /// <summary>The value of <see cref="Bank"/>, set by the checker.</summary>
+    public int? BankNumber { get; set; }
     /// <summary>The interface modules in <c>import name @ area implements a, b</c> (spec 8.5), with their positions.</summary>
     public List<(string Name, SourcePos Pos)> Implements { get; init; } = [];
 }
@@ -558,16 +562,21 @@ public sealed class ProgramSyntax(List<ConstDecl> consts, List<VarDecl> globals,
 public sealed class MemoryDecl(SourcePos pos, List<MemoryLine> lines) : Node(pos)
 {
     public List<MemoryLine> Lines { get; } = lines;
+    /// <summary>The <c>cartridge board option...</c> line, or null (spec 8.4).</summary>
+    public CartridgeLine? Cartridge { get; init; }
 }
+
+/// <summary><c>cartridge board option...</c>: the build is a cartridge image for that board (spec 8.4, 12.2).</summary>
+public sealed record CartridgeLine(SourcePos Pos, string Board, SourcePos BoardPos, IReadOnlyList<(string Name, SourcePos Pos)> Options);
 
 /// <summary>One line of the memory block: <c>first..=last kind [name]</c>.</summary>
 public sealed class MemoryLine(SourcePos pos, Expr first, Expr last, string kind, string? name) : Node(pos)
 {
     public Expr First { get; } = first;
     public Expr Last { get; } = last;
-    /// <summary>program, zeropage, reserved, region, volatile or overlay.</summary>
+    /// <summary>program, zeropage, reserved, region, volatile, overlay, bank or chr.</summary>
     public string Kind { get; } = kind;
-    /// <summary>The name after <c>region</c> or <c>overlay</c>.</summary>
+    /// <summary>The name after <c>region</c>, <c>overlay</c>, <c>bank</c> or <c>chr</c>.</summary>
     public string? Name { get; } = name;
 }
 

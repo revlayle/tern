@@ -30,32 +30,82 @@ public sealed class MemoryLayout
     public Dictionary<string, AddressRange> Regions { get; } = [];
     /// <summary>Areas modules are loaded into on request (<c>import m @ name</c>, spec 8.5).</summary>
     public Dictionary<string, AddressRange> Overlays { get; } = [];
+    /// <summary>Bank areas: windows where one bank of the cartridge's ROM is visible at a time (<c>import m @ name[n]</c>, spec 8.5, 14.1).</summary>
+    public Dictionary<string, AddressRange> Banks { get; } = [];
+
+    /// <summary>The overlay or bank area named <paramref name="name"/>, or null.</summary>
+    public AddressRange? PlacedArea(string name) =>
+        Overlays.TryGetValue(name, out var o) ? o : Banks.TryGetValue(name, out var b) ? b : null;
     /// <summary>Volatile ranges added by the memory block, in addition to the platform's.</summary>
     public List<AddressRange> Volatile { get; } = [];
+    /// <summary>
+    /// RAM for the variables' block when code is in ROM (<see cref="Platform.VariableRam"/>, less the
+    /// block's other areas); empty when the variables follow the program in <see cref="Program"/>.
+    /// </summary>
+    public List<AddressRange> Variables { get; private init; } = [];
+    /// <summary>
+    /// The <c>chr</c> areas (NES): CHR ROM, in the PPU's addresses, so they take no CPU memory. Only
+    /// <c>data</c> is placed there, and its bytes go in the image's CHR ROM (spec 12.2).
+    /// </summary>
+    public Dictionary<string, AddressRange> Chr { get; } = [];
+    /// <summary>The board the build is an image for (the <c>cartridge</c> line), or null.</summary>
+    public Cartridge? Cartridge { get; private init; }
 
     /// <summary>The block has <c>program</c> lines, which replace the platform's program areas.</summary>
     public bool ProgramReplaced { get; private init; }
 
     public bool IsVolatile(int first, int last) => Volatile.Any(a => first <= a.Last && last >= a.First);
 
-    /// <summary>The platform's map: one program area from the load address to the end of usable RAM.</summary>
+    /// <summary>
+    /// The platform's map: one program area from the load address to the end of usable RAM; on a
+    /// platform with boards, the first board's ROM, with the variables in <see cref="Platform.VariableRam"/>.
+    /// </summary>
     public static MemoryLayout Default(Platform platform) => new()
     {
-        Program = [new AddressRange(platform.LoadAddress, platform.RamEnd)],
+        Program = platform.Boards.Count > 0 ? [.. platform.Boards[0].CodeAreas] : [new AddressRange(platform.LoadAddress, platform.RamEnd)],
+        Variables = platform.VariableRam is var (first, last) ? [new AddressRange(first, last)] : [],
         ZeroPage = PlatformZeroPage(platform),
     };
+
+    /// <summary>The board and options of a <c>cartridge</c> line (spec 8.4, 12.2).</summary>
+    private static Cartridge BuildCartridge(Platform platform, CartridgeLine line)
+    {
+        if (platform.Boards.Count == 0)
+            throw new CompileError(line.Pos, platform.Name == "apple2"
+                ? "The Apple II has no cartridges. Remove the 'cartridge' line"
+                : $"'cartridge' is not supported yet for the {platform.Name}: cartridge images are built only for the NES so far. Remove the 'cartridge' line");
+        var board = platform.Boards.FirstOrDefault(b => b.Name == line.Board)
+            ?? throw new CompileError(line.BoardPos,
+                $"The {platform.Name.ToUpperInvariant()} has no board '{line.Board}'. Use one of: {string.Join(", ", platform.Boards.Select(b => b.Name))}");
+        foreach (var (name, pos) in line.Options)
+            if (!Board.Mirroring.Contains(name))
+                throw new CompileError(pos, $"The board '{board.Name}' has no option '{name}'. Use one of: {string.Join(", ", Board.Mirroring)}");
+        var mirroring = line.Options.Where(o => Board.Mirroring.Contains(o.Name)).ToList();
+        if (mirroring.Count == 0)
+            throw new CompileError(line.BoardPos,
+                $"The board '{board.Name}' is wired for one mirroring, which the line must name. Write 'cartridge {board.Name} vertical' or 'cartridge {board.Name} horizontal'");
+        if (mirroring.Count > 1)
+            throw new CompileError(mirroring[1].Pos, $"The board has one mirroring, and the line names {mirroring.Count}. Remove '{mirroring[1].Name}'");
+        return new Cartridge(board, mirroring[0].Name == "vertical");
+    }
 
     private static List<AddressRange> PlatformZeroPage(Platform platform) => platform.ZeroPage.Select(z => new AddressRange(z.First, z.Last)).ToList();
 
     /// <summary>Applies the lines of the main file's memory block to the platform's map (spec 8.4).</summary>
-    public static MemoryLayout Build(Platform platform, IReadOnlyList<(MemoryLine Line, long First, long Last)> lines)
+    /// <param name="block">The block's position, for an error about the block as a whole.</param>
+    public static MemoryLayout Build(Platform platform, IReadOnlyList<(MemoryLine Line, long First, long Last)> lines, CartridgeLine? cartridgeLine, SourcePos block)
     {
+        var cartridge = cartridgeLine is null ? null : BuildCartridge(platform, cartridgeLine);
+        if (cartridge is null && platform.Boards.Count > 0)
+            throw new CompileError(block, NeedsCartridge(platform));
         var program = new List<AddressRange>();
         var zeroPage = new List<AddressRange>();
         var reserved = new List<AddressRange>();
         var regions = new Dictionary<string, AddressRange>();
         var overlays = new Dictionary<string, AddressRange>();
         var volatileRanges = new List<AddressRange>();
+        var chr = new Dictionary<string, AddressRange>();
+        var banks = new Dictionary<string, AddressRange>();
         // Every range that may not overlap another, with the line that declared it.
         var claimed = new List<(AddressRange Range, MemoryLine Line)>();
 
@@ -66,8 +116,61 @@ public sealed class MemoryLayout
             if (first > last)
                 throw new CompileError(line.Pos, $"The range starts at ${first:X4} and ends at ${last:X4}, before its start. Write the lower address first");
             var range = new AddressRange((int)first, (int)last);
+            if (line.Kind is "bank" or "chr" && cartridge is null)
+                throw new CompileError(line.Pos, $"A '{line.Kind}' area is part of a cartridge board, which the {platform.Name} does not have. Remove the line");
+            if (line.Kind == "bank")
+            {
+                var board = cartridge!.Board;
+                if (board.BankArea is not { } window)
+                    throw new CompileError(line.Pos, $"The board '{board.Name}' has no banks. Remove the line, or name a board with banks, such as 'cartridge uxrom'");
+                if (range != window)
+                    throw new CompileError(line.Pos, $"The board '{board.Name}' switches banks at {window}, not at {range}. Write '${window.First:X4}..=${window.Last:X4} bank {line.Name}'");
+                if (banks.Count > 0)
+                    throw new CompileError(line.Pos, $"The board '{board.Name}' has one bank area, and the block already declares it as '{banks.Keys.First()}'. Remove the line");
+                if (regions.ContainsKey(line.Name!) || overlays.ContainsKey(line.Name!) || chr.ContainsKey(line.Name!))
+                    throw new CompileError(line.Pos, $"The area '{line.Name}' is declared twice. Give each area its own name");
+                banks[line.Name!] = range;
+            }
+            if (line.Kind == "chr")
+            {
+                // The PPU's addresses: not checked against the CPU's ranges.
+                if (!cartridge!.Board.ChrRom)
+                    throw new CompileError(line.Pos,
+                        $"The board '{cartridge.Board.Name}' has CHR RAM, empty at power-on, not CHR ROM. Remove the line, make the tiles ordinary data and copy them to the PPU with nes.ppu_copy");
+                if (last > 0x1FFF)
+                    throw new CompileError(line.Pos, $"A chr area lies in the PPU's pattern tables, $0000-$1FFF; {range} does not. Use addresses in that range");
+                if (chr.Count > 0)
+                    throw new CompileError(line.Pos, $"The board '{cartridge.Board.Name}' has one CHR ROM, and the block already declares it as '{chr.Keys.First()}'. Remove the line, or join the two");
+                if (regions.ContainsKey(line.Name!) || overlays.ContainsKey(line.Name!))
+                    throw new CompileError(line.Pos, $"The area '{line.Name}' is declared twice. Give each area its own name");
+                chr[line.Name!] = range;
+                continue;
+            }
+            // A cartridge has only the machine's RAM and the board's ROM (review M27, findings 1 and 2).
+            if (cartridge is not null)
+            {
+                var ram = new AddressRange(0, platform.RamEnd);
+                var board = cartridge.Board;
+                var rom = new AddressRange(board.CodeAreas.Concat(board.BankArea is { } b ? [b] : []).Min(a => a.First),
+                    board.CodeAreas.Concat(board.BankArea is { } b2 ? [b2] : []).Max(a => a.Last));
+                if (line.Kind == "overlay")
+                    throw new CompileError(line.Pos,
+                        $"A cartridge has no disk to load an overlay from, and the board '{board.Name}' no RAM at {range} to load it into. " +
+                        (board.BankArea is { } window
+                            ? $"Remove the line, and place modules in banks: '${window.First:X4}..=${window.Last:X4} bank {line.Name}' and 'import m @ {line.Name}[0]'"
+                            : "Remove the line, or use a board with banks ('cartridge uxrom') and place modules in a bank area"));
+                if (line.Kind == "region" && !ram.Contains(range))
+                    throw new CompileError(line.Pos,
+                        $"A region must lie in RAM, {ram}; {range} does not ({new AddressRange(platform.RamEnd + 1, 0x1FFF)} repeats the RAM, and the board '{board.Name}' has no RAM elsewhere). Use addresses in that range");
+                if (line.Kind == "reserved" && !ram.Contains(range) && !rom.Contains(range))
+                    throw new CompileError(line.Pos,
+                        $"A reserved range must lie in RAM, {ram}, or in the board's ROM, {rom}; {range} does not. Use addresses in one of them");
+            }
             switch (line.Kind)
             {
+                case "program" when cartridge is not null:
+                    throw new CompileError(line.Pos,
+                        $"'program' lines are not supported yet on the {platform.Name.ToUpperInvariant()}: the board '{cartridge.Board.Name}' gives the program's ROM ({List(cartridge.Board.CodeAreas)}). Remove the line, or use 'reserved' for memory the program keeps for itself");
                 case "program": program.Add(range); break;
                 case "zeropage":
                     if (last > 0xFF)
@@ -81,7 +184,7 @@ public sealed class MemoryLayout
                     break;
                 case "volatile": volatileRanges.Add(range); break;
                 case "overlay":
-                    if (!overlays.TryAdd(line.Name!, range) || regions.ContainsKey(line.Name!))
+                    if (!overlays.TryAdd(line.Name!, range) || regions.ContainsKey(line.Name!) || banks.ContainsKey(line.Name!))
                         throw new CompileError(line.Pos, $"The overlay area '{line.Name}' is declared twice. Give each area its own name");
                     break;
             }
@@ -96,22 +199,36 @@ public sealed class MemoryLayout
         }
 
         // Memory the compiler may not use is taken out of the platform's areas, when the block does not replace them.
-        var taken = reserved.Concat(regions.Values).Concat(overlays.Values).ToList();
-        var programAreas = program.Count > 0 ? program : Subtract([new AddressRange(platform.LoadAddress, platform.RamEnd)], taken);
+        var taken = reserved.Concat(regions.Values).Concat(overlays.Values).Concat(banks.Values).ToList();
+        var programAreas = program.Count > 0 ? program
+            : Subtract(cartridge is not null ? cartridge.Board.CodeAreas : [new AddressRange(platform.LoadAddress, platform.RamEnd)], taken);
         if (programAreas.Count == 0)
-            throw new CompileError(lines[0].Line.Pos, $"No program area is left: the reserved and region ranges cover all of ${platform.LoadAddress:X4}-${platform.RamEnd:X4}. Leave room for the program");
+            throw new CompileError(lines[0].Line.Pos, cartridge is not null
+                ? $"No program area is left: the reserved ranges cover all of the board '{cartridge.Board.Name}'s ROM for the program, {List(cartridge.Board.CodeAreas)}. Leave room for the program"
+                : $"No program area is left: the reserved and region ranges cover all of ${platform.LoadAddress:X4}-${platform.RamEnd:X4}. Leave room for the program");
         var layout = new MemoryLayout
         {
             Program = programAreas,
             ProgramReplaced = program.Count > 0,
             ZeroPage = zeroPage.Count > 0 ? zeroPage.OrderBy(z => z.First).ToList() : Subtract(PlatformZeroPage(platform), taken.Concat(program)),
+            Variables = platform.VariableRam is var (ramFirst, ramLast) ? Subtract([new AddressRange(ramFirst, ramLast)], taken) : [],
+            Cartridge = cartridge,
         };
+        if (platform.VariableRam is var (vFirst, vLast) && layout.Variables.Count == 0)
+            throw new CompileError(block, $"No RAM is left for variables: the block's ranges cover all of {new AddressRange(vFirst, vLast)}. Leave room for the variables");
         layout.Reserved.AddRange(reserved);
         foreach (var (name, range) in regions) layout.Regions[name] = range;
         foreach (var (name, range) in overlays) layout.Overlays[name] = range;
+        foreach (var (name, range) in chr) layout.Chr[name] = range;
+        foreach (var (name, range) in banks) layout.Banks[name] = range;
         layout.Volatile.AddRange(volatileRanges);
         return layout;
     }
+
+    /// <summary>The error for a NES program without a <c>cartridge</c> line.</summary>
+    public static string NeedsCartridge(Platform platform) =>
+        $"A {platform.Name.ToUpperInvariant()} program is a cartridge image, so its memory block names the board. " +
+        $"Write 'memory {{ cartridge {platform.Boards[0].Name} vertical }}' (boards: {string.Join(", ", platform.Boards.Select(b => b.Name))}; mirroring: vertical or horizontal)";
 
     private static string Describe(MemoryLine line) => line.Name is null ? line.Kind : $"{line.Kind} {line.Name}";
 

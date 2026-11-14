@@ -20,8 +20,29 @@ public sealed record PlacedArea(AddressRange Free, int UsedEnd, List<string> Nam
 /// <see cref="File"/> is null for the main file, else the module's file name. <see cref="Cycles"/> is
 /// the base count; <see cref="MoreCycles"/> is set for a branch or a read that can cross a page.
 /// </summary>
+/// <see cref="Overlay"/> is the overlay or bank its section is in ("levels[1]"), or null.
 public sealed record PlacedInstruction(int Address, int Size, string Text, int Cycles, bool MoreCycles, string? File, int? Line, string? Source, string Section,
-    CheckedIndex? Index = null);
+    CheckedIndex? Index = null, string? Overlay = null)
+{
+    /// <summary>The bank it is in (spec 8.5), or -1 outside banks.</summary>
+    public int Bank => CodePlace.BankOf(Overlay);
+    /// <summary>Where it is: its address, told apart from the same address in other banks (<see cref="CodePlace"/>).</summary>
+    public int Place => CodePlace.Of(Address, Bank);
+}
+
+/// <summary>
+/// A place in the program's code: an address, and for code in a bank (spec 8.5) the bank, since banks
+/// share their addresses. The emulator's index check, profile and function entries are keyed by place.
+/// </summary>
+public static class CodePlace
+{
+    /// <summary>The address, with the bank above its 16 bits; the address alone outside banks (<paramref name="bank"/> -1).</summary>
+    public static int Of(int address, int bank) => bank < 0 ? address : (bank + 1) << 16 | address;
+
+    /// <summary>The bank of an overlay or bank unit ("levels[1]" is 1); -1 for an overlay or none.</summary>
+    public static int BankOf(string? unit) =>
+        unit is not null && unit.EndsWith(']') && int.TryParse(unit[(unit.IndexOf('[') + 1)..^1], out int n) ? n : -1;
+}
 
 /// <summary>
 /// An array index or <c>indexed match</c> table read that the emulator checks (M20): the address
@@ -80,8 +101,13 @@ public static class Assembler
     /// </param>
     /// <param name="overlayImports">Where each overlay module is imported, for the error when it does not fit.</param>
     /// <param name="overlayAreas">For each overlay module, the area its sections start in (spec 8.5). Each module is laid out from the start of its area.</param>
+    /// <param name="variableAreas">
+    /// RAM for the variables' block when code is in ROM (the NES): the block goes there, in the first
+    /// area with room, instead of after the code in <paramref name="areas"/>. Null or empty: after the code.
+    /// </param>
     public static AssembledCode Assemble(IReadOnlyList<AsmItem> items, IReadOnlyList<AddressRange> areas, Action? beforeEncode = null,
-        IReadOnlyDictionary<string, AddressRange>? overlayAreas = null, IReadOnlyDictionary<string, SourcePos>? overlayImports = null)
+        IReadOnlyDictionary<string, AddressRange>? overlayAreas = null, IReadOnlyDictionary<string, SourcePos>? overlayImports = null,
+        IReadOnlyList<AddressRange>? variableAreas = null)
     {
         var slots = items.Select(i => new Slot(i)).ToList();
 
@@ -224,6 +250,15 @@ public static class Assembler
                     size += end - slots[section.Start].Address;
                     pos = end;
                 }
+                // A bank ("levels[1]") holds the modules placed in it; its sections are named module.name.
+                if (!fits && module.Key.EndsWith(']'))
+                {
+                    var sizes = module.GroupBy(s => s.Info.Name.Contains('.') ? s.Info.Name[..s.Info.Name.IndexOf('.')] : s.Info.Name)
+                        .Select(g => $"{g.Key} ({g.Sum(s => SizeOf(s))} bytes)");
+                    int at = module.Key.IndexOf('[');
+                    throw new CompileError(overlayImports?.GetValueOrDefault(module.Key) ?? new SourcePos(1, 1),
+                        $"Bank {module.Key[(at + 1)..^1]} of '{module.Key[..at]}' needs {size} bytes, but a bank has {area.Size}: {string.Join(", ", sizes)}. Move a module to another bank, or make one smaller");
+                }
                 if (!fits)
                     throw new CompileError(overlayImports?.GetValueOrDefault(module.Key) ?? new SourcePos(1, 1),
                         $"The overlay '{module.Key}' needs {size} bytes" + (fixedHere.Count > 0 ? $" of code, data and variables, plus {fixedHere.Sum(r => r.Size)} bytes of fixed data," : "") +
@@ -233,6 +268,15 @@ public static class Assembler
             variables = null;
             variablePadding = (0, 0);
             variablesOnPage = false;
+            int codeAreas = free.Count;
+            if (variableAreas is { Count: > 0 })
+            {
+                free = [.. free, .. variableAreas];
+                used = [.. used, .. variableAreas.Select(a => a.First)];
+                names = [.. names, .. variableAreas.Select(_ => new List<string>())];
+            }
+            // The areas the variables' block may go in: after the code, or the RAM given for it.
+            int firstForVariables = variableAreas is { Count: > 0 } ? codeAreas : 0;
             if (reserve is not null)
             {
                 int placedAt = -1;
@@ -244,9 +288,9 @@ public static class Assembler
                     if (at < used[a]) at += reserve.Modulus;
                     return AvoidPageEnd(at, reserve.VectorOffsets) == 0 && at + reserve.Size <= free[a].Last + 1 ? at : null;
                 }
-                int alignedArea = Enumerable.Range(0, free.Count).FirstOrDefault(a => Aligned(a) is not null, -1);
+                int alignedArea = Enumerable.Range(firstForVariables, free.Count - firstForVariables).FirstOrDefault(a => Aligned(a) is not null, -1);
                 if (reserve.Modulus > 1 && alignedArea < 0) throw new NoPageStart();
-                for (int a = 0; a < free.Count && placedAt < 0; a++)
+                for (int a = firstForVariables; a < free.Count && placedAt < 0; a++)
                 {
                     if (alignedArea >= 0 && a != alignedArea) continue;
                     int at = a == alignedArea ? Aligned(a)!.Value : used[a] + AvoidPageEnd(used[a], reserve.VectorOffsets);
@@ -260,7 +304,18 @@ public static class Assembler
                     }
                 }
                 if (placedAt < 0)
+                {
+                    // In RAM of its own (the NES): name only that RAM (review M27, suggestion 5).
+                    if (firstForVariables > 0)
+                    {
+                        var ram = free.Skip(firstForVariables).ToList();
+                        int room = ram.Select((a, i) => a.Last + 1 - used[firstForVariables + i]).Max();
+                        throw new CompileError(new SourcePos(1, 1),
+                            $"The variables need {reserve.Size} bytes, but the RAM for variables, {MemoryLayout.List(ram)} ({ram.Sum(a => a.Size)} bytes), has room for {room}. " +
+                            "Make arrays smaller, use 'data' for tables that never change (they stay in ROM), or put small variables in zero page with '@ zp'");
+                    }
                     throw NoRoom("the variables", reserve.Size, free, used, names);
+                }
                 reserve.Label.Address = placedAt;
                 slots[reserveSlot].Address = placedAt;
                 if (reserve.Size > 0) variables = new AddressRange(placedAt, placedAt + reserve.Size - 1);
@@ -348,7 +403,7 @@ public static class Assembler
                         Encoder.Encode(i.Mnemonic, s.Mode, OperandValue(i, s.Mode), s.Address, bytes);
                     var (text, cycles, more) = ListInstruction(listing, s, i, bytes.Skip(begin).ToArray());
                     instructions.Add(new PlacedInstruction(s.Address, bytes.Count - begin, text, cycles, more, source?.File, source?.Line, source?.Text.Trim(), sectionName,
-                        Checked(i, s.Mode)));
+                        Checked(i, s.Mode), overlay));
                     break;
                 }
                 case DataBytes d:

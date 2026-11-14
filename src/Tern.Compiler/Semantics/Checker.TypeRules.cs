@@ -203,7 +203,8 @@ public sealed partial class Checker
     /// from (<see cref="FunctionSymbol.Roots"/>); one reached from two roots gets a frame that
     /// overlaps no other (spec 8.1).
     /// </summary>
-    private static List<FunctionSymbol> OrderRoots(FunctionSymbol main, Module mainModule, List<FunctionSymbol> tableTargets)
+    /// <param name="kept">The globals kept whether or not code uses them (<see cref="KeptGlobals"/>).</param>
+    private static List<FunctionSymbol> OrderRoots(FunctionSymbol main, Module mainModule, List<FunctionSymbol> tableTargets, IReadOnlyList<VariableSymbol> kept)
     {
         var all = new List<FunctionSymbol>();
         var seen = new HashSet<FunctionSymbol>();
@@ -224,8 +225,8 @@ public sealed partial class Checker
             }
             else if (!addressTaken.Contains(f)) addressTaken.Add(f);
         }
-        // The main file's globals are all kept, so the functions in their initial values are too.
-        foreach (var g in mainModule.Scope.Values.OfType<VariableSymbol>())
+        // The main file's globals and placed data are all kept, so the functions in their initial values are too.
+        foreach (var g in kept)
             foreach (var f in GlobalsNamedBy(g).SelectMany(t => t.FunctionAddresses)) Named(f);
 
         void Add(FunctionSymbol root, bool isRoot)
@@ -261,7 +262,7 @@ public sealed partial class Checker
     /// An interrupt fn is a part if a function that is compiled calls it (spec 6.3). Callers that are
     /// never compiled, such as a module's handler that nothing installs, do not count.
     /// </summary>
-    private static void MarkParts(FunctionSymbol main, Module mainModule, List<FunctionSymbol> tableTargets)
+    private static void MarkParts(FunctionSymbol main, Module mainModule, List<FunctionSymbol> tableTargets, IReadOnlyList<VariableSymbol> kept)
     {
         var visited = new HashSet<FunctionSymbol>();
         var compiled = new HashSet<FunctionSymbol>();
@@ -281,7 +282,7 @@ public sealed partial class Checker
         Visit(main);
         foreach (var f in tableTargets) Visit(f);
         foreach (var f in mainModule.Scope.Values.OfType<FunctionSymbol>().Where(f => f.IsInterrupt)) Compiled(f);
-        foreach (var g in mainModule.Scope.Values.OfType<VariableSymbol>())
+        foreach (var g in kept)
             foreach (var f in GlobalsNamedBy(g).SelectMany(t => t.FunctionAddresses)) Named(f);
     }
 

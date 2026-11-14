@@ -433,9 +433,9 @@ public sealed partial class Checker
     /// <summary>An overlay may not take the address of a function of another overlay in its area (spec 8.5).</summary>
     private void CheckSiblingAddress(FunctionSymbol f, SourcePos pos)
     {
-        if (_function?.OverlayArea is { } area && f.OverlayArea == area && f.Module != _function.Module)
+        if (_function?.OverlayArea is { } area && f.OverlayArea == area && f.OverlayUnit != _function.OverlayUnit)
             throw new CompileError(pos,
-                $"addr({f.Name}) is in {f.Module!.Name}, which is in the same overlay area '{area}' as {_function.Module!.Name}. They are never loaded together, so the address would point at the wrong code. " +
+                $"addr({f.Name}) is in {f.Module!.Name}, which is {NeverTogether(f.Module, _function.Module!)} as {_function.Module!.Name}. They are never loaded together, so the address would point at the wrong code. " +
                 "Take the address in resident code, or put one of them in another area");
     }
 
@@ -497,6 +497,13 @@ public sealed partial class Checker
                     c.ConstValue = CompileTimeArray(c.Args[0]).Items.Length;
                     return;
                 }
+                // Tile data (NES): its length, though the CPU cannot read it.
+                if (c.Args[0] is NameExpr { Name: var tiles } && Lookup(tiles) is VariableSymbol { InChr: true } chrData)
+                {
+                    c.Type = TernType.IntLiteral;
+                    c.ConstValue = chrData.Type.IsArray ? chrData.Type.Length : throw new CompileError(c.Pos, "len() needs an array. Use sizeof() for the size of a type");
+                    return;
+                }
                 CheckExpr(c.Args[0]);
                 if (!c.Args[0].Type.IsArray) throw new CompileError(c.Pos, "len() needs an array. Use sizeof() for the size of a type");
                 c.Type = TernType.IntLiteral;
@@ -524,6 +531,14 @@ public sealed partial class Checker
                     case ConstSymbol: throw new CompileError(name.Pos, $"'{name.Name}' is a constant, which has no address. Use data for a value in memory");
                     case FunctionSymbol f:
                         TakeFunctionAddress(c, f, name.Pos);
+                        return;
+                    case VariableSymbol { InChr: true } tiles:
+                        // Its PPU address, a u16: not a pointer, since the CPU cannot read there (spec 12.2).
+                        name.Symbol = tiles;
+                        name.Type = tiles.Type;
+                        if (!_dead) _function?.UsedGlobals.Add(tiles);
+                        c.AddressOf = tiles;
+                        c.Type = TernType.U16;
                         return;
                     case VariableSymbol v:
                         if (!v.InMemory) throw new CompileError(name.Pos, $"'{name.Name}' lives in a register and has no address. Remove 'using' to keep it in memory");
@@ -604,20 +619,21 @@ public sealed partial class Checker
             void Visit(FunctionSymbol inline)
             {
                 if (!seen.Add(inline)) return;
-                foreach (var g in inline.UsedGlobals.Where(g => g.OverlayArea == area && g.Module != caller.Module && (g.FixedAddress is null || g.IsData) && g.Region is null))
+                foreach (var g in inline.UsedGlobals.Where(g => g.OverlayArea == area && g.OverlayUnit != caller.OverlayUnit && (g.FixedAddress is null || g.IsData) && g.Region is null
+                    && (g.IsData || !g.Module!.InBank)))
                     throw new CompileError(pos,
                         $"'{caller.Name}' calls the inline function '{callee.Name}', which is copied into it and uses '{g.Name}', {(g.IsData ? "data" : "a variable")} of {g.Module!.Name}. " +
-                        $"{caller.Module!.Name} and {g.Module.Name} are both in the overlay area '{area}', never loaded together, and share their memory. Keep shared state in a resident module or the main file");
-                foreach (var f in inline.UsedAddresses.Where(f => f.OverlayArea == area && f.Module != caller.Module))
+                        $"{caller.Module!.Name} and {g.Module.Name} are {NeverTogether(caller.Module, g.Module)}, never loaded together, and share their memory. Keep shared state in a resident module or the main file");
+                foreach (var f in inline.UsedAddresses.Where(f => f.OverlayArea == area && f.OverlayUnit != caller.OverlayUnit))
                     throw new CompileError(pos,
                         $"'{caller.Name}' calls the inline function '{callee.Name}', which is copied into it and takes addr({f.Name}). " +
-                        $"{caller.Module!.Name} and {f.Module!.Name} are both in the overlay area '{area}', never loaded together, so the address would point at the wrong code. Take the address in resident code");
+                        $"{caller.Module!.Name} and {f.Module!.Name} are {NeverTogether(caller.Module, f.Module)}, never loaded together, so the address would point at the wrong code. Take the address in resident code");
                 foreach (var next in inline.Callees)
                     if (next.IsInline) Visit(next);
-                    else if (next.OverlayArea == area && next.Module != caller.Module)
+                    else if (next.OverlayArea == area && next.OverlayUnit != caller.OverlayUnit)
                         throw new CompileError(pos,
                             $"'{caller.Name}' calls the inline function '{callee.Name}', which is copied into it and calls '{next.Name}'. " +
-                            $"{caller.Module!.Name} and {next.Module!.Name} are both in the overlay area '{area}', so they are never loaded together. Call between them from resident code");
+                            $"{caller.Module!.Name} and {next.Module!.Name} are {NeverTogether(caller.Module, next.Module!)}, so they are never loaded together. Call between them from resident code");
             }
             Visit(callee);
         }
@@ -630,10 +646,12 @@ public sealed partial class Checker
     private void AddCall(FunctionSymbol caller, FunctionSymbol callee, SourcePos pos)
     {
         if (!_dead) caller.Callees.Add(callee);
-        if (!_dead && callee.IsInline && caller.OverlayArea is not null && callee.Module != caller.Module) _inlineCalls.Add((caller, callee, pos));
-        if (caller.OverlayArea is { } area && callee.OverlayArea == area && callee.Module != caller.Module && !callee.IsInline)
-            throw new CompileError(pos,
-                $"'{caller.Name}' calls '{callee.Name}', but the modules {caller.Module!.Name} and {callee.Module!.Name} are both in the overlay area '{area}', so they are never loaded together. " +
-                "Call between them from resident code, or put one of them in another area");
+        if (!_dead && callee.IsInline && caller.OverlayArea is not null && callee.OverlayUnit != caller.OverlayUnit) _inlineCalls.Add((caller, callee, pos));
+        if (caller.OverlayArea is { } area && callee.OverlayArea == area && callee.OverlayUnit != caller.OverlayUnit && !callee.IsInline)
+            throw new CompileError(pos, caller.Module!.InBank
+                ? $"'{caller.Name}' calls '{callee.Name}', but the modules {caller.Module.Name} and {callee.Module!.Name} are {NeverTogether(caller.Module, callee.Module)}, and only one bank is selected at a time. " +
+                  "Put both modules in the same bank, or call between them from resident code"
+                : $"'{caller.Name}' calls '{callee.Name}', but the modules {caller.Module.Name} and {callee.Module!.Name} are both in the overlay area '{area}', so they are never loaded together. " +
+                  "Call between them from resident code, or put one of them in another area");
     }
 }
