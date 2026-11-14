@@ -214,7 +214,8 @@ public class NesTests
     [InlineData("cartridge nrom vertical horizontal", "The board has one mirroring, and the line names 2. Remove 'horizontal'", 2, 29)]
     [InlineData("cartridge nrom vertical\n    cartridge nrom vertical", "The memory block has a second 'cartridge' line. Remove one: a build is an image for one board", 3, 5)]
     [InlineData("$0300..=$03FF reserved\n    cartridge nrom vertical", "The 'cartridge' line comes before the ranges of the memory block. Move it to the top of the block", 3, 5)]
-    [InlineData("cartridge nrom vertical\n    $8000..=$BFFF program", "'program' lines are not supported yet on the NES: the board 'nrom' gives the program's ROM ($C000-$FFFF, $8000-$BFFF). Remove the line, or use 'reserved' for memory the program keeps for itself", 3, 19)]
+    [InlineData("cartridge nrom vertical\n    $8000..=$BFFF program", "A 'program' line has no meaning on the NES: the board 'nrom' gives the code areas ($C000-$FFFF, $8000-$BFFF), and the variables are in RAM, $0000-$07FF. Remove the line, or use 'reserved' or 'region' to take a range out of ROM or RAM", 3, 19)]
+    [InlineData("cartridge uxrom vertical\n    $0300..=$03FF program", "A 'program' line has no meaning on the NES: the board 'uxrom' gives the code areas ($C000-$FFFF), and the variables are in RAM, $0000-$07FF. Remove the line, or use 'reserved' or 'region' to take a range out of ROM or RAM", 3, 19)]
     [InlineData("cartridge nrom vertical\n    $0200..=$07FF reserved", "No RAM is left for variables: the block's ranges cover all of $0200-$07FF. Leave room for the variables", 1, 1)]
     public void Cartridge_line_errors(string lines, string message, int line, int column)
     {
