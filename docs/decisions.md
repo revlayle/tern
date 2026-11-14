@@ -835,3 +835,10 @@ All as built; spec 8.4, 10.1 and 12.2 now say so.
 - **146: `tern run`'s Apple II stand-ins include the routines the startup code and `exit()` call** (SETNORM, INIT, SETVID, SETKBD, the MLI's CLOSE); other ROM calls stop the run, which shows the missing stand-in.
 - **147: the float table's new counts** (spec 10.1), moved by `float` using `text_digits`.
 - **148: `examples/apple2` outputs are ignored** (`.gitignore`), as for the other example folders.
+
+## 2026-11-13: the Commander X16 and the Commodore 128 after the first release
+
+- **The first release has four platforms: C64, Atari 8-bit, Apple II and NES** (was five, with the X16; decision 2026-11-08). It comes after M27 (NES). Reason: the developer's choice; the X16 and the C128 are a later effort, after v1.0.
+- **The 65C02 work moves with the X16.** No release platform needs it: the Apple II target is `nmos6502`, so it runs on the II+ too. The 65C02 analysis and the CPU variant (CPU table, emulator, new modes, a code-shape column per variant, benchmark baselines per variant) would add much to the release for shorter code on the enhanced IIe and IIc only.
+- **New order after the release: M28 doc comments and a language server, then the 65C02 analysis and M29 65C02 and Commander X16, then M30 Commodore 128** (was M28 X16, M29 C128, M30 language server; decision 2026-11-12). Reason: the tooling reaches every platform of the release before more platforms come; the X16 keeps its place before the C128.
+- Unchanged: the direction for bank switching (spec 14.1) still names X16 and C128 RAM banks, settled by their spec sessions.

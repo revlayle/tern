@@ -1070,10 +1070,8 @@ tern run --target c64 game.tern --profile                      // the cycles of 
 
 - Atari 8-bit
 - Apple II
-- NES, with ROM banks placed like overlays (on the import) and calls into them
-- 65C02 CPU and the Commander X16
-- Commodore 128 in native mode, after the first release (C64 programs already run in its C64 mode)
+- NES, with ROM banks placed like overlays (on the import) and calls into them, the last platform of the first release
 
-Last: **doc comments (`///`) and a language server** (M30) that shows errors, types and costs in your editor.
+After the first release: **doc comments (`///`) and a language server** (M28) that shows errors, types and costs in your editor; then the 65C02 CPU and the Commander X16, and the Commodore 128 in native mode (C64 programs already run in its C64 mode).
 
 Far off, after the compiler is complete: a standalone assembler extracted from Tern, with its generators, memory block and listing.

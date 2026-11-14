@@ -596,7 +596,7 @@ Done when: the tests pass and `float.of`'s error names the value.
 
 ## New platforms
 
-In this order (decision 2026-11-07; renumbered 2026-11-08). Each starts with a spec session for the platform's memory map, output format, encoding and library; the scope below is a first outline.
+In this order (decision 2026-11-07; renumbered 2026-11-08). The Commander X16 and the Commodore 128 come after the first release and the language server (decision 2026-11-13). Each starts with a spec session for the platform's memory map, output format, encoding and library; the scope below is a first outline.
 
 ### M25: Atari 8-bit
 
@@ -655,9 +655,24 @@ The spec session settles the details first (names, prefixes, buffers, the bit ma
 
 Done when: an example scrolls a background and moves sprites in a NES emulator (Mesen), with code in more than one bank.
 
-### 65C02: analysis (spec session, before M28)
+## First release (after M27)
 
-Decision 2026-11-12. Before the X16 platform and its library, a spec session checks how far the compiler should go with the 65C02, beyond the instructions listed in M28. The result may split M28 into a CPU milestone and a platform milestone. Notes from the spec session of 2026-11-12, a starting point, not decisions:
+Decision 2026-11-08, changed 2026-11-13: the first release comes once the four platforms C64, Atari, Apple II and NES work; the Commander X16 and the Commodore 128 come after it. Done when: M27 is merged, the developer guide covers every behavior in its list, `docs/guide.md` and spec 10.1 describe the compiler and library as built, and every example builds for its platforms.
+
+## After the first release
+
+### M28: Doc comments and a language server
+
+Decision 2026-11-12 (was M23); the first milestone after the first release, before the X16 and the C128 (decision 2026-11-13). Starts with a spec session that settles the design; its spec section is not written yet.
+
+- `///` doc comments before declarations, kept by the compiler.
+- A Tern language server (LSP): errors as you type (in the M19 JSON format, several per compile since M23), hover with the doc comment, type and cost (bytes, cycles where fixed), go to definition, e.g. showing that `set_irq` needs an `interrupt fn`.
+
+A draft from the spec session of 2026-11-12, to start from: `///` only right before a declaration or struct field (elsewhere, or with a blank line between, an error); a `///` block at the top of a file followed by a blank line documents the module; Markdown text, no `@param` tags; the library's comments become `///`. The server is `tern lsp` (stdio, no new NuGet package) with a VS Code extension in `editors/vscode/` (colouring and a client); a module is compiled through a main file that imports it, or checked alone; hover shows signature, address, bytes and fixed cycles for functions, type and address for variables, values for constants, offsets for struct fields, from the last version that compiled when the text does not; go to definition for names, `module.name`, `import`, fields, asm `.label`s and `addr()` arguments.
+
+### 65C02: analysis (spec session, before M29)
+
+Decision 2026-11-12. Before the X16 platform and its library, a spec session checks how far the compiler should go with the 65C02, beyond the instructions listed in M29. The result may split M29 into a CPU milestone and a platform milestone. Notes from the spec session of 2026-11-12, a starting point, not decisions:
 
 - **Which variants.** The 65C02 family differs: the base CMOS set (`bra`, `stz`, `phx`/`phy`/`plx`/`ply`, `trb`/`tsb`, `inc a`/`dec a`, `(zp)`, `jmp (abs,x)`, `bit #`/`bit zp,x`/`bit abs,x`) is on every part, the Apple IIc and enhanced IIe included; `rmb`/`smb`/`bbr`/`bbs` are on Rockwell and WDC parts only, `wai`/`stp` on WDC parts. The 65C816, which the X16 can take, has the base set and `wai`/`stp` but not `rmb`/`smb`/`bbr`/`bbs`. To settle: one variant or two (e.g. `65c02` and `wdc65c02`), and which one the X16 uses by default.
 - **CPU layer** (small): the table, encoder and emulator; new modes `(zp)`, `(abs,x)` and `zp,relative` (`bbr0 $10, label`); timing differences (decimal mode +1 cycle with valid N and Z, `jmp (abs)` without the page bug, shifts on `abs,x`, unused opcodes as `nop`s of fixed size). Klaus Dormann's 65C02 extended-opcodes test checks it.
@@ -667,20 +682,14 @@ Decision 2026-11-12. Before the X16 platform and its library, a spec session che
 - **Library:** whether a module can have variant-specific bodies (e.g. `mem.fill` with `stz`), and how, without a general conditional compilation feature.
 - **Out of scope:** the 65C816's native mode (16-bit registers would change the language); an exploration after the first release (Not scheduled).
 
-### M28: 65C02 and Commander X16
+### M29: 65C02 and Commander X16
 
 - The 65C02 CPU variant (spec 12.1): new instructions in the CPU table, emulator and code generator (`stz`, `bra`, `phx`/`phy`, `inc a`, `(zp)` addressing); code shapes per variant
 - X16 platform: memory map, banked RAM, VERA register structs, KERNAL routines
 
 Done when: the benchmarks compile for the 65C02 and use the new instructions where shorter (listing tests), and an X16 example runs in its emulator.
 
-## First release (after M28)
-
-Decision 2026-11-08: the first release comes once all five platforms work. Done when: M28 is merged, the developer guide covers every behavior in its list, `docs/guide.md` and spec 10.1 describe the compiler and library as built, and every example builds for its platforms.
-
-## After the first release
-
-### M29: Commodore 128 (native mode)
+### M30: Commodore 128 (native mode)
 
 Decision 2026-11-10. C64 programs already run on a C128 in C64 mode; this target is for native mode. Starts with a spec session that checks the machine's details against the C128 reference.
 
@@ -690,15 +699,6 @@ Decision 2026-11-10. C64 programs already run on a C128 in C64 mode; this target
 - RAM bank 1 (128 KB) uses bank switching from the NES milestone (spec 14.1); it may be a follow-up
 
 Done when: the benchmarks and a sprite example build for the C128 and run in VICE's `x128`.
-
-### M30: Doc comments and a language server
-
-Decision 2026-11-12: the last milestone, after the platforms (was M23). Starts with a spec session that settles the design; its spec section is not written yet.
-
-- `///` doc comments before declarations, kept by the compiler.
-- A Tern language server (LSP): errors as you type (in the M19 JSON format, several per compile since M23), hover with the doc comment, type and cost (bytes, cycles where fixed), go to definition, e.g. showing that `set_irq` needs an `interrupt fn`.
-
-A draft from the spec session of 2026-11-12, to start from: `///` only right before a declaration or struct field (elsewhere, or with a blank line between, an error); a `///` block at the top of a file followed by a blank line documents the module; Markdown text, no `@param` tags; the library's comments become `///`. The server is `tern lsp` (stdio, no new NuGet package) with a VS Code extension in `editors/vscode/` (colouring and a client); a module is compiled through a main file that imports it, or checked alone; hover shows signature, address, bytes and fixed cycles for functions, type and address for variables, values for constants, offsets for struct fields, from the last version that compiled when the text does not; go to definition for names, `module.name`, `import`, fields, asm `.label`s and `addr()` arguments.
 
 ## Not scheduled
 

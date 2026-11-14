@@ -14,7 +14,7 @@ Tern is a programming language for 6502-family processors. It aims to be easy to
 4. **Predictable output.** Each construct has a documented code shape (section 11). A reader can estimate the generated code from the source.
 5. **Readable output.** The compiler writes a listing with source lines, addresses, bytes and cycle counts next to the binary.
 6. **Cheap mixing with assembly.** Inline assembly and assembly functions are parsed by the compiler and can use Tern variables by name.
-7. **Multiple targets.** CPU variant (which instructions exist) and platform (memory map, file format) are separate settings. Commodore 64 is the first platform; Atari 8-bit, Apple II, NES and Commander X16 are planned, in that order, then the Commodore 128 in native mode.
+7. **Multiple targets.** CPU variant (which instructions exist) and platform (memory map, file format) are separate settings. Commodore 64 is the first platform; Atari 8-bit, Apple II and NES follow, in that order, for the first release; the Commander X16 and then the Commodore 128 in native mode come after it.
 
 **Non-goals**
 
@@ -1124,7 +1124,7 @@ These are the intended translations. The optimizer may produce something shorter
 |---|---|---|
 | `nmos6502` | v0 | All 151 documented opcodes |
 | `ricoh2a03` | v0 (encoder/emulator) | NES CPU. Same opcodes; decimal mode has no effect |
-| `wdc65c02` | Planned | Adds `stz`, `bra`, `phx`/`phy`, `(zp)` mode, etc. Needed for the Commander X16 |
+| `wdc65c02` | Planned, after the first release | Adds `stz`, `bra`, `phx`/`phy`, `(zp)` mode, etc. Needed for the Commander X16 |
 | `nmos6502+undoc` | Planned, opt-in | Stable undocumented opcodes such as `lax`, `sax` |
 
 ### 12.2 Platforms
@@ -1199,7 +1199,7 @@ A platform description gives: CPU variant, free zero-page ranges, RAM ranges for
 - Overlays and binaries (8.5) are `.bin` files: the bytes from the area's lowest to its highest address, gaps as zeros, no header (a binary's interface module names `counter.bin`). Provisional: the M26 follow-up, with the MLI's overlay loader, settles the format and the ProDOS file type.
 - Disk images are not made by the compiler: a test script puts the `.system` file on a ProDOS 2.4.3 boot image with CiderPress II's `cp2`, and AppleWin boots it.
 
-**Planned**, in this order: NES (iNES, `ricoh2a03`, PRG/CHR banks), Commander X16 (`wdc65c02`). After them, the Commodore 128 in native mode (`.prg` at `$1C01`).
+**Planned**: NES (iNES, `ricoh2a03`, PRG/CHR banks), the last platform of the first release. After the release: the Commander X16 (`wdc65c02`), then the Commodore 128 in native mode (`.prg` at `$1C01`).
 
 ### 12.3 Programs without `main`
 
