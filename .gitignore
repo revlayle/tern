@@ -43,3 +43,6 @@ tests/benchmarks/*/*.bin
 tests/benchmarks/*/*.lst
 tests/benchmarks/*/*.vs
 tests/benchmarks/*/*.lines
+examples/*.prg
+examples/*.lst
+examples/*.vs

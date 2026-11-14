@@ -360,6 +360,7 @@ Decision 2026-11-07, scheduled 2026-11-08. User documentation that explains how 
 - a game's exported functions are an unknown root: globals they share are always read from memory, and the two-roots check cannot see a plug-in calling them from an interrupt (12.3, 6.5)
 - evaluation order: in `a[i] = v` the index is evaluated first; with a call in the index, and inside expressions, the order is unspecified (5)
 - a fixed address outside the platform's volatile areas is ordinary memory: unlisted hardware needs `volatile` (4)
+- `@ align(n)` can leave up to `n - 1` bytes of padding, shown in the report; in `data` or an overlay the padding is in the file (4)
 - a function shared by main and a handler may have loop counters only in registers; only `using X` / `using Y` guarantees one (8.1)
 - `indexed match` does not check its value: outside the span it jumps through whatever follows the tables; a plain `match` skips values it does not list (5.2)
 - on negative constants `/` rounds toward zero and `%` takes the left operand's sign, while `>>` rounds down (3.1)
@@ -641,12 +642,16 @@ Done when: an example draws text and hi-res graphics in AppleWin, on an enhanced
 
 ### M26 follow-up: Apple II `io` (before M27)
 
-- `lib/apple2/io` through the ProDOS MLI: `open`, `close`, `read`, `write`, `status`, whole-file `load` and `save`, as on the Atari where the machine allows; the overlay loader; the 1 KB page-aligned file buffer and the system bit map
-- `tern run`: a stand-in for the MLI's file calls that reads the build's own overlay files
-- The overlay and binary file format and ProDOS file type (now headerless `.bin`, question 141)
-- Check the startup's 80-column switch-off in AppleWin with the firmware on (`PR#3`, then start the program; question 142)
+Spec: 4 (`@ align(n)`), 8.5, 10.1 (`io` on the Apple II), 12.2. Decision 2026-11-13 (the Apple II's `io`).
 
-The spec session settles the details first (names, prefixes, buffers, the bit map). Done when: emulator tests cover `io`, and an example that saves a file and loads it back runs in AppleWin.
+- First, **`@ align(n)`** (spec 4): a global `var` or `data` at a multiple of `n` (a power of two, 2 to 32768), in RAM, a `program` area or an overlay's file; padding in the report, which other variables may fill. Errors: `n` not a power of two in range, on a local, with `zp` or a region, an aligned declaration that does not fit. Tests: alignments 2, 64, 256 and 2048 of `var`, long buffers and `data`, also in an overlay (its file's bytes), the report's padding, each error.
+- `lib/apple2/io` through the ProDOS MLI (spec 10.1): `open` (`READ`, `WRITE` creating a BIN file or emptying an existing one), `close`, `read`, `write`, `status` (the MLI's code), whole-file `load` and `save` (aux type `src`), and `load_bin`, the overlay loader (GET_FILE_INFO, BIN with a non-zero aux type). One file at a time, with a 1 KB buffer `@ align(256)`; names copied with bit 7 cleared and a length byte, cut at 64. The system bit map is left alone.
+- The startup code sets the prefix from `$0280` when ProDOS started the program with an empty one. Check in AppleWin whether the prefix is set at boot and from Bitsy Bye, and that lowercase names work; raise a question if the MLI rejects them.
+- `tern run`: a stand-in for the MLI's file calls (OPEN, READ, GET_FILE_INFO, CLOSE) that reads the build's own overlay files by name in capitals (`LEVEL1.BIN`); a write stops the run, as on the Atari.
+- Overlay and binary files: headerless `.bin` (question 141), BIN type `$06` with the load address as aux type on the disk. `apple2-disk.ps1` adds them with their type and aux type; the coding session decides how the script gets the address from the build.
+- Check the startup's 80-column switch-off in AppleWin with the firmware on (`PR#3`, then start the program; question 142).
+
+Done when: emulator tests cover `io` against an MLI and disk modelled in C# (as `AtariIoTests`) and the `@ align` cases above, and an example that saves a file, loads it back and loads an overlay with `load_bin` runs in AppleWin on an enhanced IIe and a II+ with a language card.
 
 ### M27: NES
 
@@ -711,7 +716,6 @@ Each has a reason to wait; the spec session schedules one when that reason chang
 - **65C816 native mode** (decision 2026-11-12): an exploration, after the first release is complete. 16-bit A, X and Y, a 24-bit address space and a movable direct page and stack would change types, code shapes and the memory model, so it starts with a spec session on what the language would need. Emulation mode needs nothing new: it runs the base 65C02 set (see the 65C02 analysis).
 - **Calls through pointers** (spec 6.5, planned): `var handler: fn() targets [idle, walk] = idle`, then `handler()`, a `jsr` to a `jmp (handler)` stub; the `targets` list keeps the call graph, and so frame sharing, correct. The Tern way to write what an asm `jmp (v)` does today. Wanted by the developer (2026-11-09), not urgent; scope and syntax are checked in a spec session before it is scheduled.
 - **A generator that also returns a value** (decision 2026-11-11, question 100): such as the cycles or bytes of the code it emitted, with a built-in that measures them, so a caller can pad cycle-exact raster code to the end of a line. Scheduled when such a generator is written; nothing breaks, since it only removes a restriction.
-- **Alignment as a placement, `@ align(n)`** (decision 2026-11-09): place a `var` or `data` at the next multiple of `n` (64 for sprites, 1 KB for screens, 2 KB for character sets, 256 for page-aligned tables); `@` keeps its one meaning, a location. No code; the padding shows in the report. Today a fixed address in a `reserved` area does the same. Build it when a program needs alignment that a fixed address handles badly, such as a library module whose tables must be aligned wherever the program places them.
 
 - **The Galaxy Stars routines kept in assembly, as a measurement set** (decision 2026-11-09, gaps 16, 21, 25): `stars.draw_tile`, `explode.hits` with `hostiles.explosion_hit`, `hostiles.draw` and `title.sweep_all`, in plain Tern and as the asm port, measured and classified as in M17 (optimizer, code shape, or needs assembly). Candidates from the port: a carry known clear after an `adc` that cannot overflow, repeated reloads, the absolute value of a 16-bit difference. After M21; scheduled by a spec session.
 - **Quoted import paths and aliases** (decision 2026-11-09; spec 2.2, planned): `import "levels/level1.tern"` (relative to the importing file, `/` only) for subfolders, and `import my_io = "./io.tern"` to use a module under another name. Paths when a program wants subfolders; an alias when renaming a file cannot solve a clash. The points to settle first are in the decision.
