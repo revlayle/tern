@@ -854,3 +854,16 @@ Settled before the M26 follow-up (spec 4, 8.5, 10.1, 12.2).
 - **Overlays and binaries (question 141, provisional until now): headerless `.bin`, a BIN file (`$06`) with the load address as its aux type**, and `io.load_bin` reads the address from there. Rejected: a header in the file, as the C64's and the Atari's have. Reason: the aux type is ProDOS's own convention, BLOAD loads such files too, and the file stays the area's bytes. A file that is not BIN or has aux type 0 fails, so a file copied without its type cannot load to `$0000`.
 - **The system bit map is left alone.** Reason: ProDOS marks only its own pages, so the buffer and reads in the program's RAM pass its check; the cost is that a program that chains to another system program does not protect its memory, which no current use needs.
 - **The 80-column switch-off (question 142) is checked once in AppleWin with the firmware on.**
+
+## 2026-11-13: M26 follow-up questions 149-156
+
+As built, except 150 (spec 4, 10.1, 12.2).
+
+- **149: `load_bin` fails with `$4A`** (not BIN, or aux type 0) **and `$4D`** (64 KB or more), the MLI's own codes, **with no `ST_` constants.** Reason: overlay loading rarely tells these apart; `ST_` keeps the three common codes, as on the Atari.
+- **150: the startup's prefix code is emitted only when `io` is imported, and the report counts its bytes under `io`** (was: in every Apple II program, 53 bytes). Reason: ProDOS's boot and Bitsy Bye set the prefix themselves, so in AppleWin the code never acted; it guards `io`'s partial names against a launcher that leaves the prefix empty. Paying for it in a program with no files is a cost the program cannot see (rule 1); with the import it is part of what `io` brings, as its buffer is. Rejected: dropping it, which would make `io`'s partial names fail under such a launcher with only "file not found" as the cause. A program that calls `apple2.mli` with partial names handles an empty prefix itself.
+- **151: `READ` is 1 and `WRITE` 2; `io.BIN` (`$06`) is public.** Programs use the names, so the values may differ from the Atari's; `BIN` serves programs that create files through `apple2.mli`.
+- **152: `save` sets the type and aux type after closing** (GET_FILE_INFO, then SET_FILE_INFO with the rest as read). Reason: WRITE creates files with aux type 0, and an existing file may have another type. A failure there is `save`'s failure, with the bytes written.
+- **153: `close()` with no file open makes no MLI call** and returns false, `status()` 0. Reason: CLOSE with reference 0 closes every file, also those the program opened through `apple2.mli`. A failed CLOSE keeps the file, so `close` can be called again.
+- **154: `read` sets `ST_EOF` itself on a short count**, as the spec says and as on the Atari, since the MLI gives `$4C` only when it read nothing.
+- **155: an aligned variable that must be in zero page is an error**, listed with `align`'s errors in spec 4.
+- **156: the padding before the variables' block is not filled for now.** Aligned `noinit` variables start the block, so the block has no gaps; the space before it is less than the largest alignment. Spec 4 says the compiler *may* fill padding, so filling it stays a possible optimization.
