@@ -145,6 +145,7 @@ public static partial class TernCompiler
         bool system = platform.Format == OutputFormat.System && !binary;
         var moved = new Label("moved");
         var quit = new Label("quit");
+        var prefix = new Label("prefix_parameters");
         List<AreaMove> moves = [];
         byte[]? systemFile = null;
         int passes = 0;
@@ -176,11 +177,11 @@ public static partial class TernCompiler
             if (!binary)
             {
                 items = [new SectionStart("startup"), new DataBytes(platform.Header), new LabelDef(start), new Comment("startup")];
-                items.AddRange(Startup(plan, bss, gen.LabelOf, system ? Apple2Start(moves, moved, quit, exact: passes < 4) : []));
+                items.AddRange(Startup(plan, bss, gen.LabelOf, system ? Apple2Start(moves, moved, quit, prefix, exact: passes < 4) : []));
                 items.Add(new Instr(Jsr, Absolute, new LabelOperand(gen.LabelOf(program.Main))));
                 items.Add(new LabelDef(halt));
                 items.Add(new Instr(Jmp, Absolute, new LabelOperand(halt)));
-                if (system) items.AddRange(Apple2Quit(quit));
+                if (system) items.AddRange(Apple2Quit(quit, prefix));
             }
             else
             {

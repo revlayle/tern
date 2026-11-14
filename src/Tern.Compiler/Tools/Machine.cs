@@ -13,7 +13,7 @@ internal abstract class Machine
     public static Machine For(Platform platform, CompileResult? program = null) => platform.Format switch
     {
         OutputFormat.Xex => new AtariMachine(program?.Overlays ?? []),
-        OutputFormat.System => new Apple2Machine(),
+        OutputFormat.System => new Apple2Machine(program?.Overlays ?? []),
         _ => new C64Machine(program?.Overlays ?? []),
     };
 

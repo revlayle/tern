@@ -15,7 +15,9 @@ namespace Tern.Compiler;
 public static partial class TernCompiler
 {
     private const int Cout = 0xFDED, Home = 0xFC58, SetNorm = 0xFE84, Init = 0xFB2F, SetVid = 0xFE93, SetKbd = 0xFE89;
-    private const int Mli = 0xBF00, MliClose = 0xCC, MliQuit = 0x65;
+    private const int Mli = 0xBF00, MliClose = 0xCC, MliQuit = 0x65, MliGetPrefix = 0xC7, MliSetPrefix = 0xC6;
+    /// <summary>The path ProDOS started the program with (a length, then the characters), and the input buffer, where the prefix is read.</summary>
+    private const int StartPath = 0x0280, InputBuffer = 0x0200;
     /// <summary>The output hook's high byte (CSWH): $C3 while the 80-column firmware prints.</summary>
     private const int Cswh = 0x37;
     /// <summary>The reset vector (SOFTEV) and its power-up byte (PWREDUP), which must be the vector's high byte EOR $A5.</summary>
@@ -29,10 +31,11 @@ public static partial class TernCompiler
     /// <summary>
     /// The startup code's first part on the Apple II. The copies run from the file at $2000, before
     /// the code is in its place, so they use only relative branches, then jump to <paramref name="moved"/>.
-    /// Then: 40-column text, page 1, full window, the ROM's hooks, and the reset vector to <paramref name="quit"/>.
-    /// With <paramref name="exact"/>, each copy has only the loops its count needs (see <see cref="Copy"/>).
+    /// Then: 40-column text, page 1, full window, the ROM's hooks, the reset vector to <paramref name="quit"/>,
+    /// and the prefix (<see cref="Prefix"/>). With <paramref name="exact"/>, each copy has only the loops its
+    /// count needs (see <see cref="Copy"/>).
     /// </summary>
-    private static List<AsmItem> Apple2Start(IReadOnlyList<AreaMove> moves, Label moved, Label quit, bool exact)
+    private static List<AsmItem> Apple2Start(IReadOnlyList<AreaMove> moves, Label moved, Label quit, Label prefix, bool exact)
     {
         var items = new List<AsmItem>();
         if (moves.Count > 0)
@@ -60,8 +63,52 @@ public static partial class TernCompiler
         items.Add(new Instr(Sta, Absolute, new AddrOperand(SoftEv + 1)));
         items.Add(new Instr(Eor, Immediate, new Imm(0xA5)));
         items.Add(new Instr(Sta, Absolute, new AddrOperand(PwrEdUp)));
+        items.AddRange(Prefix(prefix));
         return items;
     }
+
+    /// <summary>
+    /// When ProDOS started the program with an empty prefix, the prefix becomes the folder of the path
+    /// at $0280 (up to its last '/'), so that io's partial names find files next to the program (spec
+    /// 12.2). The prefix is read into the input buffer at $0200; a partial path at $0280 leaves it empty.
+    /// <paramref name="parameters"/> is the list for GET_PREFIX and SET_PREFIX (<see cref="Apple2Quit"/>).
+    /// </summary>
+    private static List<AsmItem> Prefix(Label parameters)
+    {
+        Label find = new("prefix_find"), found = new("prefix_found"), copy = new("prefix_copy"), done = new("prefix_done");
+        var items = new List<AsmItem> { new Comment("an empty prefix becomes the program's folder") };
+        items.AddRange(MliCall(MliGetPrefix, parameters));
+        items.Add(new Instr(Lda, Absolute, new AddrOperand(InputBuffer)));
+        items.Add(new Instr(Bne, Relative, new LabelOperand(done)));
+        items.Add(new Instr(Ldx, Absolute, new AddrOperand(StartPath)));
+        items.Add(new Instr(Beq, Relative, new LabelOperand(done)));
+        items.Add(new LabelDef(find));
+        items.Add(new Instr(Lda, AbsoluteX, new AddrOperand(StartPath)));
+        items.Add(new Instr(Cmp, Immediate, new Imm('/')));
+        items.Add(new Instr(Beq, Relative, new LabelOperand(found)));
+        items.Add(new Instr(Dex));
+        items.Add(new Instr(Bne, Relative, new LabelOperand(find)));
+        items.Add(new Instr(Beq, Relative, new LabelOperand(done)));
+        items.Add(new LabelDef(found));
+        items.Add(new Instr(Stx, Absolute, new AddrOperand(InputBuffer)));
+        items.Add(new LabelDef(copy));
+        items.Add(new Instr(Lda, AbsoluteX, new AddrOperand(StartPath)));
+        items.Add(new Instr(Sta, AbsoluteX, new AddrOperand(InputBuffer)));
+        items.Add(new Instr(Dex));
+        items.Add(new Instr(Bne, Relative, new LabelOperand(copy)));
+        items.AddRange(MliCall(MliSetPrefix, parameters));
+        items.Add(new LabelDef(done));
+        return items;
+    }
+
+    /// <summary><c>jsr $BF00</c>, then the command and the parameter list's address, where the MLI returns past them.</summary>
+    private static IEnumerable<AsmItem> MliCall(int command, Label parameters) =>
+    [
+        new Instr(Jsr, Absolute, new AddrOperand(Mli)),
+        new DataBytes([(byte)command]),
+        new AddressByte(parameters, null, 0, false, parameters.Name),
+        new AddressByte(parameters, null, 0, true, parameters.Name),
+    ];
 
     /// <summary>
     /// Copies one area: upwards in memory from its last byte down, otherwise from its first byte up,
@@ -160,27 +207,23 @@ public static partial class TernCompiler
 
     /// <summary>
     /// Where reset goes, after the startup code: close all files (MLI CLOSE with reference 0), make the
-    /// power-up byte invalid so that a second reset does not come back here, and quit (MLI QUIT).
+    /// power-up byte invalid so that a second reset does not come back here, and quit (MLI QUIT). The
+    /// parameter lists follow, with the prefix's (<paramref name="prefix"/>: the input buffer).
     /// </summary>
-    private static List<AsmItem> Apple2Quit(Label quit)
+    private static List<AsmItem> Apple2Quit(Label quit, Label prefix)
     {
         var closeParameters = new Label("close_parameters");
         var quitParameters = new Label("quit_parameters");
         var items = new List<AsmItem> { new Comment("reset: close the files and quit"), new LabelDef(quit) };
-        void Call(int command, Label parameters)
-        {
-            items.Add(new Instr(Jsr, Absolute, new AddrOperand(Mli)));
-            items.Add(new DataBytes([(byte)command]));
-            items.Add(new AddressByte(parameters, null, 0, false, parameters.Name));
-            items.Add(new AddressByte(parameters, null, 0, true, parameters.Name));
-        }
-        Call(MliClose, closeParameters);
+        items.AddRange(MliCall(MliClose, closeParameters));
         items.Add(new Instr(Inc, Absolute, new AddrOperand(PwrEdUp)));
-        Call(MliQuit, quitParameters);
+        items.AddRange(MliCall(MliQuit, quitParameters));
         items.Add(new LabelDef(closeParameters));
         items.Add(new DataBytes([1, 0]));
         items.Add(new LabelDef(quitParameters));
         items.Add(new DataBytes([4, 0, 0, 0, 0, 0, 0]));
+        items.Add(new LabelDef(prefix));
+        items.Add(new DataBytes([1, InputBuffer & 0xFF, InputBuffer >> 8]));
         return items;
     }
 

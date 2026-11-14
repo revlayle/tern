@@ -153,9 +153,20 @@ public class Apple2RunTests
     [Fact]
     public void An_mli_call_without_a_stand_in_stops_the_run()
     {
-        var run = RunApple2(MliCall(0xC8));
+        var run = RunApple2(MliCall(0xC5));
         Assert.False(run.Returned);
-        Assert.Equal("MLI call $C8, which the emulator does not have (stand-ins: CLOSE $CC, QUIT $65)", run.Stop);
+        Assert.Equal("MLI call $C5, which the emulator does not have (stand-ins: QUIT $65, GET_PREFIX $C7, SET_PREFIX $C6, and GET_FILE_INFO $C4, OPEN $C8, GET_EOF $D1, READ $CA and CLOSE $CC for the build's overlay files)", run.Stop);
+    }
+
+    [Theory]
+    [InlineData(0xC0)]      // CREATE
+    [InlineData(0xCB)]      // WRITE
+    [InlineData(0xD0)]      // SET_EOF
+    public void An_mli_call_that_writes_stops_the_run(int command)
+    {
+        var run = RunApple2(MliCall(command));
+        Assert.False(run.Returned);
+        Assert.Equal($"MLI call ${command:X2}, which writes to the disk; the emulator only reads the build's overlay files", run.Stop);
     }
 
     [Fact]

@@ -11,17 +11,26 @@ namespace Tern.Compiler.Tools;
 /// $7F flashing), codes below $80 are stored as they are, and of $80-$9F only return ($8D), line feed
 /// ($8A) and backspace ($88) do anything. Lines wrap at 40 columns and the screen scrolls at the
 /// bottom. HOME ($FC58) clears the screen. The startup code's other ROM calls (SETNORM, INIT, SETVID,
-/// SETKBD) set the bytes they set. The MLI ($BF00) has stand-ins for CLOSE, which succeeds, and QUIT,
-/// which ends the run.
+/// SETKBD) set the bytes they set. The MLI ($BF00) has stand-ins for QUIT, which ends the run,
+/// GET_PREFIX (an empty prefix) and SET_PREFIX, and for reading the build's own overlay files (spec
+/// 12.2): GET_FILE_INFO, OPEN, GET_EOF, READ and CLOSE find the one whose file name, in capitals, is
+/// the path's last part ("LEVEL1.BIN" or "/DISK/LEVEL1.BIN" is level1.bin), as a BIN file with its
+/// load address as the aux type. A name ProDOS cannot store (1-15 letters, digits and dots, starting
+/// with a letter) fails with $40, any other with $46, as a file not on the disk. CLOSE with
+/// reference 0 closes every file. A call that writes stops the run.
 /// </summary>
-internal sealed class Apple2Machine : Machine
+internal sealed class Apple2Machine(IReadOnlyList<OverlayFile> overlays) : Machine
 {
     public const int ScreenAddress = 0x0400, Columns = 40, Rows = 24;
     private const int Cout = 0xFDED, Home = 0xFC58, SetNorm = 0xFE84, Init = 0xFB2F, SetVid = 0xFE93, SetKbd = 0xFE89, Mli = 0xBF00;
     private const int Wndlft = 0x20, Wndwdth = 0x21, Wndtop = 0x22, Wndbtm = 0x23, Ch = 0x24, Cv = 0x25, Basl = 0x28, Invflg = 0x32, Csw = 0x36, Ksw = 0x38;
     private const int Blank = 0xA0;
 
-    public override string StandIns => "COUT $FDED, HOME $FC58, SETNORM $FE84, INIT $FB2F, SETVID $FE93, SETKBD $FE89, and the MLI at $BF00 for CLOSE and QUIT";
+    public override string StandIns => "COUT $FDED, HOME $FC58, SETNORM $FE84, INIT $FB2F, SETVID $FE93, SETKBD $FE89, and the MLI at $BF00 for QUIT, GET_PREFIX, SET_PREFIX, and for reading the build's overlay files";
+
+    private const int BadPath = 0x40, BadRef = 0x43, NotFound = 0x46, Eof = 0x4C;
+    /// <summary>The overlay file open under each reference number, and the next byte to read.</summary>
+    private readonly Dictionary<int, (byte[] File, int Pos)> _open = [];
 
     public override void Start(Ram ram)
     {
@@ -67,15 +76,18 @@ internal sealed class Apple2Machine : Machine
                 int sp = 0x100 + (byte)(cpu.SP + 1);
                 int at = (ram.Bytes[sp] | ram.Bytes[sp + 1] << 8) + 1;
                 int command = ram.Bytes[at & 0xFFFF];
+                int list = ram.Bytes[(at + 1) & 0xFFFF] | ram.Bytes[(at + 2) & 0xFFFF] << 8;
                 if (command == 0x65) return "the program quit (MLI QUIT)";
-                if (command != 0xCC)
-                    return $"MLI call ${command:X2}, which the emulator does not have (stand-ins: CLOSE $CC, QUIT $65)";
+                if (FileCall(command, list, ram) is not int error)
+                    return command is 0xC0 or 0xC1 or 0xC2 or 0xC3 or 0xCB or 0xD0
+                        ? $"MLI call ${command:X2}, which writes to the disk; the emulator only reads the build's overlay files"
+                        : $"MLI call ${command:X2}, which the emulator does not have (stand-ins: QUIT $65, GET_PREFIX $C7, SET_PREFIX $C6, and GET_FILE_INFO $C4, OPEN $C8, GET_EOF $D1, READ $CA and CLOSE $CC for the build's overlay files)";
                 int back = at + 2;
                 (ram.Bytes[sp], ram.Bytes[sp + 1]) = ((byte)back, (byte)(back >> 8));
-                cpu.A = 0;
-                cpu.C = false;
-                cpu.Z = true;
-                cpu.N = false;
+                cpu.A = (byte)error;
+                cpu.C = error != 0;
+                cpu.Z = error == 0;
+                cpu.N = error >= 0x80;
                 break;
             }
         }
@@ -123,6 +135,75 @@ internal sealed class Apple2Machine : Machine
                 ram.Bytes.AsSpan(Row(bottom - 1), Columns).Fill(Blank);
             }
         }
+    }
+
+    /// <summary>The MLI call <paramref name="command"/> with its parameter list at <paramref name="list"/>: its error code, 0 for success, or null when it has no stand-in.</summary>
+    private int? FileCall(int command, int list, Ram ram)
+    {
+        var b = ram.Bytes;
+        int Word(int offset) => b[(list + offset) & 0xFFFF] | b[(list + offset + 1) & 0xFFFF] << 8;
+        void Put(int offset, int value, int size = 2)
+        {
+            for (int i = 0; i < size; i++) b[(list + offset + i) & 0xFFFF] = (byte)(value >> 8 * i);
+        }
+        switch (command)
+        {
+            case 0xC7:                                  // GET_PREFIX: empty
+                b[Word(1)] = 0;
+                return 0;
+            case 0xC6:                                  // SET_PREFIX
+                return 0;
+            case 0xC4:                                  // GET_FILE_INFO: a BIN file, its load address as aux type
+            {
+                if (Find(Word(1)) is not { } file) return Missing(Word(1));
+                Put(3, 0xC3, 1);
+                Put(4, 0x06, 1);
+                Put(5, file.LoadAddress);
+                Put(7, 1, 1);
+                Put(8, (file.Image.Length + 511) / 512 + 1);
+                for (int i = 10; i < 18; i++) b[(list + i) & 0xFFFF] = 0;
+                return 0;
+            }
+            case 0xC8:                                  // OPEN
+            {
+                if (Find(Word(1)) is not { } file) return Missing(Word(1));
+                int reference = Enumerable.Range(1, 8).First(r => !_open.ContainsKey(r));
+                _open[reference] = (file.Image, 0);
+                Put(5, reference, 1);
+                return 0;
+            }
+            case 0xD1:                                  // GET_EOF
+            {
+                if (!_open.TryGetValue(b[(list + 1) & 0xFFFF], out var f)) return BadRef;
+                Put(2, f.File.Length, 3);
+                return 0;
+            }
+            case 0xCA:                                  // READ
+            {
+                int reference = b[(list + 1) & 0xFFFF];
+                if (!_open.TryGetValue(reference, out var f)) return BadRef;
+                int n = Math.Min(Word(4), f.File.Length - f.Pos);
+                for (int i = 0; i < n; i++) b[(Word(2) + i) & 0xFFFF] = f.File[f.Pos + i];
+                _open[reference] = (f.File, f.Pos + n);
+                Put(6, n);
+                return n == 0 && Word(4) > 0 ? Eof : 0;
+            }
+            case 0xCC:                                  // CLOSE; reference 0 closes every file
+            {
+                int reference = b[(list + 1) & 0xFFFF];
+                if (reference == 0) _open.Clear();
+                else if (!_open.Remove(reference)) return BadRef;
+                return 0;
+            }
+            default:
+                return null;
+        }
+
+        // A path: a length byte, then the characters; the file is its last part.
+        string Path(int at) => new([.. Enumerable.Range(1, b[at & 0xFFFF]).Select(i => (char)(b[(at + i) & 0xFFFF] & 0x7F))]);
+        string Name(int at) => Path(at)[(Path(at).LastIndexOf('/') + 1)..];
+        OverlayFile? Find(int at) => overlays.FirstOrDefault(o => (o.Name + ".bin").ToUpperInvariant() == Name(at));
+        int Missing(int at) => System.Text.RegularExpressions.Regex.IsMatch(Name(at), @"^[A-Za-z][A-Za-z0-9.]{0,14}$") ? NotFound : BadPath;
     }
 
     private static void SetWindow(Ram ram)
