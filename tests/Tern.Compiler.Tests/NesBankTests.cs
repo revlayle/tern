@@ -162,6 +162,36 @@ public class NesBankTests : IDisposable
         Assert.Empty(r.Warnings);
     }
 
+    [Fact]
+    public void Banks_implement_an_interface_and_resident_code_calls_the_selected_one()
+    {
+        // spec 8.5: implements works for banks as for overlays; the table is at the same address in each bank.
+        File.WriteAllText(Path.Combine(_dir.FullName, "level_api.tern"), "fn value() -> u8 using A @ $8000\n");
+        var r = RunMain("""
+            import uxrom
+            import level_api
+            import level1 @ levels[0] implements level_api
+            import level2 @ levels[1] implements level_api
+
+            """ + Memory + """
+            var a: u8
+            var b: u8
+            fn main() {
+                uxrom.select(0)
+                a = level_api.value()
+                uxrom.select(1)
+                b = level_api.value()
+            }
+            """,
+            level1: "fn value() -> u8 using A { return 11 }\n",
+            level2: "fn value() -> u8 using A { return 22 }\n");
+        Assert.Equal(11, r.U8("a"));
+        Assert.Equal(22, r.U8("b"));
+        var file = r.Result.File;
+        Assert.Equal(0x4C, file[16]);                   // jmp at $8000 in bank 0
+        Assert.Equal(0x4C, file[16 + 0x4000]);          // and in bank 1
+    }
+
     // ---------- Errors ----------
 
     [Fact]
