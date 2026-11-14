@@ -69,3 +69,19 @@ Branch `m26-apple2-io` (`14dc261`, `f7460eb`, `26f8a5c`, `88daab8`, `5aa05e5`, `
 - [x] Overlays as headerless `.bin`, BIN type with the load address as aux type; `apple2-disk.ps1` takes `file.bin@$addr`.
 - [x] 80-column switch-off checked in AppleWin with `PR#3` (coding session; the screen does not show which path turned it off, as the status says).
 - [x] Emulator tests of `io` against an MLI and disk modelled in C#. The coding session reports that the files example runs in AppleWin on an enhanced IIe and on a II+ with a language card.
+
+## Re-review
+
+Branch `m26-apple2-io` at `338efe9` (fixes in `4690f31`, `main` merged in at `b1a7b5c`).
+
+**Verdict: ready to merge.** The three must-fix findings and both suggestions are done.
+
+`dotnet test`: 3627 compiler tests and 36 CPU tests pass.
+
+- **Finding 1, done.** The block's modulus now comes only from `plan.ZeroedGlobals` and `plan.NoinitGlobals` (`Allocator.cs:225`). The reviewer's program now places `buf` at `$1100`, the first page after `font` (`$1000-$1007`). A correction to the finding: `$1100` is right, not the `$1008` the finding gave, since `buf[out]` reads any index from 0 to 255, so `buf` must start a page (without the `@ align` it is at `$0900` for the same reason). Test `Aligned_data_does_not_move_the_variables_after_the_program` checks that `buf` is within a page after `font` and does not cross a page.
+- **Finding 2, done.** With finding 1 fixed, a modulus above 1 from alignment means the block holds an aligned variable, so `widest` is never null. The reviewer's `@ align(32768)` program compiles (`font` at `$8000`) and runs (test `Aligned_data_with_only_frames_after_the_program_compiles`).
+- **Finding 3, done.** `OneLocation` in `Parser.Declarations.cs` rejects a second location after `zp`, an address, a region or `align(n)`, in either order, with "'@' takes one location ... Remove 'align(n)', or the other location". Five tests. `ParsePlacement` is used only by `var` and `data`, where `=` or the end of the line follows a placement, so an identifier, number or `zp` there is never valid code.
+- **Suggestion 4, done.** `align(` as a struct field's offset gives its own error; test `A_struct_field_cannot_be_aligned`.
+- **Suggestion 5, done.** OPEN with 8 files open returns `$42`; test `Tern_run_fails_a_ninth_open_file_with_too_many_files`.
+
+All "done when" items are now met, including each `@ align` error.
