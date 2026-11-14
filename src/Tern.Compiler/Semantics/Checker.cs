@@ -153,11 +153,23 @@ public sealed partial class Checker
 
         foreach (var import in modules[^1].Syntax.Imports.Where(i => i.Area is not null))
         {
-            if (_layout.Overlays.ContainsKey(import.Area!)) continue;
+            if (_layout.Overlays.ContainsKey(import.Area!))
+            {
+                if (import.Bank is not null)
+                    Recover(() => throw new CompileError(import.Bank.Pos,
+                        $"'{import.Area}' is an overlay area, which holds one module at a time, loaded from disk; it has no banks. Remove '[...]'"));
+                continue;
+            }
+            if (_layout.Banks.ContainsKey(import.Area!))
+            {
+                Recover(() => InModule(modules[^1], () => import.BankNumber = BankNumber(import)));
+                continue;
+            }
             Recover(() => throw new CompileError(import.AreaPos, _layout.Regions.ContainsKey(import.Area!)
                 ? $"'{import.Area}' is a region, not an overlay area; '@' on an import names an area declared with 'overlay {import.Area}' in the memory block. Use the name of an overlay area"
                 : $"The memory block has no overlay area '{import.Area}'. Add a line 'first..=last overlay {import.Area}' to it"));
         }
+        CheckBoardModules(modules);
 
         var implementations = CheckImplements(modules);
 

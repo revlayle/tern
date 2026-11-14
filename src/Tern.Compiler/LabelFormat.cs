@@ -17,16 +17,16 @@ public sealed class LabelFormat
 
     /// <summary>The label file for <paramref name="labels"/>, in address order.</summary>
     /// <param name="map">
-    /// Turns an address into the value the line names (Mesen: an offset into PRG ROM or RAM, see
+    /// Turns a label and its address into the value the line names (Mesen: an offset into PRG ROM or RAM, see
     /// <see cref="Mesen"/>), or -1 to leave the label out. Null: the address itself.
     /// </param>
-    public string Write(IEnumerable<KeyValuePair<string, int>> labels, Func<int, int>? map = null)
+    public string Write(IEnumerable<KeyValuePair<string, int>> labels, Func<string, int, int>? map = null)
     {
         var text = new StringBuilder();
         foreach (var line in Header) text.AppendLine(line);
         foreach (var (name, address) in labels.OrderBy(s => s.Value))
         {
-            int value = map is null ? address : map(address);
+            int value = map is null ? address : map(name, address);
             if (value >= 0) text.AppendLine(Line(value, name));
         }
         return text.ToString();

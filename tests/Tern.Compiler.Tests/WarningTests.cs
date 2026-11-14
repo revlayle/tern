@@ -657,7 +657,9 @@ public sealed class RepositoryWarningTests
             {
                 string name = Path.GetFileNameWithoutExtension(file);
                 // A NES program names its board (spec 8.4).
-                string memory = platform.Boards.Count > 0 ? $"memory {{\n    cartridge {platform.Boards[0].Name} vertical\n}}\n" : "";
+                // A board's own module (uxrom) is built for that board.
+                var board = platform.Boards.FirstOrDefault(b => b.BankModule?.EndsWith("/" + name) == true) ?? platform.Boards.FirstOrDefault();
+                string memory = board is not null ? $"memory {{\n    cartridge {board.Name} vertical\n}}\n" : "";
                 var result = TernCompiler.Compile($"import {name}\n{memory}fn main() {{ }}\n", platform, warnLibrary: true);
                 warnings.AddRange(result.Warnings.Where(w => w.Pos.File is not null).Select(Line));
             }

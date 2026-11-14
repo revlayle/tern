@@ -19,9 +19,11 @@ public static partial class TernCompiler
     /// <summary>
     /// The first part of the startup code (after <c>sei</c> and <c>cld</c>): APU frame IRQ off, the stack,
     /// PPU NMI and rendering off, DMC IRQ off; then two waits for vblank, since the PPU ignores writes for
-    /// about two frames after power-on, with all of RAM ($0000-$07FF) cleared between them.
+    /// about two frames after power-on, with all of RAM ($0000-$07FF) cleared between them. On a board
+    /// with banks, bank 0 is selected first (the bank at power-on is undefined), by writing X (0) over
+    /// <paramref name="bankZero"/>, a 0 in the fixed bank.
     /// </summary>
-    private static List<AsmItem> NesStart()
+    private static List<AsmItem> NesStart(Label? bankZero)
     {
         Label wait1 = new("vblank1"), clear = new("clear_ram"), wait2 = new("vblank2");
         var items = new List<AsmItem>
@@ -35,6 +37,14 @@ public static partial class TernCompiler
             new Instr(Stx, Absolute, new AddrOperand(PpuCtrl)),
             new Instr(Stx, Absolute, new AddrOperand(PpuMask)),
             new Instr(Stx, Absolute, new AddrOperand(DmcFreq)),
+        };
+        if (bankZero is not null)
+        {
+            items.Add(new Comment("bank 0"));
+            items.Add(new Instr(Stx, Absolute, new LabelOperand(bankZero)));
+        }
+        items.AddRange(
+        [
             new Comment("wait for two vblanks, clearing RAM between them"),
             new Instr(Bit, Absolute, new AddrOperand(PpuStatus)),
             new LabelDef(wait1),
@@ -43,7 +53,7 @@ public static partial class TernCompiler
             new Instr(Txa),
             new LabelDef(clear),
             new Instr(Sta, ZeroPageX, new AddrOperand(0)),
-        };
+        ]);
         for (int page = 1; page < 8; page++) items.Add(new Instr(Sta, AbsoluteX, new AddrOperand(page * 0x100)));
         items.AddRange(
         [
@@ -110,13 +120,33 @@ public static partial class TernCompiler
     /// below $C000, else 32 KB. Bytes no code or data covers are $FF. CHR ROM holds the data of the chr
     /// area at its PPU addresses, zeros elsewhere.
     /// </summary>
-    private static (byte[] File, int PrgSize, int PrgFirst) NesFile(Cartridge cartridge, IReadOnlyList<(int Address, byte[] Bytes)> segments, RamPlan plan)
+    /// <param name="banks">Each bank's unit ("levels[1]") and number; <paramref name="placed"/> has their bytes.</param>
+    private static (byte[] File, int PrgSize, int PrgFirst, int Banks) NesFile(Cartridge cartridge, IReadOnlyList<(int Address, byte[] Bytes)> segments, RamPlan plan,
+        IReadOnlyDictionary<string, int> banks, IReadOnlyDictionary<string, List<(int Address, byte[] Bytes)>> placed)
     {
         var rom = segments.Where(s => s.Address >= 0x8000).ToList();
-        int prgFirst = rom.Count > 0 && rom.Min(s => s.Address) < 0xC000 ? 0x8000 : 0xC000;
-        var prg = new byte[0x10000 - prgFirst];
-        Array.Fill(prg, (byte)0xFF);
-        foreach (var (address, bytes) in rom) bytes.CopyTo(prg, address - prgFirst);
+        byte[] prg;
+        int prgFirst, count = 0;
+        if (cartridge.Board.BankArea is { } window)
+        {
+            // UxROM: the banks by number, then the fixed bank; as many as the highest number needs, a power of two (spec 12.2).
+            count = 1;
+            while (count < (banks.Count == 0 ? 1 : banks.Values.Max() + 2)) count *= 2;
+            prg = new byte[count * PrgBank];
+            Array.Fill(prg, (byte)0xFF);
+            prgFirst = 0xC000;
+            foreach (var (address, bytes) in rom) bytes.CopyTo(prg, (count - 1) * PrgBank + address - 0xC000);
+            foreach (var (unit, n) in banks)
+                if (placed.TryGetValue(unit, out var bankSegments))
+                    foreach (var (address, bytes) in bankSegments) bytes.CopyTo(prg, n * PrgBank + address - window.First);
+        }
+        else
+        {
+            prgFirst = rom.Count > 0 && rom.Min(s => s.Address) < 0xC000 ? 0x8000 : 0xC000;
+            prg = new byte[0x10000 - prgFirst];
+            Array.Fill(prg, (byte)0xFF);
+            foreach (var (address, bytes) in rom) bytes.CopyTo(prg, address - prgFirst);
+        }
         var chr = cartridge.Board.ChrRom ? new byte[ChrBank] : [];
         foreach (var g in plan.ChrGlobals) ByteLayout(g, g.InitialBytes ?? new byte[g.Type.Size]).CopyTo(chr, g.Address);
         var board = cartridge.Board;
@@ -130,12 +160,23 @@ public static partial class TernCompiler
         };
         file.AddRange(prg);
         file.AddRange(chr);
-        return (file.ToArray(), prg.Length, prgFirst);
+        return (file.ToArray(), prg.Length, prgFirst, count);
     }
 
-    /// <summary>A label's place for Mesen (<see cref="LabelFormat.Mesen"/>): RAM as itself, ROM as its offset into PRG ROM, registers left out.</summary>
-    private static Func<int, int> NesLabelMap(int prgFirst) => address =>
-        address < 0x2000 ? address & 0x07FF : address >= prgFirst ? LabelFormat.PrgRom | (address - prgFirst) : -1;
+    /// <summary>
+    /// A label's place for Mesen (<see cref="LabelFormat.Mesen"/>): RAM as itself, ROM as its offset into
+    /// PRG ROM, registers left out. With <paramref name="bankCount"/> banks, the fixed bank is the last,
+    /// and a label of a module in <paramref name="moduleBanks"/> is in that module's bank.
+    /// </summary>
+    private static Func<string, int, int> NesLabelMap(int prgFirst, int bankCount, IReadOnlyDictionary<string, int> moduleBanks) => (name, address) =>
+    {
+        if (address < 0x2000) return address & 0x07FF;
+        if (address < 0x8000) return -1;
+        if (bankCount == 0) return address >= prgFirst ? LabelFormat.PrgRom | (address - prgFirst) : -1;
+        if (address >= 0xC000) return LabelFormat.PrgRom | ((bankCount - 1) * PrgBank + address - 0xC000);
+        int dot = name.IndexOf('.');
+        return dot > 0 && moduleBanks.TryGetValue(name[..dot], out int bank) ? LabelFormat.PrgRom | (bank * PrgBank + address - 0x8000) : -1;
+    };
 
     /// <summary>
     /// Copies <paramref name="size"/> bytes from <paramref name="from"/> to <paramref name="to"/>, 256 at a time,

@@ -20,8 +20,17 @@ public sealed class Module
     public Dictionary<string, Symbol> Scope { get; } = new();
     /// <summary>The <c>import</c> in the main file that loads this module (its arguments set the module's parameters), or null.</summary>
     public ImportDecl? ImportedBy { get; set; }
-    /// <summary>The overlay area the main file places this module in (<c>import name @ area</c>), or null for a resident module.</summary>
+    /// <summary>The overlay or bank area the main file places this module in (<c>import name @ area</c>, <c>@ area[n]</c>), or null for a resident module.</summary>
     public string? OverlayArea => ImportedBy?.Area;
+    /// <summary>Placed in a bank of a bank area (<c>@ area[n]</c>, spec 8.5): in ROM, so its variables are resident.</summary>
+    public bool InBank => ImportedBy?.Bank is not null;
+    /// <summary>The bank's number, once the checker has worked it out.</summary>
+    public int? Bank => ImportedBy?.BankNumber;
+    /// <summary>
+    /// What is present as a whole in its area: an overlay module alone, or the modules of one bank
+    /// ("levels[1]"). Two units of one area are never present together (spec 8.5); null for a resident module.
+    /// </summary>
+    public string? Unit => OverlayArea is null ? null : InBank ? $"{OverlayArea}[{Bank}]" : Name;
     /// <summary>A module found in the compiler's library folders (spec 2.2): never warned about (spec 13).</summary>
     public bool IsLibrary { get; init; }
     /// <summary>Set by the checker once the file's top-level declarations are in <see cref="Scope"/>.</summary>

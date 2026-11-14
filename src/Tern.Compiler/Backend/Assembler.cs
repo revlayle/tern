@@ -229,6 +229,15 @@ public static class Assembler
                     size += end - slots[section.Start].Address;
                     pos = end;
                 }
+                // A bank ("levels[1]") holds the modules placed in it; its sections are named module.name.
+                if (!fits && module.Key.EndsWith(']'))
+                {
+                    var sizes = module.GroupBy(s => s.Info.Name.Contains('.') ? s.Info.Name[..s.Info.Name.IndexOf('.')] : s.Info.Name)
+                        .Select(g => $"{g.Key} ({g.Sum(s => SizeOf(s))} bytes)");
+                    int at = module.Key.IndexOf('[');
+                    throw new CompileError(overlayImports?.GetValueOrDefault(module.Key) ?? new SourcePos(1, 1),
+                        $"Bank {module.Key[(at + 1)..^1]} of '{module.Key[..at]}' needs {size} bytes, but a bank has {area.Size}: {string.Join(", ", sizes)}. Move a module to another bank, or make one smaller");
+                }
                 if (!fits)
                     throw new CompileError(overlayImports?.GetValueOrDefault(module.Key) ?? new SourcePos(1, 1),
                         $"The overlay '{module.Key}' needs {size} bytes" + (fixedHere.Count > 0 ? $" of code, data and variables, plus {fixedHere.Sum(r => r.Size)} bytes of fixed data," : "") +

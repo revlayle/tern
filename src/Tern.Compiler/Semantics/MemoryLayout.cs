@@ -30,6 +30,12 @@ public sealed class MemoryLayout
     public Dictionary<string, AddressRange> Regions { get; } = [];
     /// <summary>Areas modules are loaded into on request (<c>import m @ name</c>, spec 8.5).</summary>
     public Dictionary<string, AddressRange> Overlays { get; } = [];
+    /// <summary>Bank areas: windows where one bank of the cartridge's ROM is visible at a time (<c>import m @ name[n]</c>, spec 8.5, 14.1).</summary>
+    public Dictionary<string, AddressRange> Banks { get; } = [];
+
+    /// <summary>The overlay or bank area named <paramref name="name"/>, or null.</summary>
+    public AddressRange? PlacedArea(string name) =>
+        Overlays.TryGetValue(name, out var o) ? o : Banks.TryGetValue(name, out var b) ? b : null;
     /// <summary>Volatile ranges added by the memory block, in addition to the platform's.</summary>
     public List<AddressRange> Volatile { get; } = [];
     /// <summary>
@@ -99,6 +105,7 @@ public sealed class MemoryLayout
         var overlays = new Dictionary<string, AddressRange>();
         var volatileRanges = new List<AddressRange>();
         var chr = new Dictionary<string, AddressRange>();
+        var banks = new Dictionary<string, AddressRange>();
         // Every range that may not overlap another, with the line that declared it.
         var claimed = new List<(AddressRange Range, MemoryLine Line)>();
 
@@ -112,7 +119,18 @@ public sealed class MemoryLayout
             if (line.Kind is "bank" or "chr" && cartridge is null)
                 throw new CompileError(line.Pos, $"A '{line.Kind}' area is part of a cartridge board, which the {platform.Name} does not have. Remove the line");
             if (line.Kind == "bank")
-                throw new CompileError(line.Pos, $"'{line.Kind}' is not supported yet. Remove the line");
+            {
+                var board = cartridge!.Board;
+                if (board.BankArea is not { } window)
+                    throw new CompileError(line.Pos, $"The board '{board.Name}' has no banks. Remove the line, or name a board with banks, such as 'cartridge uxrom'");
+                if (range != window)
+                    throw new CompileError(line.Pos, $"The board '{board.Name}' switches banks at {window}, not at {range}. Write '${window.First:X4}..=${window.Last:X4} bank {line.Name}'");
+                if (banks.Count > 0)
+                    throw new CompileError(line.Pos, $"The board '{board.Name}' has one bank area, and the block already declares it as '{banks.Keys.First()}'. Remove the line");
+                if (regions.ContainsKey(line.Name!) || overlays.ContainsKey(line.Name!) || chr.ContainsKey(line.Name!))
+                    throw new CompileError(line.Pos, $"The area '{line.Name}' is declared twice. Give each area its own name");
+                banks[line.Name!] = range;
+            }
             if (line.Kind == "chr")
             {
                 // The PPU's addresses: not checked against the CPU's ranges.
@@ -146,7 +164,7 @@ public sealed class MemoryLayout
                     break;
                 case "volatile": volatileRanges.Add(range); break;
                 case "overlay":
-                    if (!overlays.TryAdd(line.Name!, range) || regions.ContainsKey(line.Name!))
+                    if (!overlays.TryAdd(line.Name!, range) || regions.ContainsKey(line.Name!) || banks.ContainsKey(line.Name!))
                         throw new CompileError(line.Pos, $"The overlay area '{line.Name}' is declared twice. Give each area its own name");
                     break;
             }
@@ -161,7 +179,7 @@ public sealed class MemoryLayout
         }
 
         // Memory the compiler may not use is taken out of the platform's areas, when the block does not replace them.
-        var taken = reserved.Concat(regions.Values).Concat(overlays.Values).ToList();
+        var taken = reserved.Concat(regions.Values).Concat(overlays.Values).Concat(banks.Values).ToList();
         var programAreas = program.Count > 0 ? program
             : Subtract(cartridge is not null ? cartridge.Board.CodeAreas : [new AddressRange(platform.LoadAddress, platform.RamEnd)], taken);
         if (programAreas.Count == 0)
@@ -180,6 +198,7 @@ public sealed class MemoryLayout
         foreach (var (name, range) in regions) layout.Regions[name] = range;
         foreach (var (name, range) in overlays) layout.Overlays[name] = range;
         foreach (var (name, range) in chr) layout.Chr[name] = range;
+        foreach (var (name, range) in banks) layout.Banks[name] = range;
         layout.Volatile.AddRange(volatileRanges);
         return layout;
     }

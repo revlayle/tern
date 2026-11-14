@@ -199,9 +199,11 @@ public sealed partial class Checker
                 $"'{v.Name}' is tile data in the chr area '{v.Region}', in the PPU's memory, which the CPU cannot read. Use addr({v.Name}) for its PPU address, or len({v.Name})");
         if (v.Kind != VariableKind.Global || _function is null) return;
         // Overlays in one area share their memory: another one's variables are not there while this one runs.
-        if (_function.OverlayArea is { } area && v.OverlayArea == area && v.Module != _function.Module && (v.FixedAddress is null || v.IsData) && v.Region is null)
+        // A bank's variables are resident, in RAM; its data is in the bank.
+        if (_function.OverlayArea is { } area && v.OverlayArea == area && v.OverlayUnit != _function.OverlayUnit && (v.FixedAddress is null || v.IsData) && v.Region is null
+            && (v.IsData || !v.Module!.InBank))
             throw new CompileError(pos,
-                $"'{v.Name}' belongs to {v.Module!.Name}, which is in the same overlay area '{area}' as {_function.Module!.Name}. They are never loaded together and share their memory. " +
+                $"'{v.Name}' belongs to {v.Module!.Name}, which is {NeverTogether(v.Module, _function.Module!)} as {_function.Module!.Name}. They are never loaded together and share their memory. " +
                 "Keep shared state in a resident module or the main file");
         if (_dead) return;
         _function.UsedGlobals.Add(v);
@@ -904,9 +906,10 @@ public sealed partial class Checker
                 "An address in an initial value is filled in when the program is placed, so it can only be used alone, plus or minus a constant, or as .lo / .hi. Assign other values at the start of main");
         // Overlays in one area share their memory: the other one's code or data is not there while this one is loaded (spec 8.5).
         var (otherArea, otherModule, name) = function is not null ? (function.OverlayArea, function.Module, function.Name) : (variable!.OverlayArea, variable.Module, variable.QualifiedName);
-        if (target.OverlayArea is { } area && otherArea == area && otherModule != target.Module && (variable is null || variable.FixedAddress is null || variable.IsData))
+        if (target.OverlayArea is { } area && otherArea == area && otherModule!.Unit != target.Module!.Unit && (variable is null || variable.FixedAddress is null || variable.IsData)
+            && (variable is null || variable.IsData || !otherModule.InBank))
             throw new CompileError(init.Pos,
-                $"'{name}' is in {otherModule!.Name}, which is in the same overlay area '{area}' as {target.Module!.Name}. They are never loaded together, so the address would point at the wrong memory. " +
+                $"'{name}' is in {otherModule!.Name}, which is {NeverTogether(otherModule, target.Module)} as {target.Module!.Name}. They are never loaded together, so the address would point at the wrong memory. " +
                 "Take the address in resident code, or put one of them in another area");
         var (fillVariable, fillOffset) = (variable?.AliasOf ?? variable, (int)offset + (variable?.AliasOffset ?? 0));
         if (part == AddressPart.Word && highAt is { } h && h != at + 1)

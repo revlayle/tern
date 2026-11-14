@@ -61,7 +61,7 @@ public sealed partial class CodeGen
         foreach (var f in _program.Functions.Where(f => f.FixedAddress is null && !f.IsInline))
         {
             GenFunction(f);
-            all.Add(new SectionStart(f.Name, Overlay: f.OverlayArea is null ? null : f.Module!.Name));
+            all.Add(new SectionStart(f.Name, Overlay: f.OverlayUnit));
             // An interrupt handler's body is optimized before its saving code is added.
             // main runs once, right after the startup code has cleared memory.
             bool startsProgram = f == _program.Main && !_program.IsBinary && !f.AddressTaken;

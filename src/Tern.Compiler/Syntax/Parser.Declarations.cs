@@ -79,11 +79,18 @@ public sealed partial class Parser
                 }
                 string? area = null;
                 var areaPos = default(SourcePos);
+                Expr? bank = null;
                 if (Accept(TokenKind.At))
                 {
-                    var areaName = Expect(TokenKind.Identifier, "the name of an overlay area after '@'");
+                    var areaName = Expect(TokenKind.Identifier, "the name of an overlay or bank area after '@'");
                     area = areaName.Text;
                     areaPos = areaName.Pos;
+                    // @ area[n]: bank n of a bank area (spec 8.5).
+                    if (Accept(TokenKind.LBracket))
+                    {
+                        bank = ParseExpr();
+                        Expect(TokenKind.RBracket, "']' after the bank's number");
+                    }
                 }
                 var implements = new List<(string, SourcePos)>();
                 if (Accept(TokenKind.Implements))
@@ -92,7 +99,7 @@ public sealed partial class Parser
                         var iname = Expect(TokenKind.Identifier, "the name of an interface module after 'implements'");
                         implements.Add((iname.Text, iname.Pos));
                     } while (Accept(TokenKind.Comma));
-                imports.Add(new ImportDecl(name.Pos, name.Text) { Args = args, Area = area, AreaPos = areaPos, Implements = implements });
+                imports.Add(new ImportDecl(name.Pos, name.Text) { Args = args, Area = area, AreaPos = areaPos, Bank = bank, Implements = implements });
                 ExpectEndOfStatement();
             });
             SkipTerminators();
@@ -496,8 +503,6 @@ public sealed partial class Parser
             Advance();
             return OneLocation(new Placement(PlacementKind.ZeroPage));
         }
-        if (At(TokenKind.Bank))
-            throw new CompileError(Current.Pos, "'@ bank(n)' is not supported yet. Remove it");
         // 'align' is a word only after '@' (spec 4).
         if (At(TokenKind.Identifier) && Current.Text == "align")
         {

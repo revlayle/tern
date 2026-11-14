@@ -456,9 +456,13 @@ public sealed class ImportDecl(SourcePos pos, string name) : Node(pos)
     public string Name { get; } = name;
     /// <summary>Module parameters set by <c>import name(P = value)</c>.</summary>
     public List<ImportArg> Args { get; init; } = [];
-    /// <summary>The overlay area in <c>import name @ area</c> (spec 8.5), or null.</summary>
+    /// <summary>The overlay or bank area in <c>import name @ area</c> or <c>@ area[n]</c> (spec 8.5), or null.</summary>
     public string? Area { get; init; }
     public SourcePos AreaPos { get; init; }
+    /// <summary>The bank's number in <c>import name @ area[n]</c>, a constant expression, or null.</summary>
+    public Expr? Bank { get; init; }
+    /// <summary>The value of <see cref="Bank"/>, set by the checker.</summary>
+    public int? BankNumber { get; set; }
     /// <summary>The interface modules in <c>import name @ area implements a, b</c> (spec 8.5), with their positions.</summary>
     public List<(string Name, SourcePos Pos)> Implements { get; init; } = [];
 }
