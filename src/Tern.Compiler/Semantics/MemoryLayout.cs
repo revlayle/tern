@@ -37,6 +37,11 @@ public sealed class MemoryLayout
     /// block's other areas); empty when the variables follow the program in <see cref="Program"/>.
     /// </summary>
     public List<AddressRange> Variables { get; private init; } = [];
+    /// <summary>
+    /// The <c>chr</c> areas (NES): CHR ROM, in the PPU's addresses, so they take no CPU memory. Only
+    /// <c>data</c> is placed there, and its bytes go in the image's CHR ROM (spec 12.2).
+    /// </summary>
+    public Dictionary<string, AddressRange> Chr { get; } = [];
     /// <summary>The board the build is an image for (the <c>cartridge</c> line), or null.</summary>
     public Cartridge? Cartridge { get; private init; }
 
@@ -93,6 +98,7 @@ public sealed class MemoryLayout
         var regions = new Dictionary<string, AddressRange>();
         var overlays = new Dictionary<string, AddressRange>();
         var volatileRanges = new List<AddressRange>();
+        var chr = new Dictionary<string, AddressRange>();
         // Every range that may not overlap another, with the line that declared it.
         var claimed = new List<(AddressRange Range, MemoryLine Line)>();
 
@@ -105,8 +111,23 @@ public sealed class MemoryLayout
             var range = new AddressRange((int)first, (int)last);
             if (line.Kind is "bank" or "chr" && cartridge is null)
                 throw new CompileError(line.Pos, $"A '{line.Kind}' area is part of a cartridge board, which the {platform.Name} does not have. Remove the line");
-            if (line.Kind is "bank" or "chr")
+            if (line.Kind == "bank")
                 throw new CompileError(line.Pos, $"'{line.Kind}' is not supported yet. Remove the line");
+            if (line.Kind == "chr")
+            {
+                // The PPU's addresses: not checked against the CPU's ranges.
+                if (!cartridge!.Board.ChrRom)
+                    throw new CompileError(line.Pos,
+                        $"The board '{cartridge.Board.Name}' has CHR RAM, empty at power-on, not CHR ROM. Remove the line, make the tiles ordinary data and copy them to the PPU with nes.ppu_copy");
+                if (last > 0x1FFF)
+                    throw new CompileError(line.Pos, $"A chr area lies in the PPU's pattern tables, $0000-$1FFF; {range} does not. Use addresses in that range");
+                if (chr.Count > 0)
+                    throw new CompileError(line.Pos, $"The board '{cartridge.Board.Name}' has one CHR ROM, and the block already declares it as '{chr.Keys.First()}'. Remove the line, or join the two");
+                if (regions.ContainsKey(line.Name!) || overlays.ContainsKey(line.Name!))
+                    throw new CompileError(line.Pos, $"The area '{line.Name}' is declared twice. Give each area its own name");
+                chr[line.Name!] = range;
+                continue;
+            }
             switch (line.Kind)
             {
                 case "program" when cartridge is not null:
@@ -158,6 +179,7 @@ public sealed class MemoryLayout
         layout.Reserved.AddRange(reserved);
         foreach (var (name, range) in regions) layout.Regions[name] = range;
         foreach (var (name, range) in overlays) layout.Overlays[name] = range;
+        foreach (var (name, range) in chr) layout.Chr[name] = range;
         layout.Volatile.AddRange(volatileRanges);
         return layout;
     }

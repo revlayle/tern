@@ -323,7 +323,7 @@ public static partial class TernCompiler
         foreach (var (address, bytes) in code.Segments) bytes.CopyTo(image, address - loadAddress);
         byte[] file;
         int prgSize = 0, prgFirst = 0;
-        if (cartridge is not null) (file, prgSize, prgFirst) = NesFile(cartridge, code.Segments);
+        if (cartridge is not null) (file, prgSize, prgFirst) = NesFile(cartridge, code.Segments, plan);
         else file = systemFile ?? platform.FileOf(loadAddress, image, code.Segments, binary ? null : start.Address);
 
         var symbols = new Dictionary<string, int>();
@@ -484,6 +484,8 @@ public static partial class TernCompiler
                     ? $"  region {name} {range}: {use.Size} of {range.Size} bytes used"
                     : $"  region {name} {range}: unused");
         }
+        foreach (var (name, range) in layout.Chr)
+            report.AppendLine($"Chr area {name} {range}: {plan.ChrUse.GetValueOrDefault(name)} of {range.Size} bytes used");
         foreach (var area in layout.Overlays)
         {
             var inArea = overlayFiles.Where(o => o.Area == area.Key).ToList();

@@ -194,6 +194,9 @@ public sealed partial class Checker
     private void UseGlobal(VariableSymbol v, SourcePos pos)
     {
         CheckNotBinaryData(v, pos);
+        if (v.InChr)
+            throw new CompileError(pos,
+                $"'{v.Name}' is tile data in the chr area '{v.Region}', in the PPU's memory, which the CPU cannot read. Use addr({v.Name}) for its PPU address, or len({v.Name})");
         if (v.Kind != VariableKind.Global || _function is null) return;
         // Overlays in one area share their memory: another one's variables are not there while this one runs.
         if (_function.OverlayArea is { } area && v.OverlayArea == area && v.Module != _function.Module && (v.FixedAddress is null || v.IsData) && v.Region is null)
@@ -685,18 +688,39 @@ public sealed partial class Checker
             case PlacementKind.Address:
                 if (!allowAddress) throw new CompileError(decl.Pos, "Only global variables can have a fixed address. Move the variable out of the function");
                 var addr = decl.Placement.Address!;
-                // Only a region name needs the memory block; a constant address does not.
-                if (addr is NameExpr placed && _module.Syntax.Memory?.Lines.Any(l => l.Kind == "region" && l.Name == placed.Name) == true)
-{
+                // '@ name' or '@ name + offset' for a region or a chr area (spec 4); 'name' is never a constant (8.4).
+                var (areaName, offsetExpr) = addr switch
+                {
+                    NameExpr named => (named.Name, (Expr?)null),
+                    BinaryExpr { Op: TokenKind.Plus, Left: NameExpr named } b => (named.Name, b.Right),
+                    _ => ((string?)null, (Expr?)null),
+                };
+                // Only an area name needs the memory block; a constant address does not.
+                if (areaName is not null && _module.Syntax.Memory?.Lines.Any(l => l.Kind is "region" or "chr" && l.Name == areaName) == true)
+                {
                     EnsureMemoryLayout();
                     if (_memoryFailed) throw new FollowOnError();
                 }
-                if (addr is NameExpr region && _layout.Regions.ContainsKey(region.Name) && Lookup(region.Name) is null)
+                if (areaName is not null && Lookup(areaName) is null && (_layout.Regions.TryGetValue(areaName, out var span) | _layout.Chr.TryGetValue(areaName, out var chrSpan)))
                 {
-                    v.Region = region.Name;
+                    v.Region = areaName;
+                    v.InChr = _layout.Chr.ContainsKey(areaName);
+                    var area = v.InChr ? chrSpan : span;
+                    if (v.InChr && !decl.IsData)
+                        throw new CompileError(decl.Pos,
+                            $"'{decl.Name}' is a variable, but the chr area '{areaName}' is ROM the PPU reads, so it holds only tile data. Declare it with 'data'");
+                    if (offsetExpr is not null)
+                    {
+                        CheckExpr(offsetExpr);
+                        if (offsetExpr.ConstValue is not long offset)
+                            throw new CompileError(offsetExpr.Pos, "The offset must be known at compile time. Use a number or a constant");
+                        if (offset < 0 || offset + v.Type.Size > area.Size)
+                            throw new CompileError(offsetExpr.Pos,
+                                $"'{decl.Name}' ({v.Type.Size} bytes) at offset ${offset:X} does not fit in '{areaName}' ({area}, {area.Size} bytes). Use an offset up to ${Math.Max(0, area.Size - v.Type.Size):X}");
+                        v.RegionOffset = (int)offset;
+                    }
                     // A region that touches volatile memory is volatile as a whole: its addresses are not known yet.
-                    var span = _layout.Regions[region.Name];
-                    v.InVolatileArea = _layout.IsVolatile(span.First, span.Last) || _platform.IsVolatile(span.First, span.Last);
+                    v.InVolatileArea = !v.InChr && (_layout.IsVolatile(area.First, area.Last) || _platform.IsVolatile(area.First, area.Last));
                     break;
                 }
                 CheckExpr(addr);

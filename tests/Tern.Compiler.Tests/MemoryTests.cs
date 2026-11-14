@@ -255,6 +255,52 @@ public class MemoryTests
     }
 
     [Fact]
+    public void A_declaration_at_an_offset_from_a_regions_start_is_there_and_the_others_go_in_order()
+    {
+        // '@ region + offset' (spec 4, decision 2026-11-14): the offset follows the region when it moves.
+        var r = Run.Program("""
+            memory { $C000..=$C3FF region buffers }
+            const ROW = $100
+            var first: [u8; 16] @ buffers
+            var col: [u8; 32] @ buffers + ROW
+            data table: [u8; 3] @ buffers + $200 = [9, 8, 7]
+            noinit var keep: u8 @ buffers + $3FF
+            var second: u8 @ buffers
+            var seen: u8
+            fn main() {
+                col[31] += 1
+                seen = table[2] + keep
+            }
+            """, setup: ram =>
+        {
+            for (int i = 0xC000; i < 0xC200; i++) ram.Bytes[i] = 0xEE;    // not table, loaded with the program
+            ram.Bytes[0xC3FF] = 1;
+        });
+        Assert.Equal(0xC000, r.Address("first"));
+        Assert.Equal(0xC010, r.Address("second"));
+        Assert.Equal(0xC100, r.Address("col"));
+        Assert.Equal(0xC200, r.Address("table"));
+        Assert.Equal(0xC3FF, r.Address("keep"));
+        Assert.Equal(1, r.U8("col", 31));           // zeroed at startup, then incremented
+        Assert.Equal(0, r.U8("col", 0));
+        Assert.Equal(0, r.U8("second"));
+        Assert.Equal(0xEE, r.Ram.Bytes[0xC011]);    // between the variables: untouched
+        Assert.Equal(8, r.U8("seen"));              // 7 + 1, keep not cleared
+    }
+
+    [Theory]
+    [InlineData("var a: [u8; 32] @ buffers + $F0", "'a' (32 bytes) at offset $F0 does not fit in 'buffers' ($C000-$C0FF, 256 bytes). Use an offset up to $E0", 2, 29)]
+    [InlineData("var a: u8 @ buffers + n", "The offset must be known at compile time. Use a number or a constant", 2, 23)]
+    [InlineData("var a: [u8; 16] @ buffers\nvar b: [u8; 4] @ buffers + 8", "'b' at $C008-$C00B overlaps 'a' at $C000-$C00F in 'buffers'. Move one of them, with '@ buffers + offset'", 3, 1)]
+    [InlineData("var b: [u8; 4] @ buffers + 8\nvar a: [u8; 4] @ buffers + 10", "'a' at $C00A-$C00D overlaps 'b' at $C008-$C00B in 'buffers'. Move one of them, with '@ buffers + offset'", 3, 1)]
+    public void Region_offset_errors(string declaration, string message, int line, int column)
+    {
+        var e = Assert.Throws<CompileError>(() => TernCompiler.Compile($"memory {{ $C000..=$C0FF region buffers }}\n{declaration}\nvar n: u8\nfn main() {{ }}"));
+        Assert.Equal(message, e.Description);
+        Assert.Equal((line, column), (e.Pos.Line, e.Pos.Column));
+    }
+
+    [Fact]
     public void A_region_is_not_used_by_the_program_areas()
     {
         var r = Run.Program($$"""

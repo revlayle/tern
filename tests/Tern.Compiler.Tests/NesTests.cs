@@ -279,6 +279,87 @@ public class NesTests
         Assert.Equal(1234, r.U16("x"));
     }
 
+    // ---------- Tile data: chr areas ----------
+
+    private const string Tiles = "memory {\n    cartridge nrom vertical\n    $0000..=$1FFF chr tiles\n}\n";
+
+    [Fact]
+    public void Data_in_a_chr_area_is_in_chr_rom_at_its_ppu_address()
+    {
+        var r = RunNes(Tiles + """
+            data bg: [u8; _] @ tiles = [1, 2, 3]
+            data font: [u8; _] @ tiles + $1000 = [i * 2 for i in 0..16]
+            data more: [u8; 2] @ tiles = [7, 8]
+            var at: u16
+            var n: u8
+            fn main() {
+                at = addr(font)
+                n = len(font)
+            }
+            """);
+        var chr = r.Result.File[(16 + 0x4000)..];
+        Assert.Equal(0x2000, chr.Length);
+        Assert.Equal([1, 2, 3, 7, 8, 0], chr[..6]);
+        Assert.Equal(Enumerable.Range(0, 16).Select(i => (byte)(i * 2)), chr[0x1000..0x1010]);
+        Assert.Equal(0, chr[0x1010]);
+        Assert.Equal(0x1000, r.U16("at"));
+        Assert.Equal(16, r.U8("n"));
+        Assert.Equal(0x0003, r.Result.Symbols["more"]);
+        // The PPU sees it: tern run loads CHR ROM into the PPU's memory.
+        Assert.Equal(2, r.Nes!.Ppu[0x1001]);
+        Assert.Contains("Chr area tiles $0000-$1FFF: 21 of 8192 bytes used", r.Result.Report);
+        // Tile data takes no CPU memory and is not in PRG ROM.
+        Assert.DoesNotContain(r.Result.Sections, s => s.Name is "bg" or "font");
+    }
+
+    [Fact]
+    public void A_chr_area_may_be_part_of_the_pattern_tables()
+    {
+        var r = Compile("memory {\n    cartridge nrom vertical\n    $1000..=$1FFF chr sprites\n}\ndata ship: [u8; 2] @ sprites = [5, 6]\nfn main() { }");
+        Assert.Equal(0x1000, r.Symbols["ship"]);
+        Assert.Equal(5, r.File[16 + 0x4000 + 0x1000]);
+    }
+
+    [Theory]
+    [InlineData("fn main() { var x: u8 = font[1] }", "'font' is tile data in the chr area 'tiles', in the PPU's memory, which the CPU cannot read. Use addr(font) for its PPU address, or len(font)", 6, 25)]
+    [InlineData("var buffer: [u8; 4] @ tiles\nfn main() { }", "'buffer' is a variable, but the chr area 'tiles' is ROM the PPU reads, so it holds only tile data. Declare it with 'data'", 6, 1)]
+    [InlineData("data big: [u8; 2] @ tiles + $1FFF = [1, 2]\nfn main() { }", "'big' (2 bytes) at offset $1FFF does not fit in 'tiles' ($0000-$1FFF, 8192 bytes). Use an offset up to $1FFE", 6, 29)]
+    [InlineData("data a: [u8; 2] @ tiles + $FF2 = [1, 2]\nfn main() { }", "'a' at $0FF2-$0FF3 overlaps 'font' at $0FF0-$0FF3 in 'tiles'. Move one of them, with '@ tiles + offset'", 6, 1)]
+    public void Chr_data_errors(string rest, string message, int line, int column)
+    {
+        var e = Error(Tiles + "data font: [u8; 4] @ tiles + $FF0 = [1, 2, 3, 4]\n" + rest);
+        Assert.Equal(message, e.Description);
+        Assert.Equal((line, column), (e.Pos.Line, e.Pos.Column));
+    }
+
+    [Theory]
+    [InlineData("cartridge uxrom vertical\n    $0000..=$1FFF chr tiles", "The board 'uxrom' has CHR RAM, empty at power-on, not CHR ROM. Remove the line, make the tiles ordinary data and copy them to the PPU with nes.ppu_copy", 3, 19)]
+    [InlineData("cartridge nrom vertical\n    $0000..=$2FFF chr tiles", "A chr area lies in the PPU's pattern tables, $0000-$1FFF; $0000-$2FFF does not. Use addresses in that range", 3, 19)]
+    [InlineData("cartridge nrom vertical\n    $0000..=$0FFF chr a\n    $1000..=$1FFF chr b", "The board 'nrom' has one CHR ROM, and the block already declares it as 'a'. Remove the line, or join the two", 4, 19)]
+    public void Chr_area_errors(string lines, string message, int line, int column)
+    {
+        var e = Error($"memory {{\n    {lines}\n}}\nfn main() {{ }}");
+        Assert.Equal(message, e.Description);
+        Assert.Equal((line, column), (e.Pos.Line, e.Pos.Column));
+    }
+
+    [Fact]
+    public void The_address_of_tile_data_is_a_u16_not_a_pointer()
+    {
+        var e = Error(Tiles + "data font: [u8; 4] @ tiles = [1, 2, 3, 4]\nvar p: ptr u8\nfn main() { p = addr(font) }");
+        Assert.StartsWith("Expected ptr u8, found u16", e.Description);
+    }
+
+    [Fact]
+    public void A_chr_area_takes_no_cpu_memory()
+    {
+        // $0000-$1FFF in the PPU's addresses: zero page and RAM stay the program's.
+        var r = RunNes(Tiles + "var x: u8\nvar big: [u8; 200]\nfn main() { x = 5; big[199] = 6 }");
+        Assert.Equal(5, r.U8("x"));
+        Assert.Equal(6, r.U8("big", 199));
+        Assert.Equal(0x00, r.Address("x"));
+    }
+
     // ---------- Encoding ----------
 
     [Fact]

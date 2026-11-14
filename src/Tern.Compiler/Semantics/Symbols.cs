@@ -188,8 +188,12 @@ public sealed class VariableSymbol(string name, SourcePos pos, TernType type, Va
     public bool IsLoopCounter { get; init; }
     /// <summary>Set for <c>@ $addr</c> variables.</summary>
     public int? FixedAddress { get; set; }
-    /// <summary>Set for <c>@ region</c> variables and data: the region's name. The allocator gives them an address in it.</summary>
+    /// <summary>Set for <c>@ region</c> variables and data: the region's (or chr area's) name. The allocator gives them an address in it.</summary>
     public string? Region { get; set; }
+    /// <summary>Set by <c>@ region + offset</c>: the offset from the area's start (spec 4).</summary>
+    public int? RegionOffset { get; set; }
+    /// <summary>Tile data in a <c>chr</c> area (NES): its address is in the PPU's memory, which the CPU cannot read (spec 12.2).</summary>
+    public bool InChr { get; set; }
     public bool RequireZeroPage { get; set; }
     /// <summary>Set by <c>@ align(n)</c>: the address is a multiple of this (spec 4); 1 when not aligned.</summary>
     public int Alignment { get; set; } = 1;

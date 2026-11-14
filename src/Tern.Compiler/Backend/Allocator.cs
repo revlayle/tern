@@ -47,6 +47,10 @@ public sealed class RamPlan
     public List<AddressRange> RegionClears { get; } = [];
     /// <summary>Where the first and last variable in each region are, for the report.</summary>
     public Dictionary<string, AddressRange> RegionUse { get; } = [];
+    /// <summary>Tile data in the chr areas (NES), at PPU addresses: bytes of the image's CHR ROM.</summary>
+    public List<VariableSymbol> ChrGlobals { get; } = [];
+    /// <summary>The bytes of each chr area that its data covers, for the report.</summary>
+    public Dictionary<string, int> ChrUse { get; } = [];
 }
 
 /// <summary>
@@ -181,31 +185,55 @@ public static class Allocator
         }
 
         // Variables and data placed in a region, in the order they are declared: zeroed variables first
-        // (one block to clear at startup), then noinit ones, then data.
-        foreach (var (name, range) in layout.Regions)
+        // (one block to clear at startup), then noinit ones, then data. One placed at an offset
+        // ('@ region + offset') is at that offset, and may not overlap the others (spec 4). A chr area
+        // holds only data, in the PPU's memory (spec 12.2).
+        foreach (var (name, range, chr) in layout.Regions.Select(r => (r.Key, r.Value, false)).Concat(layout.Chr.Select(c => (c.Key, c.Value, true))))
         {
             var inRegion = program.Globals.Where(g => g.Region == name).ToList();
+            var placed = new List<VariableSymbol>();
+            void Overlaps(VariableSymbol g)
+            {
+                foreach (var other in placed)
+                    if (g.Address < other.Address + other.Type.Size && other.Address < g.Address + g.Type.Size)
+                    {
+                        var (first, second) = other.Pos.Line <= g.Pos.Line ? (other, g) : (g, other);
+                        throw new CompileError(second.Pos,
+                            $"'{second.Name}' at {new AddressRange(second.Address, second.Address + second.Type.Size - 1)} overlaps '{first.Name}' at {new AddressRange(first.Address, first.Address + first.Type.Size - 1)} in '{name}'. Move one of them, with '@ {name} + offset'");
+                    }
+                placed.Add(g);
+            }
+            foreach (var g in inRegion.Where(g => g.RegionOffset is not null))
+            {
+                g.Address = range.First + g.RegionOffset!.Value;
+                Overlaps(g);
+            }
             int at = range.First;
             void PlaceAll(IEnumerable<VariableSymbol> vars)
             {
-                foreach (var g in vars)
+                foreach (var g in vars.Where(g => g.RegionOffset is null))
                 {
                     if (at + g.Type.Size - 1 > range.Last)
                         throw new CompileError(g.Pos,
-                            $"Region '{name}' ({range}, {range.Size} bytes) is full: '{g.Name}' needs {g.Type.Size} bytes at ${at:X4}, " +
-                            $"{Math.Max(0, range.Last + 1 - at)} are left. Place it elsewhere or make the region larger");
+                            $"{(chr ? "The chr area" : "Region")} '{name}' ({range}, {range.Size} bytes) is full: '{g.Name}' needs {g.Type.Size} bytes at ${at:X4}, " +
+                            $"{Math.Max(0, range.Last + 1 - at)} are left. Place it elsewhere or make the {(chr ? "area" : "region")} larger");
                     g.Address = at;
                     at += g.Type.Size;
+                    Overlaps(g);
                 }
             }
             var zeroed = inRegion.Where(g => !g.IsData && !g.NoInit).ToList();
             PlaceAll(zeroed);
             if (at > range.First) plan.RegionClears.Add(new AddressRange(range.First, at - 1));
+            foreach (var g in zeroed.Where(g => g.RegionOffset is not null))
+                plan.RegionClears.Add(new AddressRange(g.Address, g.Address + g.Type.Size - 1));
             PlaceAll(inRegion.Where(g => !g.IsData && g.NoInit));
             var data = inRegion.Where(g => g.IsData).ToList();
             PlaceAll(data);
-            plan.FixedImageGlobals.AddRange(data);
-            if (at > range.First) plan.RegionUse[name] = new AddressRange(range.First, at - 1);
+            (chr ? plan.ChrGlobals : plan.FixedImageGlobals).AddRange(data);
+            if (placed.Count == 0) continue;
+            if (chr) plan.ChrUse[name] = placed.Sum(g => g.Type.Size);
+            else plan.RegionUse[name] = new AddressRange(placed.Min(g => g.Address), placed.Max(g => g.Address + g.Type.Size) - 1);
         }
         plan.FixedImageGlobals.AddRange(program.Globals.Where(g => g.FixedAddress is not null && g.IsData));
         plan.OverlayGlobals.AddRange(program.Globals.Where(g => g.IsOverlayImage));

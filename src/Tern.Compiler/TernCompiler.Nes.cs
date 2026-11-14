@@ -107,9 +107,10 @@ public static partial class TernCompiler
     /// <summary>
     /// The iNES 1.0 file (spec 12.2): the header (mapper, PRG ROM in 16 KB units, CHR ROM in 8 KB units,
     /// mirroring), PRG ROM, then CHR ROM. NROM is 16 KB (at $C000, mirrored at $8000) when nothing lies
-    /// below $C000, else 32 KB. Bytes no code or data covers are $FF.
+    /// below $C000, else 32 KB. Bytes no code or data covers are $FF. CHR ROM holds the data of the chr
+    /// area at its PPU addresses, zeros elsewhere.
     /// </summary>
-    private static (byte[] File, int PrgSize, int PrgFirst) NesFile(Cartridge cartridge, IReadOnlyList<(int Address, byte[] Bytes)> segments)
+    private static (byte[] File, int PrgSize, int PrgFirst) NesFile(Cartridge cartridge, IReadOnlyList<(int Address, byte[] Bytes)> segments, RamPlan plan)
     {
         var rom = segments.Where(s => s.Address >= 0x8000).ToList();
         int prgFirst = rom.Count > 0 && rom.Min(s => s.Address) < 0xC000 ? 0x8000 : 0xC000;
@@ -117,6 +118,7 @@ public static partial class TernCompiler
         Array.Fill(prg, (byte)0xFF);
         foreach (var (address, bytes) in rom) bytes.CopyTo(prg, address - prgFirst);
         var chr = cartridge.Board.ChrRom ? new byte[ChrBank] : [];
+        foreach (var g in plan.ChrGlobals) ByteLayout(g, g.InitialBytes ?? new byte[g.Type.Size]).CopyTo(chr, g.Address);
         var board = cartridge.Board;
         var file = new List<byte>
         {

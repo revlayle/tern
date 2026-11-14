@@ -497,6 +497,13 @@ public sealed partial class Checker
                     c.ConstValue = CompileTimeArray(c.Args[0]).Items.Length;
                     return;
                 }
+                // Tile data (NES): its length, though the CPU cannot read it.
+                if (c.Args[0] is NameExpr { Name: var tiles } && Lookup(tiles) is VariableSymbol { InChr: true } chrData)
+                {
+                    c.Type = TernType.IntLiteral;
+                    c.ConstValue = chrData.Type.IsArray ? chrData.Type.Length : throw new CompileError(c.Pos, "len() needs an array. Use sizeof() for the size of a type");
+                    return;
+                }
                 CheckExpr(c.Args[0]);
                 if (!c.Args[0].Type.IsArray) throw new CompileError(c.Pos, "len() needs an array. Use sizeof() for the size of a type");
                 c.Type = TernType.IntLiteral;
@@ -524,6 +531,14 @@ public sealed partial class Checker
                     case ConstSymbol: throw new CompileError(name.Pos, $"'{name.Name}' is a constant, which has no address. Use data for a value in memory");
                     case FunctionSymbol f:
                         TakeFunctionAddress(c, f, name.Pos);
+                        return;
+                    case VariableSymbol { InChr: true } tiles:
+                        // Its PPU address, a u16: not a pointer, since the CPU cannot read there (spec 12.2).
+                        name.Symbol = tiles;
+                        name.Type = tiles.Type;
+                        if (!_dead) _function?.UsedGlobals.Add(tiles);
+                        c.AddressOf = tiles;
+                        c.Type = TernType.U16;
                         return;
                     case VariableSymbol v:
                         if (!v.InMemory) throw new CompileError(name.Pos, $"'{name.Name}' lives in a register and has no address. Remove 'using' to keep it in memory");
