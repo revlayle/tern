@@ -919,3 +919,11 @@ Spec 12.2 (NES).
 - **Zero page `$00–$FF` free, variables `$0200–$07FF`, volatile `$2000–$401F`, code in ROM** (`$8000–$FFFF` on NROM, the fixed bank `$C000–$FFFF` on UxROM). Reason: there is no OS, so all of zero page is the program's; the registers are the only memory that changes behind the program.
 - **Startup:** interrupts and PPU NMI off, stack set, bank 0 on UxROM, two vblank waits with RAM cleared between, initial values copied, then `main`; an endless loop after it. Reason: the PPU ignores writes for about two frames after power-on, and RAM, the stack pointer and the selected bank are undefined. `data` at `$FFFC` is an error: jumping to `main` would skip every one of these, and `main` returns with `rts`. A hook run before the startup is left for a board that needs one (MMC1).
 - **Output: iNES 1.0**, header, PRG banks with the fixed bank last, CHR ROM. Reason: every emulator and flash cartridge reads it; NES 2.0's extra fields serve boards Tern does not build yet.
+
+## 2026-11-14: the NES library, `tern run` and Mesen
+
+Spec 12.2 (NES); roadmap M27.
+
+- **`lib/nes`: register structs, a sprite buffer with DMA, PPU memory writes, controllers; the frame loop through an `interrupt fn` part.** The program owns the NMI vector, so `nes.vblank()` is a part (6.3) it calls from its handler, and `wait_frame()` waits for the frame count. Reason: game logic in `main` and PPU work in NMI is how most NES games are written, and a part combines library and program vblank work in one handler with one register save. Sound and text are left out: a music driver is its own library, and each game declares its tiles' encoding.
+- **`tern run` models PPU memory and OAM, not pixels**, with vblank and NMI each frame, scripted controllers and UxROM banks. Reason: tests then check nametables, palettes, CHR RAM and sprites as C64 tests check screen memory, and frame loops run; drawing pixels would be an emulator of its own, and Mesen checks graphics.
+- **Mesen for the M27 checks**, in portable mode, its path in `CLAUDE.md`; the coding session checks whether its test runner (a Lua script, no window) can take the screenshots, or uses the window capture of `altirra-shot.ps1`.

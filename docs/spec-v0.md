@@ -1256,6 +1256,19 @@ A platform description gives: CPU variant, free zero-page ranges, RAM ranges for
 - **Startup** (the reset vector, the compiler's): `sei`, `cld`, stack pointer `$FF`, PPU NMI off (`$2000`), APU frame IRQ and DMC IRQ off; on `uxrom`, select bank 0; wait for two vblanks (the PPU ignores writes for about two frames after power-on), clearing RAM `$0000–$07FF` between them; copy initial values; call `main`. When `main` returns, the program stops in an endless loop; the NMI handler keeps running. `data` at `$FFFC` is an error that says the startup owns reset and the program starts in `main`.
 - **Output:** a `.nes` file: a 16-byte iNES 1.0 header (mapper number, PRG size in 16 KB units, CHR size in 8 KB units, 0 for CHR RAM, the mirroring bit), then PRG ROM (banks in order, the fixed bank last), then CHR ROM. One build, one file; banks make no files of their own.
 - Default encoding: none (2.1); a NES program declares one.
+- **`lib/nes`** (decision 2026-11-14): register structs for the PPU (`nes.ppu`, `$2000–$2007`) and APU (`nes.apu`), with bit constants; OAM DMA (`$4014`) and the controller ports; a 256-byte sprite buffer `nes.oam` `@ align(256)` (64 sprites of y, tile, attributes, x), `nes.hide_sprites()`; `nes.vblank()`, an `interrupt fn` part (6.3) the program calls from its own NMI handler, which sends the sprites by DMA and counts the frame, and `nes.wait_frame()`, which waits for the count to change; PPU memory through `$2006`/`$2007`, for use with rendering off or in vblank: `ppu_copy(src, dest, n)` (also to load CHR RAM on `uxrom`), `ppu_fill(dest, value, n)`, `set_palette(p)`, `scroll(x, y)`, `render_on()`, `render_off()`; `pad(n) -> u8`, the buttons of pad 1 or 2 as bits (`BTN_A` ... `BTN_RIGHT`). `nes/uxrom`: `select(n)`. Not in M27: sound, text helpers, and the DMC's interference with controller reads.
+  ```
+  interrupt fn frame() {
+      nes.vblank()                 // sprites, frame count
+      nes.scroll(x, 0)             // last in vblank
+  }
+  data nmi_vector: u16 @ $FFFA = addr(frame)
+
+  fn main() {
+      while true { nes.wait_frame(); update() }
+  }
+  ```
+- **`tern run`** models PPU memory, not pixels: writes through `$2006`/`$2007` go to a 16 KB PPU memory and OAM DMA to a 256-byte OAM, which tests check and `tern run` dumps (a nametable as text, as the C64 screen). `$2002` reports vblank once a frame and a read clears it; with bit 7 of `$2000` set an NMI fires every 29,781 cycles (one NTSC frame). The controllers read as no buttons, or as a test scripts them per frame. Writes to the UxROM latch switch the bank seen at `$8000`. Not modelled: rendering, sprite 0 hits, sprite overflow, sound, timing within a frame; graphics are checked in Mesen.
 - **Boards in M27:**
 
   | Board | Options | PRG ROM | CHR | Selecting a bank |

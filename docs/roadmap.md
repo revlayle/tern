@@ -657,7 +657,9 @@ Done when: emulator tests cover `io` against an MLI and disk modelled in C# (as 
 
 - First (decision 2026-11-13, question 150): the Apple II startup's prefix code only when the program imports `io`, its bytes counted under `io` in the report. Tests: an Apple II program without `io` has no GET_PREFIX call in its listing; one with `io` has it, and the report shows it under `io`.
 - Bank switching (spec 8.4, 8.5, 14.1; direction settled 2026-11-12, syntax 2026-11-14): the `cartridge` line, `bank` areas, `import m @ area[n]`, plain calls, `implements`, one library module per board; boards `nrom` and `uxrom` (spec 12.2, decision 2026-11-14)
-- iNES output; 2 KB of RAM, so frame sharing and zero page matter most; PPU and APU register structs; NMI-driven frame loop; no default encoding, so examples declare one (`encoding`, `default encoding`, spec 2.1)
+- `--target nes` (spec 12.2, decisions 2026-11-14): boards `nrom` and `uxrom`, `chr` areas, `@ area + offset`, vectors as `data`, placed `data` always kept, the memory map and startup, iNES 1.0 output; 2 KB of RAM, so frame sharing and zero page matter most
+- `lib/nes` and `nes/uxrom` as in spec 12.2: register structs, sprite buffer and DMA, the `nes.vblank()` part and `wait_frame()`, PPU memory writes, controllers; no default encoding, so examples declare one (`encoding`, `default encoding`, spec 2.1)
+- `tern run`: PPU memory and OAM modelled (not pixels), vblank and NMI each frame, scripted controllers, UxROM banks
 
 Done when: an example scrolls a background and moves sprites in a NES emulator (Mesen), with code in more than one bank.
 
