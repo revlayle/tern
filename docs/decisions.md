@@ -911,3 +911,11 @@ Spec 2.2, 12.2 (NES), 13.
 - **The program sets the NMI and IRQ vectors with `data` at `$FFFA` and `$FFFE`**: `data nmi_vector: u16 @ $FFFA = addr(frame)`. Reason: the NES has no system ROM, so the cartridge's bytes are the vectors, fixed at build time; existing syntax says it, with no installing function (the 2026-11-01 decision already noted NES vectors are fixed in ROM). Each must be the address of an `interrupt fn` or `asm fn`, since a plain `fn` ends in `rts`; an unset vector points to an `rti`.
 - **Reset is the compiler's**, pointing to the board's startup code (on `uxrom` it also selects a known bank, since the bank at power-on is undefined). Reason: nothing returns from reset; the program starts in `main`, and its own startup would be a separate feature, like binaries without `main` (12.3).
 - **`data` with a placement is always kept and never warned as unused**, in the main file and in imported modules. Reason: hardware reads it where no code names it (vectors, VIC sprites, PPU tiles); the placement shows it is there on purpose. Unplaced `data` keeps the rule of being kept when compiled code names it. The developer noticed the gap: the spec kept "the main file's globals" without saying `data`, and the warning exempted fixed variables but not fixed `data`.
+
+## 2026-11-14: the NES memory map, startup and output
+
+Spec 12.2 (NES).
+
+- **Zero page `$00–$FF` free, variables `$0200–$07FF`, volatile `$2000–$401F`, code in ROM** (`$8000–$FFFF` on NROM, the fixed bank `$C000–$FFFF` on UxROM). Reason: there is no OS, so all of zero page is the program's; the registers are the only memory that changes behind the program.
+- **Startup:** interrupts and PPU NMI off, stack set, bank 0 on UxROM, two vblank waits with RAM cleared between, initial values copied, then `main`; an endless loop after it. Reason: the PPU ignores writes for about two frames after power-on, and RAM, the stack pointer and the selected bank are undefined. `data` at `$FFFC` is an error: jumping to `main` would skip every one of these, and `main` returns with `rts`. A hook run before the startup is left for a board that needs one (MMC1).
+- **Output: iNES 1.0**, header, PRG banks with the fixed bank last, CHR ROM. Reason: every emulator and flash cartridge reads it; NES 2.0's extra fields serve boards Tern does not build yet.

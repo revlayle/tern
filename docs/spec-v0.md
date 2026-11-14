@@ -1242,6 +1242,20 @@ A platform description gives: CPU variant, free zero-page ranges, RAM ranges for
 **NES (M27)** (decisions 2026-11-14; being settled)
 
 - CPU: `ricoh2a03`. Every NES program is a cartridge image, so its `memory` block names the board (8.4).
+- **Memory map** (decision 2026-11-14):
+
+  | Area | Range | Notes |
+  |---|---|---|
+  | Free zero page | `$00–$FF` | all of it: there is no OS |
+  | Stack | `$0100–$01FF` | return addresses (8.3) |
+  | Variables | `$0200–$07FF` | 2 KB RAM less zero page and stack |
+  | Volatile | `$2000–$401F` | PPU, APU, controller and OAM DMA registers |
+  | Code and `data` | `$8000–$FFFF` on `nrom`; `$C000–$FFFF`, the fixed bank, on `uxrom` | ROM |
+
+  ROM holds no variables: a global with an initial value keeps the value in ROM, and the startup code copies it to RAM, as initialized data is copied on the other targets.
+- **Startup** (the reset vector, the compiler's): `sei`, `cld`, stack pointer `$FF`, PPU NMI off (`$2000`), APU frame IRQ and DMC IRQ off; on `uxrom`, select bank 0; wait for two vblanks (the PPU ignores writes for about two frames after power-on), clearing RAM `$0000–$07FF` between them; copy initial values; call `main`. When `main` returns, the program stops in an endless loop; the NMI handler keeps running. `data` at `$FFFC` is an error that says the startup owns reset and the program starts in `main`.
+- **Output:** a `.nes` file: a 16-byte iNES 1.0 header (mapper number, PRG size in 16 KB units, CHR size in 8 KB units, 0 for CHR RAM, the mirroring bit), then PRG ROM (banks in order, the fixed bank last), then CHR ROM. One build, one file; banks make no files of their own.
+- Default encoding: none (2.1); a NES program declares one.
 - **Boards in M27:**
 
   | Board | Options | PRG ROM | CHR | Selecting a bank |
