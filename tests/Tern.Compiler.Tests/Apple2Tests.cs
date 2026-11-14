@@ -74,6 +74,18 @@ public class Apple2Tests
     }
 
     [Fact]
+    public void A_variable_required_in_zero_page_moves_one_the_compiler_chose_to_ram()
+    {
+        // Review M26, finding 8: the compiler's own choices filled $50-$FE, and p must be in zero page.
+        var r = RunApple2(Bytes175 + "var buf: [u8; 4]\nvar p: ptr u8\nfn main() {\n" + Uses175 + "    p = addr(buf)\n    p[1] = 7\n}\n");
+        Assert.Equal(7, r.U8("buf", 1));
+        Assert.InRange(r.Address("p"), 0x50, 0xFE);
+        Assert.All(Enumerable.Range(0, 175), i => Assert.Equal(1, r.U8($"b{i}")));
+        // One of the b's went to RAM to make room.
+        Assert.Contains(Enumerable.Range(0, 175), i => r.Address($"b{i}") >= 0x2000);
+    }
+
+    [Fact]
     public void A_variable_required_in_zero_page_across_the_gap_is_still_an_error()
     {
         var e = Assert.Throws<CompileError>(() => Compile("var a: [u8; 175] @ zp\nvar p: ptr u8 @ zp\nfn main() {\n    a[1] = 1\n    p[0] = 2\n}\n"));
