@@ -903,3 +903,11 @@ Spec 8.4, 12.2 (NES).
 Spec 4, 12.2 (NES); replaces the third point of "NES tile data" above, the same day.
 
 - **`@ name + offset` places a declaration at an offset from the start of a region or `chr` area**, on every target: `data font @ tiles + $1000`, `var col: [u8; 32] @ buffers + $100`. Reason (the developer's): it says "4 KB after the start" directly, whatever address the area starts at, and `+` keeps its meaning (the area's start plus a constant), where `@ tiles $1000` needed the reader to know the number was an address in another address space. An offset means the same in every region, so the rule has no exception for areas with their own address space. `@ $C100` stays a fixed address; the offset form follows the area when its range moves. Not on `bank` or `overlay` areas, where modules are placed by import and an overlay's fixed data uses an address (8.5).
+
+## 2026-11-14: NES interrupt vectors; placed `data` is always kept
+
+Spec 2.2, 12.2 (NES), 13.
+
+- **The program sets the NMI and IRQ vectors with `data` at `$FFFA` and `$FFFE`**: `data nmi_vector: u16 @ $FFFA = addr(frame)`. Reason: the NES has no system ROM, so the cartridge's bytes are the vectors, fixed at build time; existing syntax says it, with no installing function (the 2026-11-01 decision already noted NES vectors are fixed in ROM). Each must be the address of an `interrupt fn` or `asm fn`, since a plain `fn` ends in `rts`; an unset vector points to an `rti`.
+- **Reset is the compiler's**, pointing to the board's startup code (on `uxrom` it also selects a known bank, since the bank at power-on is undefined). Reason: nothing returns from reset; the program starts in `main`, and its own startup would be a separate feature, like binaries without `main` (12.3).
+- **`data` with a placement is always kept and never warned as unused**, in the main file and in imported modules. Reason: hardware reads it where no code names it (vectors, VIC sprites, PPU tiles); the placement shows it is there on purpose. Unplaced `data` keeps the rule of being kept when compiled code names it. The developer noticed the gap: the spec kept "the main file's globals" without saying `data`, and the warning exempted fixed variables but not fixed `data`.
