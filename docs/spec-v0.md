@@ -1245,7 +1245,7 @@ A platform description gives: CPU variant, free zero-page ranges, RAM ranges for
 
   | Board | Options | PRG ROM | CHR | Selecting a bank |
   |---|---|---|---|---|
-  | `nrom` (mapper 0) | `vertical` or `horizontal` (mirroring) | 16 or 32 KB, no banks | 8 KB ROM | none |
+  | `nrom` (mapper 0) | `vertical` or `horizontal` (mirroring) | 16 or 32 KB, no banks | 8 KB ROM, declared as a `chr` area | none |
   | `uxrom` (mapper 2) | `vertical` or `horizontal` | `$8000–$BFFF` bank area of 16 KB banks; the last bank is fixed at `$C000–$FFFF` and holds the resident program | 8 KB RAM | `nes/uxrom` |
 
   - **NROM's size follows from the program:** a program that fits in 16 KB is NROM-128, its 16 KB visible twice, at `$8000` and `$C000`; a larger one is NROM-256. There is no size option.
