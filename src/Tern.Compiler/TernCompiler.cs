@@ -170,6 +170,11 @@ public static partial class TernCompiler
                 && AsmEffects.ReadsMemory(i.Mnemonic, i.Mode) && !AsmEffects.WritesMemory(i.Mnemonic, i.Mode)
                 && i.Operand is VarOperand { Variable: var v } o)
                 (indexed.TryGetValue(v.Storage, out var list) ? list : indexed[v.Storage] = []).Add(v.AliasOffset + o.Offset);
+        // NROM fills $C000-$FFFF first, so a small program is NROM-128; one that does not fit there is
+        // laid out again in one area, $8000-$FFFF, so that a function or table may be larger than 16 KB
+        // (review M27, finding 4).
+        var codeAreas = layout.Program;
+        bool CanJoin() => cartridge is { Board.BankArea: null } && Joined(codeAreas).Count < codeAreas.Count;
         for (bool byPage = true; ;)
         {
             plan = Allocator.Allocate(program, platform, byPage, indexed);
@@ -299,7 +304,7 @@ public static partial class TernCompiler
             // any error as before.
             try
             {
-                code = Assembler.Assemble(items, layout.Program, () =>
+                code = Assembler.Assemble(items, codeAreas, () =>
                 {
                     foreach (var (g, label) in imageLabels) g.Address = label.Address;
                     foreach (var (v, offset) in plan.ZeroedGlobals.Concat(plan.NoinitGlobals).Concat(plan.CopiedGlobals)) v.Address = bss.Address + offset;
@@ -320,6 +325,11 @@ public static partial class TernCompiler
                     systemFile = built;
                 }
                 break;
+            }
+            catch (CompileError) when (CanJoin())
+            {
+                codeAreas = Joined(codeAreas);
+                byPage = true;
             }
             catch (Exception e) when (byPage && plan.PageArrays.Count > 0 && e is Assembler.NoPageStart or CompileError) { byPage = false; }
             catch (Assembler.NoPageStart)
@@ -495,10 +505,12 @@ public static partial class TernCompiler
         // The low table follows the high one.
         foreach (var (function, pos, high, _, span) in gen.MatchTables)
             report.AppendLine($"Jump table of the indexed match at {pos} in {function.Name}: {new AddressRange(high.Address, high.Address + 2 * span - 1)}, {2 * span} bytes for {span} values");
-        if (code.Areas.Count > 1 || layout.Regions.Count > 0)
+        // The variables' own RAM (the NES) has its line above (review M27, suggestion 7).
+        var programAreas = code.Areas.Where(a => !layout.Variables.Any(v => v.Contains(a.Free))).ToList();
+        if (programAreas.Count > 1 || layout.Regions.Count > 0)
         {
             report.AppendLine("Program areas:");
-            foreach (var a in code.Areas)
+            foreach (var a in programAreas)
                 report.AppendLine($"  {a.Free}: {a.UsedEnd - a.Free.First} of {a.Free.Size} bytes used");
             foreach (var (name, range) in layout.Regions)
                 report.AppendLine(plan.RegionUse.TryGetValue(name, out var use)

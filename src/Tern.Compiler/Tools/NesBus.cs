@@ -114,7 +114,8 @@ public sealed class NesBus : IBus
         }
         if (address == 0x4016) return Serial(ref _shift1);
         if (address == 0x4017) return Serial(ref _shift2);
-        if (address < 0x4020) return 0;
+        // NROM and UxROM have no PRG RAM at $4020-$7FFF: nothing answers there.
+        if (address < 0x8000) return 0;
         return _ram.Bytes[address];
     }
 
@@ -158,7 +159,7 @@ public sealed class NesBus : IBus
             if (_strobe) Latch();
             return;
         }
-        if (address < 0x8000) { if (address >= 0x4020) _ram.Bytes[address] = value; return; }
+        if (address < 0x8000) return;
         if (_mapper == 2)
         {
             // UxROM's latch sees the ROM's byte at the address as well as the CPU's (bus conflicts).

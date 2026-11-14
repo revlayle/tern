@@ -223,6 +223,89 @@ public class NesTests
         Assert.Equal((line, column), (e.Pos.Line, e.Pos.Column));
     }
 
+    [Theory]
+    // Review M27, finding 1: a cartridge has no disk and no RAM to load an overlay into.
+    [InlineData("cartridge nrom vertical\n    $6000..=$7FFF overlay lv",
+        "A cartridge has no disk to load an overlay from, and the board 'nrom' no RAM at $6000-$7FFF to load it into. Remove the line, or use a board with banks ('cartridge uxrom') and place modules in a bank area", 3, 19)]
+    [InlineData("cartridge uxrom vertical\n    $6000..=$7FFF overlay lv",
+        "A cartridge has no disk to load an overlay from, and the board 'uxrom' no RAM at $6000-$7FFF to load it into. Remove the line, and place modules in banks: '$8000..=$BFFF bank lv' and 'import m @ lv[0]'", 3, 19)]
+    // Finding 2: a region only in RAM; $0800-$1FFF repeats it.
+    [InlineData("cartridge nrom vertical\n    $0800..=$08FF region mirror",
+        "A region must lie in RAM, $0000-$07FF; $0800-$08FF does not ($0800-$1FFF repeats the RAM, and the board 'nrom' has no RAM elsewhere). Use addresses in that range", 3, 19)]
+    [InlineData("cartridge nrom vertical\n    $6000..=$60FF region extra",
+        "A region must lie in RAM, $0000-$07FF; $6000-$60FF does not ($0800-$1FFF repeats the RAM, and the board 'nrom' has no RAM elsewhere). Use addresses in that range", 3, 19)]
+    [InlineData("cartridge nrom vertical\n    $6000..=$60FF reserved",
+        "A reserved range must lie in RAM, $0000-$07FF, or in the board's ROM, $8000-$FFFF; $6000-$60FF does not. Use addresses in one of them", 3, 19)]
+    // Suggestion 6: the board's ROM, not $8000-$07FF.
+    [InlineData("cartridge nrom vertical\n    $8000..=$FFFF reserved",
+        "No program area is left: the reserved ranges cover all of the board 'nrom's ROM for the program, $C000-$FFFF, $8000-$BFFF. Leave room for the program", 3, 19)]
+    public void Memory_a_cartridge_does_not_have(string lines, string message, int line, int column)
+    {
+        var e = Error($"memory {{\n    {lines}\n}}\nfn main() {{ }}");
+        Assert.Equal(message, e.Description);
+        Assert.Equal((line, column), (e.Pos.Line, e.Pos.Column));
+    }
+
+    [Fact]
+    public void A_region_and_reserved_ranges_in_ram_and_rom_work()
+    {
+        var r = RunNes("memory {\n    cartridge nrom vertical\n    $0700..=$07FF region buffer\n    $E000..=$E0FF reserved\n}\nvar m: [u8; 4] @ buffer\nvar score: u8 @ zp\nfn main() {\n    score = 7\n    m[0] = 99\n}");
+        Assert.Equal(7, r.U8("score"));
+        Assert.Equal(99, r.U8("m"));
+        Assert.Equal(0x0700, r.Address("m"));
+    }
+
+    [Fact]
+    public void Nrom_256_holds_a_table_larger_than_16_kb()
+    {
+        // Review M27, finding 4: the program is laid out again in one area, $8000-$FFFF.
+        var r = RunNes(Nrom + """
+            data big: [u8; 17000] = [i % 251 for i in 0..17000]
+            var x: u8
+            var y: u8
+            fn main() {
+                var p: ptr u8 = addr(big) + 16990
+                x = p[9]
+                p = addr(big) + 200
+                y = p[51]
+            }
+            """);
+        Assert.Equal(16999 % 251, r.U8("x"));
+        Assert.Equal(251 % 251, r.U8("y"));
+        Assert.Equal(2, r.Result.File[4]);
+        Assert.Contains("32 KB of PRG ROM at $8000-$FFFF", r.Result.Report);
+        // The startup code then starts the ROM, and reset points to it.
+        Assert.Equal(0x8000, r.Result.Entry);
+        Assert.Equal([0x00, 0x80], r.Result.File[(16 + 0x7FFC)..(16 + 0x7FFE)]);
+    }
+
+    [Fact]
+    public void Running_out_of_ram_names_the_ram()
+    {
+        // Review M27, suggestion 5.
+        var e = Error(Nrom + "var a: [u8; 256]\nvar b: [u8; 256]\nvar c: [u8; 256]\nvar d: [u8; 256]\nvar f: [u8; 256]\nvar g: [u8; 256]\nvar h: [u8; 256]\n" +
+            "fn main() { a[1] = 1; b[1] = 1; c[1] = 1; d[1] = 1; f[1] = 1; g[1] = 1; h[1] = 1 }");
+        Assert.Equal("The variables need 1792 bytes, but the RAM for variables, $0200-$07FF (1536 bytes), has room for 1536. " +
+            "Make arrays smaller, use 'data' for tables that never change (they stay in ROM), or put small variables in zero page with '@ zp'", e.Description);
+    }
+
+    [Fact]
+    public void The_report_lists_ram_apart_from_the_program_areas()
+    {
+        // Review M27, suggestion 7.
+        var r = Compile(Nrom + "var big: [u8; 100]\nfn main() { big[1] = 2 }");
+        Assert.Contains("Variables in RAM: 100 bytes", r.Report);
+        Assert.DoesNotContain("$0200-$07FF:", r.Report);
+    }
+
+    [Fact]
+    public void Tern_run_has_no_ram_at_4020_to_7fff()
+    {
+        // Review M27, suggestion 10: NROM and UxROM have no PRG RAM.
+        var r = RunNes(Nrom + "volatile var cart: u8 @ $6000\nvar seen: u8\nfn main() {\n    cart = 5\n    seen = cart\n}");
+        Assert.Equal(0, r.U8("seen"));
+    }
+
     [Fact]
     public void Other_targets_have_no_cartridges_yet()
     {
@@ -267,7 +350,7 @@ public class NesTests
     public void Data_outside_rom_is_an_error()
     {
         var e = Error("memory {\n    cartridge nrom vertical\n    $0300..=$03FF reserved\n}\ndata d: [u8; 2] @ $0300 = [1, 2]\nfn main() { }");
-        Assert.Equal("'d' at $0300-$0301 is outside the cartridge's ROM ($8000-$FFFF), and the image cannot put bytes in RAM. Make it a 'var' with an initial value, which the startup code copies to RAM, or place it in ROM", e.Description);
+        Assert.Equal("'d' at $0300-$0301 is outside the cartridge's ROM ($8000-$FFFF), and the image cannot put bytes in RAM. Make it a 'var' with an initial value and no fixed address, which the startup code copies to RAM, or place it in ROM", e.Description);
     }
 
     [Fact]

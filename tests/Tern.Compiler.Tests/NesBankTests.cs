@@ -198,8 +198,8 @@ public class NesBankTests : IDisposable
     public void A_call_and_a_data_use_between_banks_are_errors()
     {
         var call = Error(TwoBanks, level1: "import level2\nfn run() -> u8 using A { return level2.run() }\n");
-        Assert.Equal("'level1.run' calls 'level2.run', but the modules level1 and level2 are in banks 0 and 1 of the bank area 'levels', so they are never loaded together. " +
-            "Call between them from resident code, or put one of them in another area", call.Description);
+        Assert.Equal("'level1.run' calls 'level2.run', but the modules level1 and level2 are in banks 0 and 1 of the bank area 'levels', and only one bank is selected at a time. " +
+            "Put both modules in the same bank, or call between them from resident code", call.Description);
         var data = Error(TwoBanks, level1: "import level2\nfn run() -> u8 using A { return level2.MARK[0] }\n");
         Assert.Equal("'level2.MARK' belongs to level2, which is in banks 1 and 0 of the bank area 'levels' as level1. They are never loaded together and share their memory. " +
             "Keep shared state in a resident module or the main file", data.Description);
@@ -223,6 +223,15 @@ public class NesBankTests : IDisposable
     {
         var e = Assert.Throws<CompileError>(() => TernCompiler.Compile($"memory {{\n    {lines}\n}}\nfn main() {{ }}", Platform.Nes));
         Assert.Equal(message, e.Description);
+    }
+
+    [Fact]
+    public void A_rejected_bank_line_brings_no_error_about_the_area()
+    {
+        // Review M27, suggestion 9: only the bank line's error, not "no overlay area 'w'".
+        var e = Error("import level1 @ w[0]\nmemory {\n    cartridge nrom vertical\n    $8000..=$BFFF bank w\n}\nfn main() { }");
+        Assert.Equal("The board 'nrom' has no banks. Remove the line, or name a board with banks, such as 'cartridge uxrom'", e.Description);
+        Assert.Single(e.All);
     }
 
     [Fact]

@@ -648,8 +648,10 @@ public sealed partial class Checker
         if (!_dead) caller.Callees.Add(callee);
         if (!_dead && callee.IsInline && caller.OverlayArea is not null && callee.OverlayUnit != caller.OverlayUnit) _inlineCalls.Add((caller, callee, pos));
         if (caller.OverlayArea is { } area && callee.OverlayArea == area && callee.OverlayUnit != caller.OverlayUnit && !callee.IsInline)
-            throw new CompileError(pos,
-                $"'{caller.Name}' calls '{callee.Name}', but the modules {caller.Module!.Name} and {callee.Module!.Name} are {(caller.Module.InBank ? NeverTogether(caller.Module, callee.Module!) : $"both in the overlay area '{area}'")}, so they are never loaded together. " +
-                "Call between them from resident code, or put one of them in another area");
+            throw new CompileError(pos, caller.Module!.InBank
+                ? $"'{caller.Name}' calls '{callee.Name}', but the modules {caller.Module.Name} and {callee.Module!.Name} are {NeverTogether(caller.Module, callee.Module)}, and only one bank is selected at a time. " +
+                  "Put both modules in the same bank, or call between them from resident code"
+                : $"'{caller.Name}' calls '{callee.Name}', but the modules {caller.Module.Name} and {callee.Module!.Name} are both in the overlay area '{area}', so they are never loaded together. " +
+                  "Call between them from resident code, or put one of them in another area");
     }
 }

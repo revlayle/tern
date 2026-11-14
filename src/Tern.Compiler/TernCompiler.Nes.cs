@@ -80,7 +80,7 @@ public static partial class TernCompiler
             var range = new AddressRange(g.Address, g.Address + g.Type.Size - 1);
             if (range.First < 0x8000)
                 throw new CompileError(g.Pos,
-                    $"'{g.Name}' at {range} is outside the cartridge's ROM ($8000-$FFFF), and the image cannot put bytes in RAM. Make it a 'var' with an initial value, which the startup code copies to RAM, or place it in ROM");
+                    $"'{g.Name}' at {range} is outside the cartridge's ROM ($8000-$FFFF), and the image cannot put bytes in RAM. Make it a 'var' with an initial value and no fixed address, which the startup code copies to RAM, or place it in ROM");
             if (range.Overlaps(new AddressRange(ResetVector, ResetVector + 1)))
                 throw new CompileError(g.Pos,
                     $"'{g.Name}' at {range} covers the reset vector ($FFFC), which belongs to the startup code: reset sets up the machine and then calls main. Remove the data, and start the program in main");
@@ -100,6 +100,16 @@ public static partial class TernCompiler
             }
         }
         return (nmi, irq);
+    }
+
+    /// <summary>Areas that touch joined into one, in address order: NROM's $8000-$BFFF and $C000-$FFFF as $8000-$FFFF.</summary>
+    private static List<AddressRange> Joined(IEnumerable<AddressRange> areas)
+    {
+        var joined = new List<AddressRange>();
+        foreach (var a in areas.OrderBy(a => a.First))
+            if (joined.Count > 0 && joined[^1].Last + 1 == a.First) joined[^1] = joined[^1] with { Last = a.Last };
+            else joined.Add(a);
+        return joined;
     }
 
     /// <summary>The vectors the compiler sets: reset to the startup code, and NMI and IRQ, unless the program sets them, to an rti.</summary>

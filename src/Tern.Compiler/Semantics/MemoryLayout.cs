@@ -146,6 +146,26 @@ public sealed class MemoryLayout
                 chr[line.Name!] = range;
                 continue;
             }
+            // A cartridge has only the machine's RAM and the board's ROM (review M27, findings 1 and 2).
+            if (cartridge is not null)
+            {
+                var ram = new AddressRange(0, platform.RamEnd);
+                var board = cartridge.Board;
+                var rom = new AddressRange(board.CodeAreas.Concat(board.BankArea is { } b ? [b] : []).Min(a => a.First),
+                    board.CodeAreas.Concat(board.BankArea is { } b2 ? [b2] : []).Max(a => a.Last));
+                if (line.Kind == "overlay")
+                    throw new CompileError(line.Pos,
+                        $"A cartridge has no disk to load an overlay from, and the board '{board.Name}' no RAM at {range} to load it into. " +
+                        (board.BankArea is { } window
+                            ? $"Remove the line, and place modules in banks: '${window.First:X4}..=${window.Last:X4} bank {line.Name}' and 'import m @ {line.Name}[0]'"
+                            : "Remove the line, or use a board with banks ('cartridge uxrom') and place modules in a bank area"));
+                if (line.Kind == "region" && !ram.Contains(range))
+                    throw new CompileError(line.Pos,
+                        $"A region must lie in RAM, {ram}; {range} does not ({new AddressRange(platform.RamEnd + 1, 0x1FFF)} repeats the RAM, and the board '{board.Name}' has no RAM elsewhere). Use addresses in that range");
+                if (line.Kind == "reserved" && !ram.Contains(range) && !rom.Contains(range))
+                    throw new CompileError(line.Pos,
+                        $"A reserved range must lie in RAM, {ram}, or in the board's ROM, {rom}; {range} does not. Use addresses in one of them");
+            }
             switch (line.Kind)
             {
                 case "program" when cartridge is not null:
@@ -183,7 +203,9 @@ public sealed class MemoryLayout
         var programAreas = program.Count > 0 ? program
             : Subtract(cartridge is not null ? cartridge.Board.CodeAreas : [new AddressRange(platform.LoadAddress, platform.RamEnd)], taken);
         if (programAreas.Count == 0)
-            throw new CompileError(lines[0].Line.Pos, $"No program area is left: the reserved and region ranges cover all of ${platform.LoadAddress:X4}-${platform.RamEnd:X4}. Leave room for the program");
+            throw new CompileError(lines[0].Line.Pos, cartridge is not null
+                ? $"No program area is left: the reserved ranges cover all of the board '{cartridge.Board.Name}'s ROM for the program, {List(cartridge.Board.CodeAreas)}. Leave room for the program"
+                : $"No program area is left: the reserved and region ranges cover all of ${platform.LoadAddress:X4}-${platform.RamEnd:X4}. Leave room for the program");
         var layout = new MemoryLayout
         {
             Program = programAreas,

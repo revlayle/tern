@@ -153,6 +153,8 @@ public sealed partial class Checker
 
         foreach (var import in modules[^1].Syntax.Imports.Where(i => i.Area is not null))
         {
+            // The block had an error: its areas are not known (review M27, suggestion 9).
+            if (_memoryFailed) break;
             if (_layout.Overlays.ContainsKey(import.Area!))
             {
                 if (import.Bank is not null)
