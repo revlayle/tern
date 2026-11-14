@@ -1,8 +1,8 @@
 # Review: M20 follow-up, branch `m20-followup`
 
-## First review (`626a345`), 2026-11-09
+## First review (`837ead1`), 2026-11-09
 
-**Not ready to merge: two must-fix items**, both in the constant-expression change (`4c96d78`). Each is a program that compiles and runs correctly on `main` and fails to compile on the branch. The rest of the milestone is good: `addr()` in initial values gives the right bytes in every form I tried, the tools and the library additions work, and the Galaxy Stars port (a copy with its `build/*.bin`) still compiles, `main.tern` and `check_player.tern`.
+**Not ready to merge: two must-fix items**, both in the constant-expression change (`cd81385`). Each is a program that compiles and runs correctly on `main` and fails to compile on the branch. The rest of the milestone is good: `addr()` in initial values gives the right bytes in every form I tried, the tools and the library additions work, and the Galaxy Stars port (a copy with its `build/*.bin`) still compiles, `main.tern` and `check_player.tern`.
 
 2121 tests pass (36 CPU, 2085 compiler). `BenchmarkTests` and `SkillTests` pass, with no baseline change (1254 / 350780).
 
@@ -71,7 +71,7 @@ A test with these three lines would guard it.
 - [x] `BenchmarkTests` and `SkillTests` unchanged
 - [x] Done when: the gaps 1, 3, 4, 5, 7, 8, 9 and 10 compile in their plain form (`GalaxyStarsGapTests`); the port itself still compiles
 
-## Second review (`de4adb0`), 2026-11-09
+## Second review (`83e0bcc`), 2026-11-09
 
 **Not ready to merge: one must-fix item.** A pointer now converts to `u16` in a compound assignment (`w += p`), which was an error on `main` and which spec 3.1 and 3.5 still make an error. It is a one-line check. Everything else is good. The first review's two must-fix items and suggestions 3, 5 and 6 are fixed and tested, and questions 79-85 are built as decided. `.lo` / `.hi` on `addr(...) ± constant` give the right bytes and one load. The Galaxy Stars port (`main.tern`, `check_player.tern`) still compiles.
 
@@ -120,7 +120,7 @@ A fix: in the compound-assignment branch (next to the typed-constant check at li
 - [x] `BenchmarkTests` and `SkillTests` unchanged
 - [x] Done when: gaps 1, 3, 4, 5, 7, 8, 9 and 10 compile in their plain form (`GalaxyStarsGapTests`); the port still compiles
 
-## Third review (`0d861dd`), 2026-11-09
+## Third review (`11016b0`), 2026-11-09
 
 **Ready to merge.** The second review's must-fix item is fixed and tested. Suggestion 2 is done, and suggestion 3 is under "Known limitations". The two points below are small wording issues in the new messages and do not block the merge.
 

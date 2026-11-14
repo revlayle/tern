@@ -1,6 +1,6 @@
 # Review: M20 follow-up 3, branch `m20-followup3`
 
-## First review (`a842cf2`), 2026-11-09
+## First review (`16740d4`), 2026-11-09
 
 **Not ready to merge.** Three must-fix items: one regression in module loading and two cases of "constants on demand" that still fail, with wrong messages. The rest is solid. Evaluation order holds in every case I tried (operators, arguments, indexes, compound assignments, volatile targets, `&&` / `||`, struct-array indexes), the `p = q + e` and sign-test shapes match the spec 11 rows and give correct results, `var` lines in an `asm fn` share frames correctly (also across a `jsr` from the assembly to a Tern function), and `step` works as a name.
 
@@ -76,7 +76,7 @@ gives "addr(fb) is known only when the program is placed, so it cannot be part o
 - [x] The skill: the evaluation-order rule and its exception, `var` lines in `asm fn`, line continuation.
 - [x] The port's workarounds for gaps 11, 12, 15, 17, 18, 19, 23 (the error) and 24 compile in their plain form (`GalaxyStarsGapTests`).
 
-## Second review (`95a2b15`), 2026-11-09
+## Second review (`cf028a2`), 2026-11-09
 
 **Ready to merge.** The three must-fix items and both suggestions from the first review are fixed and tested. Two new suggestions below, both small and in the new memory-block ordering; neither blocks the merge.
 
@@ -103,7 +103,7 @@ var r: u8
 fn main() { r = SZ }
 ```
 
-This compiles on `a842cf2` (`r = 16`). On `95a2b15` it is "'SZ' depends on itself: SZ -> buf -> SZ", but `buf` does not depend on the memory block, since `SCREEN` is a constant. The program is unusual (a memory block sized by a `len()` of a variable at a fixed address), so this is a suggestion. Fix: call `EnsureMemoryLayout` only when the name is one of the regions in `_module.Syntax.Memory` (the syntax is there before evaluation), or only when `Lookup(name)` finds no symbol.
+This compiles on `16740d4` (`r = 16`). On `cf028a2` it is "'SZ' depends on itself: SZ -> buf -> SZ", but `buf` does not depend on the memory block, since `SCREEN` is a constant. The program is unusual (a memory block sized by a `len()` of a variable at a fixed address), so this is a suggestion. Fix: call `EnsureMemoryLayout` only when the name is one of the regions in `_module.Syntax.Memory` (the syntax is there before evaluation), or only when `Lookup(name)` finds no symbol.
 
 **2. Suggestion: the new error "The memory block depends on itself" has no test.** (`Checker.cs:219`.) The coding conventions ask for one. It can be reached:
 

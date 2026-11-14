@@ -1,12 +1,12 @@
 # Review: M27 follow-up, questions 160, 166 and 169
 
-Branch `m27-followup` (`951eb17` to `b5865f9`, 4 commits), from `main` at `7a3535a`. Roadmap "M27: NES", last item (the three changes of questions 157-169); decision 2026-11-14; spec 8.5 and 12.2.
+Branch `m27-followup` (`5b1bf3f` to `8684609`, 4 commits), from `main` at `06423ea`. Roadmap "M27: NES", last item (the three changes of questions 157-169); decision 2026-11-14; spec 8.5 and 12.2.
 
 ## Verdict
 
 **Ready to merge.** No must-fix findings. Each of the three changes matches its decision and the spec's text, and each error has a test.
 
-`dotnet test` (in `../6502-language-dev`, on `b5865f9`): 3720 compiler tests pass. No benchmark changed. `SkillTests` pass.
+`dotnet test` (in `../6502-language-dev`, on `8684609`): 3720 compiler tests pass. No benchmark changed. `SkillTests` pass.
 
 ## What changed
 
@@ -41,8 +41,8 @@ The roadmap item: "Questions 157-169 (decision 2026-11-14): three changes from t
 
 ## Re-review
 
-Branch `m27-followup` at `ccf6737` (`main` merged in at `b4af13d`, status updated in `ccf6737`).
+Branch `m27-followup` at `ebf5755` (`main` merged in at `c8c94f6`, status updated in `ebf5755`).
 
 **Verdict: ready to merge.** The first review had no findings, so there was nothing to fix. Since then the branch has only merged `main`, which brought in this review file, and updated `docs/status.md`. The status now gives the verdict and lists the error position at `main.tern:1:1`, which predates this branch, under known limitations. That is the right place for it. No code or tests changed.
 
-`dotnet test` (on `ccf6737`): 3720 compiler tests and 36 CPU tests pass.
+`dotnet test` (on `ebf5755`): 3720 compiler tests and 36 CPU tests pass.

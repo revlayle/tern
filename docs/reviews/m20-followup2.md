@@ -1,6 +1,6 @@
 # Review: M20 follow-up 2, branch `m20-followup2`
 
-## First review (`f3e3ef4`), 2026-11-09
+## First review (`de44d29`), 2026-11-09
 
 **Ready to merge.** No must-fix items. All six roadmap items are built and tested, and the "done when" test passes. Struct literals give the right bytes in every layout and placement I tried. 16-bit shifts by 8 to 15 give the right results, signed and unsigned, and match the spec 11 rows. Constant arithmetic catches every overflow I tried. The four suggestions below are about error messages and one gap between the lexer and the new 64-bit rule.
 
@@ -59,9 +59,9 @@ People writing tables of records will hit this often, because the rule changes b
 - [x] A listing test for each new spec 11 row: compares, `&&`, `||`, a compare stored in a `bool`, `i8 >> 1` (`CompareShapeTests`)
 - [x] Done when: the `how_row` / `how_col` / `how_text` group compiles as an array of struct literals and gives the same tables (`GalaxyStarsPagesTests`)
 
-## Second review (`9db9de6`): review suggestions and questions 86, 87, 2026-11-09
+## Second review (`dacc89d`): review suggestions and questions 86, 87, 2026-11-09
 
-Commits since the first review: `a8cd7e4` (suggestions 1-4), the merge of `main`, and `9db9de6` (question 87, and the question 86 test).
+Commits since the first review: `fa13130` (suggestions 1-4), the merge of `main`, and `dacc89d` (question 87, and the question 86 test).
 
 **Not ready to merge: one must fix.** The lexer change is right: the check `value > (long.MaxValue - dv) / radix` before each digit is exact, so every literal up to 2^63 - 1 is accepted and nothing above it, in decimal, hex and binary. But one place still turns a literal into an `int` without a range check, and with the wider literals it now silently gives a small array. The four suggestion fixes give the messages the first review asked for.
 
@@ -100,7 +100,7 @@ Before question 87 the lexer stopped at `$FFFFFFFF`, so only lengths 2^31 to 2^3
 - [x] Line breaks between struct literal fields stay as built; a test that a newline between list elements is still the missing-`,` error
 - [ ] No literal silently wraps where it is used: see finding 1
 
-## Third review (`d72bf1d`): second review fixes, 2026-11-09
+## Third review (`db18283`): second review fixes, 2026-11-09
 
 **Ready to merge.** The must fix is done, and both suggestions are in. 2420 tests pass (36 CPU, 2384 compiler). `BenchmarkTests` and `SkillTests` pass with no change.
 
@@ -130,7 +130,7 @@ gives "Expected ',' or ']' after this element, found 'fn'. Write ',' between the
 - [x] Line breaks between struct literal fields stay as built; a test that a newline between list elements is still the missing-`,` error
 - [x] No literal silently wraps where it is used (finding 1; finding 3 is a smaller gap from before this branch)
 
-## Fourth review (`a508a4a`): third review suggestions, 2026-11-09
+## Fourth review (`f66fbce`): third review suggestions, 2026-11-09
 
 **Ready to merge.** Both suggestions are done and tested. 2429 tests pass (36 CPU, 2393 compiler). `BenchmarkTests` and `SkillTests` pass with no change. Every example that is a program compiles (`level1`, `level2` and `player_api` are modules).
 

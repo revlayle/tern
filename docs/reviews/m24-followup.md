@@ -1,6 +1,6 @@
 # Review: M24 follow-up, `assert` inside a `const fn`
 
-Branch `m24-followup` (`9cf52d2`, `716c0ab`, `fa12c41`), from `main` at `c4a1910`. Roadmap "M24 follow-up"; spec 4.1; decision 2026-11-13, question 128.
+Branch `m24-followup` (`6353828`, `302cce7`, `cb9e116`), from `main` at `fab2bb2`. Roadmap "M24 follow-up"; spec 4.1; decision 2026-11-13, question 128.
 
 ## Verdict
 
@@ -53,11 +53,11 @@ Branch `m24-followup` (`9cf52d2`, `716c0ab`, `fa12c41`), from `main` at `c4a1910
 - [x] Tests: holds, fails (message, line, called-from, `calledFrom`), a parameter condition, a nested const fn call, the runtime-code error, `float.of` too large.
 - [x] The tests pass and `float.of`'s error names the value (see note 2).
 
-## Re-review (`d1a5002`, `5dbf3ee`)
+## Re-review (`626f5bb`, `c0ce05a`)
 
 **Still ready to merge.** `dotnet test`: 3381 compiler tests and 36 CPU tests pass.
 
-- `d1a5002` merges `main` (the first review) and changes nothing else.
+- `626f5bb` merges `main` (the first review) and changes nothing else.
 - Suggestion 1 is done (`Interpreter.cs:670`). A condition that is not a bool now gets the top-level wording, at the condition. Probed with `assert 1.5, "m"` in a const fn: "An assert condition is a bool (called from nb.tern:5).", `suggestion` "Write a comparison, e.g. COUNT <= 64", `calledFrom` line 5. The `ConstFnTests` case checks the whole message. Nothing else used the `Bool` path for asserts, so the change touches nothing else.
 - Note 3 is done: the skill's `assert` bullet says that a second sentence starting with a verb becomes the suggestion. It is prose only, so `SkillTests` do not change.
 - Note 2: `float.of`'s message stays the spec's, as agreed.

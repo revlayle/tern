@@ -1,6 +1,6 @@
 # Review: M25 follow-up, Atari `io` and hex letters
 
-Branch `m25-atari-io` (`5009feb`, `48bb6b1`, `20f3edd`, `2c16cc0`, `f0aa3c2`, `52fe959`, `75227d4`), from `main` at `a3e8744`. Roadmap "M25 follow-up"; spec 10.1, 12.2, 13; decision 2026-11-13, questions 131, 132, 136.
+Branch `m25-atari-io` (`5d91d21`, `33b382f`, `fc6fe89`, `0f54521`, `2790522`, `74c1111`, `b0aca00`), from `main` at `1c3e63d`. Roadmap "M25 follow-up"; spec 10.1, 12.2, 13; decision 2026-11-13, questions 131, 132, 136.
 
 ## Verdict
 
@@ -10,10 +10,10 @@ Branch `m25-atari-io` (`5009feb`, `48bb6b1`, `20f3edd`, `2c16cc0`, `f0aa3c2`, `5
 
 ## What changed
 
-- **Hex letters** (`5009feb`): `text`'s digit table moved to a new library module `digits` (`lib/digits.tern`, screen codes); `lib/atari/digits.tern` replaces it with ATASCII through the existing platform-folder rule (spec 2.2). No language change, and `text` is not copied. C64 bytes are unchanged (benchmarks, `LibraryTests.Hex8_for_every_value`).
-- **`lib/atari/io`** (`48bb6b1`): `open`, `close`, `read`, `write`, `status`, `load`, `save`, `load_xex`, all on IOCB 1. CIO is a routine at a fixed address with the result in N. `read` and `write` skip CIO for a length of 0 (CIO would move one byte through A). `load`, `save` and `load_xex` always close, and `close_after_error` keeps the first error's status. `load_xex` handles an extra `$FF $FF` before a segment and stops cleanly at end of file between segments.
-- **`tern run`** (`20f3edd`): CIO on IOCBs 1-7 opens the build's overlay files for reading; writing and other commands stop the run with a message that lists the stand-ins.
-- **Label file** (`2c16cc0`): `.lbl` is now MADS's label table, which Altirra loads with the `.xex` of the same name. The C64's `.vs` is unchanged. Question 138 asks the spec session to record the format change.
+- **Hex letters** (`5d91d21`): `text`'s digit table moved to a new library module `digits` (`lib/digits.tern`, screen codes); `lib/atari/digits.tern` replaces it with ATASCII through the existing platform-folder rule (spec 2.2). No language change, and `text` is not copied. C64 bytes are unchanged (benchmarks, `LibraryTests.Hex8_for_every_value`).
+- **`lib/atari/io`** (`33b382f`): `open`, `close`, `read`, `write`, `status`, `load`, `save`, `load_xex`, all on IOCB 1. CIO is a routine at a fixed address with the result in N. `read` and `write` skip CIO for a length of 0 (CIO would move one byte through A). `load`, `save` and `load_xex` always close, and `close_after_error` keeps the first error's status. `load_xex` handles an extra `$FF $FF` before a segment and stops cleanly at end of file between segments.
+- **`tern run`** (`fc6fe89`): CIO on IOCBs 1-7 opens the build's overlay files for reading; writing and other commands stop the run with a message that lists the stand-ins.
+- **Label file** (`0f54521`): `.lbl` is now MADS's label table, which Altirra loads with the `.xex` of the same name. The C64's `.vs` is unchanged. Question 138 asks the spec session to record the format change.
 - **Example** `examples/atari/files.tern` with the overlay `greet.tern`; skill updates.
 
 ## Checks
@@ -53,7 +53,7 @@ Branch `m25-atari-io` (`5009feb`, `48bb6b1`, `20f3edd`, `2c16cc0`, `f0aa3c2`, `5
 
 ## Re-review
 
-Commits `3cf5f6e`, `e6a2be2`, `0e60125`, `ea2e605`, after `main` was merged in (`5305d40`). `dotnet test`: 3484 compiler tests pass. No benchmark changed.
+Commits `ebc279e`, `ca961b3`, `4fc3f34`, `f345171`, after `main` was merged in (`eec8c1c`). `dotnet test`: 3484 compiler tests pass. No benchmark changed.
 
 **Verdict: ready to merge.** All four suggestions are handled, each with a test:
 

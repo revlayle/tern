@@ -1,12 +1,12 @@
 # Review: M26 follow-up, the Apple II's `io` and `@ align(n)`
 
-Branch `m26-apple2-io` (`14dc261`, `f7460eb`, `26f8a5c`, `88daab8`, `5aa05e5`, `0ec5c96`, `2e70325`, `63e1012`), from `main` at `8425bd0`. Roadmap "M26 follow-up"; spec 4, 8.5, 10.1, 12.2; decision 2026-11-13 (the Apple II's `io`, and `@ align(n)`).
+Branch `m26-apple2-io` (`478c2e6`, `cfede86`, `8e5b576`, `36775c0`, `73d43cb`, `7d6686a`, `cf77029`, `378725c`), from `main` at `cf2b553`. Roadmap "M26 follow-up"; spec 4, 8.5, 10.1, 12.2; decision 2026-11-13 (the Apple II's `io`, and `@ align(n)`).
 
 ## Verdict
 
 **Not ready to merge.** Two must-fix findings in `@ align`. The first wastes up to `n` bytes of RAM, and the second crashes the compiler. A third is a roadmap error case with no test and no specific message. The `io` library, the prefix code and `tern run`'s stand-ins are correct as far as this review checked.
 
-`dotnet test` (in `../6502-language-dev`, on `63e1012`): 3618 compiler tests and 36 CPU tests pass. The status reports no benchmark change (1254 / 350780) and passing `SkillTests`. The AppleWin checks were not rerun by the reviewer.
+`dotnet test` (in `../6502-language-dev`, on `378725c`): 3618 compiler tests and 36 CPU tests pass. The status reports no benchmark change (1254 / 350780) and passing `SkillTests`. The AppleWin checks were not rerun by the reviewer.
 
 ## Checks
 
@@ -72,7 +72,7 @@ Branch `m26-apple2-io` (`14dc261`, `f7460eb`, `26f8a5c`, `88daab8`, `5aa05e5`, `
 
 ## Re-review
 
-Branch `m26-apple2-io` at `338efe9` (fixes in `4690f31`, `main` merged in at `b1a7b5c`).
+Branch `m26-apple2-io` at `a71d8e2` (fixes in `ce39ec9`, `main` merged in at `d7bd131`).
 
 **Verdict: ready to merge.** The three must-fix findings and both suggestions are done.
 

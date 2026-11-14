@@ -1,8 +1,8 @@
 # Review: M13 follow-up, branch `m13-followup`
 
-## Second re-review (`33ceba5`), 2026-11-07
+## Second re-review (`1fb908a`), 2026-11-07
 
-**Ready to merge.** 1339 tests pass (36 CPU, 1303 compiler). `BenchmarkTests` is unchanged. `main` was merged in (`5049fa4`), including the spec change for finding 6 (`aa3f3da`: long `data` may come from a list literal).
+**Ready to merge.** 1339 tests pass (36 CPU, 1303 compiler). `BenchmarkTests` is unchanged. `main` was merged in (`03ade4a`), including the spec change for finding 6 (`e2cce48`: long `data` may come from a list literal).
 
 - **7.** `CheckSiblingAddress` (`Checker.cs:1537`) is now the one check for `addr()` and for `#f.lo` / `#f.hi` in assembly. The re-review's probe (`asm { lda #level2.five.lo }` in `level1`) is now "addr(level2.five) is in level2, which is in the same overlay area 'levels' as level1". The same holds for an `inline asm fn` in `level1` that does it. `Taking_the_address_of_a_sibling_overlays_function_in_assembly_is_an_error` tests `.lo` and `.hi`.
 - **a.** The inline error now says "uses 'level2.T', data of level2".
@@ -24,9 +24,9 @@ Every item is met:
 - `const` before the memory block
 - the `OverlayTests` the roadmap lists
 
-## Re-review of the fixes (`ca1162b`), 2026-11-07
+## Re-review of the fixes (`8070d01`), 2026-11-07
 
-**Not ready to merge: one small must-fix item.** Findings 1-5 are fixed. While checking finding 3 I found one more way to reach a sibling's address, through assembly. 1337 tests pass (36 CPU, 1301 compiler). `BenchmarkTests` is unchanged. `main` was merged in (`c534553`).
+**Not ready to merge: one small must-fix item.** Findings 1-5 are fixed. While checking finding 3 I found one more way to reach a sibling's address, through assembly. 1337 tests pass (36 CPU, 1301 compiler). `BenchmarkTests` is unchanged. `main` was merged in (`d0d32fc`).
 
 I reran every probe from the first review:
 
@@ -62,7 +62,7 @@ This compiles. Spec 6.5 says `#f.lo` / `#f.hi` take the function's address "as `
 - [x] `const` before the memory block.
 - [x] `OverlayTests`, including the optimizer test.
 
-## First review (`8d558de`), 2026-11-07
+## First review (`7518fa7`), 2026-11-07
 
 **Not ready to merge: three must-fix items.** Most of the follow-up is sound. Long byte buffers, `const` before the memory block, fixed zero-page pointers in overlays and the layout of fixed data in an overlay file all behave as spec 3.2, 8.4 and 8.5 say. The problems are in the optimizer change and the sibling-overlay checks:
 
@@ -70,7 +70,7 @@ This compiles. Spec 6.5 says `#f.lo` / `#f.hi` take the function's address "as `
 - The change misses a variable that is both declared `volatile` and in a `volatile` memory range.
 - The sibling checks can be bypassed through an inline function.
 
-1334 tests pass (36 CPU, 1298 compiler). `BenchmarkTests` is unchanged. The branch is based on the current `main` (`6d1eba9`).
+1334 tests pass (36 CPU, 1298 compiler). `BenchmarkTests` is unchanged. The branch is based on the current `main` (`3b327da`).
 
 ### 1. Must fix: the optimizer change has no test, and the status note about it is wrong
 

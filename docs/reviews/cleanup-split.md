@@ -1,6 +1,6 @@
 # Review: Cleanup, split the large classes, branch `cleanup-split`
 
-## First review (`686aebc`), 2026-11-11
+## First review (`4ba6cc4`), 2026-11-11
 
 **Ready to merge.** No must-fix items. The diff is moves only: every line that left `CodeGen.cs`, `Checker.cs`, `Optimizer.cs` and `Parser.cs` is in one of the new files, unchanged, and the only new lines are each file's header and closing brace.
 
@@ -20,5 +20,5 @@ How I checked:
 - [x] No source file in `src/` is over about 1,000 lines (largest 931).
 - [x] All tests pass unchanged (2861 + 36; no test file in the diff; benchmark and skill baselines unchanged).
 - [x] A review confirms the diff is moves only (line multisets and contiguous blocks, above).
-- [x] One commit per class (`c55e412` CodeGen, `c501e1d` Checker, `5e06934` Optimizer, `5fcc0ea` Parser).
+- [x] One commit per class (`3ca5278` CodeGen, `1c75689` Checker, `6953184` Optimizer, `3b3d3af` Parser).
 - [x] Every example compiles to the same bytes (70 output files compared).

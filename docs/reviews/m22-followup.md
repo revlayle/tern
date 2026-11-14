@@ -1,6 +1,6 @@
 # Review: M22 follow-up, branch `m22-followup`
 
-## First review (`e023754`), 2026-11-11
+## First review (`866c9f7`), 2026-11-11
 
 **Not ready to merge.** One must-fix item: the argument form that spec 4.1 uses as its example, `copy_rows(addr(back) + 1, addr(screen), 25, 12)`, is an error. Everything else is solid. Real constants are refused in every runtime position I tried (an expression, `m.K` from a module, a plain asm operand, an array length, an `@` address, a `match` arm, a `for` bound and step, a global's initial value) and work in constants, `const fn`s, lists and `bool` constants (`const B = K > 1.0`). `offset()` handles nested and module structs and gives clear errors. `repeat()` and the `[7; 4]` error match the spec. The loop-direction errors fire where spec 5.1 says and not for a signed `n..=0`. Generators take `addr()` of globals, data, functions and a module's data (`addr(m.buf)`), and branch to the calling block's `.label`; the listing shows `lda #back.lo`, `ldx #back.hi`, `lda back-1` as expected. `tern --json` gives `calledFrom` for an error in a const fn and in generated code, and `null` otherwise.
 
@@ -57,15 +57,15 @@ gives "A label() value is only for emit in a generator. Use it in a const fn tha
 - [ ] Addresses as labels: `addr()` of a global, `data` or function as an argument and in a `const fn`, alone, with an `int` offset and as `.lo` / `.hi` in `emit` operands; a `.label` of the calling block; the errors; both emulator runs (`GeneratorTests`). Not met: the spec's argument form `addr(back) + 1` (finding 1).
 - [x] `tern --json` gives the call's location as a field (`DiagnosticTests`; checked with the CLI for a const fn error and for generated code).
 
-## Second review (`2cf1f16`), 2026-11-11
+## Second review (`2acf547`), 2026-11-11
 
 **Ready to merge.** Finding 1 is fixed, and suggestions 2, 4 and 5 are done. Suggestion 3 waits for question 106, as the status says.
 
 2834 compiler tests and 36 CPU tests pass. `BenchmarkTests` and `SkillTests` pass with no baseline change (1254 / 350780).
 
-- **Finding 1** (`1c56e40`): `CtLabel.Offset`; `label + int`, `int + label` and `label - int` give a label of the same kind, written `name + offset` in an `emit` operand. Checked: `ptr_to(addr(back) + 255)` with `#d.lo` / `#d.hi` gives `lda #(back+255).lo` = `$3B` and `.hi` = `$09` with `back` at `$083C` (the high byte carries); `addr(back) - 1 + 2` and `3 + addr(back)` store to `back+1`..`back+3`; `0 - .done` stays an error. `GeneratorTests` runs the spec's form in the emulator, plus offset `label()` and block labels as jump targets, and placing an offset label is an error.
-- **Suggestion 2** (`bc726cb`): `Parser.TokenText` slices the source, so `'Z'..='A'`, a range after a tab, and `repeat('A', 4)` are quoted as written.
-- **Suggestions 4 and 5** (`bc726cb`): `'const K_40 = round(K * 40)'`; a label from a const fn in a constant has its own message, and `label()` written there keeps the spec's.
+- **Finding 1** (`7d3ad48`): `CtLabel.Offset`; `label + int`, `int + label` and `label - int` give a label of the same kind, written `name + offset` in an `emit` operand. Checked: `ptr_to(addr(back) + 255)` with `#d.lo` / `#d.hi` gives `lda #(back+255).lo` = `$3B` and `.hi` = `$09` with `back` at `$083C` (the high byte carries); `addr(back) - 1 + 2` and `3 + addr(back)` store to `back+1`..`back+3`; `0 - .done` stays an error. `GeneratorTests` runs the spec's form in the emulator, plus offset `label()` and block labels as jump targets, and placing an offset label is an error.
+- **Suggestion 2** (`14494c2`): `Parser.TokenText` slices the source, so `'Z'..='A'`, a range after a tab, and `repeat('A', 4)` are quoted as written.
+- **Suggestions 4 and 5** (`14494c2`): `'const K_40 = round(K * 40)'`; a label from a const fn in a constant has its own message, and `label()` written there keeps the spec's.
 
 ### Note (no change needed to merge)
 

@@ -1,6 +1,6 @@
 # Review: Warnings, branch `warnings`
 
-## First review (`bf2f94f`), 2026-11-12
+## First review (`fc0ee0d`), 2026-11-12
 
 **Ready to merge.** No must-fix items. The four warnings, the switches, the tool output and the report's two-roots list match spec 13, 8.1 and the decision "warnings for code that does nothing". The repository compiles with no warnings.
 
@@ -41,9 +41,9 @@ This matters for the language server (M30), which marks the statement from this 
 - [x] The skill explains each warning and `_`. The guide's mention belongs to the spec session.
 - [x] `WarningTests` covers every case on the roadmap's list: `0..COUNT` with `COUNT` 0, `if DEBUG { return }`, an inner loop's `break` under `while true`, an `asm` block, a name used only in assembly, a variable only written, the unused-function chain, no warnings with a check error, warnings with an allocation error, the order with errors, the JSON severity, both switches and both together, `run` and `bench`, and the two-roots list.
 
-## Second review (`cedee19`), 2026-11-12
+## Second review (`48c6cb8`), 2026-11-12
 
-**Ready to merge.** The fix commit takes care of suggestions 1, 2 and 4. Note 3 has gone to the spec session as question 118. The merge of `main` (`c69451d`) only brought in this review file.
+**Ready to merge.** The fix commit takes care of suggestions 1, 2 and 4. Note 3 has gone to the spec session as question 118. The merge of `main` (`96771ad`) only brought in this review file.
 
 - **Suggestion 1, done.** `Start` uses `Leftmost` for an assignment target, which walks `IndexExpr` / `MemberExpr` down to the first token. An `asm` statement uses the new `AsmStmt.KeywordPos`, which the parser sets only on the statement path. An `asm fn` body has no keyword position and keeps `Pos`, but its block is the whole body and never follows another statement. The block's own `Pos` stays its `{`, so asm error positions don't change. `An_unreachable_statement_is_reported_at_its_start` has a row for each kind, plus a nested `buf[pt.a].lo = 2` and a call. Minor: the `Start` summary still describes the old positions ("an assignment's position is its operator's") as a reason, which reads fine.
 - **Suggestion 2, done.** `Bytes(n)` gives "1 byte", and the report test is updated.

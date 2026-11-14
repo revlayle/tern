@@ -1,6 +1,6 @@
 # Review: M22 follow-up 2, branch `m22-followup2`
 
-## First review (`9bb2d1b`), 2026-11-11
+## First review (`373fd4b`), 2026-11-11
 
 **Ready to merge.** No must-fix items. The two loop changes do what decisions 104 and 106 say, and both examples run in VICE and in the emulator tests.
 
@@ -35,4 +35,4 @@ I ran each of them by hand for n = 0, 1, 5 and 255 and they are correct. Adding 
 - [x] The listings show each generated instruction's `emit` line (test and listing read).
 - [x] An unsigned `n..=0` and `a..=0 step n` compile and run once when the start is 0, with no warning. `9..=0`, `255..=0 step n` and an unsigned `n..0` keep the error, and with a variable step the fix is "Use a constant negative step to count down". Tested in the emulator for n = 0 and 5 (also 255, u16 and a variable step).
 - [x] `for i in n..0 step -1` (n: `u8`) is `ldx n` / `beq done`, and a listing test checks the full shape (M22 follow-up review suggestion 3). No benchmark moved.
-- [x] Each change is in its own commit (`7b787a8`, `23d5cc9`, `82d5f0c`).
+- [x] Each change is in its own commit (`ac3be5f`, `c0f2a12`, `331831f`).

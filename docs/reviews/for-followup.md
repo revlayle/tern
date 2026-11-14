@@ -1,6 +1,6 @@
 # Review: `for _` follow-up
 
-Branch `for-followup` (`0a80f43`, `aa0d6a7`), from `main` at `1b991c1`. Roadmap "`for _` follow-up"; spec 5.1, 11; decision 118.
+Branch `for-followup` (`90ac72e`, `1fe7bac`), from `main` at `f14841f`. Roadmap "`for _` follow-up"; spec 5.1, 11; decision 118.
 
 ## Verdict
 
@@ -47,5 +47,5 @@ Branch `for-followup` (`0a80f43`, `aa0d6a7`), from `main` at `1b991c1`. Roadmap 
 - [x] The spec 11 row `for _ in 0..10` keeps its shape when nothing is held.
 - [x] A listing test for the example: `A_repeat_loop_holds_a_variable_in_the_free_index_register`.
 - [x] The skill's `flow.tern` takes at most 802 cycles: 799.
-- [x] Benchmark and skill outputs rewritten in the same commit: the benchmarks did not move; the skill outputs and listing excerpts were updated in `0a80f43`.
+- [x] Benchmark and skill outputs rewritten in the same commit: the benchmarks did not move; the skill outputs and listing excerpts were updated in `90ac72e`.
 - [x] The tests pass.
