@@ -63,7 +63,7 @@ public class AlignTests
     }
 
     [Fact]
-    public void A_long_noinit_buffer_is_page_aligned_and_the_zeroed_variables_fill_the_space_before_it()
+    public void A_long_noinit_buffer_starts_the_block_and_the_zeroed_variables_follow_it()
     {
         var r = Run.Program("""
             var count: [u8; 2]
@@ -82,11 +82,13 @@ public class AlignTests
         int at = r.Address("buffer");
         Assert.Equal(0, at % 256);
         Assert.Equal(3, r.U8("count", 1));
-        // The zeroed variables end right where the buffer starts, so the only padding is before the block.
-        var vars = r.Result.Variables.Values.Where(v => v.Name == "count").Single();
-        Assert.Equal(at - 2, vars.Address);
+        Assert.Equal(0, r.U8("count"));     // zeroed at startup
+        // The buffer starts the block and the zeroed variables follow it, so the only padding is before the block.
+        Assert.Equal(at + 1024, r.Address("count"));
+        var free = System.Text.RegularExpressions.Regex.Match(r.Result.Listing, @"; \$[0-9A-F]{4}: (\d+) byte\(s\) left free so that aligned variables");
+        int padding = free.Success ? int.Parse(free.Groups[1].Value) : 0;
         var line = r.Result.Report.Split('\n').Single(l => l.StartsWith("Aligned buffer"));
-        Assert.Equal($"Aligned buffer: ${at:X4} (@ align(256)), 0 bytes of padding before it", line.TrimEnd());
+        Assert.Equal($"Aligned buffer: ${at:X4} (@ align(256)), {padding} bytes of padding before it", line.TrimEnd());
     }
 
     [Fact]

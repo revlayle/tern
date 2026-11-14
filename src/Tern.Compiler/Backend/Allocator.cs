@@ -7,8 +7,9 @@ namespace Tern.Compiler.Backend;
 /// <summary>Where variables go after the program: offsets from the end of the program.</summary>
 public sealed class RamPlan
 {
-    /// <summary>Uninitialized globals, zeroed at startup. They come first.</summary>
+    /// <summary>Uninitialized globals, zeroed at startup: <see cref="ZeroedSize"/> bytes from <see cref="ZeroedStart"/>, first in the block but for aligned noinit globals.</summary>
     public List<(VariableSymbol Var, int Offset)> ZeroedGlobals { get; } = [];
+    public int ZeroedStart { get; set; }
     public int ZeroedSize { get; set; }
     /// <summary>
     /// Arrays among the globals that the code reads through an index register, placed so that no such
@@ -21,7 +22,7 @@ public sealed class RamPlan
     /// </summary>
     public int StartModulus { get; set; } = 1;
     public int StartResidue { get; set; }
-    /// <summary>Globals declared <c>noinit</c>, after the zeroed ones: not cleared at startup.</summary>
+    /// <summary>Globals declared <c>noinit</c>, after the zeroed ones (aligned ones before them): not cleared at startup.</summary>
     public List<(VariableSymbol Var, int Offset)> NoinitGlobals { get; } = [];
     /// <summary>Function frames (parameters, locals, temporaries), after the globals.</summary>
     public List<(VariableSymbol Var, int Offset)> FrameVariables { get; } = [];
@@ -202,7 +203,8 @@ public static class Allocator
         plan.FixedImageGlobals.AddRange(program.Globals.Where(g => g.FixedAddress is not null && g.IsData));
         plan.OverlayGlobals.AddRange(program.Globals.Where(g => g.IsOverlayImage));
 
-        // RAM after the program: zeroed globals, noinit globals, then the overlaid frames. Arrays read
+        // RAM after the program: aligned noinit globals, zeroed globals, the other noinit globals, then
+        // the overlaid frames, so that the block starts with the aligned ones and has no gap. Arrays read
         // through an index register are placed so that no such read crosses a page, and aligned
         // variables at a multiple of their alignment (spec 4), counting the offsets from a block that
         // starts at a multiple of the largest alignment (256 with such arrays, F12).
@@ -212,29 +214,25 @@ public static class Allocator
         if (byPage && indexed is not null)
             foreach (var g in ram.Where(g => g.InitialBytes is null))
                 if (Spans(g, indexed) is { } list) spans[g] = list;
-        var zeroedRam = ram.Where(g => g.InitialBytes is null && !g.NoInit).ToList();
-        int offset = PlaceByPage(zeroedRam, 0, plan.ZeroedGlobals, spans);
-        plan.ZeroedSize = offset;
-        offset = PlaceByPage(ram.Where(g => g.NoInit).ToList(), offset, plan.NoinitGlobals, spans);
+        var noinit = ram.Where(g => g.NoInit).ToList();
+        int offset = PlaceByPage(noinit.Where(g => g.Alignment > 1).ToList(), 0, plan.NoinitGlobals, spans);
+        plan.ZeroedStart = offset;
+        offset = PlaceByPage(ram.Where(g => g.InitialBytes is null && !g.NoInit).ToList(), offset, plan.ZeroedGlobals, spans);
+        int zeroedEnd = offset;
+        offset = PlaceByPage(noinit.Where(g => g.Alignment == 1).ToList(), offset, plan.NoinitGlobals, spans);
         plan.PageArrays.AddRange(spans.Keys.OrderBy(v => plan.ZeroedGlobals.Concat(plan.NoinitGlobals).First(e => e.Var == v).Offset));
         int modulus = Math.Max(spans.Count > 0 ? 256 : 1, ram.Select(g => g.Alignment).DefaultIfEmpty(1).Max());
-        // Zeroed variables that are not placed by page or aligned may move up to the first noinit one, so
-        // that the space an aligned noinit variable leaves before it comes before the block instead.
-        if (ram.Any(g => g.Alignment > 1) && zeroedRam.Count > 0 && plan.NoinitGlobals.Count > 0 && !zeroedRam.Any(g => spans.ContainsKey(g) || g.Alignment > 1)
-            && plan.NoinitGlobals.Min(e => e.Offset) - plan.ZeroedSize is int room and > 0)
-        {
-            for (int k = 0; k < plan.ZeroedGlobals.Count; k++) plan.ZeroedGlobals[k] = (plan.ZeroedGlobals[k].Var, plan.ZeroedGlobals[k].Offset + room);
-            plan.ZeroedSize += room;
-        }
         // Space before the first variable is not needed: the block starts that far past a multiple of the modulus instead.
         var globals = plan.ZeroedGlobals.Concat(plan.NoinitGlobals).ToList();
         if (modulus > 1 && globals.Count > 0 && globals.Min(e => e.Offset) is int lead and > 0)
         {
             foreach (var list in new[] { plan.ZeroedGlobals, plan.NoinitGlobals })
                 for (int k = 0; k < list.Count; k++) list[k] = (list[k].Var, list[k].Offset - lead);
-            plan.ZeroedSize -= lead;
+            plan.ZeroedStart = Math.Max(0, plan.ZeroedStart - lead);
+            zeroedEnd -= lead;
             offset -= lead;
         }
+        plan.ZeroedSize = zeroedEnd - plan.ZeroedStart;
         if (modulus > 1)
         {
             plan.StartModulus = modulus;

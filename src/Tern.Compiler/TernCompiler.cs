@@ -631,7 +631,7 @@ public static partial class TernCompiler
         }
 
         if (plan.ZeroedSize > 0)
-            ClearBlock(items, plan.ZeroedSize, p => new LabelOperand(bss, p), "clear");
+            ClearBlock(items, plan.ZeroedSize, p => new LabelOperand(bss, plan.ZeroedStart + p), "clear");
         foreach (var block in plan.RegionClears)
             ClearBlock(items, block.Size, p => new AddrOperand(block.First + p), $"clear_{block.First:X4}_");
         return items;

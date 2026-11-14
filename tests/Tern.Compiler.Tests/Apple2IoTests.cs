@@ -548,6 +548,30 @@ public class Apple2IoTests
         Assert.Empty(set);
     }
 
+    // ---------- The example ----------
+
+    [Fact]
+    public void Files_example_saves_loads_back_and_loads_its_overlay()
+    {
+        string path = AsmTests.FindExample("files.tern", "apple2");
+        var compiled = TernCompiler.Compile(File.ReadAllText(path), Platform.Apple2, sourcePath: path);
+        var greet = compiled.Overlays.Single();
+        Assert.Equal("greet", greet.Name);
+        Assert.Equal(0x6000, greet.LoadAddress);
+        var mli = new FakeMli();
+        mli.Files["GREET.BIN"] = new DiskFile { Bytes = greet.File, Aux = greet.LoadAddress };
+        var printed = new System.Text.StringBuilder();
+        var traps = new Dictionary<int, Action<Run>>(mli.Traps)
+        {
+            [0xFDED] = run => printed.Append(run.Cpu.A == 0x8D ? '\n' : (char)(run.Cpu.A & 0x7F)),
+        };
+        var r = Run.Program(File.ReadAllText(path), sourcePath: path, platform: Platform.Apple2, traps: traps);
+        Assert.Equal("SAVED SCORES\nLOADED 0A 14 1E 28 FF 00 C8 9B\nSAME BYTES\nHELLO FROM AN OVERLAY\n", printed.ToString());
+        Assert.Equal(new byte[] { 0x0A, 0x14, 0x1E, 0x28, 0xFF, 0x00, 0xC8, 0x9B }, mli.Files["SCORES"].Bytes);
+        Assert.Equal(r.Address("scores"), mli.Files["SCORES"].Aux);
+        Assert.Empty(mli.Open);
+    }
+
     // ---------- tern run ----------
 
     [Fact]
