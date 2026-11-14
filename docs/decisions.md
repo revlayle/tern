@@ -887,3 +887,13 @@ Spec 12.2 (NES); roadmap M27 and Not scheduled.
 - **NROM's size (128 or 256) follows from the program**, with no option. Reason: the size is a result of the code, not a choice the programmer needs to make.
 - **UxROM's size follows from the highest bank used**, rounded up to a power of two, at most 16 banks (256 KB) in M27.
 - **UxROM's bus conflicts are handled by `uxrom.select(n)`**, which writes `n` into a 16-byte table of 0-15 in the fixed bank: 16 bytes of ROM and one indexed store per switch.
+
+## 2026-11-14: NES tile data: `chr` areas
+
+Spec 8.4, 12.2 (NES).
+
+- **The program declares CHR ROM in its `memory` block, `$0000..=$1FFF chr tiles`, with its own name.** Reason (the developer's): every area name the program uses should be declared where the reader sees the memory layout; a region brought silently by the board would be the only name that appears from nowhere. Rejected: a built-in `chr` region; `chr0`/`chr1` regions for the two pattern tables, which cannot hold the one 8 KB file NES tile editors write.
+- **A line is always a range, a kind, and a name when the kind takes one; kinds may be platform-specific.** `chr` is needed as a kind: the range is in the PPU's address space, and without the word `$0000..=$1FFF` would be the CPU's zero page and RAM. The word also sends the bytes to the image's CHR part.
+- **`@ name address` places data at an address in an area's own address space.** Reason (the developer's): `data font @ tiles $1000` states where the font lands; placing in order with a padding line (`[0; $1000 - len(bg)]`) makes the reader add up lengths, and breaks when a line is added in front. Only for areas with their own address space: on CPU memory `@ address` already says it, so there is one way to write each placement. On NROM, the address is also the offset into CHR ROM.
+- **Only `data` in a `chr` area, and code may use only `addr()` and `len()` of it**, since the CPU cannot read CHR ROM. Any `data` initializer works.
+- **UxROM has no `chr` area**: its tiles are in CHR RAM, ordinary `data` the program copies to the PPU.

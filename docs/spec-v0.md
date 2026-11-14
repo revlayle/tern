@@ -680,6 +680,9 @@ Each line is an inclusive range of constant expressions (constants from imported
 | `volatile` | Volatile memory (4), in addition to the platform's volatile areas |
 | `overlay name` | An overlay area (8.5) |
 | `bank name` | A bank area: a window in which one of several banks of a cartridge's ROM is visible at a time (8.5, 14.1) |
+| `chr name` | NES only: CHR ROM, the tile memory the PPU reads; its range is in the PPU's addresses, not the CPU's (12.2) |
+
+Each line is a range, a kind, and a name when the kind takes one (the kinds that `@ name` points at). A kind may be platform-specific, like `chr`; the board (below) lists which it accepts, and another target's kind is an error.
 
 - **Cartridge images.** A line `cartridge board option...`, before the ranges and at most once, means the build is a cartridge image for that board instead of the platform's disk file. The board name and its options are platform-specific: 12.2 lists, for each platform, the boards it supports, the options each takes, the output format, the startup code, the board's fixed and bank areas, and the library module that selects banks. On the NES the line is required, since every NES program is a cartridge (`cartridge uxrom vertical`); elsewhere it is optional. A board or option the target does not have is an error that lists the target's boards or the board's options. Settled 2026-11-14 for every platform; built for the NES in M27, for C64 and Atari cartridges later.
 - **Replacing or adding.** If the block has any `program` line, the `program` lines replace the platform's program and variable areas; the same for `zeropage` lines and the platform's free zero page. The other kinds add to the platform's map and take their range out of any program area and out of the free zero page. A block with only `reserved` lines keeps the platform's areas.
@@ -1248,7 +1251,22 @@ A platform description gives: CPU variant, free zero-page ranges, RAM ranges for
   - **NROM's size follows from the program:** a program that fits in 16 KB is NROM-128, its 16 KB visible twice, at `$8000` and `$C000`; a larger one is NROM-256. There is no size option.
   - **UxROM's size follows from the highest bank number used**, with the fixed bank, rounded up to a power of two: up to 8 banks (128 KB, UNROM) or 16 (256 KB, UOROM). More than 16 is an error.
   - **UxROM's bus conflicts:** the board's latch sees the ROM's byte at the written address as well as the CPU's, so `uxrom.select(n)` writes `n` into a 16-byte table of the values 0-15 in the fixed bank.
-  - Mirroring is fixed by the board's wiring, so the option is required on both boards. MMC1, which sets it at run time, comes later. After the release: the Commander X16 (`wdc65c02`), then the Commodore 128 in native mode (`.prg` at `$1C01`).
+  - Mirroring is fixed by the board's wiring, so the option is required on both boards. MMC1, which sets it at run time, comes later.
+- **Tile data (CHR)** (decision 2026-11-14). On `nrom`, the program declares the CHR ROM in its `memory` block, with a name of its choice, and places `data` there:
+  ```
+  memory {
+      cartridge nrom vertical
+      $0000..=$1FFF  chr tiles
+  }
+  data bg   @ tiles       = include_bytes("bg.chr")      // in order, from $0000
+  data font @ tiles $1000 = include_bytes("font.chr")    // at $1000
+  ```
+  - The range is in the PPU's addresses, so it does not take CPU memory. `nrom` allows `$0000..=$1FFF` or part of it; at most one `chr` line. The bytes go in the image's CHR ROM; bytes no `data` covers are zero. Without a `chr` line the CHR ROM is all zeros.
+  - `@ name` places `data` in order from the area's start, as in any region. `@ name address` places it at that address in the area's own address space. This second form exists only for areas with their own address space (`chr`); on a region of CPU memory it is an error that says to write `@ address`.
+  - Any `data` initializer works: lists, `[expr for i in range]`, `const fn` results, `include_bytes`. A tile is 16 bytes (bitplane 0, then bitplane 1).
+  - Only `data` may be placed there: no code, no `var`. The CPU cannot read it, so code may use only `addr(x)` (its PPU address, a `u16`) and `len(x)`; `x[i]` or a pointer to it is an error.
+  - Errors: data past the area, overlapping data, an address outside the area.
+  - On `uxrom` the tiles are in CHR RAM, empty at power-on: they are ordinary `data` in PRG ROM, which the program copies to the PPU (a library routine, 10.1). A `chr` line is an error there that says so. After the release: the Commander X16 (`wdc65c02`), then the Commodore 128 in native mode (`.prg` at `$1C01`).
 
 ### 12.3 Programs without `main`
 
