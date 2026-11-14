@@ -110,32 +110,50 @@ public static class Allocator
 
         var plan = new RamPlan();
 
-        // Zero-page addresses: globals first, then the overlaid frames.
+        // Zero-page addresses: globals first, then the overlaid frames. A variable the compiler chose
+        // (step 2) that would cross the end of a range goes to RAM instead, and the rest are placed again;
+        // one the program requires there is an error.
+        VariableSymbol? crossing = null;
         int ZeroPageAddress(int index, VariableSymbol v)
         {
             int address = zeroPage[index];
             if (zeroPage[index + v.Type.Size - 1] - address != v.Type.Size - 1)
+            {
+                if (!v.ForcedZeroPage)
+                {
+                    crossing ??= v;
+                    return address;
+                }
                 throw new CompileError(v.Pos,
                     $"'{v.QualifiedName}' ({v.Type.Size} bytes) would cross the end of a zero-page range at ${zeroPage[index + v.Type.Size - 1]:X2}. " +
                     $"Zero-page ranges: {MemoryLayout.ListZeroPage(layout.ZeroPage)}. Join the ranges or reorder the variables");
+            }
             return address;
         }
-        int zp = 0;
-        foreach (var g in program.Globals.Where(inZp.Contains))
+        while (true)
         {
-            g.Address = ZeroPageAddress(zp, g);
-            zp += g.Type.Size;
-            plan.ZeroPageGlobals.Add(g);
-        }
-        var zpOffsets = FrameOffsets(functions, callers, f => f.FrameVariables.Where(inZp.Contains).Sum(v => v.Type.Size));
-        foreach (var f in functions)
-        {
-            int at = zp + zpOffsets[f];
-            foreach (var v in f.FrameVariables.Where(inZp.Contains))
+            crossing = null;
+            plan.ZeroPageGlobals.Clear();
+            int zp = 0;
+            foreach (var g in program.Globals.Where(inZp.Contains))
             {
-                v.Address = ZeroPageAddress(at, v);
-                at += v.Type.Size;
+                g.Address = ZeroPageAddress(zp, g);
+                zp += g.Type.Size;
+                plan.ZeroPageGlobals.Add(g);
             }
+            var zpOffsets = FrameOffsets(functions, callers, f => f.FrameVariables.Where(inZp.Contains).Sum(v => v.Type.Size));
+            foreach (var f in functions)
+            {
+                int at = zp + zpOffsets[f];
+                foreach (var v in f.FrameVariables.Where(inZp.Contains))
+                {
+                    v.Address = ZeroPageAddress(at, v);
+                    at += v.Type.Size;
+                }
+            }
+            if (crossing is null) break;
+            inZp.Remove(crossing);
+            crossing.Address = -1;     // not placed yet: the assembler must not size its instructions for zero page
         }
 
         // Variables and data placed in a region, in the order they are declared: zeroed variables first

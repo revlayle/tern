@@ -42,6 +42,44 @@ public class Apple2Tests
         Assert.Equal(0x00, r.Symbols["c"]);
     }
 
+    /// <summary>175 u8 globals, each used once: they fill $50-$FE, one byte short of the end of the range.</summary>
+    private static readonly string Bytes175 =
+        string.Concat(Enumerable.Range(0, 175).Select(i => $"var b{i}: u8\n"));
+
+    private static readonly string Uses175 = string.Concat(Enumerable.Range(0, 175).Select(i => $"    b{i} += 1\n"));
+
+    [Fact]
+    public void A_variable_the_compiler_puts_in_zero_page_never_crosses_from_ff_to_00()
+    {
+        // Review M26, finding 1: w would have been placed at $FF-$00.
+        var r = RunApple2(Bytes175 + "var w: u16\nfn main() {\n" + Uses175 + "    w += 300\n}\n");
+        Assert.Equal(300, r.U16("w"));
+        Assert.NotEqual(0xFF, r.Address("w"));
+        Assert.All(Enumerable.Range(0, 175), i => Assert.Equal(1, r.U8($"b{i}")));
+    }
+
+    [Fact]
+    public void A_frame_variable_the_compiler_puts_in_zero_page_never_crosses_from_ff_to_00()
+    {
+        var r = RunApple2(Bytes175 + """
+            var out: u16
+            fn f(n: u16) {
+                out = n + 1
+            }
+            fn main() {
+
+            """ + Uses175 + "    f(1000)\n}\n");
+        Assert.Equal(1001, r.U16("out"));
+        Assert.NotEqual(0xFF, r.Address("f.n"));
+    }
+
+    [Fact]
+    public void A_variable_required_in_zero_page_across_the_gap_is_still_an_error()
+    {
+        var e = Assert.Throws<CompileError>(() => Compile("var a: [u8; 175] @ zp\nvar p: ptr u8 @ zp\nfn main() {\n    a[1] = 1\n    p[0] = 2\n}\n"));
+        Assert.Equal("'p' (2 bytes) would cross the end of a zero-page range at $00. Zero-page ranges: $50-$FF, $00-$1F. Join the ranges or reorder the variables", e.Description);
+    }
+
     [Fact]
     public void A_program_is_a_system_file_that_loads_and_starts_at_2000()
     {
@@ -229,6 +267,30 @@ public class Apple2Tests
             """));
         Assert.Contains("would overwrite the startup code that copies the areas into place, which runs at $2000-", e.Description);
         Assert.Contains("Start the first program area at $2000", e.Description);
+    }
+
+    [Fact]
+    public void Copies_that_would_each_overwrite_the_others_bytes_are_an_error()
+    {
+        // Review M26, finding 2: the start area's copy to $8000 lands on the second area's bytes in the
+        // file, and the second area's copy to $2400 on the start area's.
+        var tables = string.Concat(Enumerable.Range(0, 100).Select(k => $"data T{k}: [u8; 256] = repeat({k}, 256)\n"));
+        var uses = string.Concat(Enumerable.Range(0, 100).Select(k => $"    n += T{k}[1]\n"));
+        var e = Assert.Throws<CompileError>(() => Compile($$"""
+            memory {
+                $8000..=$BEFF program
+                $2400..=$7FFF program
+            }
+            {{tables}}
+            var n: u8
+            fn main() {
+            {{uses}}
+            }
+            """));
+        Assert.StartsWith("The startup code copies the program's areas from the system file, which ProDOS loads at $2000, to their places, but every order of the copies overwrites bytes of the file before they are copied (the area at $8000-", e.Description);
+        Assert.Contains("Start the first program area at $2000, or place the areas further from $2000-", e.Description);
+        // The memory block placed the areas, so the error points at it (review M26, suggestion 6).
+        Assert.Equal(1, e.Pos.Line);
     }
 
     [Fact]

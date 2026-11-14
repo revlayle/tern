@@ -267,7 +267,8 @@ public static partial class TernCompiler
                 CheckFixedAddresses(program, platform, code, plan);
                 if (system)
                 {
-                    var (built, needed) = SystemFile(platform, code.Segments, start.Address, moves.Count > 0 ? moved.Address - start.Address : 0, program.Main.Pos);
+                    var (built, needed) = SystemFile(platform, code.Segments, start.Address, moves.Count > 0 ? moved.Address - start.Address : 0,
+                        program.Main.Pos, program.Modules[^1].Syntax.Memory?.Pos ?? program.Main.Pos);
                     if (!needed.SequenceEqual(moves))
                     {
                         if (++passes > 8) throw new InvalidOperationException("The Apple II's startup copies did not settle");

@@ -167,10 +167,12 @@ public static partial class TernCompiler
     /// The system file: the run of bytes that starts at <paramref name="start"/> first, since ProDOS
     /// starts the file at its first byte, then the others by address, with no gaps. Returns the copies
     /// the startup code makes, in an order where none overwrites the startup code that copies (the
-    /// file's first <paramref name="copierSize"/> bytes) or bytes of the file not copied yet.
+    /// file's first <paramref name="copierSize"/> bytes) or bytes of the file not copied yet. Copies that
+    /// cannot be made are reported at <paramref name="layoutPos"/> (the memory block that placed the
+    /// areas), a file that is too large at <paramref name="pos"/>.
     /// </summary>
     private static (byte[] File, List<AreaMove> Moves) SystemFile(Platform platform, IReadOnlyList<(int Address, byte[] Bytes)> segments,
-        int start, int copierSize, SourcePos pos)
+        int start, int copierSize, SourcePos pos, SourcePos layoutPos)
     {
         var runs = new List<(int Address, byte[] Bytes)>();
         foreach (var (address, bytes) in segments)
@@ -213,7 +215,7 @@ public static partial class TernCompiler
             {
                 var blocked = pending[0];
                 var target = Bytes(blocked.To, blocked.Count);
-                throw new CompileError(pos, Free(blocked)
+                throw new CompileError(layoutPos, Free(blocked)
                     ? $"The startup code copies the program's areas from the system file, which ProDOS loads at ${platform.LoadAddress:X4}, to their places, but every order of the copies overwrites bytes of the file before they are copied (the area at {target} first). Start the first program area at ${platform.LoadAddress:X4}, or place the areas further from ${platform.LoadAddress:X4}-${at - 1:X4}"
                     : $"The area at {target} would overwrite the startup code that copies the areas into place, which runs at {copier} in the system file. Start the first program area at ${platform.LoadAddress:X4}, or leave {copier} out of the program areas");
             }
