@@ -656,7 +656,9 @@ public sealed class RepositoryWarningTests
             foreach (var file in Directory.GetFiles(library, "*.tern").Concat(Directory.GetFiles(Path.Combine(library, platform.Name), "*.tern")))
             {
                 string name = Path.GetFileNameWithoutExtension(file);
-                var result = TernCompiler.Compile($"import {name}\nfn main() {{ }}\n", platform, warnLibrary: true);
+                // A NES program names its board (spec 8.4).
+                string memory = platform.Boards.Count > 0 ? $"memory {{\n    cartridge {platform.Boards[0].Name} vertical\n}}\n" : "";
+                var result = TernCompiler.Compile($"import {name}\n{memory}fn main() {{ }}\n", platform, warnLibrary: true);
                 warnings.AddRange(result.Warnings.Where(w => w.Pos.File is not null).Select(Line));
             }
         Assert.True(warnings.Count == 0, string.Join("\n", warnings.Distinct()));

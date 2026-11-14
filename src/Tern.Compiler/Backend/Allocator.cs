@@ -27,8 +27,15 @@ public sealed class RamPlan
     /// <summary>Function frames (parameters, locals, temporaries), after the globals.</summary>
     public List<(VariableSymbol Var, int Offset)> FrameVariables { get; } = [];
     public int TotalSize { get; set; }
-    /// <summary>Globals with an initial value that live in the program image.</summary>
+    /// <summary>Globals with an initial value that live in the program image (on a cartridge, only <c>data</c>).</summary>
     public List<VariableSymbol> ImageGlobals { get; } = [];
+    /// <summary>
+    /// On a cartridge (code in ROM): variables with an initial value, in the block from <see cref="CopiedStart"/>,
+    /// <see cref="CopiedSize"/> bytes. Their initial values are a table in ROM that the startup code copies (spec 12.2).
+    /// </summary>
+    public List<(VariableSymbol Var, int Offset)> CopiedGlobals { get; } = [];
+    public int CopiedStart { get; set; }
+    public int CopiedSize { get; set; }
     /// <summary>Globals in zero page, initialized by the startup code.</summary>
     public List<VariableSymbol> ZeroPageGlobals { get; } = [];
     public string ZeroPageMap { get; set; } = "";
@@ -208,32 +215,42 @@ public static class Allocator
         // through an index register are placed so that no such read crosses a page, and aligned
         // variables at a multiple of their alignment (spec 4), counting the offsets from a block that
         // starts at a multiple of the largest alignment (256 with such arrays, F12).
+        // On a cartridge the initial values are in ROM and the variables in RAM: the variables are in the
+        // block, after the aligned noinit ones, and the startup code copies their values (spec 12.2).
         var ram = program.Globals.Where(g => g.FixedAddress is null && g.Region is null && !g.IsOverlayImage && !inZp.Contains(g)).ToList();
-        plan.ImageGlobals.AddRange(ram.Where(g => g.InitialBytes is not null));
+        bool rom = layout.Variables.Count > 0;
+        bool InBlock(VariableSymbol g) => g.InitialBytes is null || (rom && !g.IsData);
+        plan.ImageGlobals.AddRange(ram.Where(g => !InBlock(g)));
         var spans = new Dictionary<VariableSymbol, List<(int From, int To)>>();
         if (byPage && indexed is not null)
-            foreach (var g in ram.Where(g => g.InitialBytes is null))
+            foreach (var g in ram.Where(InBlock))
                 if (Spans(g, indexed) is { } list) spans[g] = list;
         var noinit = ram.Where(g => g.NoInit).ToList();
         int offset = PlaceByPage(noinit.Where(g => g.Alignment > 1).ToList(), 0, plan.NoinitGlobals, spans);
+        offset = PlaceByPage(ram.Where(g => rom && !g.IsData && g.InitialBytes is not null).ToList(), offset, plan.CopiedGlobals, spans);
         plan.ZeroedStart = offset;
         offset = PlaceByPage(ram.Where(g => g.InitialBytes is null && !g.NoInit).ToList(), offset, plan.ZeroedGlobals, spans);
         int zeroedEnd = offset;
         offset = PlaceByPage(noinit.Where(g => g.Alignment == 1).ToList(), offset, plan.NoinitGlobals, spans);
-        plan.PageArrays.AddRange(spans.Keys.OrderBy(v => plan.ZeroedGlobals.Concat(plan.NoinitGlobals).First(e => e.Var == v).Offset));
+        var globals = plan.ZeroedGlobals.Concat(plan.NoinitGlobals).Concat(plan.CopiedGlobals).ToList();
+        plan.PageArrays.AddRange(spans.Keys.OrderBy(v => globals.First(e => e.Var == v).Offset));
         // Only the block's own variables count: data and initialized variables are aligned in the file (review M26 follow-up, finding 1).
-        int modulus = Math.Max(spans.Count > 0 ? 256 : 1, plan.ZeroedGlobals.Concat(plan.NoinitGlobals).Select(e => e.Var.Alignment).DefaultIfEmpty(1).Max());
+        int modulus = Math.Max(spans.Count > 0 ? 256 : 1, globals.Select(e => e.Var.Alignment).DefaultIfEmpty(1).Max());
         // Space before the first variable is not needed: the block starts that far past a multiple of the modulus instead.
-        var globals = plan.ZeroedGlobals.Concat(plan.NoinitGlobals).ToList();
         if (modulus > 1 && globals.Count > 0 && globals.Min(e => e.Offset) is int lead and > 0)
         {
-            foreach (var list in new[] { plan.ZeroedGlobals, plan.NoinitGlobals })
+            foreach (var list in new[] { plan.ZeroedGlobals, plan.NoinitGlobals, plan.CopiedGlobals })
                 for (int k = 0; k < list.Count; k++) list[k] = (list[k].Var, list[k].Offset - lead);
             plan.ZeroedStart = Math.Max(0, plan.ZeroedStart - lead);
             zeroedEnd -= lead;
             offset -= lead;
         }
         plan.ZeroedSize = zeroedEnd - plan.ZeroedStart;
+        if (plan.CopiedGlobals.Count > 0)
+        {
+            plan.CopiedStart = plan.CopiedGlobals.Min(e => e.Offset);
+            plan.CopiedSize = plan.CopiedGlobals.Max(e => e.Offset + e.Var.Type.Size) - plan.CopiedStart;
+        }
         if (modulus > 1)
         {
             plan.StartModulus = modulus;

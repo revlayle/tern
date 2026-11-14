@@ -150,6 +150,10 @@ public static partial class TernCompiler
         var prefix = withIo ? new Label("prefix_parameters") : null;
         List<AreaMove> moves = [];
         byte[]? systemFile = null;
+        // A cartridge (the NES): code in ROM, variables in RAM, initial values copied from ROM (spec 12.2).
+        var cartridge = layout.Cartridge;
+        var initial = new Label("initial");
+        var rti = new Label("rti");
         int passes = 0;
         // Indexed reads only: a store or a read-modify-write takes the same cycles across a page.
         var indexed = new Dictionary<VariableSymbol, List<int>>();
@@ -176,14 +180,24 @@ public static partial class TernCompiler
             if (program.ExportTableAddress is int tableAt)
                 CheckExportTable(program, new AddressRange(tableAt, tableAt + 3 * program.Exports.Count - 1));
 
+            var vectors = cartridge is null ? default : CheckVectors(plan);
             if (!binary)
             {
                 items = [new SectionStart("startup"), new DataBytes(platform.Header), new LabelDef(start), new Comment("startup")];
-                items.AddRange(Startup(plan, bss, gen.LabelOf, system ? Apple2Start(moves, moved, quit, prefix, exact: passes < 4) : []));
+                if (cartridge is not null) items.Add(new Instr(Sei));
+                items.AddRange(Startup(plan, bss, gen.LabelOf,
+                    system ? Apple2Start(moves, moved, quit, prefix, exact: passes < 4) : cartridge is not null ? NesStart() : [],
+                    ramCleared: cartridge is not null, initial));
                 items.Add(new Instr(Jsr, Absolute, new LabelOperand(gen.LabelOf(program.Main))));
                 items.Add(new LabelDef(halt));
                 items.Add(new Instr(Jmp, Absolute, new LabelOperand(halt)));
                 if (system) items.AddRange(Apple2Quit(quit, prefix));
+                if (cartridge is not null)
+                {
+                    items.Add(new Comment("an interrupt vector the program does not set"));
+                    items.Add(new LabelDef(rti));
+                    items.Add(new Instr(Rti));
+                }
             }
             else
             {
@@ -207,6 +221,11 @@ public static partial class TernCompiler
                 items.Add(new Instr(Rts));
             }
             items.AddRange(functionCode);
+            if (cartridge is not null)
+            {
+                items.AddRange(NesVectors(start, rti, vectors));
+                if (plan.CopiedSize > 0) items.AddRange(InitialValues(plan, initial, gen.LabelOf));
+            }
             // implements (spec 8.5): a jmp at each interface routine's address, in the overlay's file; its code goes around them.
             foreach (var entry in program.Implementations)
             {
@@ -248,12 +267,12 @@ public static partial class TernCompiler
             }
             // Variables after the program start at bss. Move them all, if needed, so that no jmp (...)
             // vector among them starts at an address ending in $FF.
-            var ramVectors = plan.ZeroedGlobals.Concat(plan.NoinitGlobals).Concat(plan.FrameVariables)
+            var ramVectors = plan.ZeroedGlobals.Concat(plan.NoinitGlobals).Concat(plan.CopiedGlobals).Concat(plan.FrameVariables)
                 .SelectMany(e => e.Var.JumpVectorOffsets.Select(o => e.Offset + o)).ToList();
             string reason = string.Join(" and ", new[]
             {
                 plan.PageArrays.Count > 0 ? "indexed reads of the variables do not cross a page" : null,
-                plan.ZeroedGlobals.Concat(plan.NoinitGlobals).Any(e => e.Var.Alignment > 1) ? "aligned variables start at a multiple of their alignment" : null,
+                plan.ZeroedGlobals.Concat(plan.NoinitGlobals).Concat(plan.CopiedGlobals).Any(e => e.Var.Alignment > 1) ? "aligned variables start at a multiple of their alignment" : null,
             }.OfType<string>());
             items.Add(new Reserve(bss, plan.TotalSize, ramVectors, plan.StartModulus, plan.StartResidue, reason));
 
@@ -267,9 +286,10 @@ public static partial class TernCompiler
                 code = Assembler.Assemble(items, layout.Program, () =>
                 {
                     foreach (var (g, label) in imageLabels) g.Address = label.Address;
-                    foreach (var (v, offset) in plan.ZeroedGlobals.Concat(plan.NoinitGlobals)) v.Address = bss.Address + offset;
+                    foreach (var (v, offset) in plan.ZeroedGlobals.Concat(plan.NoinitGlobals).Concat(plan.CopiedGlobals)) v.Address = bss.Address + offset;
                     foreach (var (v, offset) in plan.FrameVariables) v.Address = bss.Address + offset;
-                }, overlayAreas, program.Modules.Where(m => m.ImportedBy is not null && m.OverlayArea is not null).ToDictionary(m => m.Name, m => m.ImportedBy!.Pos));
+                }, overlayAreas, program.Modules.Where(m => m.ImportedBy is not null && m.OverlayArea is not null).ToDictionary(m => m.Name, m => m.ImportedBy!.Pos),
+                layout.Variables);
                 CheckFixedAddresses(program, platform, code, plan);
                 if (system)
                 {
@@ -289,7 +309,7 @@ public static partial class TernCompiler
             catch (Assembler.NoPageStart)
             {
                 // Only aligned variables are left to place the block for.
-                var widest = plan.ZeroedGlobals.Concat(plan.NoinitGlobals).Select(e => e.Var).MaxBy(v => v.Alignment)!;
+                var widest = plan.ZeroedGlobals.Concat(plan.NoinitGlobals).Concat(plan.CopiedGlobals).Select(e => e.Var).MaxBy(v => v.Alignment)!;
                 throw new CompileError(widest.Pos,
                     $"The variables after the program ({plan.TotalSize} bytes) must start where '{widest.Name}' is at a multiple of ${widest.Alignment:X}, and no program area has room for them there. " +
                     "Make a program area larger, or use a smaller alignment");
@@ -301,7 +321,10 @@ public static partial class TernCompiler
         int fileEnd = code.Segments.Max(s => s.Address + s.Bytes.Length);
         var image = new byte[fileEnd - loadAddress];
         foreach (var (address, bytes) in code.Segments) bytes.CopyTo(image, address - loadAddress);
-        var file = systemFile ?? platform.FileOf(loadAddress, image, code.Segments, binary ? null : start.Address);
+        byte[] file;
+        int prgSize = 0, prgFirst = 0;
+        if (cartridge is not null) (file, prgSize, prgFirst) = NesFile(cartridge, code.Segments);
+        else file = systemFile ?? platform.FileOf(loadAddress, image, code.Segments, binary ? null : start.Address);
 
         var symbols = new Dictionary<string, int>();
         var variables = new Dictionary<string, VariableInfo>();
@@ -322,7 +345,7 @@ public static partial class TernCompiler
         }
 
         // The emulators accept dots inside labels, so names stay as in the listing and cannot clash (util.bump, util_bump).
-        string labels = platform.Labels.Write(symbols);
+        string labels = platform.Labels.Write(symbols, cartridge is null ? null : NesLabelMap(prgFirst));
 
         var entries = new List<(string Name, int Address)>();
         string? apiModule = null, apiName = null;
@@ -433,12 +456,17 @@ public static partial class TernCompiler
                 + (moves.Count > 0 ? $"; the startup code copies {Plural(moves.Count, "area", "areas")} into place: {string.Join(", ", moves.Select(m => $"${m.From:X4} to ${m.To:X4}, {m.Count} bytes"))}" : ""));
         if (withIo)
             report.AppendLine($"io: {PrefixSize} bytes of startup code, which set an empty prefix to the program's folder");
+        if (cartridge is not null)
+            report.AppendLine($"Cartridge: {cartridge.Board.Name} (mapper {cartridge.Board.Mapper}), {(cartridge.VerticalMirroring ? "vertical" : "horizontal")} mirroring, " +
+                $"{prgSize / 1024} KB of PRG ROM at ${prgFirst:X4}-$FFFF, " + (cartridge.Board.ChrRom ? $"{ChrBank / 1024} KB of CHR ROM" : "CHR RAM") +
+                (plan.CopiedSize > 0 ? $"; the startup code copies {Plural(plan.CopiedSize, "byte", "bytes")} of initial values to RAM" : ""));
+        string variablesAt = cartridge is null ? "after the program" : "in RAM";
         report.AppendLine(code.Variables is { } vars
-            ? $"Variables after the program: {plan.TotalSize} bytes, up to ${vars.Last:X4}"
+            ? $"Variables {variablesAt}: {plan.TotalSize} bytes, up to ${vars.Last:X4}"
               + (plan.PageArrays.Count > 0
                   ? $", from ${vars.First:X4}, placed so that indexed reads do not cross a page: {string.Join(", ", plan.PageArrays.Select(a => $"{a.QualifiedName} ${a.Address:X4}"))}"
                   : "")
-            : "Variables after the program: 0 bytes");
+            : $"Variables {variablesAt}: 0 bytes");
         foreach (var g in program.Globals.Where(g => g.Alignment > 1).OrderBy(g => g.Address))
             report.AppendLine($"Aligned {g.Name}: ${g.Address:X4} (@ align({g.Alignment})), {Plural(AlignmentPadding(g, plan, code), "byte", "bytes")} of padding before it");
         foreach (var table in program.Globals.Where(g => g.IsOffsetTable))
@@ -605,13 +633,16 @@ public static partial class TernCompiler
     /// Startup code: the platform's own first steps (<paramref name="prelude"/>), then set up zero-page
     /// globals and clear the uninitialized ones in RAM (except noinit ones).
     /// </summary>
-    private static List<AsmItem> Startup(RamPlan plan, Label bss, Func<FunctionSymbol, Label> labelOf, IEnumerable<AsmItem> prelude)
+    /// <param name="ramCleared">The prelude cleared all of RAM (the NES): zeros are not stored again.</param>
+    /// <param name="initial">The initial values in ROM that the startup copies (<see cref="RamPlan.CopiedGlobals"/>).</param>
+    private static List<AsmItem> Startup(RamPlan plan, Label bss, Func<FunctionSymbol, Label> labelOf, IEnumerable<AsmItem> prelude,
+        bool ramCleared = false, Label? initial = null)
     {
         var items = new List<AsmItem> { new Instr(Cld) };
         items.AddRange(prelude);
 
         int? a = null;
-        foreach (var g in plan.ZeroPageGlobals.Where(g => !g.NoInit))
+        foreach (var g in plan.ZeroPageGlobals.Where(g => !g.NoInit && !(ramCleared && g.InitialBytes is null)))
         {
             var bytes = ByteLayout(g, g.InitialBytes ?? new byte[g.Type.Size]);
             var addresses = AddressBytes(g);
@@ -634,9 +665,14 @@ public static partial class TernCompiler
             }
         }
 
-        if (plan.ZeroedSize > 0)
+        if (plan.CopiedSize > 0)
+        {
+            items.Add(new Comment("copy the initial values from ROM"));
+            CopyBlock(items, plan.CopiedSize, p => new LabelOperand(initial!, p), p => new LabelOperand(bss, plan.CopiedStart + p), "copy");
+        }
+        if (plan.ZeroedSize > 0 && !ramCleared)
             ClearBlock(items, plan.ZeroedSize, p => new LabelOperand(bss, plan.ZeroedStart + p), "clear");
-        foreach (var block in plan.RegionClears)
+        foreach (var block in plan.RegionClears.Where(b => !ramCleared || b.First > 0x07FF))
             ClearBlock(items, block.Size, p => new AddrOperand(block.First + p), $"clear_{block.First:X4}_");
         return items;
     }

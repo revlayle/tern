@@ -80,8 +80,13 @@ public static class Assembler
     /// </param>
     /// <param name="overlayImports">Where each overlay module is imported, for the error when it does not fit.</param>
     /// <param name="overlayAreas">For each overlay module, the area its sections start in (spec 8.5). Each module is laid out from the start of its area.</param>
+    /// <param name="variableAreas">
+    /// RAM for the variables' block when code is in ROM (the NES): the block goes there, in the first
+    /// area with room, instead of after the code in <paramref name="areas"/>. Null or empty: after the code.
+    /// </param>
     public static AssembledCode Assemble(IReadOnlyList<AsmItem> items, IReadOnlyList<AddressRange> areas, Action? beforeEncode = null,
-        IReadOnlyDictionary<string, AddressRange>? overlayAreas = null, IReadOnlyDictionary<string, SourcePos>? overlayImports = null)
+        IReadOnlyDictionary<string, AddressRange>? overlayAreas = null, IReadOnlyDictionary<string, SourcePos>? overlayImports = null,
+        IReadOnlyList<AddressRange>? variableAreas = null)
     {
         var slots = items.Select(i => new Slot(i)).ToList();
 
@@ -233,6 +238,15 @@ public static class Assembler
             variables = null;
             variablePadding = (0, 0);
             variablesOnPage = false;
+            int codeAreas = free.Count;
+            if (variableAreas is { Count: > 0 })
+            {
+                free = [.. free, .. variableAreas];
+                used = [.. used, .. variableAreas.Select(a => a.First)];
+                names = [.. names, .. variableAreas.Select(_ => new List<string>())];
+            }
+            // The areas the variables' block may go in: after the code, or the RAM given for it.
+            int firstForVariables = variableAreas is { Count: > 0 } ? codeAreas : 0;
             if (reserve is not null)
             {
                 int placedAt = -1;
@@ -244,9 +258,9 @@ public static class Assembler
                     if (at < used[a]) at += reserve.Modulus;
                     return AvoidPageEnd(at, reserve.VectorOffsets) == 0 && at + reserve.Size <= free[a].Last + 1 ? at : null;
                 }
-                int alignedArea = Enumerable.Range(0, free.Count).FirstOrDefault(a => Aligned(a) is not null, -1);
+                int alignedArea = Enumerable.Range(firstForVariables, free.Count - firstForVariables).FirstOrDefault(a => Aligned(a) is not null, -1);
                 if (reserve.Modulus > 1 && alignedArea < 0) throw new NoPageStart();
-                for (int a = 0; a < free.Count && placedAt < 0; a++)
+                for (int a = firstForVariables; a < free.Count && placedAt < 0; a++)
                 {
                     if (alignedArea >= 0 && a != alignedArea) continue;
                     int at = a == alignedArea ? Aligned(a)!.Value : used[a] + AvoidPageEnd(used[a], reserve.VectorOffsets);

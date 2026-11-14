@@ -1,0 +1,210 @@
+// NES: the PPU's and APU's registers, the sprite buffer and its DMA, the frame loop, PPU memory
+// and the controllers.
+//
+// The program owns the NMI vector: its handler calls vblank() first, then does its own vblank work,
+// with scroll() last; main waits for each frame with wait_frame():
+//
+//     interrupt fn frame() {
+//         nes.vblank()                 // sprites, frame count
+//         nes.scroll(x, 0)             // last in vblank
+//     }
+//     data nmi_vector: u16 @ $FFFA = addr(frame)
+//
+//     fn main() {
+//         nes.ppu.ctrl = nes.NMI_ON
+//         while true { nes.wait_frame(); update() }
+//     }
+//
+// PPU memory (ppu_copy, ppu_fill, set_palette) is written with rendering off, or in vblank.
+
+// ---------- Hardware registers (volatile: every read and write happens) ----------
+
+// The PPU at $2000 (mirrored up to $3FFF).
+struct Ppu {
+    ctrl: u8 @ 0                    // PPUCTRL: NMI_ON and the bits below
+    mask: u8 @ 1                    // PPUMASK: what is drawn
+    status: u8 @ 2                  // PPUSTATUS: VBLANK, SPRITE0_HIT, OVERFLOW; a read resets the address latch
+    oam_address: u8 @ 3
+    oam_data: u8 @ 4
+    scroll: u8 @ 5                  // x, then y
+    address: u8 @ 6                 // the PPU address, high byte first
+    value: u8 @ 7                   // PPUDATA: reads and writes PPU memory at the address, which then moves on
+}
+var ppu: Ppu @ $2000
+
+// PPUCTRL
+const NMI_ON = $80                  // an NMI at the start of each vblank
+const SPRITES_8X16 = $20
+const BG_TILES_1000 = $10           // background tiles from $1000
+const SPRITE_TILES_1000 = $08       // 8x8 sprite tiles from $1000
+const INCREMENT_32 = $04            // ppu.value moves down a row (32) instead of across (1)
+const NAMETABLE_2400 = $01          // the nametable at scroll 0, 0: $2000 plus $400 for each of these
+const NAMETABLE_2800 = $02
+
+// PPUMASK
+const SHOW_SPRITES = $10
+const SHOW_BG = $08
+const SHOW_LEFT_SPRITES = $04       // also in the leftmost 8 pixels
+const SHOW_LEFT_BG = $02
+const GRAYSCALE = $01
+
+// PPUSTATUS
+const VBLANK = $80
+const SPRITE0_HIT = $40
+const OVERFLOW = $20
+
+// The APU at $4000.
+struct Apu {
+    pulse1: [u8; 4] @ $00
+    pulse2: [u8; 4] @ $04
+    triangle: [u8; 4] @ $08
+    noise: [u8; 4] @ $0C
+    dmc: [u8; 4] @ $10
+    status: u8 @ $15                // channels on (write), length counters and IRQs (read)
+    frame_counter: u8 @ $17         // mode and frame IRQ (write; a read is pad 2)
+}
+var apu: Apu @ $4000
+
+var oam_dma: u8 @ $4014             // a write copies that page to the PPU's sprite memory (513 cycles)
+var pad_port: [u8; 2] @ $4016       // controllers 1 and 2; a write to the first strobes both
+
+// ---------- Sprites ----------
+
+// One hardware sprite: y is the line above the sprite's top (239 and up hide it).
+struct Sprite {
+    y: u8
+    tile: u8
+    attributes: u8                  // palette (bits 0-1), BEHIND_BG, FLIP_X, FLIP_Y
+    x: u8
+}
+
+const FLIP_Y = $80
+const FLIP_X = $40
+const BEHIND_BG = $20
+
+// The sprite buffer: vblank() copies it to the PPU each frame. Page aligned, as DMA needs.
+linear var oam: [Sprite; 64] @ align(256)
+
+// Hides all 64 sprites (y = $FF).
+asm fn hide_sprites() {
+    lda #$FF
+    ldx #0
+.loop:
+    sta oam,x
+    inx
+    inx
+    inx
+    inx
+    bne .loop
+}
+
+// ---------- The frame loop ----------
+
+// Frames counted by vblank().
+var frames: u8
+
+// The part of the program's NMI handler that comes first in vblank: sends the sprite buffer to the
+// PPU by DMA and counts the frame (spec 6.3).
+interrupt fn vblank() {
+    asm {
+        lda #0
+        sta $2003
+        lda #oam.hi
+        sta $4014
+    }
+    frames += 1
+}
+
+// Waits until vblank() has counted a new frame.
+fn wait_frame() {
+    var f = frames
+    while frames == f { }
+}
+
+// ---------- PPU memory: with rendering off, or in vblank ----------
+
+// Sets the PPU address for the next ppu.value reads and writes. Reads PPUSTATUS first, which resets
+// the address latch.
+asm fn ppu_address(at: u16 using XY) {
+    bit $2002
+    sty $2006
+    stx $2006
+}
+
+// Copies n bytes from src to PPU memory at dest: tiles to CHR RAM, a nametable, a palette.
+fn ppu_copy(src: ptr u8, dest: u16, n: u16) {
+    ppu_address(dest)
+    for _ in 0..n.hi {
+        for i in 0..=255 using Y {
+            ppu.value = src[i]
+        }
+        src += 256
+    }
+    for i in 0..n.lo using Y {
+        ppu.value = src[i]
+    }
+}
+
+// Writes value to n bytes of PPU memory from dest.
+fn ppu_fill(dest: u16, value: u8, n: u16) {
+    ppu_address(dest)
+    for _ in 0..n.hi {
+        for _ in 0..=255 using Y {
+            ppu.value = value
+        }
+    }
+    for _ in 0..n.lo using Y {
+        ppu.value = value
+    }
+}
+
+// Sets the 32 palette bytes (4 background palettes, then 4 sprite palettes) from p.
+fn set_palette(p: ptr u8) {
+    ppu_copy(p, $3F00, 32)
+}
+
+// Sets the scroll position. Writes to the PPU address change it, so this comes last in vblank.
+fn scroll(x: u8, y: u8) {
+    asm {
+        bit $2002
+    }
+    ppu.scroll = x
+    ppu.scroll = y
+}
+
+// Draws the background and the sprites, also in the leftmost 8 pixels.
+fn render_on() {
+    ppu.mask = SHOW_BG | SHOW_SPRITES | SHOW_LEFT_BG | SHOW_LEFT_SPRITES
+}
+
+// Stops drawing, so that PPU memory can be written at any time.
+fn render_off() {
+    ppu.mask = 0
+}
+
+// ---------- Controllers ----------
+
+const BTN_A = $80
+const BTN_B = $40
+const BTN_SELECT = $20
+const BTN_START = $10
+const BTN_UP = $08
+const BTN_DOWN = $04
+const BTN_LEFT = $02
+const BTN_RIGHT = $01
+
+// The buttons of pad 1 or 2 as bits, 1 for pressed: BTN_A ... BTN_RIGHT.
+asm fn pad(n: u8 using X) -> u8 using A {
+    var buttons: u8
+    lda #1
+    sta $4016
+    sta buttons                     // when this bit reaches the carry, 8 buttons are in
+    lsr a
+    sta $4016
+.loop:
+    lda $4015,x
+    lsr a
+    rol buttons
+    bcc .loop
+    lda buttons
+}

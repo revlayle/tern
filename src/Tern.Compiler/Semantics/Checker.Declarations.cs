@@ -35,7 +35,7 @@ public sealed partial class Checker
             CheckExpr(e);
             return e.ConstValue ?? throw new CompileError(e.Pos, "A memory range must be known at compile time. Use numbers and constants");
         }
-        return MemoryLayout.Build(_platform, memory.Lines.Select(l => (l, Value(l.First), Value(l.Last))).ToList());
+        return MemoryLayout.Build(_platform, memory.Lines.Select(l => (l, Value(l.First), Value(l.Last))).ToList(), memory.Cartridge, memory.Pos);
     }
 
     /// <param name="name">The name in this file's scope; for top-level declarations of a module, without the module name.</param>
@@ -552,8 +552,10 @@ public sealed partial class Checker
         if (decl.IsNoinit && v.FixedAddress is not null)
             throw new CompileError(decl.Pos, $"'{decl.Name}' is at a fixed address, which is never zeroed; leave out 'noinit'");
 
-        if (decl.IsData && !type.IsArray && !type.IsStruct)
-            throw new CompileError(decl.Pos, "Data must be an array, a string or a struct. Use 'const' for a single value");
+        // A single value placed with '@' is bytes the hardware reads, such as the NES's interrupt vectors
+        // (spec 12.2: data nmi_vector: u16 @ $FFFA = addr(frame)); provisional, question 157.
+        if (decl.IsData && !type.IsArray && !type.IsStruct && v.FixedAddress is null && v.Region is null)
+            throw new CompileError(decl.Pos, "Data must be an array, a string or a struct, unless it is placed with '@'. Use 'const' for a single value");
         if (decl.Init is not null)
         {
             if (v.FixedAddress is not null && !decl.IsData)

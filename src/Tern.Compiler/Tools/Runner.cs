@@ -14,6 +14,8 @@ public sealed record RunOptions
     public string MainFile { get; init; } = "program.tern";
     /// <summary>Bytes written into memory after the program is loaded, before it starts (<c>--set</c>).</summary>
     public IReadOnlyList<MemorySet> Sets { get; init; } = [];
+    /// <summary>On the NES: the buttons of pad 1 or 2 in a frame (<see cref="NesBus.Buttons"/>); null for none.</summary>
+    public Func<long, int, byte>? Buttons { get; init; }
 }
 
 /// <summary>
@@ -56,6 +58,8 @@ public sealed record RunResult(
 {
     /// <summary>The machine the program ran on.</summary>
     public Platform Platform { get; init; } = Platform.C64;
+    /// <summary>On the NES: the PPU's memory, OAM and frames (<see cref="NesBus"/>); null elsewhere.</summary>
+    public NesBus? Nes { get; init; }
 }
 
 
@@ -80,10 +84,13 @@ public static class Runner
         var ram = new Ram();
         machine.Start(ram);
         // An Apple II system file is one block at $2000, which its startup code moves into place.
+        NesBus? nes = null;
         if (program.Platform.Format == OutputFormat.System) ram.Load((ushort)program.Platform.LoadAddress, program.File);
+        else if (program.Platform.Format == OutputFormat.Nes) nes = new NesBus(ram, program.File) { Buttons = options.Buttons };
         else ram.Load((ushort)program.LoadAddress, program.Image);
         foreach (var set in options.Sets) ram.Bytes[set.Address] = set.Value;
-        var cpu = new Cpu6502(ram) { PC = (ushort)program.Entry, SP = 0xFF, I = true };
+        var cpu = new Cpu6502(nes is null ? ram : nes, program.Platform.Cpu) { PC = (ushort)program.Entry, SP = 0xFF, I = true };
+        if (nes is not null) nes.Cpu = cpu;
 
         var inProgram = program.Sections.Select(s => (s.Address, End: s.Address + s.Size)).ToList();
         bool InProgram(int pc) => inProgram.Any(s => pc >= s.Address && pc < s.End);
@@ -137,6 +144,12 @@ public static class Runner
             long before = cpu.Cycles;
             try { cpu.Step(); }
             catch (IllegalOpcodeException e) { stop = $"illegal opcode ${e.Opcode:X2} at ${e.Address:X4}"; break; }
+            if (nes is not null)
+            {
+                int nmis = nes.Nmis;
+                nes.Tick(cpu);
+                if (nes.Nmis > nmis) { interrupts++; Entered(cpu.PC); }
+            }
             profile.Add(pc, cpu.Cycles - before);
             if (opcode == 0x20) Entered(cpu.PC);   // jsr
             Left();
@@ -149,6 +162,7 @@ public static class Runner
         return new RunResult(returned, stop, cpu.Cycles, mainCycles, interrupts, ram, cpu, output.ToString(), profile, times, checker.Errors)
         {
             Platform = program.Platform,
+            Nes = nes,
         };
 
         void Entered(int at)

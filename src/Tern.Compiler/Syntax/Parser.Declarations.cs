@@ -296,27 +296,44 @@ public sealed partial class Parser
         if (PeekAt(i).Kind == TokenKind.LBrace) _pos += i;
     }
 
-    /// <summary><c>memory { first..=last kind [name] ... }</c> (spec 8.4). The kinds are words only inside the block.</summary>
+    /// <summary><c>memory { [cartridge board option...] first..=last kind [name] ... }</c> (spec 8.4). The kinds are words only inside the block.</summary>
     private MemoryDecl ParseMemory()
     {
         var start = Advance();
         SkipBreaksBeforeBrace();
         Expect(TokenKind.LBrace, "'{'");
         var lines = new List<MemoryLine>();
+        CartridgeLine? cartridge = null;
         SkipTerminators();
         while (!At(TokenKind.RBrace))
         {
             if (At(TokenKind.Eof)) throw new CompileError(start.Pos, "The memory block is not closed with '}'. Add '}' after its last range");
+            // cartridge board option...: before the ranges, at most once (spec 8.4).
+            if (At(TokenKind.Identifier) && Current.Text == "cartridge" && PeekAt(1).Kind == TokenKind.Identifier)
+            {
+                var word = Advance();
+                if (cartridge is not null)
+                    throw new CompileError(word.Pos, "The memory block has a second 'cartridge' line. Remove one: a build is an image for one board");
+                if (lines.Count > 0)
+                    throw new CompileError(word.Pos, "The 'cartridge' line comes before the ranges of the memory block. Move it to the top of the block");
+                var board = Advance();
+                var options = new List<(string, SourcePos)>();
+                while (At(TokenKind.Identifier)) { var o = Advance(); options.Add((o.Text, o.Pos)); }
+                cartridge = new CartridgeLine(word.Pos, board.Text, board.Pos, options);
+                ExpectEndOfStatement();
+                SkipTerminators();
+                continue;
+            }
             var first = ParseExpr();
             if (At(TokenKind.DotDot))
                 throw new CompileError(Current.Pos, "A memory range includes its last address. Write first..=last");
             Expect(TokenKind.DotDotEq, "'..=' and the last address of the range");
             var last = ParseExpr();
-            var kind = At(TokenKind.Volatile) ? Advance() : Expect(TokenKind.Identifier, "the kind of memory: program, zeropage, reserved, region, volatile or overlay");
-            if (kind.Text is not ("program" or "zeropage" or "reserved" or "region" or "volatile" or "overlay"))
-                throw new CompileError(kind.Pos, $"Unknown kind of memory '{kind.Text}'. Use program, zeropage, reserved, region, volatile or overlay");
+            var kind = At(TokenKind.Volatile) ? Advance() : Expect(TokenKind.Identifier, "the kind of memory: program, zeropage, reserved, region, volatile, overlay, bank or chr");
+            if (kind.Text is not ("program" or "zeropage" or "reserved" or "region" or "volatile" or "overlay" or "bank" or "chr"))
+                throw new CompileError(kind.Pos, $"Unknown kind of memory '{kind.Text}'. Use program, zeropage, reserved, region, volatile, overlay, bank or chr");
             string? name = null;
-            if (kind.Text is "region" or "overlay")
+            if (kind.Text is "region" or "overlay" or "bank" or "chr")
                 name = Expect(TokenKind.Identifier, $"a name after '{kind.Text}'").Text;
             lines.Add(new MemoryLine(kind.Pos, first, last, kind.Text, name));
             // The lexer ends no statement after the keyword 'volatile'.
@@ -326,7 +343,7 @@ public sealed partial class Parser
         }
         Expect(TokenKind.RBrace, "'}'");
         ExpectEndOfStatement();
-        return new MemoryDecl(start.Pos, lines);
+        return new MemoryDecl(start.Pos, lines) { Cartridge = cartridge };
     }
 
     /// <summary><c>struct Name { field: type, field: type @ offset }</c>; fields are separated by ',' or line breaks.</summary>

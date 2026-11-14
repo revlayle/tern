@@ -32,24 +32,61 @@ public sealed class MemoryLayout
     public Dictionary<string, AddressRange> Overlays { get; } = [];
     /// <summary>Volatile ranges added by the memory block, in addition to the platform's.</summary>
     public List<AddressRange> Volatile { get; } = [];
+    /// <summary>
+    /// RAM for the variables' block when code is in ROM (<see cref="Platform.VariableRam"/>, less the
+    /// block's other areas); empty when the variables follow the program in <see cref="Program"/>.
+    /// </summary>
+    public List<AddressRange> Variables { get; private init; } = [];
+    /// <summary>The board the build is an image for (the <c>cartridge</c> line), or null.</summary>
+    public Cartridge? Cartridge { get; private init; }
 
     /// <summary>The block has <c>program</c> lines, which replace the platform's program areas.</summary>
     public bool ProgramReplaced { get; private init; }
 
     public bool IsVolatile(int first, int last) => Volatile.Any(a => first <= a.Last && last >= a.First);
 
-    /// <summary>The platform's map: one program area from the load address to the end of usable RAM.</summary>
+    /// <summary>
+    /// The platform's map: one program area from the load address to the end of usable RAM; on a
+    /// platform with boards, the first board's ROM, with the variables in <see cref="Platform.VariableRam"/>.
+    /// </summary>
     public static MemoryLayout Default(Platform platform) => new()
     {
-        Program = [new AddressRange(platform.LoadAddress, platform.RamEnd)],
+        Program = platform.Boards.Count > 0 ? [.. platform.Boards[0].CodeAreas] : [new AddressRange(platform.LoadAddress, platform.RamEnd)],
+        Variables = platform.VariableRam is var (first, last) ? [new AddressRange(first, last)] : [],
         ZeroPage = PlatformZeroPage(platform),
     };
+
+    /// <summary>The board and options of a <c>cartridge</c> line (spec 8.4, 12.2).</summary>
+    private static Cartridge BuildCartridge(Platform platform, CartridgeLine line)
+    {
+        if (platform.Boards.Count == 0)
+            throw new CompileError(line.Pos, platform.Name == "apple2"
+                ? "The Apple II has no cartridges. Remove the 'cartridge' line"
+                : $"'cartridge' is not supported yet for the {platform.Name}: cartridge images are built only for the NES so far. Remove the 'cartridge' line");
+        var board = platform.Boards.FirstOrDefault(b => b.Name == line.Board)
+            ?? throw new CompileError(line.BoardPos,
+                $"The {platform.Name.ToUpperInvariant()} has no board '{line.Board}'. Use one of: {string.Join(", ", platform.Boards.Select(b => b.Name))}");
+        foreach (var (name, pos) in line.Options)
+            if (!Board.Mirroring.Contains(name))
+                throw new CompileError(pos, $"The board '{board.Name}' has no option '{name}'. Use one of: {string.Join(", ", Board.Mirroring)}");
+        var mirroring = line.Options.Where(o => Board.Mirroring.Contains(o.Name)).ToList();
+        if (mirroring.Count == 0)
+            throw new CompileError(line.BoardPos,
+                $"The board '{board.Name}' is wired for one mirroring, which the line must name. Write 'cartridge {board.Name} vertical' or 'cartridge {board.Name} horizontal'");
+        if (mirroring.Count > 1)
+            throw new CompileError(mirroring[1].Pos, $"The board has one mirroring, and the line names {mirroring.Count}. Remove '{mirroring[1].Name}'");
+        return new Cartridge(board, mirroring[0].Name == "vertical");
+    }
 
     private static List<AddressRange> PlatformZeroPage(Platform platform) => platform.ZeroPage.Select(z => new AddressRange(z.First, z.Last)).ToList();
 
     /// <summary>Applies the lines of the main file's memory block to the platform's map (spec 8.4).</summary>
-    public static MemoryLayout Build(Platform platform, IReadOnlyList<(MemoryLine Line, long First, long Last)> lines)
+    /// <param name="block">The block's position, for an error about the block as a whole.</param>
+    public static MemoryLayout Build(Platform platform, IReadOnlyList<(MemoryLine Line, long First, long Last)> lines, CartridgeLine? cartridgeLine, SourcePos block)
     {
+        var cartridge = cartridgeLine is null ? null : BuildCartridge(platform, cartridgeLine);
+        if (cartridge is null && platform.Boards.Count > 0)
+            throw new CompileError(block, NeedsCartridge(platform));
         var program = new List<AddressRange>();
         var zeroPage = new List<AddressRange>();
         var reserved = new List<AddressRange>();
@@ -66,8 +103,15 @@ public sealed class MemoryLayout
             if (first > last)
                 throw new CompileError(line.Pos, $"The range starts at ${first:X4} and ends at ${last:X4}, before its start. Write the lower address first");
             var range = new AddressRange((int)first, (int)last);
+            if (line.Kind is "bank" or "chr" && cartridge is null)
+                throw new CompileError(line.Pos, $"A '{line.Kind}' area is part of a cartridge board, which the {platform.Name} does not have. Remove the line");
+            if (line.Kind is "bank" or "chr")
+                throw new CompileError(line.Pos, $"'{line.Kind}' is not supported yet. Remove the line");
             switch (line.Kind)
             {
+                case "program" when cartridge is not null:
+                    throw new CompileError(line.Pos,
+                        $"'program' lines are not supported yet on the {platform.Name.ToUpperInvariant()}: the board '{cartridge.Board.Name}' gives the program's ROM ({List(cartridge.Board.CodeAreas)}). Remove the line, or use 'reserved' for memory the program keeps for itself");
                 case "program": program.Add(range); break;
                 case "zeropage":
                     if (last > 0xFF)
@@ -97,7 +141,8 @@ public sealed class MemoryLayout
 
         // Memory the compiler may not use is taken out of the platform's areas, when the block does not replace them.
         var taken = reserved.Concat(regions.Values).Concat(overlays.Values).ToList();
-        var programAreas = program.Count > 0 ? program : Subtract([new AddressRange(platform.LoadAddress, platform.RamEnd)], taken);
+        var programAreas = program.Count > 0 ? program
+            : Subtract(cartridge is not null ? cartridge.Board.CodeAreas : [new AddressRange(platform.LoadAddress, platform.RamEnd)], taken);
         if (programAreas.Count == 0)
             throw new CompileError(lines[0].Line.Pos, $"No program area is left: the reserved and region ranges cover all of ${platform.LoadAddress:X4}-${platform.RamEnd:X4}. Leave room for the program");
         var layout = new MemoryLayout
@@ -105,13 +150,22 @@ public sealed class MemoryLayout
             Program = programAreas,
             ProgramReplaced = program.Count > 0,
             ZeroPage = zeroPage.Count > 0 ? zeroPage.OrderBy(z => z.First).ToList() : Subtract(PlatformZeroPage(platform), taken.Concat(program)),
+            Variables = platform.VariableRam is var (ramFirst, ramLast) ? Subtract([new AddressRange(ramFirst, ramLast)], taken) : [],
+            Cartridge = cartridge,
         };
+        if (platform.VariableRam is var (vFirst, vLast) && layout.Variables.Count == 0)
+            throw new CompileError(block, $"No RAM is left for variables: the block's ranges cover all of {new AddressRange(vFirst, vLast)}. Leave room for the variables");
         layout.Reserved.AddRange(reserved);
         foreach (var (name, range) in regions) layout.Regions[name] = range;
         foreach (var (name, range) in overlays) layout.Overlays[name] = range;
         layout.Volatile.AddRange(volatileRanges);
         return layout;
     }
+
+    /// <summary>The error for a NES program without a <c>cartridge</c> line.</summary>
+    public static string NeedsCartridge(Platform platform) =>
+        $"A {platform.Name.ToUpperInvariant()} program is a cartridge image, so its memory block names the board. " +
+        $"Write 'memory {{ cartridge {platform.Boards[0].Name} vertical }}' (boards: {string.Join(", ", platform.Boards.Select(b => b.Name))}; mirroring: vertical or horizontal)";
 
     private static string Describe(MemoryLine line) => line.Name is null ? line.Kind : $"{line.Kind} {line.Name}";
 
