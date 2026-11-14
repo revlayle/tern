@@ -120,6 +120,8 @@ fn main() {
 ```
 
 - `@` always means "located at": an address, `zp`, `align(n)`, or a region of the `memory` block.
+  `@ buffers + $100` places it at that offset from the region's start (on the NES also in a `chr`
+  area); the others in the region are placed in order, and overlapping is an error.
 - `@ align(n)` puts a global `var` or `data` where the compiler would, but at a multiple of `n` (a
   power of two, 2 to 32768): `noinit var chars: [u8; 2048] @ align(2048)`, `@ align(64)` for sprite
   data. No code; up to `n - 1` bytes of padding, which the report shows (`Aligned chars: $3000
@@ -644,7 +646,7 @@ A=$15 X=$00 Y=$00 SP=$FF PC=$0817
 a $0003 u8 = 21 ($15)
 ```
 
-- `import name` looks in the platform library (`lib/c64/`, `lib/atari/`, `lib/apple2/`), the standard library (`lib/`), then the
+- `import name` looks in the platform library (`lib/c64/`, `lib/atari/`, `lib/apple2/`, `lib/nes/`), the standard library (`lib/`), then the
   program's folder. Names are used with the module name. `private` hides a declaration. A module of
   your own may not have a library module's name (`io.tern`, `random.tern`): rename it.
 - Only what is reached is compiled. Module parameters: `import sprites(COUNT = 24)`; a module
@@ -660,6 +662,11 @@ a $0003 u8 = 21 ($15)
   calls `level_api.update()` and whichever level is loaded answers. Each function must match its
   routine's registers and `keeps`; each `volatile var` of the interface is `data` of the same name,
   type and address in the module. See `examples/c64/stages.tern`.
+- Banks (NES, UxROM): `import level1 @ levels[0]` puts a module in bank 0 of the bank area
+  `levels` (`$8000..=$BFFF bank levels` after `cartridge uxrom vertical`). It is not loaded: the
+  program shows the bank with `uxrom.select(0)` before calling into it, and the compiler does not
+  check that. Modules with the same number share the bank; `implements` works as for overlays. See
+  `examples/nes/scroll.tern`.
 - Plug-ins: `export level_api` in a binary takes its entries from a hand-written interface module
   (routines at fixed addresses, with `setup` at the start of the binary's first program area, and
   `volatile var`s the binary defines as `data` at the same address); each function must match its
@@ -769,6 +776,8 @@ out $0974 [u8; 3] (3 bytes):
 | `c64` | `SCREEN`, `COLOR`, the 16 colors (`c64.BLACK` ... `c64.LIGHT_GREY`), `chrout`, `print`, `getin`, `cursor`, `load`; registers `vic`, `sid`, `cia1`, `cia2`; `sprite_xy` (the sprite positions as an array: x of sprite n at `2n`, y at `2n + 1`); `kernal_off`, `set_irq`, `set_kernal_irq`, `set_nmi`, `interrupts_on`, `interrupts_off` |
 | `atari` (Atari) | `put`, `print`, `cursor` (text through the screen editor, in ATASCII); registers `gtia`/`gtia_in`, `pokey`/`pokey_in`, `pia`, `antic`; shadow registers (`color`, `sdmctl`, `sdlst`, `chbas`, ...), `stick`, `strig`, `ch`, `rtclok`, `savmsc`; `wait_frame`, `exit`; `set_dli`, `set_vbi` (after the OS's frame work), `set_vbi_immediate`; display lists: `DL_` and `MODE_` constants, the const fn `display_list(mode, rows, screen, at, dli)` for `data list: [u8; _] @ LIST = ...`, `set_display_list` |
 | `apple2` (Apple II) | `put` (COUT itself), `print`, `cursor`, `inverse`, `flashing`, `normal`, `home`, `put_hex`, `read_key`, `bell`, `wait`; `TEXT_ROWS`; soft switches `show_text`, `show_graphics`, `show_mixed`, `show_full`, `show_page1`, `show_page2`, `show_lores`, `show_hires`; hi-res: `draw_page` (`$20` or `$40`), `clear`, `plot(x, y)`, `HIRES_ROWS`; `kbd`, `key()`, `click`, `tone`; `mli(command, parameters)`, `exit` |
+| `nes` (NES) | registers `ppu` (`ctrl`, `mask`, `status`, `scroll`, `address`, `value`, ...) with `NMI_ON`, `SHOW_BG`, `NAMETABLE_2400`, ..., `apu`, `oam_dma`; the sprite buffer `oam` (64 `Sprite`s: `y`, `tile`, `attributes`, `x`; `FLIP_X`, `FLIP_Y`, `BEHIND_BG`), `hide_sprites`; the NMI part `vblank()` (sprite DMA, `frames` += 1) and `wait_frame()`; PPU memory with rendering off or in vblank: `ppu_address`, `ppu_copy(src, dest, n)`, `ppu_fill(dest, value, n)`, `set_palette(p)` (32 bytes), `scroll(x, y)` (last in vblank), `render_on`, `render_off`; `pad(1 or 2)`: buttons as bits `BTN_A` ... `BTN_RIGHT` |
+| `uxrom` (NES) | `select(n)`: shows bank n at `$8000-$BFFF` on UxROM (writes n over a table holding n, for the board's bus conflicts) |
 | `io` (C64) | disk files through the KERNAL: `load`, `save`, `open`, `read`, `write`, `close`, the command channel |
 | `io` (Apple II) | files through the ProDOS MLI, one open at a time (a 1 KB buffer `@ align(256)`), ProDOS paths in `apple2` codes, partial (`"SCORES"`, next to the program) or full (`"/GAMES/SCORES"`), at most 64 characters, lowercase allowed: the Atari's `open` (`io.READ`, `io.WRITE`: creates a BIN file or empties it), `read`, `write`, `close`, `load`, `save` (a BIN file with `src` as its aux type), `status()` (the MLI's code: 0 is success; `ST_EOF` `$4C`, `ST_NOT_FOUND` `$46`), and `load_bin(name, n)` for overlay files (a BIN file loads at its aux type; another type or aux type 0 fails with `$4A`); `true` means it failed |
 | `io` (Atari) | files through CIO on IOCB 1, one open at a time, names with their device (`"D1:SCORES.DAT"`, `"H:..."`): `open(name, n, io.READ or io.WRITE)`, `read(dst, n: u16)` (returns the count), `write`, `close`, `status()` (CIO's code: below 128 is success, not only `ST_OK`; `ST_EOF`, `ST_NOT_FOUND`), `load(name, n, dst, max)`, `save(name, n, src, count)`, `load_xex(name, n)` for overlay files; `true` means it failed |
