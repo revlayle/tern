@@ -6,7 +6,8 @@ Owned by the coding session. Updated at the end of every coding session.
 
 - **Milestone:** M27 follow-up: the three changes of questions 157-169 (roadmap "M27: NES", last item; decision 2026-11-14). M27 itself is merged (`7a3535a`).
 - **Branch:** `m27-followup`, from `main` at `7a3535a`. All three changes are done, each with tests. 3720 compiler tests pass plus 36 CPU tests. No benchmark changed (1254 / 350780); `SkillTests` pass.
-- **Next step:** `/review m27-followup`, then `/merge`. After that the first release (roadmap "First release"): the spec session brings `docs/guide.md` and spec 10.1 up to the compiler as built; every example must build for its platforms. When the OS-B and XL OS ROM images are registered in Altirra, rerun the Atari examples on them (decision 2026-11-13, question 137).
+- **Review** (`docs/reviews/m27-followup.md`): ready to merge, no findings.
+- **Next step:** `/merge m27-followup`. After that the first release (roadmap "First release"): the spec session brings `docs/guide.md` and spec 10.1 up to the compiler as built; every example must build for its platforms. When the OS-B and XL OS ROM images are registered in Altirra, rerun the Atari examples on them (decision 2026-11-13, question 137).
 
 ## Done
 
@@ -753,6 +754,7 @@ Cycles including `jsr` and `rts`, best and worst over the test values (`FloatTes
 
 ## Known limitations and technical debt
 
+- Two interface modules whose fixed routines overlap (`api1.value` and `api2.other` both at `$8000`) give "... are placed at overlapping addresses" at `main.tern:1:1`, not at either declaration (review M27 follow-up, outside the branch; for a later milestone).
 - NES: `tern run` has no option for the pads (only tests script them with `NesBus.Buttons`), no dump of PPU memory but `--screen`, and models no timing within a frame (sprite 0 hits, the length of vblank).
 - NES: `addr()` of a function or variable inside `chr` data would be zeros in CHR ROM (the address fill is not applied there); tile data has no use for one.
 - NES: the optimizer treats a bank module's variables as it treats an overlay's (`OverlayArea` is set), so it keeps some loads and stores it could remove; they are resident RAM.
