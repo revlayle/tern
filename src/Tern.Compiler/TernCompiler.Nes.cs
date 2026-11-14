@@ -96,6 +96,11 @@ public static partial class TernCompiler
                         (f is null || fill!.Offset != 0 ? "" : f.IsPart ? $"; '{f.Name}' is called by another interrupt fn, so it is compiled as a part, which returns with rts"
                             : $"; '{f.Name}' is a plain fn, which returns with rts") +
                         $". {(f is not null && !f.IsPart && fill!.Offset == 0 ? $"Declare it 'interrupt fn {f.Name}'" : "Write addr() of an interrupt fn")}");
+                // Decision 2026-11-14 (question 169): an interrupt can come with any bank selected.
+                if (f.Module is { InBank: true } m)
+                    throw new CompileError(g.Pos,
+                        $"The {what} vector (${vector:X4}) points to '{f.Name}' in bank {m.Bank} of the bank area '{m.OverlayArea}', but an interrupt can come with any bank selected. " +
+                        $"Call it from a resident interrupt fn through an interface its module implements, or import {m.Name} without '@ {m.OverlayArea}[{m.Bank}]'");
                 if (vector == NmiVector) nmi = true; else irq = true;
             }
         }
