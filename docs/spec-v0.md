@@ -340,6 +340,7 @@ data msg = "GAME OVER"
   - `zp`: anywhere in zero page, chosen by the compiler. This is a guarantee: if zero page is full, compilation fails (8.2).
   - `align(n)`: where the compiler would place it, but at an address that is a multiple of `n`, a constant power of two from 2 to 32768 (decision 2026-11-13): `noinit var buffer: [u8; 1024] @ align(256)` for a page-aligned buffer, `@ align(64)` for sprite data, `@ align(2048)` for a character set. It is allowed on global `var`s and `data`, also in an overlay module (the padding is then in its file), not on locals, in zero page or with a region (`@` takes one location). It costs no code. The padding before it shows in the report, and the compiler may place other variables in it (it does not yet: aligned `noinit` variables start the variables' block, so the block has no gaps of its own, and the space before the block, less than the largest alignment, stays empty; decision 2026-11-13). `align` is a word only after `@`. Errors: `n` not a power of two in that range, an aligned declaration that does not fit, and an aligned variable that must be in zero page (a dereferenced pointer, a zero-page operand of assembly), which says to remove `@ align(n)`.
 
+  - a region or `chr` area's name (8.4): in that area, placed in order (`var map: [u8; 2048] @ buffers`), or at an offset from its start with `@ name + offset`, `offset` a constant expression (`data font @ tiles + $1000`; decision 2026-11-14). The offset form follows the area when its range moves; `@ $C100` stays a fixed address. An area name is never a constant's name (8.4), so `@ buffers + $100` and `@ VIC + $20` cannot be confused. Errors: an offset past the area's end, overlapping declarations.
   Code and `data` go into an overlay or a ROM bank by module, with `@` on the module's import (8.5, 14.1), not on single declarations.
 - **Volatile memory.** Every read and write of volatile memory in the source happens exactly once and in order; the optimizer never removes, merges or reorders them. Memory is volatile when:
   - it lies in one of the platform's volatile areas (12.2), such as I/O registers. This needs no keyword: `var border: u8 @ $D020` is volatile,
@@ -1258,11 +1259,11 @@ A platform description gives: CPU variant, free zero-page ranges, RAM ranges for
       cartridge nrom vertical
       $0000..=$1FFF  chr tiles
   }
-  data bg   @ tiles       = include_bytes("bg.chr")      // in order, from $0000
-  data font @ tiles $1000 = include_bytes("font.chr")    // at $1000
+  data bg   @ tiles         = include_bytes("bg.chr")    // in order, from the start
+  data font @ tiles + $1000 = include_bytes("font.chr")  // 4 KB after the start
   ```
   - The range is in the PPU's addresses, so it does not take CPU memory. `nrom` allows `$0000..=$1FFF` or part of it; at most one `chr` line. The bytes go in the image's CHR ROM; bytes no `data` covers are zero. Without a `chr` line the CHR ROM is all zeros.
-  - `@ name` places `data` in order from the area's start, as in any region. `@ name address` places it at that address in the area's own address space. This second form exists only for areas with their own address space (`chr`); on a region of CPU memory it is an error that says to write `@ address`.
+  - `@ name` places `data` in order from the area's start, `@ name + offset` at that offset from it, as in any region (4). With the range starting at `$0000`, the offset is also the PPU address.
   - Any `data` initializer works: lists, `[expr for i in range]`, `const fn` results, `include_bytes`. A tile is 16 bytes (bitplane 0, then bitplane 1).
   - Only `data` may be placed there: no code, no `var`. The CPU cannot read it, so code may use only `addr(x)` (its PPU address, a `u16`) and `len(x)`; `x[i]` or a pointer to it is an error.
   - Errors: data past the area, overlapping data, an address outside the area.

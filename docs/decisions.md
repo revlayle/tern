@@ -897,3 +897,9 @@ Spec 8.4, 12.2 (NES).
 - **`@ name address` places data at an address in an area's own address space.** Reason (the developer's): `data font @ tiles $1000` states where the font lands; placing in order with a padding line (`[0; $1000 - len(bg)]`) makes the reader add up lengths, and breaks when a line is added in front. Only for areas with their own address space: on CPU memory `@ address` already says it, so there is one way to write each placement. On NROM, the address is also the offset into CHR ROM.
 - **Only `data` in a `chr` area, and code may use only `addr()` and `len()` of it**, since the CPU cannot read CHR ROM. Any `data` initializer works.
 - **UxROM has no `chr` area**: its tiles are in CHR RAM, ordinary `data` the program copies to the PPU.
+
+## 2026-11-14: `@ area + offset` replaces `@ area address`
+
+Spec 4, 12.2 (NES); replaces the third point of "NES tile data" above, the same day.
+
+- **`@ name + offset` places a declaration at an offset from the start of a region or `chr` area**, on every target: `data font @ tiles + $1000`, `var col: [u8; 32] @ buffers + $100`. Reason (the developer's): it says "4 KB after the start" directly, whatever address the area starts at, and `+` keeps its meaning (the area's start plus a constant), where `@ tiles $1000` needed the reader to know the number was an address in another address space. An offset means the same in every region, so the rule has no exception for areas with their own address space. `@ $C100` stays a fixed address; the offset form follows the area when its range moves. Not on `bank` or `overlay` areas, where modules are placed by import and an overlay's fixed data uses an address (8.5).
