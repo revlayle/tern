@@ -20,6 +20,8 @@ public sealed class CheckedProgram(
     public Dictionary<FunctionSymbol, FunctionSymbol> ExportedAs { get; init; } = [];
     /// <summary>The address of a program's export table (<c>export f, g @ $0900</c>), or null.</summary>
     public int? ExportTableAddress { get; init; }
+    /// <summary>The encoding of the program's literals without a prefix: its 'default encoding', or the platform's; null when neither (the NES).</summary>
+    public CharEncoding? TextEncoding { get; init; }
     /// <summary>A binary without <c>main</c>, which starts with its jump table.</summary>
     public bool IsBinary => Exports.Count > 0 && ExportTableAddress is null;
     /// <summary>The entries of the overlays' interface tables (<c>implements</c>, spec 8.5).</summary>
@@ -262,7 +264,7 @@ public sealed partial class Checker
         var used = reachable.SelectMany(f => f.UsedGlobals).Concat(kept).Concat(_tableData).ToHashSet();
         // A kept global keeps the globals whose addresses are in its initial value.
         foreach (var g in used.ToList()) used.UnionWith(GlobalsNamedBy(g.Storage));
-        return new CheckedProgram(modules, _globals.Where(used.Contains).ToList(), reachable, main) { Layout = _layout, Exports = exports, ExportedAs = exportedAs, ExportTableAddress = exportTable, Implementations = implementations };
+        return new CheckedProgram(modules, _globals.Where(used.Contains).ToList(), reachable, main) { Layout = _layout, Exports = exports, ExportedAs = exportedAs, ExportTableAddress = exportTable, Implementations = implementations, TextEncoding = _programDefault ?? _platform.DefaultEncoding };
     }
 
     /// <summary>A global and the globals whose addresses are in its initial value, and in theirs (spec 4).</summary>

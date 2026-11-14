@@ -60,6 +60,8 @@ public sealed record RunResult(
     public Platform Platform { get; init; } = Platform.C64;
     /// <summary>On the NES: the PPU's memory, OAM and frames (<see cref="NesBus"/>); null elsewhere.</summary>
     public NesBus? Nes { get; init; }
+    /// <summary>The program's text encoding, for the NES's nametable as text.</summary>
+    public CharEncoding? TextEncoding { get; init; }
 }
 
 
@@ -163,6 +165,7 @@ public static class Runner
         {
             Platform = program.Platform,
             Nes = nes,
+            TextEncoding = program.TextEncoding,
         };
 
         void Entered(int at)
@@ -183,11 +186,13 @@ public static class Runner
         }
     }
 
-    /// <summary>The text screen's address, columns and rows after a run (the C64's at $0400, the Atari's at SAVMSC).</summary>
-    public static (int Address, int Columns, int Rows) Screen(RunResult run) => Machine.For(run.Platform).Screen(run.Ram);
+    /// <summary>The text screen's address, columns and rows after a run (the C64's at $0400, the Atari's at SAVMSC, the NES's nametable at $2000 in PPU memory).</summary>
+    public static (int Address, int Columns, int Rows) Screen(RunResult run) =>
+        run.Nes is not null ? (0x2000, 32, 30) : Machine.For(run.Platform).Screen(run.Ram);
 
-    /// <summary>The lines of the text screen after a run, without trailing spaces.</summary>
-    public static IReadOnlyList<string> ScreenText(RunResult run) => Machine.For(run.Platform).ScreenText(run.Ram);
+    /// <summary>The lines of the text screen after a run, without trailing spaces. On the NES: nametable 0 (<see cref="NesMachine.Text"/>).</summary>
+    public static IReadOnlyList<string> ScreenText(RunResult run) =>
+        run.Nes is not null ? NesMachine.Text(run.Nes, run.TextEncoding) : Machine.For(run.Platform).ScreenText(run.Ram);
 
     /// <summary>The lines of the C64's screen at $0400 in <paramref name="ram"/>, without trailing spaces.</summary>
     public static IReadOnlyList<string> ScreenText(Ram ram) => Machine.For(Platform.C64).ScreenText(ram);

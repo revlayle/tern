@@ -1,3 +1,5 @@
+using Tern.Compiler.Tools;
+
 namespace Tern.Compiler.Tests;
 
 /// <summary>
@@ -130,6 +132,36 @@ public class NesLibraryTests
             """, (_, pad) => (byte)(pad == 1 ? buttons : buttons ^ 0xFF));
         Assert.Equal(buttons, r.U8("one"));
         Assert.Equal(buttons ^ 0xFF, r.U8("two"));
+    }
+
+    [Fact]
+    public void Tern_writes_an_ines_image_and_runs_it_showing_the_nametable()
+    {
+        var dir = Directory.CreateTempSubdirectory("tern-nes-");
+        try
+        {
+            var path = Path.Combine(dir.FullName, "hi.tern");
+            File.WriteAllText(path, Head + """
+                encoding tiles { 'A'..='Z' = 1, '0'..='9' = 30, ' ' = 0 }
+                default encoding tiles
+                data HELLO = "HELLO 42"
+                fn main() {
+                    nes.ppu_copy(addr(HELLO), $2000 + 2 * 32 + 3, len(HELLO))
+                    nes.ppu_fill($2000 + 3 * 32, 99, 2)
+                }
+                """);
+            var output = new StringWriter();
+            Assert.Equal(0, Cli.Run(["--target", "nes", path], output, output));
+            Assert.Equal("NES\u001A"u8.ToArray(), File.ReadAllBytes(Path.ChangeExtension(path, ".nes"))[..4]);
+            Assert.Contains(File.ReadAllLines(Path.ChangeExtension(path, ".mlb")), l => l.StartsWith("NesPrgRom:") && l.EndsWith(":main"));
+
+            output = new StringWriter();
+            Assert.Equal(0, Cli.Run(["run", "--target", "nes", path, "--screen"], output, output));
+            var text = output.ToString().Replace("\r", "");
+            Assert.Contains("Main returned", text);
+            Assert.Contains($"Screen ($2000, 32 x 30):\n  |{"",-32}|\n  |{"",-32}|\n  |{"   HELLO 42",-32}|\n  |{"##",-32}|\n", text);
+        }
+        finally { dir.Delete(recursive: true); }
     }
 
     [Fact]

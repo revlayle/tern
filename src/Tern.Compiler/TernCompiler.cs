@@ -58,6 +58,8 @@ public sealed class CompileResult
     public IReadOnlyDictionary<string, VariableInfo> Variables { get; init; } = new Dictionary<string, VariableInfo>();
     /// <summary>Every function declared in the program and its modules ("module.name"), compiled or not.</summary>
     public IReadOnlySet<string> DeclaredFunctions { get; init; } = new HashSet<string>();
+    /// <summary>The encoding of the program's literals without a prefix, for showing its screen as text (NES: its nametable); null when it has none.</summary>
+    public CharEncoding? TextEncoding { get; init; }
     /// <summary>The warnings (spec 13), sorted by place; none with <see cref="WarningMode.Off"/>.</summary>
     public IReadOnlyList<CompileError> Warnings { get; internal set; } = [];
 }
@@ -536,6 +538,7 @@ public static partial class TernCompiler
             Instructions = code.Instructions,
             Variables = variables,
             DeclaredFunctions = program.Modules.SelectMany(m => m.Scope.Values.OfType<FunctionSymbol>()).Select(f => f.Name).ToHashSet(),
+            TextEncoding = program.TextEncoding,
         };
     }
 

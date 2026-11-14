@@ -16,8 +16,8 @@ public static class Cli
           tern bench --target <machine> [options] <file.tern>... | --code <statements>...
 
         Every command names the machine it builds for: --target c64 (Commodore 64),
-        --target atari (Atari 8-bit with 48 KB or more) or --target apple2 (Apple II with
-        64 KB under ProDOS 8).
+        --target atari (Atari 8-bit with 48 KB or more), --target apple2 (Apple II with
+        64 KB under ProDOS 8) or --target nes (NES; the memory block names the board).
 
         tern --target <machine> <file.tern> compiles a Tern program. Writes:
           <output>.prg   the program
@@ -27,7 +27,9 @@ public static class Cli
         On the Atari the program is <output>.xex and the labels <output>.lbl (Altirra loads
         them with the program); on the Apple II the program is <output>.system, a ProDOS
         system file, and the labels <output>.sym (in AppleWin's debugger: symuser load
-        "<path>", the path in quotes and relative to AppleWin's folder).
+        "<path>", the path in quotes and relative to AppleWin's folder); on the NES the
+        program is <output>.nes, an iNES cartridge image, and the labels <output>.mlb (Mesen
+        loads them with the image).
 
         A program with 'export' lines and no main is a binary for another program to call;
         it also writes <name>_api.tern, the module a Tern program imports to call it. A program
@@ -55,7 +57,9 @@ public static class Cli
         and other ROM calls stop the run. On the C64: CHROUT, GETIN and PLOT; SETNAM, SETLFS
         and LOAD load the program's own overlay files ("LEVEL1" is level1.prg). On the Atari:
         CIOV for put bytes on IOCB 0 (the screen editor), and SETVBV. On the Apple II:
-        COUT, HOME, the startup code's ROM calls, and the MLI's CLOSE and QUIT.
+        COUT, HOME, the startup code's ROM calls, and the MLI's CLOSE and QUIT. On the NES:
+        PPU memory and sprite memory (not pixels), vblank and an NMI every frame when bit 7
+        of $2000 is set, the UxROM bank latch; the controllers read as no buttons.
         The emulator reports an array index outside its array and an 'indexed match' value
         outside its span, with the source line (a match value outside stops the run). Exit
         code: 0 when main returned, 2 when it did not, 3 when it did but an index was outside.
@@ -67,7 +71,8 @@ public static class Cli
                            variable with a byte count (table:4), $C000-$C0FF or $C000:16;
                            may be given more than once
           --screen         show the text screen ($0400 on the C64 and the Apple II, SAVMSC
-                           on the Atari)
+                           on the Atari; on the NES nametable 0, each tile as the character
+                           the program's default encoding gives it)
           --profile        show the cycles of each function and each source line
           --max-errors <n>, --no-warnings, --warnings-as-errors  as for tern <file.tern>
           --json           print the result as JSON
