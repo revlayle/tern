@@ -1235,7 +1235,20 @@ A platform description gives: CPU variant, free zero-page ranges, RAM ranges for
 - Overlays and binaries (8.5) are `.bin` files: the bytes from the area's lowest to its highest address, gaps as zeros, no header (a binary's interface module names `counter.bin`). On the disk they are BIN files (type `$06`) with the load address as their aux type, ProDOS's own convention, so BASIC.SYSTEM's BLOAD loads them too; `io.load_bin` reads the address from there (10.1). The disk script gives each file its type and aux type.
 - Disk images are not made by the compiler: a test script puts the `.system` file on a ProDOS 2.4.3 boot image with CiderPress II's `cp2`, and AppleWin boots it.
 
-**Planned**: NES (iNES, `ricoh2a03`, PRG/CHR banks), the last platform of the first release. After the release: the Commander X16 (`wdc65c02`), then the Commodore 128 in native mode (`.prg` at `$1C01`).
+**NES (M27)** (decisions 2026-11-14; being settled)
+
+- CPU: `ricoh2a03`. Every NES program is a cartridge image, so its `memory` block names the board (8.4).
+- **Boards in M27:**
+
+  | Board | Options | PRG ROM | CHR | Selecting a bank |
+  |---|---|---|---|---|
+  | `nrom` (mapper 0) | `vertical` or `horizontal` (mirroring) | 16 or 32 KB, no banks | 8 KB ROM | none |
+  | `uxrom` (mapper 2) | `vertical` or `horizontal` | `$8000–$BFFF` bank area of 16 KB banks; the last bank is fixed at `$C000–$FFFF` and holds the resident program | 8 KB RAM | `nes/uxrom` |
+
+  - **NROM's size follows from the program:** a program that fits in 16 KB is NROM-128, its 16 KB visible twice, at `$8000` and `$C000`; a larger one is NROM-256. There is no size option.
+  - **UxROM's size follows from the highest bank number used**, with the fixed bank, rounded up to a power of two: up to 8 banks (128 KB, UNROM) or 16 (256 KB, UOROM). More than 16 is an error.
+  - **UxROM's bus conflicts:** the board's latch sees the ROM's byte at the written address as well as the CPU's, so `uxrom.select(n)` writes `n` into a 16-byte table of the values 0-15 in the fixed bank.
+  - Mirroring is fixed by the board's wiring, so the option is required on both boards. MMC1, which sets it at run time, comes later. After the release: the Commander X16 (`wdc65c02`), then the Commodore 128 in native mode (`.prg` at `$1C01`).
 
 ### 12.3 Programs without `main`
 

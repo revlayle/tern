@@ -878,3 +878,12 @@ Spec 8.4, 8.5, 14.1; replaces 14.1's "left to the NES spec session" for the synt
 - **`bank name` areas and `import m @ area[n]`.** The import gives the bank number as a constant expression; modules with the same number share a bank, filled in import order, and may use each other; uses between different banks of one area are errors. Reason: the program selects a bank by number, so the number must be in the source; `[n]` picks one of a row of same-sized blocks, as an index does (rule 3). Rejected: numbers chosen by the compiler, which would need a built-in to read them back; `@ levels(2)`, which reads like a call; `@ levels bank 2`, an extra word. Accepted risk: the number is written twice, on the import and in the selecting call; a named constant keeps them in step.
 - **No bank on single declarations** (unchanged from 2026-11-12): a binary goes in a bank through a module holding its `data` line. Reason: the module is the one unit of placement, and code stays in the bank with the tables it reads.
 - **One library module per board** (`nes/uxrom`, `uxrom.select(n)`), with an error when it does not match the `cartridge` line. Reason: boards switch banks differently (one write on UxROM, five on MMC1), so one `nes.bank(n)` would hide a cost that differs by board (rule 1).
+
+## 2026-11-14: NES boards for M27: NROM and UxROM
+
+Spec 12.2 (NES); roadmap M27 and Not scheduled.
+
+- **M27 builds `nrom` and `uxrom`; MMC1 later.** Reason: NROM is the smallest program; UxROM is the smallest board that exercises the bank model (M27's "done when" needs code in more than one bank), and its fixed last bank is the resident `program` area. MMC1 brings CHR banks, run-time mirroring, save RAM and a five-write switch an NMI can break, each needing design work; its usual mode has UxROM's layout, so the syntax stays.
+- **NROM's size (128 or 256) follows from the program**, with no option. Reason: the size is a result of the code, not a choice the programmer needs to make.
+- **UxROM's size follows from the highest bank used**, rounded up to a power of two, at most 16 banks (256 KB) in M27.
+- **UxROM's bus conflicts are handled by `uxrom.select(n)`**, which writes `n` into a 16-byte table of 0-15 in the fixed bank: 16 bytes of ROM and one indexed store per switch.
