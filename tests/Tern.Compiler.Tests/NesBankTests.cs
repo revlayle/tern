@@ -195,6 +195,24 @@ public class NesBankTests : IDisposable
     // ---------- Errors ----------
 
     [Fact]
+    public void Two_modules_in_one_bank_cannot_implement_the_same_interface()
+    {
+        // Decision 2026-11-14 (question 166): their tables would be on the same bytes.
+        File.WriteAllText(Path.Combine(_dir.FullName, "level_api.tern"), "fn value() -> u8 using A @ $8000\n");
+        var main = """
+            import level_api
+            import level1 @ levels[1] implements level_api
+            import level2 @ levels[1] implements level_api
+
+            """ + Memory + "fn main() { _ = level_api.value() }\n";
+        var e = Error(main,
+            level1: "fn value() -> u8 using A { return 11 }\n",
+            level2: "fn value() -> u8 using A { return 22 }\n");
+        Assert.Equal("level1 and level2 both implement level_api in bank 1 of the bank area 'levels', so their tables would be on the same bytes. Put them in different banks", e.Description);
+        Assert.Equal((3, 38), (e.Pos.Line, e.Pos.Column));
+    }
+
+    [Fact]
     public void A_call_and_a_data_use_between_banks_are_errors()
     {
         var call = Error(TwoBanks, level1: "import level2\nfn run() -> u8 using A { return level2.run() }\n");
