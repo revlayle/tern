@@ -153,6 +153,10 @@ public sealed class MemoryLayout
                 var board = cartridge.Board;
                 var rom = new AddressRange(board.CodeAreas.Concat(board.BankArea is { } b ? [b] : []).Min(a => a.First),
                     board.CodeAreas.Concat(board.BankArea is { } b2 ? [b2] : []).Max(a => a.Last));
+                // Decision 2026-11-14 (question 160): the board gives the code areas, so the line has no meaning.
+                if (line.Kind == "program")
+                    throw new CompileError(line.Pos,
+                        $"A 'program' line has no meaning on the {platform.Name.ToUpperInvariant()}: the board '{board.Name}' gives the code areas ({List(board.CodeAreas)}), and the variables are in RAM, {ram}. Remove the line, or use 'reserved' or 'region' to take a range out of ROM or RAM");
                 if (line.Kind == "overlay")
                     throw new CompileError(line.Pos,
                         $"A cartridge has no disk to load an overlay from, and the board '{board.Name}' no RAM at {range} to load it into. " +
@@ -168,9 +172,6 @@ public sealed class MemoryLayout
             }
             switch (line.Kind)
             {
-                case "program" when cartridge is not null:
-                    throw new CompileError(line.Pos,
-                        $"'program' lines are not supported yet on the {platform.Name.ToUpperInvariant()}: the board '{cartridge.Board.Name}' gives the program's ROM ({List(cartridge.Board.CodeAreas)}). Remove the line, or use 'reserved' for memory the program keeps for itself");
                 case "program": program.Add(range); break;
                 case "zeropage":
                     if (last > 0xFF)

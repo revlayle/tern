@@ -194,6 +194,37 @@ public class NesBankTests : IDisposable
 
     // ---------- Errors ----------
 
+    [Theory]
+    // Decision 2026-11-14 (question 169): an interrupt can come with any bank selected.
+    [InlineData("$FFFA", "NMI", "interrupt fn on_frame() { }")]
+    [InlineData("$FFFE", "IRQ", "asm fn on_frame() { rti }")]
+    public void An_interrupt_vector_into_a_bank_is_an_error(string address, string vector, string handler)
+    {
+        var main = "import level1 @ levels[2]\n" + Memory + $"data v: u16 @ {address} = addr(level1.on_frame)\nfn main() {{ }}\n";
+        var e = Error(main, level1: handler + "\n");
+        Assert.Equal($"The {vector} vector ({address}) points to 'level1.on_frame' in bank 2 of the bank area 'levels', but an interrupt can come with any bank selected. " +
+            "Call it from a resident interrupt fn through an interface its module implements, or import level1 without '@ levels[2]'", e.Description);
+        Assert.Equal(6, e.Pos.Line);
+    }
+
+    [Fact]
+    public void Two_modules_in_one_bank_cannot_implement_the_same_interface()
+    {
+        // Decision 2026-11-14 (question 166): their tables would be on the same bytes.
+        File.WriteAllText(Path.Combine(_dir.FullName, "level_api.tern"), "fn value() -> u8 using A @ $8000\n");
+        var main = """
+            import level_api
+            import level1 @ levels[1] implements level_api
+            import level2 @ levels[1] implements level_api
+
+            """ + Memory + "fn main() { _ = level_api.value() }\n";
+        var e = Error(main,
+            level1: "fn value() -> u8 using A { return 11 }\n",
+            level2: "fn value() -> u8 using A { return 22 }\n");
+        Assert.Equal("level1 and level2 both implement level_api in bank 1 of the bank area 'levels', so their tables would be on the same bytes. Put them in different banks", e.Description);
+        Assert.Equal((3, 38), (e.Pos.Line, e.Pos.Column));
+    }
+
     [Fact]
     public void A_call_and_a_data_use_between_banks_are_errors()
     {

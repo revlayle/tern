@@ -19,6 +19,8 @@ public sealed partial class Checker
     {
         var result = new List<Implementation>();
         var mainModule = modules[^1];
+        // The module implementing each interface in each bank: two in one bank would put two tables on the same bytes (spec 8.5).
+        var inBank = new Dictionary<(Module, string), Module>();
         foreach (var importer in modules)
             foreach (var import in importer.Syntax.Imports.Where(i => i.Implements.Count > 0))
                 Recover(() =>
@@ -46,6 +48,10 @@ public sealed partial class Checker
                         // Decision 123: its helpers would go into an overlay file the levels cannot call.
                         if (api.OverlayArea is { } apiArea)
                             throw new CompileError(pos, $"'{name}' is placed in the overlay area '{apiArea}'; an interface must be resident. Remove '@ {apiArea}' from its import");
+                        if (module.InBank && module.Unit is { } unit && !inBank.TryAdd((api, unit), module))
+                            throw new CompileError(pos,
+                                $"{inBank[(api, unit)].Name} and {module.Name} both implement {name} in bank {module.Bank} of the bank area '{import.Area}', so their tables would be on the same bytes. " +
+                                "Put them in different banks");
                         // Both imports are used, by the table (spec 13).
                         _usedImports.Add((mainModule, name));
                         _usedImports.Add((importer, import.Name));

@@ -4,12 +4,17 @@ Owned by the coding session. Updated at the end of every coding session.
 
 ## Current
 
-- **Milestone:** M27, the NES (roadmap "M27: NES"; spec 2.1, 4, 8.4, 8.5, 12.2, 14.1; decisions 2026-11-14).
-- **Branch:** `m27-nes`, from `main` at `35de89e`, `main` merged in (the review, `064389e`). All "done when" items are met (see below). Review (`docs/reviews/m27.md`): not ready to merge; its four findings and suggestions 5, 6, 7, 9 and 10 are done (`fe901bb`, `8660241`), suggestion 8 is question 169. 3716 compiler tests pass plus 36 CPU tests. No benchmark changed (1254 / 350780); `SkillTests` pass.
-- **Next step:** `/review m27-nes` again. The spec session answers questions 157-169 (provisional choices of M27) and adds `examples/nes/` build outputs to `.gitignore` (question 168). When the OS-B and XL OS ROM images are registered in Altirra, rerun the Atari examples on them (decision 2026-11-13, question 137).
+- **Milestone:** M27 follow-up: the three changes of questions 157-169 (roadmap "M27: NES", last item; decision 2026-11-14). M27 itself is merged (`7a3535a`).
+- **Branch:** `m27-followup`, from `main` at `7a3535a`. All three changes are done, each with tests. 3720 compiler tests pass plus 36 CPU tests. No benchmark changed (1254 / 350780); `SkillTests` pass.
+- **Review** (`docs/reviews/m27-followup.md`): ready to merge, no findings.
+- **Next step:** `/merge m27-followup`. After that the first release (roadmap "First release"): the spec session brings `docs/guide.md` and spec 10.1 up to the compiler as built; every example must build for its platforms. When the OS-B and XL OS ROM images are registered in Altirra, rerun the Atari examples on them (decision 2026-11-13, question 137).
 
 ## Done
 
+- **M27 follow-up** (2026-11-14, decision 2026-11-14 on questions 157-169):
+  - Question 160 (`951eb17`): a `program` line on the NES is a plain error, "A 'program' line has no meaning on the NES: the board 'nrom' gives the code areas (...), and the variables are in RAM, $0000-$07FF. Remove the line, or use 'reserved' or 'region' ...". `NesTests.Cartridge_line_errors` (nrom and uxrom).
+  - Question 166 (`96c2fc0`): two modules in one bank implementing the same interface are an error naming both and the bank, at the second import's interface name (`Checker.CheckImplements`). `NesBankTests.Two_modules_in_one_bank_cannot_implement_the_same_interface`. The order inside a bank stays the compiler's (as built).
+  - Question 169 (`3ff7c33`): an NMI or IRQ vector pointing to a function in a bank is an error naming the function and its bank; it says to call it through an interface from a resident handler, or to import the module without `@ area[n]` (`TernCompiler.CheckVectors`). `NesBankTests.An_interrupt_vector_into_a_bank_is_an_error` (an `interrupt fn` and an `asm fn`).
 - **M27 review** (2026-11-14, `docs/reviews/m27.md`): not ready to merge; four findings, six suggestions.
   - Finding 1 (`8660241`): an `overlay` line on a cartridge is an error (no disk, no RAM to load into); on UxROM the message names a bank area. Test `NesTests.Memory_a_cartridge_does_not_have`.
   - Finding 2 (`8660241`): on a cartridge a `region` must lie in RAM (`$0000-$07FF`), a `reserved` range in RAM or the board's ROM (`$8000-$FFFF`); the mirrors and `$6000` were accepted and aliased zero page. Same test; `A_region_and_reserved_ranges_in_ram_and_rom_work`.
@@ -749,6 +754,7 @@ Cycles including `jsr` and `rts`, best and worst over the test values (`FloatTes
 
 ## Known limitations and technical debt
 
+- Two interface modules whose fixed routines overlap (`api1.value` and `api2.other` both at `$8000`) give "... are placed at overlapping addresses" at `main.tern:1:1`, not at either declaration (review M27 follow-up, outside the branch; for a later milestone).
 - NES: `tern run` has no option for the pads (only tests script them with `NesBus.Buttons`), no dump of PPU memory but `--screen`, and models no timing within a frame (sprite 0 hits, the length of vblank).
 - NES: `addr()` of a function or variable inside `chr` data would be zeros in CHR ROM (the address fill is not applied there); tile data has no use for one.
 - NES: the optimizer treats a bank module's variables as it treats an overlay's (`OverlayArea` is set), so it keeps some loads and stores it could remove; they are resident RAM.
@@ -825,22 +831,7 @@ Not bugs; things to improve, mostly in M7 (optimizer).
 
 ## Questions for the spec session
 
-Open, from M27 (provisional, as built):
-
-157. **A single value of `data` with a placement.** Spec 4 says `data` declares arrays and strings, and a scalar `data` is an error ("Use 'const' for a single value"), but spec 12.2 writes `data nmi_vector: u16 @ $FFFA = addr(frame)`. Built: a scalar `data` is allowed when it is placed with `@` (an address or a region); unplaced, it stays an error. Proposed: say so in spec 4.
-158. **`import nes/uxrom`.** Spec 8.5's example and the decisions write `nes/uxrom`, but imports take bare names and platform modules are found in `lib/<platform>/` (2.2). Built: `import uxrom`, the module `lib/nes/uxrom.tern`, used as `uxrom.select(n)`. Proposed: write `import uxrom` in 8.5.
-159. **Assembly may store to `data` on a cartridge.** `uxrom.select` writes n over a table entry holding n (bus conflicts), which the rule "data is read-only" forbade in assembly. Built: on a target with boards, an assembly store to `data` is allowed and counts as no write (ROM does not change). Tern code still cannot write `data`.
-160. **`program` lines on the NES** give "'program' lines are not supported yet on the NES: the board 'nrom' gives the program's ROM ...". Spec 8.4 says `program` lines replace the platform's areas; on the NES the code areas are the board's ROM and the variables RAM, so a `program` line has no clear meaning. `reserved` and `region` lines work and take their range out of ROM or RAM.
-161. **The startup also turns rendering off** (`$2001` = 0), not only NMI (`$2000`): after a reset (not a power-on) rendering may be on, and the RAM clearing would show. 3 bytes.
-162. **Unused PRG bytes are `$FF`**, also the gaps inside NROM's ROM and inside banks (spec: unused banks `$FF`; spec 8.4 says gaps in a program file are zeros).
-163. **An import that places a module in a bank is not warned as unused** (`import music @ levels[1]` where the main file never names `music`): it puts the module's code in the bank, as an import with module parameters sets them. An overlay import (`@ area` without a number) is still warned when unused, as before.
-164. **`bank` is no longer a reserved word.** It was reserved for `@ bank(n)`, which decision 2026-11-12 removed; spec 8.4 says the block's kinds are words only inside the block. The old "'@ bank(n)' is not supported yet" error is gone; `var bank: u8` works.
-165. **`@ area + offset` with in-order declarations**: declarations with an offset are placed first, the others in order from the area's start, and any overlap is an error (in-order ones do not skip around placed ones). The offset may be a constant expression; the area name must not be a symbol (8.4), so `@ VIC + $20` stays an address.
-166. **Bank sizes and order**: a bank's modules are laid out in the order of their code (callers first), not strictly in import order; the report and the image list them by import. Two modules in one bank implementing the same interface would put two tables at the same address; not checked.
-167. **The PPUDATA field of `nes.ppu` is `value`**, since `data` is a keyword. The others: `ctrl`, `mask`, `status`, `oam_address`, `oam_data`, `scroll`, `address`. The pads are `pad_port` (`$4016`, `$4017`); `nes.frames` counts frames.
-168. **`.gitignore` for `examples/nes/`**: `*.nes`, `*.mlb`, `*.lst`, `*.lines` (the spec session's file, question 148's pattern). Not committed. Also for `CLAUDE.md`: `pwsh tests/tools/mesen-shot.ps1 game.nes shot.png <frames...>` takes Mesen screenshots.
-
-169. **An interrupt vector that points into a bank** (`data v: u16 @ $FFFE = addr(k2.irq)`, `k2` in a bank) compiles: resident code may take addresses in any bank (8.5). The interrupt then runs whichever bank is selected, which is almost always a mistake (review M27, suggestion 8). Options: an error for a vector into a bank area, or leave it.
+Questions 157-169 (from M27) were settled on 2026-11-14 (decisions.md): as built, except 160, 166 and 169 (errors), built on `m27-followup`.
 
 Questions 149-156 were settled on 2026-11-13 (decisions.md): as built, except 150 (the prefix code only with `io`), built at the start of M27.
 
