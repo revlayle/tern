@@ -1,0 +1,9 @@
+// The overlay of the files example (files.tern): built as greet.bin, loaded into $6000 with
+// io.load_bin, then called.
+import apple2
+
+data HELLO = "HELLO FROM AN OVERLAY\n"
+
+fn hello() {
+    apple2.print(addr(HELLO), len(HELLO))
+}

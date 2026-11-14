@@ -68,10 +68,13 @@ puts the program at `$2000`, on hi-res page 1, so a program that draws hi-res gr
 `$6000..=$BEFF program`); the startup code copies each area from the file to its place, and the
 report says which. The file stays at `$2000` after that, so clear page 1 before drawing on it. Zero
 page is `$50-$FF`, then `$00-$1F`. `tern run` has stand-ins for COUT (`apple2.put` and
-`apple2.print`), HOME, and the MLI's CLOSE and QUIT (`apple2.exit()` ends the run); `--screen` shows
-text page 1 at `$0400` in the Apple II's row order. Hi-res and sound show in AppleWin: put the file on
-a ProDOS boot disk with `pwsh tests/tools/apple2-disk.ps1 game.system game.po` and boot `game.po`;
-in its debugger, `symuser load "..\path\game.sym"` (in quotes, relative to AppleWin's folder) loads
+`apple2.print`), HOME, the MLI's CLOSE and QUIT (`apple2.exit()` ends the run), and for reading the
+build's own overlay files (`io.load_bin` of `"LEVEL1.BIN"` reads `level1.bin`; a name ProDOS cannot
+store fails with `$40`, a missing one with `$46`); an MLI call that writes (`io.save`) stops the run.
+`--screen` shows text page 1 at `$0400` in the Apple II's row order. Hi-res, sound and files show in
+AppleWin: put the file on a ProDOS boot disk with `pwsh tests/tools/apple2-disk.ps1 game.system
+game.po` (overlays after it as `level1.bin@$6000`, the overlay area's first address, so the disk
+gives each its load address as aux type) and boot `game.po`; in its debugger, `symuser load "..\path\game.sym"` (in quotes, relative to AppleWin's folder) loads
 the labels.
 
 The program never checks an array index, but `tern run` does: an index outside its array, and an

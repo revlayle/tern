@@ -1,0 +1,229 @@
+// Apple II files through the ProDOS MLI (spec 10.1).
+//
+//     import io
+//     data NAME = "SCORES"
+//     io.save(addr(NAME), len(NAME), addr(scores), 16)            // whole file
+//     io.load(addr(NAME), len(NAME), addr(scores), 16)
+//
+// Names are ProDOS paths, passed as a pointer and a length: a partial name ("SCORES", "DATA/LEVEL1")
+// is relative to the prefix, the program's own folder, and a full one starts with the volume
+// ("/GAMES/SCORES"). At most 64 characters; the program's strings are in the apple2 encoding, and
+// bit 7 of each character is cleared for the MLI.
+//
+// One file is open at a time: ProDOS keeps an open file's 1 KB buffer until it is closed, and the
+// module has one. A program that needs more open files calls apple2.mli itself.
+//
+// Errors. A function that returns a bool returns true on failure. status() gives the MLI's error code
+// for the last call, 0 for success (ST_ below).
+import apple2
+
+const READ = 1                  // modes for open()
+const WRITE = 2                 // a new file, or one that replaces the old one
+
+const ST_OK = 0
+const ST_EOF = $4C              // end of file: a read got fewer bytes than asked, maybe none
+const ST_NOT_FOUND = $46        // no such file
+
+const BIN = $06                 // the ProDOS file type that save() and WRITE create
+
+private const MLI_CREATE = $C0
+private const MLI_SET_FILE_INFO = $C3
+private const MLI_GET_FILE_INFO = $C4
+private const MLI_OPEN = $C8
+private const MLI_READ = $CA
+private const MLI_WRITE = $CB
+private const MLI_CLOSE = $CC
+private const MLI_SET_EOF = $D0
+private const MLI_GET_EOF = $D1
+private const DUPLICATE = $47           // CREATE: the file exists
+private const FORMAT = $4A              // load_bin: not a BIN file, or no load address
+private const TOO_LARGE = $4D           // load_bin: the file is 64 KB or more
+
+// The file's buffer, which ProDOS uses from OPEN to CLOSE; it must start on a page.
+private noinit var buffer: [u8; 1024] @ align(256)
+// The name, with its length first, as the MLI wants it.
+private var path: [u8; 65]
+private var err: u8
+
+// The MLI's parameter lists: each starts with its count of parameters.
+private struct OpenList { count: u8, path: ptr u8, buffer: ptr u8, ref: u8 }
+private struct ReadList { count: u8, ref: u8, bytes: ptr u8, request: u16, done: u16 }     // READ and WRITE
+private struct RefList { count: u8, ref: u8 }
+private struct EofList { count: u8, ref: u8, eof: [u8; 3] }                                // SET_EOF and GET_EOF
+private struct CreateList { count: u8, path: ptr u8, access: u8, file_type: u8, aux: u16, storage: u8, date: u16, time: u16 }
+// GET_FILE_INFO with a count of 10; SET_FILE_INFO takes the same list with a count of 7.
+private struct InfoList {
+    count: u8, path: ptr u8, access: u8, file_type: u8, aux: u16, storage: u8, blocks: u16,
+    mod_date: u16, mod_time: u16, create_date: u16, create_time: u16,
+}
+
+private var open_list = OpenList { count = 3, path = addr(path), buffer = addr(buffer) }
+private var read_list = ReadList { count = 4 }
+private var close_list = RefList { count = 1 }      // ref 0 while no file is open: CLOSE with 0 would close every file
+private var eof_list = EofList { count = 2 }
+// Read, write, rename and destroy allowed; a standard file; the date and time from ProDOS's clock.
+private var create_list = CreateList { count = 7, path = addr(path), access = $C3, file_type = BIN, storage = 1 }
+private var info = InfoList { path = addr(path) }
+
+// Makes an MLI call and keeps its code for status(). Returns true on failure.
+private fn call(command: u8, list: u16) -> bool {
+    err = apple2.mli(command, list)
+    return err != 0
+}
+
+// The name into `path`: its length, then the characters with bit 7 cleared, cut at 64.
+private fn set_path(name: ptr u8, n: u8) {
+    if n > 64 {
+        n = 64
+    }
+    path[0] = n
+    for i in 0..n using Y {
+        path[i + 1] = name[i] & $7F
+    }
+}
+
+// ---------- Files ----------
+
+// Open the file `name` (n characters) with `mode`, READ or WRITE. WRITE creates the file (a BIN file)
+// when it is missing and empties it when it exists. Returns true on failure, e.g. no such file
+// (ST_NOT_FOUND). After a failure the file may still be open: call close() before the next open().
+fn open(name: ptr u8, n: u8, mode: u8) -> bool {
+    set_path(name, n)
+    return open_path(mode)
+}
+
+private fn open_path(mode: u8) -> bool {
+    if mode == WRITE && call(MLI_CREATE, addr(create_list) as u16) && err != DUPLICATE {
+        return true
+    }
+    if call(MLI_OPEN, addr(open_list) as u16) {
+        return true
+    }
+    read_list.ref = open_list.ref
+    close_list.ref = open_list.ref
+    eof_list.ref = open_list.ref
+    if mode == WRITE {
+        eof_list.eof[0] = 0
+        eof_list.eof[1] = 0
+        eof_list.eof[2] = 0
+        return call(MLI_SET_EOF, addr(eof_list) as u16)
+    }
+    return false
+}
+
+// Close the file. Returns true on failure: when writing, the last bytes reach the disk only now, so a
+// full disk may show here. With no file open it does nothing.
+fn close() -> bool {
+    if close_list.ref == 0 {
+        err = ST_OK
+        return false
+    }
+    if call(MLI_CLOSE, addr(close_list) as u16) {
+        return true
+    }
+    close_list.ref = 0
+    return false
+}
+
+// Read up to `n` bytes from the open file into `dst`. Returns how many bytes were read: fewer than n
+// at the end of the file (status() is then ST_EOF), 0 on any other error.
+fn read(dst: ptr u8, n: u16) -> u16 {
+    if n == 0 {
+        return 0
+    }
+    read_list.bytes = dst
+    read_list.request = n
+    if call(MLI_READ, addr(read_list) as u16) {
+        return 0                        // ST_EOF when nothing was left to read
+    }
+    if read_list.done != n {
+        err = ST_EOF                    // the MLI gives ST_EOF only when it read nothing
+    }
+    return read_list.done
+}
+
+// Write `n` bytes from `src` to the open file. Returns true on failure.
+fn write(src: ptr u8, n: u16) -> bool {
+    if n == 0 {
+        return false
+    }
+    read_list.bytes = src
+    read_list.request = n
+    return call(MLI_WRITE, addr(read_list) as u16)
+}
+
+// The MLI's error code for the last call: 0 for success.
+inline fn status() -> u8 {
+    return err
+}
+
+// ---------- Whole files ----------
+
+// Load the file `name` into `dst`, at most `max` bytes. A shorter file is not an error. Returns true
+// on failure; status() then gives the first error.
+fn load(name: ptr u8, n: u8, dst: ptr u8, max: u16) -> bool {
+    if open(name, n, READ) {
+        return close_after_error()
+    }
+    read(dst, max)
+    if err != ST_OK && err != ST_EOF {
+        return close_after_error()
+    }
+    return close()
+}
+
+// Save `count` bytes from `src` as the file `name`, replacing a file of that name: a BIN file with
+// `src` as its aux type, as BSAVE writes it, so that load_bin and BLOAD load it there. Returns true
+// on failure; status() then gives the first error.
+fn save(name: ptr u8, n: u8, src: ptr u8, count: u16) -> bool {
+    if open(name, n, WRITE) || write(src, count) {
+        return close_after_error()
+    }
+    if close() {
+        return true
+    }
+    info.count = 10
+    if call(MLI_GET_FILE_INFO, addr(info) as u16) {
+        return true
+    }
+    info.file_type = BIN
+    info.aux = src as u16
+    info.count = 7
+    return call(MLI_SET_FILE_INFO, addr(info) as u16)
+}
+
+// Load a BIN file at the address in its aux type, e.g. an overlay, which the compiler writes as a
+// .bin that the disk holds with its load address there. Nothing is run. Returns true on failure: a
+// missing file, a file that ends early, and one that is not BIN or has aux type 0 (status() $4A).
+fn load_bin(name: ptr u8, n: u8) -> bool {
+    set_path(name, n)
+    info.count = 10
+    if call(MLI_GET_FILE_INFO, addr(info) as u16) {
+        return true
+    }
+    if info.file_type != BIN || info.aux == 0 {
+        err = FORMAT
+        return true
+    }
+    if open_path(READ) || call(MLI_GET_EOF, addr(eof_list) as u16) {
+        return close_after_error()
+    }
+    if eof_list.eof[2] != 0 {
+        err = TOO_LARGE
+        return close_after_error()
+    }
+    var size: u16 = eof_list.eof[0] as u16
+    size.hi = eof_list.eof[1]
+    if read(info.aux as ptr u8, size) != size {
+        return close_after_error()
+    }
+    return close()
+}
+
+// Close after a failed call, keeping that call's code for status(). Returns true.
+private fn close_after_error() -> bool {
+    var failed_with = err
+    close()
+    err = failed_with
+    return true
+}

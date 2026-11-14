@@ -53,7 +53,7 @@ public sealed partial class Checker
 
             // Unused declarations: private ones of a module, any of the main file.
             var declarations = syntax.Consts.Select(c => (c.Name, c.Pos, Fixed: false))
-                .Concat(syntax.Globals.Select(g => (g.Name, g.Pos, Fixed: g.Placement.Kind != PlacementKind.None)))
+                .Concat(syntax.Globals.Select(g => (g.Name, g.Pos, Fixed: g.Placement.Kind is not (PlacementKind.None or PlacementKind.Align))))
                 .Concat(syntax.Functions.Select(f => (f.Name, f.Pos, Fixed: false)))
                 .Concat(syntax.ConstFns.Select(f => (f.Name, f.Pos, Fixed: false)))
                 .Concat(syntax.Structs.Select(s => (s.Name, s.Pos, Fixed: false)))

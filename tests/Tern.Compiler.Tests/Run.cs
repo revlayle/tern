@@ -26,6 +26,10 @@ public sealed class Run
             // ROM routines the startup calls (COUT, SETNORM, INIT, SETVID, SETKBD, HOME) return at once.
             Ram.Load((ushort)Result.Platform.LoadAddress, Result.File);
             foreach (int routine in new[] { 0xFDED, 0xFE84, 0xFB2F, 0xFE93, 0xFE89, 0xFC58 }) Ram.Bytes[routine] = 0x60;
+            // The MLI, for the startup's GET_PREFIX: returns success (A = 0, carry clear) past the 3 bytes
+            // after the jsr, leaving the prefix empty. A test's traps take its place.
+            byte[] mli = [0x68, 0x18, 0x69, 0x03, 0xA8, 0x68, 0x69, 0x00, 0x48, 0x98, 0x48, 0xA9, 0x00, 0x18, 0x60];
+            mli.CopyTo(Ram.Bytes, 0xBF00);
         }
         else Ram.Load((ushort)Result.LoadAddress, Result.Image);
         setup?.Invoke(Ram);

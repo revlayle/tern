@@ -7,17 +7,22 @@ namespace Tern.Compiler.Backend;
 /// <summary>Where variables go after the program: offsets from the end of the program.</summary>
 public sealed class RamPlan
 {
-    /// <summary>Uninitialized globals, zeroed at startup. They come first.</summary>
+    /// <summary>Uninitialized globals, zeroed at startup: <see cref="ZeroedSize"/> bytes from <see cref="ZeroedStart"/>, first in the block but for aligned noinit globals.</summary>
     public List<(VariableSymbol Var, int Offset)> ZeroedGlobals { get; } = [];
+    public int ZeroedStart { get; set; }
     public int ZeroedSize { get; set; }
     /// <summary>
     /// Arrays among the globals that the code reads through an index register, placed so that no such
-    /// read crosses a page when the block starts at <see cref="PageOffset"/> in a page (M18 F12).
+    /// read crosses a page when the block starts at <see cref="StartResidue"/> in a page (M18 F12).
     /// </summary>
     public List<VariableSymbol> PageArrays { get; } = [];
-    /// <summary>With <see cref="PageArrays"/>: where in its page the block must start (its low byte).</summary>
-    public int PageOffset { get; set; }
-    /// <summary>Globals declared <c>noinit</c>, after the zeroed ones: not cleared at startup.</summary>
+    /// <summary>
+    /// With <see cref="PageArrays"/> or aligned variables: the block must start at an address that is
+    /// <see cref="StartResidue"/> more than a multiple of <see cref="StartModulus"/> (1 when it may start anywhere).
+    /// </summary>
+    public int StartModulus { get; set; } = 1;
+    public int StartResidue { get; set; }
+    /// <summary>Globals declared <c>noinit</c>, after the zeroed ones (aligned ones before them): not cleared at startup.</summary>
     public List<(VariableSymbol Var, int Offset)> NoinitGlobals { get; } = [];
     /// <summary>Function frames (parameters, locals, temporaries), after the globals.</summary>
     public List<(VariableSymbol Var, int Offset)> FrameVariables { get; } = [];
@@ -67,6 +72,10 @@ public static class Allocator
                     $"'{g.Name}' must be in zero page, but it belongs to the overlay {g.Module!.Name}, whose variables are set by loading its file, and zero page is not part of the file. " +
                     "Use a local variable in the function that needs it, name a zero-page address (var p: ptr u8 @ $FB), or move the variable to the main file");
 
+        foreach (var g in program.Globals.Where(g => g.Alignment > 1 && g.ForcedZeroPage && !g.RequireZeroPage))
+            throw new CompileError(g.Pos,
+                $"'{g.Name}' must be in zero page, since it is {(g.Dereferenced ? "dereferenced as a pointer" : "a zero-page operand of assembly code")}, so it cannot be placed with '@ align({g.Alignment})'. Remove '@ align({g.Alignment})'");
+
         var placeable = program.Globals.Where(g => g.FixedAddress is null && g.Region is null && !g.IsOverlayImage)
             .Concat(functions.SelectMany(f => f.FrameVariables))
             .ToList();
@@ -100,7 +109,7 @@ public static class Allocator
 
         // 2. Best effort: the most used small variables.
         var candidates = placeable
-            .Where(v => !v.ForcedZeroPage && !v.Type.IsArray && !v.Type.IsStruct && v.Weight > 0)
+            .Where(v => !v.ForcedZeroPage && !v.Type.IsArray && !v.Type.IsStruct && v.Weight > 0 && v.Alignment == 1)
             .OrderByDescending(v => v.Weight).ThenBy(v => v.QualifiedName, StringComparer.Ordinal);
         foreach (var v in candidates)
         {
@@ -194,29 +203,42 @@ public static class Allocator
         plan.FixedImageGlobals.AddRange(program.Globals.Where(g => g.FixedAddress is not null && g.IsData));
         plan.OverlayGlobals.AddRange(program.Globals.Where(g => g.IsOverlayImage));
 
-        // RAM after the program: zeroed globals, noinit globals, then the overlaid frames. Arrays read
-        // through an index register are placed so that no such read crosses a page, counting the
-        // offsets from where the block starts in its page (F12).
+        // RAM after the program: aligned noinit globals, zeroed globals, the other noinit globals, then
+        // the overlaid frames, so that the block starts with the aligned ones and has no gap. Arrays read
+        // through an index register are placed so that no such read crosses a page, and aligned
+        // variables at a multiple of their alignment (spec 4), counting the offsets from a block that
+        // starts at a multiple of the largest alignment (256 with such arrays, F12).
         var ram = program.Globals.Where(g => g.FixedAddress is null && g.Region is null && !g.IsOverlayImage && !inZp.Contains(g)).ToList();
         plan.ImageGlobals.AddRange(ram.Where(g => g.InitialBytes is not null));
         var spans = new Dictionary<VariableSymbol, List<(int From, int To)>>();
         if (byPage && indexed is not null)
             foreach (var g in ram.Where(g => g.InitialBytes is null))
                 if (Spans(g, indexed) is { } list) spans[g] = list;
-        int offset = PlaceByPage(ram.Where(g => g.InitialBytes is null && !g.NoInit).ToList(), 0, plan.ZeroedGlobals, spans);
-        plan.ZeroedSize = offset;
-        offset = PlaceByPage(ram.Where(g => g.NoInit).ToList(), offset, plan.NoinitGlobals, spans);
+        var noinit = ram.Where(g => g.NoInit).ToList();
+        int offset = PlaceByPage(noinit.Where(g => g.Alignment > 1).ToList(), 0, plan.NoinitGlobals, spans);
+        plan.ZeroedStart = offset;
+        offset = PlaceByPage(ram.Where(g => g.InitialBytes is null && !g.NoInit).ToList(), offset, plan.ZeroedGlobals, spans);
+        int zeroedEnd = offset;
+        offset = PlaceByPage(noinit.Where(g => g.Alignment == 1).ToList(), offset, plan.NoinitGlobals, spans);
         plan.PageArrays.AddRange(spans.Keys.OrderBy(v => plan.ZeroedGlobals.Concat(plan.NoinitGlobals).First(e => e.Var == v).Offset));
-        // Space before the first variable is not needed: the block starts that far into a page instead.
+        // Only the block's own variables count: data and initialized variables are aligned in the file (review M26 follow-up, finding 1).
+        int modulus = Math.Max(spans.Count > 0 ? 256 : 1, plan.ZeroedGlobals.Concat(plan.NoinitGlobals).Select(e => e.Var.Alignment).DefaultIfEmpty(1).Max());
+        // Space before the first variable is not needed: the block starts that far past a multiple of the modulus instead.
         var globals = plan.ZeroedGlobals.Concat(plan.NoinitGlobals).ToList();
-        if (spans.Count > 0 && globals.Min(e => e.Offset) is int lead and > 0)
+        if (modulus > 1 && globals.Count > 0 && globals.Min(e => e.Offset) is int lead and > 0)
         {
             foreach (var list in new[] { plan.ZeroedGlobals, plan.NoinitGlobals })
                 for (int k = 0; k < list.Count; k++) list[k] = (list[k].Var, list[k].Offset - lead);
-            plan.ZeroedSize -= lead;
+            plan.ZeroedStart = Math.Max(0, plan.ZeroedStart - lead);
+            zeroedEnd -= lead;
             offset -= lead;
         }
-        if (spans.Count > 0) plan.PageOffset = globals.Count == 0 ? 0 : globals.Min(e => e.Offset) & 0xFF;
+        plan.ZeroedSize = zeroedEnd - plan.ZeroedStart;
+        if (modulus > 1)
+        {
+            plan.StartModulus = modulus;
+            plan.StartResidue = globals.Count == 0 ? 0 : globals.Min(e => e.Offset) % modulus;
+        }
 
         var ramOffsets = FrameOffsets(functions, callers, f => f.FrameVariables.Where(v => !inZp.Contains(v)).Sum(v => v.Type.Size));
         int framesEnd = offset;
@@ -264,28 +286,32 @@ public static class Allocator
 
     /// <summary>
     /// Gives each variable an offset from <paramref name="start"/>, counted as if the block began on
-    /// a page. Arrays with spans (<see cref="Spans"/>) first, in order, each at the first offset where
-    /// fewest of its spans cross a page; then the other variables in order, each at the top of the
-    /// first gap left that holds it, or at the end. Without spans, one after another. Returns the end.
+    /// a page (or a multiple of the largest alignment). Arrays with spans (<see cref="Spans"/>) and
+    /// aligned variables first, in order, each at the first offset that is a multiple of its alignment
+    /// where fewest of its spans cross a page; then the other variables in order, each at the top of the
+    /// first gap left that holds it, or at the end. Without either, one after another. Returns the end.
     /// </summary>
     private static int PlaceByPage(List<VariableSymbol> vars, int start, List<(VariableSymbol Var, int Offset)> placed,
         Dictionary<VariableSymbol, List<(int From, int To)>> spans)
     {
         int end = start;
         var gaps = new List<(int From, int To)>();
-        foreach (var v in vars.Where(spans.ContainsKey))
+        bool First(VariableSymbol v) => spans.ContainsKey(v) || v.Alignment > 1;
+        foreach (var v in vars.Where(First))
         {
-            var span = spans[v];
+            var span = spans.GetValueOrDefault(v) ?? [];
+            int step = v.Alignment;
             // Room for the reads below the array's start (a-2,x) in the same page.
-            int first = end - Math.Min(0, span.Min(s => s.From));
+            int first = end - Math.Min(0, span.Select(s => s.From).DefaultIfEmpty(0).Min());
+            first = (first + step - 1) & -step;
             int best = first;
-            for (int at = first; at < first + 256 && Crossings(span, best) > 0; at++)
+            for (int at = first; at < first + 256 && Crossings(span, best) > 0; at += step)
                 if (Crossings(span, at) < Crossings(span, best)) best = at;
             if (best > end) gaps.Add((end, best));
             placed.Add((v, best));
             end = best + v.Type.Size;
         }
-        foreach (var v in vars.Where(v => !spans.ContainsKey(v)))
+        foreach (var v in vars.Where(v => !First(v)))
         {
             int gap = gaps.FindIndex(g => g.To - g.From >= v.Type.Size);
             if (gap < 0)

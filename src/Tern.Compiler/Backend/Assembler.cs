@@ -44,6 +44,8 @@ public sealed class AssembledCode(
     public List<PlacedArea> Areas { get; } = areas;
     /// <summary>Where the program's variables (<see cref="Reserve"/>) were placed, or null if there are none.</summary>
     public AddressRange? Variables { get; } = variables;
+    /// <summary>Where the area's used bytes ended before the variables' block, which starts at <see cref="Variables"/>.</summary>
+    public int VariablesAfter { get; init; }
 }
 
 /// <summary>
@@ -54,7 +56,7 @@ public sealed class AssembledCode(
 public static class Assembler
 {
     /// <summary>
-    /// The variables were to start at a place in a page (<see cref="Reserve.PageOffset"/>), but no area has room
+    /// The variables were to start at a place in a page or at an alignment (<see cref="Reserve.Modulus"/>), but no area has room
     /// for that, or a <c>jmp (...)</c> vector would then start at $xxFF. The caller places them another way.
     /// </summary>
     public sealed class NoPageStart() : Exception("The variables do not fit where they were placed in a page");
@@ -237,13 +239,13 @@ public static class Assembler
                 // At the place in a page that was asked for (the first area with room, where no vector then ends a page), else first fit.
                 int? Aligned(int a)
                 {
-                    if (reserve.PageOffset is not int low) return null;
-                    int at = (used[a] & ~0xFF) + low;
-                    if (at < used[a]) at += 0x100;
+                    if (reserve.Modulus == 1) return null;
+                    int at = used[a] - (used[a] - reserve.Residue) % reserve.Modulus;
+                    if (at < used[a]) at += reserve.Modulus;
                     return AvoidPageEnd(at, reserve.VectorOffsets) == 0 && at + reserve.Size <= free[a].Last + 1 ? at : null;
                 }
                 int alignedArea = Enumerable.Range(0, free.Count).FirstOrDefault(a => Aligned(a) is not null, -1);
-                if (reserve.PageOffset is not null && alignedArea < 0) throw new NoPageStart();
+                if (reserve.Modulus > 1 && alignedArea < 0) throw new NoPageStart();
                 for (int a = 0; a < free.Count && placedAt < 0; a++)
                 {
                     if (alignedArea >= 0 && a != alignedArea) continue;
@@ -398,7 +400,7 @@ public static class Assembler
         }
         Flush();
         if (variablePadding.Size > 0 && variablesOnPage)
-            listing.AppendLine($"; ${variablePadding.From:X4}: {variablePadding.Size} byte(s) left free so that indexed reads of the variables do not cross a page (not in the file)");
+            listing.AppendLine($"; ${variablePadding.From:X4}: {variablePadding.Size} byte(s) left free so that {reserve!.Reason} (not in the file)");
         else if (variablePadding.Size > 0)
             listing.AppendLine($"${variablePadding.From:X4}  {variablePadding.Size} byte(s) of padding: no jmp (...) vector may start at $xxFF (before the variables; not in the file)");
 
@@ -416,7 +418,7 @@ public static class Assembler
             return merged;
         }
         return new AssembledCode(Merge(segments), listing.ToString(), placed, placedAreas, variables,
-            overlaySegments.ToDictionary(p => p.Key, p => Merge(p.Value)), instructions);
+            overlaySegments.ToDictionary(p => p.Key, p => Merge(p.Value)), instructions) { VariablesAfter = variablePadding.From };
     }
 
     /// <summary>

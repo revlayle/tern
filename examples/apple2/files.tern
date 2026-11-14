@@ -1,0 +1,84 @@
+// Files on the Apple II (lib/apple2/io): save a file, load it back, and load an overlay from a file.
+//
+// The program saves 8 bytes as SCORES, loads them back into another array and prints them in hex,
+// then loads the overlay greet (greet.bin, written next to files.system by the same build) into
+// $6000 with io.load_bin and calls it. The names are partial, so the files are found next to the
+// program.
+//
+// To try it in AppleWin:
+//   dotnet run --project src/Tern.Cli -- --target apple2 examples/apple2/files.tern
+//   pwsh tests/tools/apple2-disk.ps1 examples/apple2/files.system files.po examples/apple2/greet.bin@$6000
+// then boot files.po. tern run loads the overlay too, but stops at the save, which writes.
+//
+// Result:
+//   SAVED SCORES
+//   LOADED 0A 14 1E 28 FF 00 C8 9B
+//   SAME BYTES
+//   HELLO FROM AN OVERLAY
+// A call that fails prints the MLI's error code in hex instead, e.g. "LOAD FAILED: $46" for a missing
+// file.
+import apple2
+import io
+import text
+import greet @ overlays
+
+memory {
+    $2000..=$5FFF  program
+    $6000..=$6FFF  overlay overlays
+}
+
+data NAME = "SCORES"
+data OVERLAY = "GREET.BIN"
+data SAVED = "SAVED "
+data LOADED = "LOADED"
+data SAME = "SAME BYTES\n"
+data DIFFERENT = "DIFFERENT BYTES\n"
+data SAVE = "SAVE"
+data LOAD = "LOAD"
+data FAILED = " FAILED: $"
+
+var scores: [u8; 8] = [$0A, $14, $1E, $28, $FF, $00, $C8, $9B]
+var loaded: [u8; 8]
+var hex: [u8; 2]
+
+fn main() {
+    if io.save(addr(NAME), len(NAME), addr(scores), len(scores)) {
+        failed(addr(SAVE), len(SAVE))
+        return
+    }
+    apple2.print(addr(SAVED), len(SAVED))
+    apple2.print(addr(NAME), len(NAME))
+    apple2.put('\n')
+
+    if io.load(addr(NAME), len(NAME), addr(loaded), len(loaded)) {
+        failed(addr(LOAD), len(LOAD))
+        return
+    }
+    apple2.print(addr(LOADED), len(LOADED))
+    for i in 0..len(loaded) {
+        apple2.put(' ')
+        text.hex8(addr(hex), loaded[i])
+        apple2.print(addr(hex), 2)
+    }
+    apple2.put('\n')
+    if text.equal(addr(scores), addr(loaded), len(scores)) {
+        apple2.print(addr(SAME), len(SAME))
+    } else {
+        apple2.print(addr(DIFFERENT), len(DIFFERENT))
+    }
+
+    if io.load_bin(addr(OVERLAY), len(OVERLAY)) {
+        failed(addr(LOAD), len(LOAD))
+        return
+    }
+    greet.hello()
+}
+
+// Print what failed and the MLI's error code.
+fn failed(what: ptr u8, n: u8) {
+    apple2.print(what, n)
+    apple2.print(addr(FAILED), len(FAILED))
+    text.hex8(addr(hex), io.status())
+    apple2.print(addr(hex), 2)
+    apple2.put('\n')
+}
