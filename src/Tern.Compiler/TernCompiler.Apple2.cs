@@ -32,10 +32,10 @@ public static partial class TernCompiler
     /// The startup code's first part on the Apple II. The copies run from the file at $2000, before
     /// the code is in its place, so they use only relative branches, then jump to <paramref name="moved"/>.
     /// Then: 40-column text, page 1, full window, the ROM's hooks, the reset vector to <paramref name="quit"/>,
-    /// and the prefix (<see cref="Prefix"/>). With <paramref name="exact"/>, each copy has only the loops its
-    /// count needs (see <see cref="Copy"/>).
+    /// and, when the program imports io (<paramref name="prefix"/> not null), the prefix (<see cref="Prefix"/>).
+    /// With <paramref name="exact"/>, each copy has only the loops its count needs (see <see cref="Copy"/>).
     /// </summary>
-    private static List<AsmItem> Apple2Start(IReadOnlyList<AreaMove> moves, Label moved, Label quit, Label prefix, bool exact)
+    private static List<AsmItem> Apple2Start(IReadOnlyList<AreaMove> moves, Label moved, Label quit, Label? prefix, bool exact)
     {
         var items = new List<AsmItem>();
         if (moves.Count > 0)
@@ -63,14 +63,15 @@ public static partial class TernCompiler
         items.Add(new Instr(Sta, Absolute, new AddrOperand(SoftEv + 1)));
         items.Add(new Instr(Eor, Immediate, new Imm(0xA5)));
         items.Add(new Instr(Sta, Absolute, new AddrOperand(PwrEdUp)));
-        items.AddRange(Prefix(prefix));
+        if (prefix is not null) items.AddRange(Prefix(prefix));
         return items;
     }
 
     /// <summary>
     /// When ProDOS started the program with an empty prefix, the prefix becomes the folder of the path
     /// at $0280 (up to its last '/'), so that io's partial names find files next to the program (spec
-    /// 12.2). The prefix is read into the input buffer at $0200; a partial path at $0280 leaves it empty.
+    /// 12.2). Only in a program that imports io, which counts its bytes (<see cref="PrefixSize"/>;
+    /// question 150). The prefix is read into the input buffer at $0200; a partial path at $0280 leaves it empty.
     /// Bit 7 of the path's characters is cleared: Bitsy Bye leaves it set (AppleWin, M26 follow-up).
     /// <paramref name="parameters"/> is the list for GET_PREFIX and SET_PREFIX (<see cref="Apple2Quit"/>).
     /// </summary>
@@ -103,6 +104,18 @@ public static partial class TernCompiler
         items.Add(new LabelDef(done));
         return items;
     }
+
+    /// <summary>The bytes of the prefix code and its parameter list, which the report counts under io.</summary>
+    private static int PrefixSize => Prefix(new Label("size")).Sum(item => item switch
+    {
+        Instr i => 1 + Tern.Cpu.InstructionSet.OperandSize(i.Mode),
+        DataBytes d => d.Bytes.Length,
+        AddressByte => 1,
+        _ => 0,
+    }) + PrefixParameters.Length;
+
+    /// <summary>GET_PREFIX's and SET_PREFIX's parameter list: one parameter, the input buffer.</summary>
+    private static readonly byte[] PrefixParameters = [1, InputBuffer & 0xFF, InputBuffer >> 8];
 
     /// <summary><c>jsr $BF00</c>, then the command and the parameter list's address, where the MLI returns past them.</summary>
     private static IEnumerable<AsmItem> MliCall(int command, Label parameters) =>
@@ -211,9 +224,9 @@ public static partial class TernCompiler
     /// <summary>
     /// Where reset goes, after the startup code: close all files (MLI CLOSE with reference 0), make the
     /// power-up byte invalid so that a second reset does not come back here, and quit (MLI QUIT). The
-    /// parameter lists follow, with the prefix's (<paramref name="prefix"/>: the input buffer).
+    /// parameter lists follow, with the prefix's when the program imports io (<paramref name="prefix"/>: the input buffer).
     /// </summary>
-    private static List<AsmItem> Apple2Quit(Label quit, Label prefix)
+    private static List<AsmItem> Apple2Quit(Label quit, Label? prefix)
     {
         var closeParameters = new Label("close_parameters");
         var quitParameters = new Label("quit_parameters");
@@ -225,8 +238,9 @@ public static partial class TernCompiler
         items.Add(new DataBytes([1, 0]));
         items.Add(new LabelDef(quitParameters));
         items.Add(new DataBytes([4, 0, 0, 0, 0, 0, 0]));
+        if (prefix is null) return items;
         items.Add(new LabelDef(prefix));
-        items.Add(new DataBytes([1, InputBuffer & 0xFF, InputBuffer >> 8]));
+        items.Add(new DataBytes(PrefixParameters));
         return items;
     }
 

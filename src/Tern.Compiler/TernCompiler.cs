@@ -145,7 +145,9 @@ public static partial class TernCompiler
         bool system = platform.Format == OutputFormat.System && !binary;
         var moved = new Label("moved");
         var quit = new Label("quit");
-        var prefix = new Label("prefix_parameters");
+        // The prefix code comes with io (question 150).
+        bool withIo = system && program.Modules.Any(m => m.IsLibrary && m.Name == "io");
+        var prefix = withIo ? new Label("prefix_parameters") : null;
         List<AreaMove> moves = [];
         byte[]? systemFile = null;
         int passes = 0;
@@ -429,6 +431,8 @@ public static partial class TernCompiler
         if (systemFile is not null)
             report.AppendLine($"System file: {systemFile.Length} bytes, loaded at ${platform.LoadAddress:X4}-${platform.LoadAddress + systemFile.Length - 1:X4}"
                 + (moves.Count > 0 ? $"; the startup code copies {Plural(moves.Count, "area", "areas")} into place: {string.Join(", ", moves.Select(m => $"${m.From:X4} to ${m.To:X4}, {m.Count} bytes"))}" : ""));
+        if (withIo)
+            report.AppendLine($"io: {PrefixSize} bytes of startup code, which set an empty prefix to the program's folder");
         report.AppendLine(code.Variables is { } vars
             ? $"Variables after the program: {plan.TotalSize} bytes, up to ${vars.Last:X4}"
               + (plan.PageArrays.Count > 0

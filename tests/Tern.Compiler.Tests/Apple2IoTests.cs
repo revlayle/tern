@@ -514,7 +514,8 @@ public class Apple2IoTests
             run.Cpu.A = 0;
             run.Cpu.C = false;
         }
-        var run = Run.Program("var x: u8\nfn main() { x = 1 }", platform: Platform.Apple2,
+        // The prefix code comes with io (question 150).
+        var run = Run.Program("import io\nvar x: u8\nfn main() { x = io.status() + 1 }", platform: Platform.Apple2,
             traps: new Dictionary<int, Action<Run>> { [0xBF00] = Mli },
             setup: ram =>
             {
@@ -547,6 +548,37 @@ public class Apple2IoTests
         var (run, set) = StartWith("/GAMES/", "HELLO.SYSTEM");
         Assert.Equal(1, run.U8("x"));
         Assert.Empty(set);
+    }
+
+    [Fact]
+    public void A_program_without_io_has_no_prefix_code()
+    {
+        var result = TernCompiler.Compile("var x: u8\nfn main() { x = 1 }", Platform.Apple2);
+        Assert.DoesNotContain("prefix", result.Listing);
+        // The MLI is called only by the quit routine: CLOSE and QUIT.
+        Assert.Equal(2, result.Listing.Split('\n').Count(l => l.Contains("jsr $BF00")));
+        Assert.DoesNotContain("io:", result.Report);
+    }
+
+    [Fact]
+    public void A_program_with_io_has_the_prefix_code_and_the_report_counts_it_under_io()
+    {
+        var without = TernCompiler.Compile("var x: u8\nfn main() { x = 1 }", Platform.Apple2);
+        var with = TernCompiler.Compile("import io\nvar x: u8\nfn main() { x = 1; if io.close() { x = 2 } }", Platform.Apple2);
+        var listing = with.Listing.Split('\n');
+        // GET_PREFIX ($C7) and SET_PREFIX ($C6), each after a jsr $BF00.
+        int get = Array.FindIndex(listing, l => l.Contains("an empty prefix becomes the program's folder"));
+        Assert.True(get > 0);
+        Assert.Contains("jsr $BF00", listing[get + 1]);
+        Assert.Contains("C7", listing[get + 2]);
+        Assert.Contains("io: 53 bytes of startup code, which set an empty prefix to the program's folder", with.Report);
+        // 50 bytes of code, from the comment to prefix_done, and the 3-byte parameter list.
+        static int At(string line) => Convert.ToInt32(line[1..5], 16);
+        int done = Array.FindIndex(listing, l => l.StartsWith("prefix_done:"));
+        Assert.Equal(50, At(listing[done + 1]) - At(listing[get + 1]));
+        int parameters = Array.FindIndex(listing, l => l.StartsWith("prefix_parameters:"));
+        Assert.Contains("01 00 02", listing[parameters + 1]);
+        Assert.DoesNotContain("prefix", without.Listing);
     }
 
     [Fact]
