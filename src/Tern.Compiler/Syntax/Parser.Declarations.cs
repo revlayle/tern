@@ -345,7 +345,10 @@ public sealed partial class Parser
             var field = Expect(TokenKind.Identifier, "a field 'name: type'");
             Expect(TokenKind.Colon, "':' and the field's type");
             var type = ParseType();
-            Expr? offset = Accept(TokenKind.At) ? ParseExpr() : null;
+            bool placed = Accept(TokenKind.At);
+            if (placed && At(TokenKind.Identifier) && Current.Text == "align" && PeekAt(1).Kind == TokenKind.LParen)
+                throw new CompileError(Current.Pos, "A struct field's '@' is its offset from the start of the struct, so it cannot be aligned. Write the offset, as in '@ 2'");
+            Expr? offset = placed ? ParseExpr() : null;
             fields.Add(new FieldSyntax(field.Pos, field.Text, type, offset));
             if (Accept(TokenKind.Comma) || At(TokenKind.Newline) || At(TokenKind.RBrace)) continue;
             throw new CompileError(Current.Pos, $"Expected ',' or a line break after the field, found {Describe(Current)}. Separate the fields with ',' or a line break");
@@ -474,7 +477,7 @@ public sealed partial class Parser
         {
             if (!allowZeroPage) throw new CompileError(Current.Pos, "Data is read-only and lives in the program; '@ zp' is for variables. Remove '@ zp', or make it a var");
             Advance();
-            return new Placement(PlacementKind.ZeroPage);
+            return OneLocation(new Placement(PlacementKind.ZeroPage));
         }
         if (At(TokenKind.Bank))
             throw new CompileError(Current.Pos, "'@ bank(n)' is not supported yet. Remove it");
@@ -485,9 +488,21 @@ public sealed partial class Parser
             Expect(TokenKind.LParen, "'(' and the alignment, as in '@ align(256)'");
             var n = ParseExpr();
             Expect(TokenKind.RParen, "')'");
-            return new Placement(PlacementKind.Align, n);
+            return OneLocation(new Placement(PlacementKind.Align, n));
         }
-        return new Placement(PlacementKind.Address, ParseExpr());
+        return OneLocation(new Placement(PlacementKind.Address, ParseExpr()));
+    }
+
+    /// <summary>A second location after the first, such as <c>@ zp align(2)</c>, is an error: '@' takes one (spec 4).</summary>
+    private Placement OneLocation(Placement placement)
+    {
+        bool second = placement.Kind == PlacementKind.Align
+            ? At(TokenKind.Zp) || At(TokenKind.Identifier) || At(TokenKind.Number)
+            : At(TokenKind.Identifier) && Current.Text == "align";
+        if (second)
+            throw new CompileError(Current.Pos,
+                "'@' takes one location (an address, a region, 'zp' or 'align(n)'), and this has two. Remove 'align(n)', or the other location");
+        return placement;
     }
 
     private VarDecl ParseData()

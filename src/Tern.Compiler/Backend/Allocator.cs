@@ -221,7 +221,8 @@ public static class Allocator
         int zeroedEnd = offset;
         offset = PlaceByPage(noinit.Where(g => g.Alignment == 1).ToList(), offset, plan.NoinitGlobals, spans);
         plan.PageArrays.AddRange(spans.Keys.OrderBy(v => plan.ZeroedGlobals.Concat(plan.NoinitGlobals).First(e => e.Var == v).Offset));
-        int modulus = Math.Max(spans.Count > 0 ? 256 : 1, ram.Select(g => g.Alignment).DefaultIfEmpty(1).Max());
+        // Only the block's own variables count: data and initialized variables are aligned in the file (review M26 follow-up, finding 1).
+        int modulus = Math.Max(spans.Count > 0 ? 256 : 1, plan.ZeroedGlobals.Concat(plan.NoinitGlobals).Select(e => e.Var.Alignment).DefaultIfEmpty(1).Max());
         // Space before the first variable is not needed: the block starts that far past a multiple of the modulus instead.
         var globals = plan.ZeroedGlobals.Concat(plan.NoinitGlobals).ToList();
         if (modulus > 1 && globals.Count > 0 && globals.Min(e => e.Offset) is int lead and > 0)

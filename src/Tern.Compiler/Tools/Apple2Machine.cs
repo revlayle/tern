@@ -28,7 +28,7 @@ internal sealed class Apple2Machine(IReadOnlyList<OverlayFile> overlays) : Machi
 
     public override string StandIns => "COUT $FDED, HOME $FC58, SETNORM $FE84, INIT $FB2F, SETVID $FE93, SETKBD $FE89, and the MLI at $BF00 for QUIT, GET_PREFIX, SET_PREFIX, and for reading the build's overlay files";
 
-    private const int BadPath = 0x40, BadRef = 0x43, NotFound = 0x46, Eof = 0x4C;
+    private const int BadPath = 0x40, TooManyFiles = 0x42, BadRef = 0x43, NotFound = 0x46, Eof = 0x4C;
     /// <summary>The overlay file open under each reference number, and the next byte to read.</summary>
     private readonly Dictionary<int, (byte[] File, int Pos)> _open = [];
 
@@ -167,6 +167,7 @@ internal sealed class Apple2Machine(IReadOnlyList<OverlayFile> overlays) : Machi
             case 0xC8:                                  // OPEN
             {
                 if (Find(Word(1)) is not { } file) return Missing(Word(1));
+                if (_open.Count == 8) return TooManyFiles;     // ProDOS has 8 file control blocks
                 int reference = Enumerable.Range(1, 8).First(r => !_open.ContainsKey(r));
                 _open[reference] = (file.Image, 0);
                 Put(5, reference, 1);

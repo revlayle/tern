@@ -584,6 +584,42 @@ public class Apple2IoTests
     // ---------- tern run ----------
 
     [Fact]
+    public void Tern_run_fails_a_ninth_open_file_with_too_many_files()
+    {
+        // ProDOS has 8 file control blocks: OPEN gives $42 when all are in use.
+        var dir = Directory.CreateTempSubdirectory("tern");
+        try
+        {
+            File.WriteAllText(Path.Combine(dir.FullName, "level1.tern"), "var value: u8 = 42\nfn get() -> u8 using A { return value }\n");
+            File.WriteAllText(Path.Combine(dir.FullName, "main.tern"), """
+                import io
+                import level1 @ levels
+                memory {
+                    $2000..=$5FFF  program
+                    $6000..=$6FFF  overlay levels
+                }
+                data NAME = "LEVEL1.BIN"
+                var results: [u8; 9]
+                fn main() {
+                    io.load_bin(addr(NAME), len(NAME))
+                    for i in 0..9 {
+                        io.open(addr(NAME), len(NAME), io.READ)
+                        results[i] = io.status()
+                    }
+                    results[0] += level1.get()
+                }
+                """);
+            string main = Path.Combine(dir.FullName, "main.tern");
+            var compiled = TernCompiler.Compile(File.ReadAllText(main), Platform.Apple2, sourcePath: main);
+            var run = Runner.Run(compiled);
+            Assert.True(run.Returned, run.Stop);
+            int results = compiled.Symbols["results"];
+            Assert.Equal([42, 0, 0, 0, 0, 0, 0, 0, 0x42], run.Ram.Bytes[results..(results + 9)]);
+        }
+        finally { dir.Delete(recursive: true); }
+    }
+
+    [Fact]
     public void Tern_run_loads_the_builds_own_overlay_with_load_bin()
     {
         var dir = Directory.CreateTempSubdirectory("tern");

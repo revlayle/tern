@@ -297,6 +297,64 @@ public class AlignTests
     }
 
     [Fact]
+    public void Aligned_data_does_not_move_the_variables_after_the_program()
+    {
+        // Review M26 follow-up, finding 1: font is aligned in the file; buf, a page array, follows it.
+        var r = Run.Program("""
+            data font: [u8; 8] @ align(2048) = [1, 2, 3, 4, 5, 6, 7, 8]
+            var x: u8
+            var buf: [u8; 200]
+            var out: u8 @ $C000
+            fn main() {
+                x = font[out]
+                buf[x] = 3
+                out = buf[out]
+            }
+            """);
+        int font = r.Address("font"), buf = r.Address("buf");
+        Assert.Equal(0, font % 2048);
+        Assert.InRange(buf, font + 8, font + 0x100);
+        Assert.Equal(buf >> 8, (buf + 199) >> 8);     // still placed so that indexed reads do not cross a page
+        Assert.Equal(3, r.U8("buf", 1));
+        Assert.Equal(0, r.Ram.Bytes[0xC000]);     // buf[0]
+    }
+
+    [Fact]
+    public void Aligned_data_with_only_frames_after_the_program_compiles()
+    {
+        // Review M26 follow-up, finding 2: this crashed the compiler.
+        var r = Run.Program("""
+            data font: [u8; 8] @ align(32768) = [1, 2, 3, 4, 5, 6, 7, 8]
+            var out: u8 @ $C000
+            fn main() {
+                var y: u8 = font[out]
+                out = y
+            }
+            """);
+        Assert.Equal(0x8000, r.Address("font"));
+        Assert.Equal(1, r.Ram.Bytes[0xC000]);
+    }
+
+    [Theory]
+    [InlineData("var x: u8 @ zp align(2)")]
+    [InlineData("var x: u8 @ $C000 align(2)")]
+    [InlineData("memory { $C000..=$CFFF region buffers }\nvar x: u8 @ buffers align(2)")]
+    [InlineData("var x: u8 @ align(2) zp")]
+    [InlineData("var x: u8 @ align(2) buffers")]
+    public void Align_with_another_location_is_an_error(string declaration)
+    {
+        var message = Message($"{declaration}\nfn main() {{ x = 1 }}");
+        Assert.Equal("'@' takes one location (an address, a region, 'zp' or 'align(n)'), and this has two. Remove 'align(n)', or the other location", message);
+    }
+
+    [Fact]
+    public void A_struct_field_cannot_be_aligned()
+    {
+        var message = Message("struct S { a: u8, b: u8 @ align(2) }\nvar s: S\nfn main() { s.b = 1 }");
+        Assert.Equal("A struct field's '@' is its offset from the start of the struct, so it cannot be aligned. Write the offset, as in '@ 2'", message);
+    }
+
+    [Fact]
     public void An_aligned_global_that_is_not_used_is_warned()
     {
         var result = TernCompiler.Compile("var buf: [u8; 4] @ align(4)\nfn main() { }");
