@@ -67,6 +67,26 @@ C:\AppleWin\AppleWin-x64.exe -conf C:\AppleWin\AppleWin.ini -model apple2ee -s7 
 C:\AppleWin\AppleWin-x64.exe -conf C:\AppleWin\AppleWin.ini -model apple2p -s0 languagecard -s7 empty -d1 disk.po -no-printscreen-dlg -m
 ```
 
+To check a program on an emulated NES, use Mesen (2.1.1, installed at `C:\Mesen`, in portable mode: its settings are `C:\Mesen\settings.json`; it also unpacks its native libraries into `Documents\Mesen2` on every start, which holds no settings). The NES needs no ROM images. Mesen's test runner runs a `.nes` file with a Lua script and no window; the script stops the run with `emu.stop(code)`, which becomes Mesen's exit code, and can save a screenshot with `emu.takeScreenshot()` and `io.open` (scripts' file access, `AllowIoOsAccess`, is on in the settings). A script that fails never calls `emu.stop`, so run it under a timeout:
+
+```
+timeout 60 C:\Mesen\Mesen.exe --testRunner game.nes check.lua
+```
+
+A script that saves a screenshot after 30 frames:
+
+```lua
+local n = 0
+emu.addEventCallback(function()
+  n = n + 1
+  if n == 30 then
+    local f = io.open([[C:\path\shot.png]], "wb")
+    f:write(emu.takeScreenshot()); f:close()
+    emu.stop(0)
+  end
+end, emu.eventType.endFrame)
+```
+
 ## Design rules
 
 These come from the spec and `docs/decisions.md`. Apply them to every change.
