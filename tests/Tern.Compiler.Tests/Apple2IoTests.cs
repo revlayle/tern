@@ -599,6 +599,7 @@ public class Apple2IoTests
                 }
                 data GOOD = "LEVEL1.BIN"
                 data FULL = "/DISK/LEVEL1.BIN"
+                data LOWER = "level1.bin"
                 data MISSING = "LEVEL2.BIN"
                 data BAD = "1LEVEL.BIN"
                 var results: [u8; 6]
@@ -606,6 +607,7 @@ public class Apple2IoTests
                     results[0] = io.load_bin(addr(GOOD), len(GOOD)) as u8
                     results[1] = level1.get()
                     results[2] = io.load_bin(addr(FULL), len(FULL)) as u8
+                    results[5] = io.load_bin(addr(LOWER), len(LOWER)) as u8
                     io.load_bin(addr(MISSING), len(MISSING))
                     results[3] = io.status()
                     io.load_bin(addr(BAD), len(BAD))
@@ -617,7 +619,7 @@ public class Apple2IoTests
             var run = Runner.Run(compiled);
             Assert.True(run.Returned, run.Stop);
             int results = compiled.Symbols["results"];
-            Assert.Equal([0, 42, 0, NotFound, 0x40], run.Ram.Bytes[results..(results + 5)]);
+            Assert.Equal([0, 42, 0, NotFound, 0x40, 0], run.Ram.Bytes[results..(results + 6)]);
         }
         finally { dir.Delete(recursive: true); }
     }

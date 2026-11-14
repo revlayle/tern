@@ -14,7 +14,7 @@ namespace Tern.Compiler.Tools;
 /// SETKBD) set the bytes they set. The MLI ($BF00) has stand-ins for QUIT, which ends the run,
 /// GET_PREFIX (an empty prefix) and SET_PREFIX, and for reading the build's own overlay files (spec
 /// 12.2): GET_FILE_INFO, OPEN, GET_EOF, READ and CLOSE find the one whose file name, in capitals, is
-/// the path's last part ("LEVEL1.BIN" or "/DISK/LEVEL1.BIN" is level1.bin), as a BIN file with its
+/// the path's last part, upshifted as the MLI does ("LEVEL1.BIN", "level1.bin" or "/DISK/LEVEL1.BIN" is level1.bin), as a BIN file with its
 /// load address as the aux type. A name ProDOS cannot store (1-15 letters, digits and dots, starting
 /// with a letter) fails with $40, any other with $46, as a file not on the disk. CLOSE with
 /// reference 0 closes every file. A call that writes stops the run.
@@ -202,7 +202,7 @@ internal sealed class Apple2Machine(IReadOnlyList<OverlayFile> overlays) : Machi
         // A path: a length byte, then the characters; the file is its last part.
         string Path(int at) => new([.. Enumerable.Range(1, b[at & 0xFFFF]).Select(i => (char)(b[(at + i) & 0xFFFF] & 0x7F))]);
         string Name(int at) => Path(at)[(Path(at).LastIndexOf('/') + 1)..];
-        OverlayFile? Find(int at) => overlays.FirstOrDefault(o => (o.Name + ".bin").ToUpperInvariant() == Name(at));
+        OverlayFile? Find(int at) => overlays.FirstOrDefault(o => (o.Name + ".bin").ToUpperInvariant() == Name(at).ToUpperInvariant());
         int Missing(int at) => System.Text.RegularExpressions.Regex.IsMatch(Name(at), @"^[A-Za-z][A-Za-z0-9.]{0,14}$") ? NotFound : BadPath;
     }
 
