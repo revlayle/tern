@@ -669,6 +669,17 @@ public sealed partial class Checker
             case PlacementKind.ZeroPage:
                 v.RequireZeroPage = true;
                 break;
+            case PlacementKind.Align:
+                if (!allowAddress)
+                    throw new CompileError(decl.Pos, "Only global variables and data can be aligned: a local's memory is shared with other functions' (spec 8.1). Move the variable out of the function");
+                var n = decl.Placement.Alignment!;
+                CheckExpr(n);
+                if (n.ConstValue is not long align)
+                    throw new CompileError(n.Pos, "The alignment must be known at compile time. Use a number or a constant, as in '@ align(256)'");
+                if (align < 2 || align > 32768 || (align & (align - 1)) != 0)
+                    throw new CompileError(n.Pos, $"The alignment must be a power of two from 2 to 32768, not {align}. Use one such as 64, 256 or 2048");
+                v.Alignment = (int)align;
+                break;
             case PlacementKind.Address:
                 if (!allowAddress) throw new CompileError(decl.Pos, "Only global variables can have a fixed address. Move the variable out of the function");
                 var addr = decl.Placement.Address!;

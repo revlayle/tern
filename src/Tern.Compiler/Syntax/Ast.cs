@@ -182,13 +182,16 @@ public sealed class CastExpr(SourcePos pos, Expr operand, TypeSyntax target) : E
 
 public abstract class Stmt(SourcePos pos) : Node(pos);
 
-public enum PlacementKind { None, Address, ZeroPage }
+public enum PlacementKind { None, Address, ZeroPage, Align }
 
+/// <param name="address">The address or region for <see cref="PlacementKind.Address"/>; the alignment <c>n</c> for <see cref="PlacementKind.Align"/>.</param>
 public sealed class Placement(PlacementKind kind, Expr? address = null)
 {
     public static readonly Placement None = new(PlacementKind.None);
     public PlacementKind Kind { get; } = kind;
-    public Expr? Address { get; } = address;
+    public Expr? Address => Kind == PlacementKind.Align ? null : address;
+    /// <summary>For <c>@ align(n)</c>: the expression <c>n</c>.</summary>
+    public Expr? Alignment => Kind == PlacementKind.Align ? address : null;
 }
 
 public sealed class VarDecl(SourcePos pos, string name, TypeSyntax? type, Placement placement, Expr? init) : Stmt(pos)

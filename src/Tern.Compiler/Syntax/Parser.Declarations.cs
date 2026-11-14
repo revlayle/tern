@@ -466,7 +466,7 @@ public sealed partial class Parser
         return new VarDecl(start.Pos, name.Text, type, placement, init);
     }
 
-    /// <summary>The optional <c>@ zp</c>, <c>@ address</c> or <c>@ region</c> after a variable's type.</summary>
+    /// <summary>The optional <c>@ zp</c>, <c>@ align(n)</c>, <c>@ address</c> or <c>@ region</c> after a variable's type.</summary>
     private Placement ParsePlacement(bool allowZeroPage)
     {
         if (!Accept(TokenKind.At)) return Placement.None;
@@ -478,6 +478,15 @@ public sealed partial class Parser
         }
         if (At(TokenKind.Bank))
             throw new CompileError(Current.Pos, "'@ bank(n)' is not supported yet. Remove it");
+        // 'align' is a word only after '@' (spec 4).
+        if (At(TokenKind.Identifier) && Current.Text == "align")
+        {
+            Advance();
+            Expect(TokenKind.LParen, "'(' and the alignment, as in '@ align(256)'");
+            var n = ParseExpr();
+            Expect(TokenKind.RParen, "')'");
+            return new Placement(PlacementKind.Align, n);
+        }
         return new Placement(PlacementKind.Address, ParseExpr());
     }
 

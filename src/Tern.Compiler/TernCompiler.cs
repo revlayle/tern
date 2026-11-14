@@ -224,8 +224,7 @@ public static partial class TernCompiler
                 var label = new Label(g.Name);
                 imageLabels[g] = label;
                 items.Add(new SectionStart(g.Name));
-                if (g.JumpVectorOffsets.Count > 0)
-                    items.Add(new Padding(pc => Assembler.AvoidPageEnd(pc, g.JumpVectorOffsets), $"jmp ({g.Name}) must not read a vector at $xxFF"));
+                if (ImagePadding(g) is { } padding) items.Add(padding);
                 items.Add(new LabelDef(label));
                 items.AddRange(ImageBytes(g, gen.LabelOf));
             }
@@ -240,8 +239,7 @@ public static partial class TernCompiler
                 var label = new Label(g.Name);
                 imageLabels[g] = label;
                 items.Add(new SectionStart(g.Name, Overlay: g.Module!.Name));
-                if (g.JumpVectorOffsets.Count > 0)
-                    items.Add(new Padding(pc => Assembler.AvoidPageEnd(pc, g.JumpVectorOffsets), $"jmp ({g.Name}) must not read a vector at $xxFF"));
+                if (ImagePadding(g) is { } padding) items.Add(padding);
                 items.Add(new LabelDef(label));
                 items.AddRange(ImageBytes(g, gen.LabelOf));
             }
@@ -249,7 +247,12 @@ public static partial class TernCompiler
             // vector among them starts at an address ending in $FF.
             var ramVectors = plan.ZeroedGlobals.Concat(plan.NoinitGlobals).Concat(plan.FrameVariables)
                 .SelectMany(e => e.Var.JumpVectorOffsets.Select(o => e.Offset + o)).ToList();
-            items.Add(new Reserve(bss, plan.TotalSize, ramVectors, plan.PageArrays.Count > 0 ? plan.PageOffset : null));
+            string reason = string.Join(" and ", new[]
+            {
+                plan.PageArrays.Count > 0 ? "indexed reads of the variables do not cross a page" : null,
+                plan.ZeroedGlobals.Concat(plan.NoinitGlobals).Any(e => e.Var.Alignment > 1) ? "aligned variables start at a multiple of their alignment" : null,
+            }.OfType<string>());
+            items.Add(new Reserve(bss, plan.TotalSize, ramVectors, plan.StartModulus, plan.StartResidue, reason));
 
             var overlayAreas = program.Modules.Where(m => m.OverlayArea is not null)
                 .ToDictionary(m => m.Name, m => layout.Overlays[m.OverlayArea!]);
@@ -280,6 +283,14 @@ public static partial class TernCompiler
                 break;
             }
             catch (Exception e) when (byPage && plan.PageArrays.Count > 0 && e is Assembler.NoPageStart or CompileError) { byPage = false; }
+            catch (Assembler.NoPageStart)
+            {
+                // Only aligned variables are left to place the block for.
+                var widest = plan.ZeroedGlobals.Concat(plan.NoinitGlobals).Select(e => e.Var).MaxBy(v => v.Alignment)!;
+                throw new CompileError(widest.Pos,
+                    $"The variables after the program ({plan.TotalSize} bytes) must start where '{widest.Name}' is at a multiple of ${widest.Alignment:X}, and no program area has room for them there. " +
+                    "Make a program area larger, or use a smaller alignment");
+            }
         }
 
         // The file covers every byte from the lowest to the highest address used; gaps are zeros.
@@ -423,6 +434,8 @@ public static partial class TernCompiler
                   ? $", from ${vars.First:X4}, placed so that indexed reads do not cross a page: {string.Join(", ", plan.PageArrays.Select(a => $"{a.QualifiedName} ${a.Address:X4}"))}"
                   : "")
             : "Variables after the program: 0 bytes");
+        foreach (var g in program.Globals.Where(g => g.Alignment > 1).OrderBy(g => g.Address))
+            report.AppendLine($"Aligned {g.Name}: ${g.Address:X4} (@ align({g.Alignment})), {Plural(AlignmentPadding(g, plan, code), "byte", "bytes")} of padding before it");
         foreach (var table in program.Globals.Where(g => g.IsOffsetTable))
             report.AppendLine($"Offset table {table.Name}: {table.Type.Size} bytes, in the program");
         // The low table follows the high one.

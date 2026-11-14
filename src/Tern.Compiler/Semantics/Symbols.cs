@@ -191,6 +191,8 @@ public sealed class VariableSymbol(string name, SourcePos pos, TernType type, Va
     /// <summary>Set for <c>@ region</c> variables and data: the region's name. The allocator gives them an address in it.</summary>
     public string? Region { get; set; }
     public bool RequireZeroPage { get; set; }
+    /// <summary>Set by <c>@ align(n)</c>: the address is a multiple of this (spec 4); 1 when not aligned.</summary>
+    public int Alignment { get; set; } = 1;
     /// <summary>A global of an overlay module that is placed with the module's code (not at a fixed address or in a region).</summary>
     public bool IsOverlayImage => Kind == VariableKind.Global && OverlayArea is not null && FixedAddress is null && Region is null;
     /// <summary>Set for loop variables that live in a register (<c>using X</c>). They have no memory.</summary>
