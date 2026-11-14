@@ -5,10 +5,17 @@ Owned by the coding session. Updated at the end of every coding session.
 ## Current
 
 - **Milestone:** M27, the NES (roadmap "M27: NES"; spec 2.1, 4, 8.4, 8.5, 12.2, 14.1; decisions 2026-11-14).
-- **Branch:** `m27-nes`, from `main` at `35de89e`. All "done when" items are met (see below). 3704 compiler tests pass plus 36 CPU tests. No benchmark changed (1254 / 350780); `SkillTests` pass.
-- **Next step:** `/review m27-nes`. The spec session answers questions 157-168 (provisional choices of M27) and adds `examples/nes/` build outputs to `.gitignore` (question 168). When the OS-B and XL OS ROM images are registered in Altirra, rerun the Atari examples on them (decision 2026-11-13, question 137).
+- **Branch:** `m27-nes`, from `main` at `35de89e`, `main` merged in (the review, `064389e`). All "done when" items are met (see below). Review (`docs/reviews/m27.md`): not ready to merge; its four findings and suggestions 5, 6, 7, 9 and 10 are done (`fe901bb`, `8660241`), suggestion 8 is question 169. 3716 compiler tests pass plus 36 CPU tests. No benchmark changed (1254 / 350780); `SkillTests` pass.
+- **Next step:** `/review m27-nes` again. The spec session answers questions 157-169 (provisional choices of M27) and adds `examples/nes/` build outputs to `.gitignore` (question 168). When the OS-B and XL OS ROM images are registered in Altirra, rerun the Atari examples on them (decision 2026-11-13, question 137).
 
 ## Done
+
+- **M27 review** (2026-11-14, `docs/reviews/m27.md`): not ready to merge; four findings, six suggestions.
+  - Finding 1 (`8660241`): an `overlay` line on a cartridge is an error (no disk, no RAM to load into); on UxROM the message names a bank area. Test `NesTests.Memory_a_cartridge_does_not_have`.
+  - Finding 2 (`8660241`): on a cartridge a `region` must lie in RAM (`$0000-$07FF`), a `reserved` range in RAM or the board's ROM (`$8000-$FFFF`); the mirrors and `$6000` were accepted and aliased zero page. Same test; `A_region_and_reserved_ranges_in_ram_and_rom_work`.
+  - Finding 3 (`fe901bb`): `tern run`'s index check, profile and function entries are keyed by place (`CodePlace`: the address, with the bank for code in a bank; `PlacedInstruction.Overlay`; `CompileResult.BankWindow` and `PlaceOf` with `NesBus.SelectedBank`), so code in one bank is no longer checked as another bank's. The scroll example's test checks no index errors and the profile's calls.
+  - Finding 4 (`8660241`): NROM lays out a program that does not fit in `$C000-$FFFF` again in one area, `$8000-$FFFF` (`Joined`), so a table or function over 16 KB fits. Test `Nrom_256_holds_a_table_larger_than_16_kb`.
+  - Suggestions 5, 6, 7, 9, 10 (`8660241`): out of RAM names the RAM and suggests `data` or `@ zp`; three messages (data outside ROM, no program area left on a cartridge, a call between banks); RAM no longer under "Program areas"; no follow-on error after a failed `bank` line; no RAM at `$4020-$7FFF` in `tern run`. Suggestion 8 is question 169.
 
 - **M27: NES** (2026-11-14, branch `m27-nes`; decisions 2026-11-14).
   - *Apple II prefix* (`036c376`, question 150 as settled): the startup's prefix code (53 bytes) only when the program imports `io`; the report has "io: 53 bytes of startup code, which set an empty prefix to the program's folder". Tests in `Apple2IoTests`.
@@ -746,6 +753,7 @@ Cycles including `jsr` and `rts`, best and worst over the test values (`FloatTes
 - NES: `addr()` of a function or variable inside `chr` data would be zeros in CHR ROM (the address fill is not applied there); tile data has no use for one.
 - NES: the optimizer treats a bank module's variables as it treats an overlay's (`OverlayArea` is set), so it keeps some loads and stores it could remove; they are resident RAM.
 - NES: the error for `implements` on a module with no area still says "overlay" only.
+- `tern run` tells banks apart by place; overlays on the C64, Atari and Apple II still share addresses in the index check and profile (a loaded overlay's code is checked as whichever overlay compiled first at that address).
 - NES: the benchmarks are not compiled for the NES (not in M27's done-when).
 - Apple II: the system file stays at `$2000` after the startup code copied it, so hi-res page 1 holds it until the program clears the page (`apple2.clear()`); the example and the skill say so.
 - Apple II: the assembler's error for a first program area too small for the startup code says "BASIC line and startup code", as on the Atari; only the C64 has a BASIC line.
@@ -831,6 +839,8 @@ Open, from M27 (provisional, as built):
 166. **Bank sizes and order**: a bank's modules are laid out in the order of their code (callers first), not strictly in import order; the report and the image list them by import. Two modules in one bank implementing the same interface would put two tables at the same address; not checked.
 167. **The PPUDATA field of `nes.ppu` is `value`**, since `data` is a keyword. The others: `ctrl`, `mask`, `status`, `oam_address`, `oam_data`, `scroll`, `address`. The pads are `pad_port` (`$4016`, `$4017`); `nes.frames` counts frames.
 168. **`.gitignore` for `examples/nes/`**: `*.nes`, `*.mlb`, `*.lst`, `*.lines` (the spec session's file, question 148's pattern). Not committed. Also for `CLAUDE.md`: `pwsh tests/tools/mesen-shot.ps1 game.nes shot.png <frames...>` takes Mesen screenshots.
+
+169. **An interrupt vector that points into a bank** (`data v: u16 @ $FFFE = addr(k2.irq)`, `k2` in a bank) compiles: resident code may take addresses in any bank (8.5). The interrupt then runs whichever bank is selected, which is almost always a mistake (review M27, suggestion 8). Options: an error for a vector into a bank area, or leave it.
 
 Questions 149-156 were settled on 2026-11-13 (decisions.md): as built, except 150 (the prefix code only with `io`), built at the start of M27.
 
