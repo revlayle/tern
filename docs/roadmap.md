@@ -643,6 +643,8 @@ Done when: an example draws text and hi-res graphics in AppleWin, on an enhanced
 
 - `lib/apple2/io` through the ProDOS MLI: `open`, `close`, `read`, `write`, `status`, whole-file `load` and `save`, as on the Atari where the machine allows; the overlay loader; the 1 KB page-aligned file buffer and the system bit map
 - `tern run`: a stand-in for the MLI's file calls that reads the build's own overlay files
+- The overlay and binary file format and ProDOS file type (now headerless `.bin`, question 141)
+- Check the startup's 80-column switch-off in AppleWin with the firmware on (`PR#3`, then start the program; question 142)
 
 The spec session settles the details first (names, prefixes, buffers, the bit map). Done when: emulator tests cover `io`, and an example that saves a file and loads it back runs in AppleWin.
 
