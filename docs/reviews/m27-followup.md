@@ -38,3 +38,11 @@ The roadmap item: "Questions 157-169 (decision 2026-11-14): three changes from t
 - [x] An error for an interrupt vector into a bank area (spec 12.2). Test: `NesBankTests.An_interrupt_vector_into_a_bank_is_an_error`, for NMI and IRQ.
 - [x] A `program` line on the NES is a plain error, not "not supported yet" (spec 12.2). Test: `NesTests.Cartridge_line_errors`, for `nrom` and `uxrom`.
 - [x] M27's own "done when" (the scrolling example in Mesen with code in more than one bank) was met and reviewed in `m27.md`. This branch does not touch the examples, and `RepositoryWarningTests` still builds them.
+
+## Re-review
+
+Branch `m27-followup` at `ccf6737` (`main` merged in at `b4af13d`, status updated in `ccf6737`).
+
+**Verdict: ready to merge.** The first review had no findings, so there was nothing to fix. Since then the branch has only merged `main`, which brought in this review file, and updated `docs/status.md`. The status now gives the verdict and lists the error position at `main.tern:1:1`, which predates this branch, under known limitations. That is the right place for it. No code or tests changed.
+
+`dotnet test` (on `ccf6737`): 3720 compiler tests and 36 CPU tests pass.
