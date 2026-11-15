@@ -11,20 +11,6 @@ public class LinearArrayTests
     /// <summary>Element <paramref name="i"/> of a linear 16-bit array.</summary>
     private static int At(Run r, string name, int i) => r.U8(name, 2 * i) | r.U8(name, 2 * i + 1) << 8;
 
-    /// <summary>The instructions of main, without addresses, bytes and cycles.</summary>
-    private static string Code(Run r)
-    {
-        var listing = r.Result.Listing;
-        var start = listing.IndexOf("\nmain:", StringComparison.Ordinal);
-        var code = new List<string>();
-        foreach (var l in listing[(start + 1)..].Split('\n').Skip(1))
-        {
-            if (l.EndsWith(':') && !l.StartsWith(' ') && !l.StartsWith('$') && !l.StartsWith(';')) break;
-            if (l.StartsWith('$')) code.Add(l[17..].Split(';')[0].Trim());
-        }
-        return string.Join("|", code);
-    }
-
     private static readonly int[] Values = [0, 255, 256, 0x1234, 0x7FFF, 0x8000, 0xFFFF, 1];
 
     [Fact]
@@ -193,7 +179,7 @@ public class LinearArrayTests
             var i: u8
             fn main() { {{statement}} }
             """);
-        Assert.Equal(expected, Code(r));
+        Assert.Equal(expected, Listing.Code(r));
     }
 
     [Theory]

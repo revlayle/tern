@@ -85,23 +85,11 @@ public class WideningAddTests
             """);
         Assert.Equal(300, r.U16("w"));
         Assert.Equal(500, r.U16("x"));
-        Assert.Matches(@"^lda b\|clc\|adc w\|sta w\|bcc up\.c\d+\|inc w\+1\|rts$", Code(r, "up"));
-        Assert.Matches(@"^lda w\|sec\|sbc b\|sta w\|bcs down\.c\d+\|dec w\+1\|rts$", Code(r, "down"));
+        Assert.Matches(@"^lda b\|clc\|adc w\|sta w\|bcc up\.c\d+\|inc w\+1\|rts$", Listing.Code(r, "up"));
+        Assert.Matches(@"^lda w\|sec\|sbc b\|sta w\|bcs down\.c\d+\|dec w\+1\|rts$", Listing.Code(r, "down"));
         // A still holds w after the inc w+1 (F17), so the subtraction does not load it; the first
         // store of the low byte is overwritten before anything reads it (F3, F7).
-        Assert.Matches(@"lda b\|clc\|adc w\|bcc main\.c\d+\|inc w\+1\|sec\|sbc b\|sta w\|bcs main\.c\d+\|dec w\+1\|rts$", Code(r));
+        Assert.Matches(@"lda b\|clc\|adc w\|bcc main\.c\d+\|inc w\+1\|sec\|sbc b\|sta w\|bcs main\.c\d+\|dec w\+1\|rts$", Listing.Code(r));
     }
 
-    private static string Code(Run r, string function = "main")
-    {
-        var listing = r.Result.Listing;
-        var start = listing.IndexOf($"\n{function}:", StringComparison.Ordinal);
-        var code = new List<string>();
-        foreach (var l in listing[(start + 1)..].Split('\n').Skip(1).Select(l => l.TrimEnd('\r')))
-        {
-            if (l.EndsWith(':') && !l.StartsWith(' ') && !l.StartsWith('$') && !l.StartsWith(';') && !l.StartsWith($"{function}.")) break;
-            if (l.StartsWith('$')) code.Add(l[17..].Split(';')[0].Trim());
-        }
-        return string.Join("|", code);
-    }
 }

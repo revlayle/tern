@@ -8,20 +8,6 @@ namespace Tern.Compiler.Tests;
 /// </summary>
 public class InterruptTests
 {
-    /// <summary>The instructions of a function, without addresses, bytes and cycles.</summary>
-    private static string Code(Run r, string function)
-    {
-        var listing = r.Result.Listing;
-        var start = listing.IndexOf($"\n{function}:", StringComparison.Ordinal);
-        var code = new List<string>();
-        foreach (var l in listing[(start + 1)..].Split('\n').Skip(1).Select(l => l.TrimEnd('\r')))
-        {
-            if (l.EndsWith(':') && !l.StartsWith(' ') && !l.StartsWith('$') && !l.StartsWith(';') && !l.StartsWith($"{function}.")) break;
-            if (l.StartsWith('$')) code.Add(l[17..].Split(';')[0].Trim());
-        }
-        return string.Join("|", code);
-    }
-
     /// <summary>Installs <c>handler</c> in the IRQ vector and enables interrupts.</summary>
     private const string Install = """
         asm {
@@ -131,7 +117,7 @@ public class InterruptTests
             {{handler}}
             fn main() { }
             """);
-        Assert.Equal(expected, Code(r, "handler"));
+        Assert.Equal(expected, Listing.Code(r, "handler"));
     }
 
     [Fact]

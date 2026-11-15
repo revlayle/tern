@@ -25,13 +25,6 @@ public class PointerTests
         Assert.True(r.Address("main.p") < 0x100, "a dereferenced pointer must be in zero page");
     }
 
-    /// <summary>The instructions of main, without addresses, bytes and cycles.</summary>
-    private static string[] MainCode(Run r) =>
-        r.Result.Listing[r.Result.Listing.IndexOf("main:")..].Split('\n')
-            .Where(l => l.StartsWith('$'))
-            .Select(l => l[17..].Split(';')[0].Trim())
-            .ToArray();
-
     [Theory]
     // Spec 11: p[i] = v is ldy i / lda v / sta (p),y.
     [InlineData("p[i] = v", "ldy i|lda v|sta (p),y|rts")]
@@ -57,7 +50,7 @@ public class PointerTests
             var rows: [ptr u8; 2]
             fn main() { {{statement}} }
             """);
-        Assert.Equal(expected, string.Join("|", MainCode(r)));
+        Assert.Equal(expected, Listing.Code(r));
     }
 
     [Fact]
@@ -327,9 +320,9 @@ public class PointerTests
                 got = (rows[j] + 1)[i]
                 (rows[0] + 300)[0] = 7
             }
-            """);
+            """, setup: ram => ram.Bytes[0x3106] = 99);
         Assert.Equal(42, r.Ram.Bytes[0x3105]);
-        Assert.Equal(0, r.U8("got"));
+        Assert.Equal(99, r.U8("got"));
         Assert.Equal(7, r.Ram.Bytes[0x3000 + 300]);
     }
 

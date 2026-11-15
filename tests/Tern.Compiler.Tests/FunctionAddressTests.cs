@@ -222,7 +222,7 @@ public class FunctionAddressTests
                     sta vec+1
                 }
             }
-            """);
+            """, comparePlain: false);   // the asm block stores an address, which differs without the optimizer
         Assert.NotEqual(r.Address("a.x"), r.Address("g.y"));
     }
 

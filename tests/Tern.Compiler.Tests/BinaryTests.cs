@@ -36,8 +36,10 @@ public class BinaryTests
         public Binary(string source, string? sourcePath = null)
         {
             Result = TernCompiler.Compile(source, sourcePath: sourcePath);
+            StartState.Fill(Ram);
             Ram.Load((ushort)Result.LoadAddress, Result.Image);
             Cpu = new Cpu6502(Ram) { SP = 0xFF };
+            StartState.Set(Cpu);
         }
 
         public int Entry(string name) => Result.Entries.Single(e => e.Name == name).Address;
@@ -371,11 +373,14 @@ public class BinaryTests
     // ---------- The examples ----------
 
     /// <summary>Runs a program that never ends for a number of cycles, with an IRQ every <paramref name="irqEvery"/> cycles.</summary>
-    private static Ram Emulate(CompileResult result, long cycles, long irqEvery, Action<Ram>? onIrq = null)
+    private static Ram Emulate(CompileResult result, long cycles, long irqEvery, Action<Ram>? onIrq = null, Action<Ram>? setup = null)
     {
         var ram = new Ram();
+        StartState.Fill(ram);
         ram.Load((ushort)result.LoadAddress, result.Image);
+        setup?.Invoke(ram);
         var cpu = new Cpu6502(ram) { PC = (ushort)result.Entry, SP = 0xFF, I = true };
+        StartState.Set(cpu);
         long nextIrq = irqEvery;
         while (cpu.Cycles < cycles)
         {
@@ -414,7 +419,7 @@ public class BinaryTests
             {
                 int freq = ram.Bytes[0xD400] | (ram.Bytes[0xD401] << 8);
                 if (freq != 0 && (notes.Count == 0 || notes[^1] != freq)) notes.Add(freq);
-            });
+            }, setup: ram => ram.Bytes.AsSpan(0xD400, 0x1D).Clear());   // the SID reads back as RAM here; 0 until the player writes it
             Assert.Equal(new[] { 4455, 5001, 5613, 5947, 6675, 7493, 8410, 8910, 4455 }, notes.Take(9));
             Assert.Equal(15, ram.Bytes[0xD418]);                              // init set the volume
             Assert.Equal(0x11, ram.Bytes[0xD404] & 0xFF);                     // gate on

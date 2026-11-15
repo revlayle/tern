@@ -3,19 +3,6 @@ namespace Tern.Compiler.Tests;
 /// <summary>M18 F10: small code shapes, each checked against C# at edge values and in the listing.</summary>
 public class SmallShapeTests
 {
-    private static string Code(Run r, string function = "main")
-    {
-        var listing = r.Result.Listing;
-        var start = listing.IndexOf($"\n{function}:", StringComparison.Ordinal);
-        var code = new List<string>();
-        foreach (var l in listing[(start + 1)..].Split('\n').Skip(1).Select(l => l.TrimEnd('\r')))
-        {
-            if (l.EndsWith(':') && !l.StartsWith(' ') && !l.StartsWith('$') && !l.StartsWith(';') && !l.StartsWith($"{function}.")) break;
-            if (l.StartsWith('$')) code.Add(l[17..].Split(';')[0].Trim());
-        }
-        return string.Join("|", code);
-    }
-
     [Theory]
     [InlineData(0)]
     [InlineData(1)]
@@ -54,8 +41,8 @@ public class SmallShapeTests
         Assert.Equal((byte)(x + 3), r.U8("c"));
         Assert.Equal((byte)(x + 2), r.U8("e"));
         // The volatile byte, the u16 and 3 keep the add.
-        Assert.StartsWith("inc a|inc a|dec b|dec b|inc s|inc s|dec t|dec t|lda v|clc|adc #$02|sta v|", Code(r));
-        Assert.Contains("adc #$03", Code(r));
+        Assert.StartsWith("inc a|inc a|dec b|dec b|inc s|inc s|dec t|dec t|lda v|clc|adc #$02|sta v|", Listing.Code(r));
+        Assert.Contains("adc #$03", Listing.Code(r));
     }
 
     [Theory]
@@ -86,7 +73,7 @@ public class SmallShapeTests
         Assert.Equal((ushort)(w + 0x300), r.U16("c"));
         Assert.Equal((ushort)(w - 0xFF00), r.U16("d"));
         Assert.Equal((ushort)(w + 256), r.U16("p"));
-        Assert.Equal("inc a+1|dec b+1|lda c+1|clc|adc #$03|sta c+1|lda d+1|sec|sbc #$FF|sta d+1|inc p+1|rts", Code(r));
+        Assert.Equal("inc a+1|dec b+1|lda c+1|clc|adc #$03|sta c+1|lda d+1|sec|sbc #$FF|sta d+1|inc p+1|rts", Listing.Code(r));
     }
 
     [Theory]
@@ -107,8 +94,8 @@ public class SmallShapeTests
         byte[] want = [.. Enumerable.Repeat((byte)v, 8)];
         want[3]++; want[2]--; want[6]++; want[7]++;
         for (int k = 0; k < 8; k++) Assert.Equal(want[k], r.U8("a", k));
-        Assert.Contains("ldx i|inc a,x|dec a-1,x", Code(r));
-        Assert.Contains("inc a+1,x", Code(r));
+        Assert.Contains("ldx i|inc a,x|dec a-1,x", Listing.Code(r));
+        Assert.Contains("inc a+1,x", Listing.Code(r));
     }
 
     [Fact]
@@ -144,7 +131,7 @@ public class SmallShapeTests
             """);
         Assert.Equal(5, r.U8("a", 2));
         Assert.Equal(4, r.U8("m"));
-        Assert.Equal("lda #$05|ldx n|sta a,x|txa|asl a|sta m|rts", Code(r));
+        Assert.Equal("lda #$05|ldx n|sta a,x|txa|asl a|sta m|rts", Listing.Code(r));
     }
 
     [Theory]
@@ -164,7 +151,7 @@ public class SmallShapeTests
             }
             """);
         Assert.Equal([0, (byte)v, (byte)(v + 1), (byte)v, 0], new[] { 0, 1, 2, 3, 4 }.Select(k => r.U8("buf", k)));
-        var code = Code(r);
+        var code = Listing.Code(r);
         Assert.Contains("ldy #$01", code);
         Assert.DoesNotContain("ldy #$02", code);
         Assert.DoesNotContain("ldy #$03", code);
@@ -184,7 +171,7 @@ public class SmallShapeTests
             """);
         Assert.Equal(99, r.U8("buf", 0));
         Assert.Equal(255, r.U8("buf", 255));
-        Assert.Equal(1, Code(r).Split('|').Count(s => s == "ldy #$00"));
+        Assert.Equal(1, Listing.Code(r).Split('|').Count(s => s == "ldy #$00"));
     }
 
     [Theory]
@@ -200,7 +187,7 @@ public class SmallShapeTests
             }
             """);
         Assert.Equal(x == 0 ? 0 : 7, r.U8("y"));
-        Assert.Equal("lda x|bne main.endif0|sta y|rts", Code(r));
+        Assert.Equal("lda x|bne main.endif0|sta y|rts", Listing.Code(r));
     }
 
     [Fact]
@@ -224,8 +211,8 @@ public class SmallShapeTests
             Assert.Equal((byte)-values[i], r.U8("n", i));
             Assert.Equal((sbyte)-(sbyte)values[i], r.I8("s", i));
         }
-        Assert.Contains("lda #$00|sec|sbc a,x", Code(r));   // m read from a[i] (F18)
-        Assert.DoesNotContain("eor #$FF", Code(r));
+        Assert.Contains("lda #$00|sec|sbc a,x", Listing.Code(r));   // m read from a[i] (F18)
+        Assert.DoesNotContain("eor #$FF", Listing.Code(r));
     }
 
     [Theory]
@@ -247,8 +234,8 @@ public class SmallShapeTests
             }
             """);
         Assert.Equal((w == 0 ? 5 : 2) | (w != 256 ? 8 : 0), r.U8("f"));
-        Assert.DoesNotContain("cmp #$00", Code(r));
-        Assert.Contains("cmp #$01", Code(r));
+        Assert.DoesNotContain("cmp #$00", Listing.Code(r));
+        Assert.Contains("cmp #$01", Listing.Code(r));
     }
 
     [Fact]
@@ -272,7 +259,7 @@ public class SmallShapeTests
             Assert.Equal((byte)((i << 4) + i + 250), r.U8("b", i));
         }
         for (int i = 0; i < 17; i++) Assert.Equal((byte)((i << 4) + 1), r.U8("c", i));
-        Assert.Equal(1, Code(r).Split('|').Count(s => s == "clc"));
+        Assert.Equal(1, Listing.Code(r).Split('|').Count(s => s == "clc"));
     }
 
     [Theory]
@@ -289,7 +276,7 @@ public class SmallShapeTests
             }
             """);
         Assert.Equal((byte)((last << 1) + 1), r.U8("a", last));
-        Assert.Contains("clc", Code(r));
+        Assert.Contains("clc", Listing.Code(r));
     }
 
     [Theory]
@@ -307,8 +294,8 @@ public class SmallShapeTests
             fn main() { fill({{n}}) }
             """);
         for (int k = 0; k < 256; k++) Assert.Equal(k < (n & 0xFF) ? 1 : 0, r.U8("buf", k));
-        Assert.Contains("cpy fill.n|", Code(r, "fill"));
-        Assert.DoesNotContain("_t0", Code(r, "fill"));
+        Assert.Contains("cpy fill.n|", Listing.Code(r, "fill"));
+        Assert.DoesNotContain("_t0", Listing.Code(r, "fill"));
     }
 
     [Fact]
@@ -340,7 +327,7 @@ public class SmallShapeTests
         Assert.Equal(0, r.U8("d"));
         Assert.Equal(0, r.U8("e"));
         Assert.Equal(1, r.U8("g"));
-        var code = Code(r);
+        var code = Listing.Code(r);
         Assert.DoesNotContain("sta a|", code);
         Assert.DoesNotContain("sta a+4|", code);
         Assert.DoesNotContain("sta b|", code);   // also the second b = 0: main has not written b
@@ -371,9 +358,9 @@ public class SmallShapeTests
             """);
         Assert.Equal(1, r.U8("x"));
         // x is held in X for the loop (lda #0 / tax / inx), then stored (F7).
-        Assert.Contains("stx x", Code(r));
-        Assert.Contains("sta z", Code(r));
-        Assert.Contains("sta y", Code(r, "f"));
+        Assert.Contains("stx x", Listing.Code(r));
+        Assert.Contains("sta z", Listing.Code(r));
+        Assert.Contains("sta y", Listing.Code(r, "f"));
     }
 
     [Fact]
@@ -385,7 +372,7 @@ public class SmallShapeTests
             fn main() { out = mul(123, 45) }
             """);
         Assert.Equal(168, r.U16("out"));
-        Assert.Equal("lda #$7B|sta mul.a|lda #$2D|sta mul.b|lda #$00|sta mul.a+1|sta mul.b+1|jsr mul|sta out|stx out+1|rts", Code(r));
+        Assert.Equal("lda #$7B|sta mul.a|lda #$2D|sta mul.b|lda #$00|sta mul.a+1|sta mul.b+1|jsr mul|sta out|stx out+1|rts", Listing.Code(r));
     }
 
     [Fact]
@@ -401,7 +388,7 @@ public class SmallShapeTests
                 y = 0
             }
             """, setup: ram => ram.Bytes[0x0900] = 0);
-        Assert.Equal("lda #$01|sta border|rts", Code(r));   // the zeros go: x and y were cleared
+        Assert.Equal("lda #$01|sta border|rts", Listing.Code(r));   // the zeros go: x and y were cleared
         var r2 = Run.Program("""
             var border: u8 @ $D020
             var x: u8
@@ -412,7 +399,7 @@ public class SmallShapeTests
                 y = 5
             }
             """);
-        Assert.Equal("lda #$05|sta x|lda #$00|sta border|lda #$05|sta y|rts", Code(r2));
+        Assert.Equal("lda #$05|sta x|lda #$00|sta border|lda #$05|sta y|rts", Listing.Code(r2));
     }
 
     [Fact]
@@ -430,10 +417,7 @@ public class SmallShapeTests
             """);
         Assert.Equal(123, r.U16("a"));
         Assert.Equal(45, r.U16("b"));
-        var listing = r.Result.Listing;
-        var text = listing[listing.IndexOf("\nf:", StringComparison.Ordinal)..];
-        var lines = text.Split('\n').Select(l => l.Trim()).Where(l => l.StartsWith(';') || l.StartsWith('$'))
-            .Select(l => l.StartsWith('$') ? l[17..].Split(';')[0].Trim() : l).TakeWhile(l => l != "rts").ToList();
+        var lines = Listing.Annotated(r, "f").Where(l => !l.EndsWith(':')).TakeWhile(l => l != "rts").ToList();
         int A(string s) => lines.FindIndex(l => l.Contains(s));
         Assert.True(A("a = 123") < A("lda #$7B") && A("sta a") < A("b = 45") && A("b = 45") < A("lda #$2D"), string.Join("\n", lines));
         Assert.Equal(1, lines.Count(l => l == "lda #$00"));

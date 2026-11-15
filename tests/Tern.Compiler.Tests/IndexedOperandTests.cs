@@ -286,8 +286,8 @@ public class IndexedOperandTests
             var k: [u16; 4] = [1, 2, 3, 4]
             var w: u16 = 5
             fn main() { {{statement}} }
-            """);
-        Assert.Equal(1, r.Result.Listing.Split('\n').Count(l => l.Contains("ldx vi") || l.Contains("ldy vi") || l.Contains("lda vi")));
+            """, watch: c => [c.Symbols["vi"]]);
+        Assert.Equal(1, r.Log!.Reads(r.Address("vi")));
     }
 
     [Fact]

@@ -36,20 +36,6 @@ public sealed class InterruptPartTests : IDisposable
         }
         """;
 
-    /// <summary>The instruction text of a function in the listing.</summary>
-    private static string[] Code(Run r, string function)
-    {
-        var listing = r.Result.Listing;
-        var start = listing.IndexOf($"\n{function}:", StringComparison.Ordinal);
-        var code = new List<string>();
-        foreach (var l in listing[(start + 1)..].Split('\n').Skip(1).Select(l => l.TrimEnd('\r')))
-        {
-            if (l.EndsWith(':') && !l.StartsWith(' ') && !l.StartsWith('$') && !l.StartsWith(';') && !l.StartsWith($"{function}.")) break;
-            if (l.StartsWith('$')) code.Add(l[17..].Split(';')[0].Trim());
-        }
-        return code.ToArray();
-    }
-
     [Fact]
     public void A_part_with_parameters_and_a_flag_return_runs_inside_the_handler()
     {
@@ -77,11 +63,11 @@ public sealed class InterruptPartTests : IDisposable
             """, irqEvery: 300);
         Assert.True(r.U8("tops") >= 5);
         Assert.Equal(r.U8("frames"), r.U8("total") / 2);
-        var add = Code(r, "add");
+        var add = Listing.Instructions(r, "add");
         Assert.Equal("rts", add[^1]);
         Assert.DoesNotContain("rti", add);
         Assert.DoesNotContain("pha", add);
-        var frame = Code(r, "frame");
+        var frame = Listing.Instructions(r, "frame");
         Assert.Equal("rti", frame[^1]);
         Assert.Equal(1, frame.Count(i => i == "rti"));
         Assert.Contains(frame, i => i.StartsWith("jsr") && i.EndsWith("add"));
@@ -150,7 +136,7 @@ public sealed class InterruptPartTests : IDisposable
     public void Handlers_clear_decimal_mode_only_when_they_add_subtract_or_call(string source, bool cld)
     {
         var r = Run.Program(source + "\nfn main() { }");
-        var code = Code(r, "frame");
+        var code = Listing.Instructions(r, "frame");
         Assert.Equal(cld, code.Contains("cld"));
         if (cld) Assert.Equal("cld", code[0]);
         Assert.Equal("rti", code[^1]);
@@ -165,8 +151,8 @@ public sealed class InterruptPartTests : IDisposable
             interrupt fn frame() { part() }
             fn main() { {{Install}} }
             """);
-        Assert.Equal("rts", Code(r, "part")[^1]);
-        Assert.Equal("rti", Code(r, "frame")[^1]);
+        Assert.Equal("rts", Listing.Instructions(r, "part")[^1]);
+        Assert.Equal("rti", Listing.Instructions(r, "frame")[^1]);
     }
 
     [Theory]
@@ -230,7 +216,7 @@ public sealed class InterruptPartTests : IDisposable
                 }
             }
             """);
-        Assert.Equal("rti", Code(r, "timer.tick")[^1]);
+        Assert.Equal("rti", Listing.Instructions(r, "timer.tick")[^1]);
         Assert.DoesNotContain("\ntimer.both:", r.Result.Listing);
     }
 

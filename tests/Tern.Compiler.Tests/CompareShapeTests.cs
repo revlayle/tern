@@ -11,25 +11,8 @@ public class CompareShapeTests
     private static string Code(Run r, string function)
     {
         var names = new Dictionary<string, string>();
-        return System.Text.RegularExpressions.Regex.Replace(Listed(r, function), $@"\b{function}\.\w+",
+        return System.Text.RegularExpressions.Regex.Replace(Listing.CodeWithLabels(r, function), $@"\b{function}\.\w+",
             m => names.TryGetValue(m.Value, out var n) ? n : names[m.Value] = $"L{names.Count + 1}");
-    }
-
-    private static string Listed(Run r, string function)
-    {
-        var listing = r.Result.Listing;
-        var start = listing.IndexOf($"\n{function}:", StringComparison.Ordinal);
-        var code = new List<string>();
-        foreach (var l in listing[(start + 1)..].Split('\n').Skip(1).Select(l => l.TrimEnd('\r')))
-        {
-            if (l.EndsWith(':') && !l.StartsWith(' ') && !l.StartsWith('$') && !l.StartsWith(';'))
-            {
-                if (!l.StartsWith($"{function}.")) break;
-                code.Add(l);
-            }
-            if (l.StartsWith('$')) code.Add(l[17..].Split(';')[0].Trim());
-        }
-        return string.Join("|", code);
     }
 
     [Theory]

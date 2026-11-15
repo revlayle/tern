@@ -5,20 +5,6 @@ namespace Tern.Compiler.Tests;
 /// <summary><c>inline fn</c> (spec 6.2): the body is copied into each caller instead of a <c>jsr</c>.</summary>
 public class InlineTests
 {
-    /// <summary>The instructions of a function, without addresses, bytes and cycles.</summary>
-    private static string Code(Run r, string function = "main")
-    {
-        var listing = r.Result.Listing;
-        var start = listing.IndexOf($"\n{function}:", StringComparison.Ordinal);
-        var code = new List<string>();
-        foreach (var l in listing[(start + 1)..].Split('\n').Skip(1).Select(l => l.TrimEnd('\r')))
-        {
-            if (l.EndsWith(':') && !l.StartsWith(' ') && !l.StartsWith('$') && !l.StartsWith(';') && !l.Contains('.')) break;
-            if (l.StartsWith('$')) code.Add(l[17..].Split(';')[0].Trim());
-        }
-        return string.Join("|", code);
-    }
-
     [Fact]
     public void Calls_are_replaced_by_the_body()
     {
@@ -39,7 +25,7 @@ public class InlineTests
         Assert.Equal(42, r.U8("x"));
         Assert.Equal(100, r.U8("y"));
         Assert.Equal(99, r.U8("z"));
-        Assert.DoesNotContain("jsr", Code(r));
+        Assert.DoesNotContain("jsr", Listing.Code(r));
         Assert.DoesNotContain("clamp", r.Result.Symbols.Keys);
         Assert.Contains("main.clamp.v", r.Result.Symbols.Keys); // its parameter is in main's frame
     }
@@ -55,7 +41,7 @@ public class InlineTests
                 tick()
             }
             """);
-        Assert.Equal("inc count|inc count|rts", Code(r));
+        Assert.Equal("inc count|inc count|rts", Listing.Code(r));
         Assert.Equal(2, r.U8("count"));
     }
 

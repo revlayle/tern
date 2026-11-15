@@ -170,8 +170,9 @@ public class Apple2Tests
     [InlineData(0xCFFF)]   // slot ROMs off
     public void Soft_switches_and_io_are_volatile(int address)
     {
-        var r = Compile($"var v: u8 @ ${address:X4}\nfn main() {{\n    v = 1\n    v = 2\n}}\n");
-        Assert.Equal(2, r.Listing.Split('\n').Count(l => l.Contains("sta v ")));
+        var r = Run.Program($"var v: u8 @ ${address:X4}\nfn main() {{\n    v = 1\n    v = 2\n}}\n", platform: Platform.Apple2,
+            watch: _ => [address]);
+        Assert.Equal([1, 2], r.Log!.Writes(address));
     }
 
     [Theory]
@@ -182,8 +183,9 @@ public class Apple2Tests
     public void Memory_that_changes_only_inside_a_call_is_not_volatile(int address, bool isVolatile)
     {
         // A volatile variable is read again after it is written.
-        var r = Compile($"var v: u8 @ ${address:X4}\nvar n: u8\nfn main() {{\n    v = 1\n    n = v\n}}\n");
-        Assert.Equal(isVolatile ? 1 : 0, r.Listing.Split('\n').Count(l => l.Contains("lda v ")));
+        var r = Run.Program($"var v: u8 @ ${address:X4}\nvar n: u8\nfn main() {{\n    v = 1\n    n = v\n}}\n", platform: Platform.Apple2,
+            watch: _ => [address]);
+        Assert.Equal(isVolatile ? 1 : 0, r.Log!.Reads(address));
     }
 
     /// <summary>Areas below and above the hi-res pages, the first with the startup code, and data in both.</summary>

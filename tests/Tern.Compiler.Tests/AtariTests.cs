@@ -109,8 +109,9 @@ public class AtariTests
     [InlineData(0xD40A)]   // WSYNC
     public void Os_and_chip_addresses_are_volatile(int address)
     {
-        var r = Compile($"var v: u8 @ ${address:X4}\nfn main() {{\n    v = 1\n    v = 2\n}}\n");
-        Assert.Equal(2, r.Listing.Split('\n').Count(l => l.Contains("sta v ")));
+        var r = Run.Program($"var v: u8 @ ${address:X4}\nfn main() {{\n    v = 1\n    v = 2\n}}\n", platform: Platform.Atari,
+            watch: _ => [address]);
+        Assert.Equal([1, 2], r.Log!.Writes(address));
     }
 
     [Fact]

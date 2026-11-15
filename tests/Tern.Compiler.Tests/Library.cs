@@ -17,9 +17,11 @@ public sealed class Library
     public Library(string imports, string calls, Action<Ram>? setup = null)
     {
         Result = TernCompiler.Compile($"{imports}\nvar go: bool\nfn main() {{\n    if go {{\n{calls}\n    }}\n}}\n");
+        StartState.Fill(Ram);
         Ram.Load((ushort)Result.LoadAddress, Result.Image);
         setup?.Invoke(Ram);
         Cpu = new Cpu6502(Ram) { PC = (ushort)Result.Entry, SP = 0xFF };
+        StartState.Set(Cpu);
         RunToHalt(1_000_000);
     }
 

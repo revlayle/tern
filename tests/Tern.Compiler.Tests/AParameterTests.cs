@@ -6,19 +6,6 @@ namespace Tern.Compiler.Tests;
 /// </summary>
 public class AParameterTests
 {
-    private static string Code(Run r, string function)
-    {
-        var listing = r.Result.Listing;
-        var start = listing.IndexOf($"\n{function}:", StringComparison.Ordinal);
-        var code = new List<string>();
-        foreach (var l in listing[(start + 1)..].Split('\n').Skip(1).Select(l => l.TrimEnd('\r')))
-        {
-            if (l.EndsWith(':') && !l.StartsWith(' ') && !l.StartsWith('$') && !l.StartsWith(';') && !l.StartsWith($"{function}.")) break;
-            if (l.StartsWith('$')) code.Add(l[17..].Split(';')[0].Trim());
-        }
-        return string.Join("|", code);
-    }
-
     private static readonly int[] Tops = [0, 1, 127, 128, 254, 255];
 
     [Fact]
@@ -37,7 +24,7 @@ public class AParameterTests
                 }
                 """);
             for (int v = 0; v < 256; v++) Assert.Equal(Math.Min(v, top), r.U8("out", v));
-            Assert.Equal("cmp clamp.top|bcc clamp.endif3|beq clamp.endif3|lda clamp.top|rts|rts", Code(r, "clamp"));
+            Assert.Equal("cmp clamp.top|bcc clamp.endif3|beq clamp.endif3|lda clamp.top|rts|rts", Listing.Code(r, "clamp"));
         }
     }
 
@@ -171,7 +158,7 @@ public class AParameterTests
             }
         Assert.DoesNotContain("then.v", r.Result.Listing.Replace("then.v:", ""));
         // Ordering compares the high bytes first; equality the low bytes first.
-        Assert.StartsWith(op is "==" or "!=" ? "cmp then.t|" : "cpx then.t+1|", Code(r, "then"));
+        Assert.StartsWith(op is "==" or "!=" ? "cmp then.t|" : "cpx then.t+1|", Listing.Code(r, "then"));
     }
 
     [Fact]
@@ -192,7 +179,7 @@ public class AParameterTests
             }
             """);
         Assert.Equal([999, 1000, 1000, 1000], Enumerable.Range(0, 4).Select(k => (int)r.U16At("out", k, 4)));
-        Assert.Equal("cpx top+1|bcc clamp.endif0|bne clamp.cmp1|cmp top|bcc clamp.endif0|beq clamp.endif0|ldx top+1|lda top|rts|rts", Code(r, "clamp"));
+        Assert.Equal("cpx top+1|bcc clamp.endif0|bne clamp.cmp1|cmp top|bcc clamp.endif0|beq clamp.endif0|ldx top+1|lda top|rts|rts", Listing.Code(r, "clamp"));
     }
 
     [Fact]

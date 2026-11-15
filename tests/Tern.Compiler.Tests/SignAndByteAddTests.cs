@@ -10,18 +10,15 @@ public class SignAndByteAddTests
     private static readonly int[] Words = [0, 1, 0x00FF, 0x0100, 0x12F0, 0x7FFF, 0x8000, 0xFFFE, 0xFFFF];
     private static readonly int[] Bytes = [0, 1, 127, 128, 200, 255];
 
-    private static string Body(string listing, string fn)
-    {
-        var lines = listing.Split('\n').Select(l => l.TrimEnd('\r')).ToList();
-        int start = lines.IndexOf(fn + ":");
-        return string.Join("|", lines.Skip(start + 1).TakeWhile(l => !l.Contains("rts"))
-            .Where(l => l.StartsWith('$')).Select(l => System.Text.RegularExpressions.Regex.Replace(l[17..].Split(';')[0].Trim(), @"endif\d+", "endif")));
-    }
+    /// <summary>The instructions of a function before its rts, with its endif labels numbered alike.</summary>
+    private static string Body(CompileResult result, string fn) =>
+        string.Join("|", Listing.Instructions(result, fn).TakeWhile(i => i != "rts")
+            .Select(i => System.Text.RegularExpressions.Regex.Replace(i, @"endif\d+", "endif")));
 
     [Fact]
     public void A_pointer_plus_a_byte_expression_adds_eight_bits()
     {
-        var listing = TernCompiler.Compile("""
+        var result = TernCompiler.Compile("""
             var rows: [ptr u8; 12]
             var p: ptr u8
             var q: ptr u8
@@ -32,10 +29,10 @@ public class SignAndByteAddTests
             fn g() { p = q + (col << 1) }
             fn h() { w = (col & 7) + w }
             fn main() { f(); g(); h() }
-            """).Listing;
-        Assert.Equal("lda col|asl a|clc|ldx row|adc rows,x|sta p|lda rows+12,x|adc #$00|sta p+1", Body(listing, "f"));
-        Assert.Equal("lda col|asl a|clc|adc q|sta p|lda q+1|adc #$00|sta p+1", Body(listing, "g"));
-        Assert.DoesNotContain("_t", Body(listing, "h"));
+            """);
+        Assert.Equal("lda col|asl a|clc|ldx row|adc rows,x|sta p|lda rows+12,x|adc #$00|sta p+1", Body(result, "f"));
+        Assert.Equal("lda col|asl a|clc|adc q|sta p|lda q+1|adc #$00|sta p+1", Body(result, "g"));
+        Assert.DoesNotContain("_t", Body(result, "h"));
     }
 
     [Fact]
@@ -74,7 +71,7 @@ public class SignAndByteAddTests
     [Fact]
     public void A_sign_test_is_one_branch()
     {
-        var listing = TernCompiler.Compile("""
+        var result = TernCompiler.Compile("""
             var s: i8
             var w: i16
             var d: u8
@@ -86,13 +83,13 @@ public class SignAndByteAddTests
             fn f() { if w < 0 { n = 5 } }
             fn g() { if 0 > w { n = 6 } }
             fn main() { a(); b(); c(); e(); f(); g() }
-            """).Listing;
-        Assert.Equal("lda s|bpl a.endif|lda #$01|sta n", Body(listing, "a"));
-        Assert.Equal("lda w+1|bmi b.endif|lda #$02|sta n", Body(listing, "b"));
-        Assert.Equal("lda d|bpl c.endif|lda #$03|sta n", Body(listing, "c"));
-        Assert.Equal("lda s|bmi e.endif|lda #$04|sta n", Body(listing, "e"));
-        Assert.Equal("lda w+1|bpl f.endif|lda #$05|sta n", Body(listing, "f"));
-        Assert.Equal("lda w+1|bpl g.endif|lda #$06|sta n", Body(listing, "g"));   // 0 > w is w < 0
+            """);
+        Assert.Equal("lda s|bpl a.endif|lda #$01|sta n", Body(result, "a"));
+        Assert.Equal("lda w+1|bmi b.endif|lda #$02|sta n", Body(result, "b"));
+        Assert.Equal("lda d|bpl c.endif|lda #$03|sta n", Body(result, "c"));
+        Assert.Equal("lda s|bmi e.endif|lda #$04|sta n", Body(result, "e"));
+        Assert.Equal("lda w+1|bpl f.endif|lda #$05|sta n", Body(result, "f"));
+        Assert.Equal("lda w+1|bpl g.endif|lda #$06|sta n", Body(result, "g"));   // 0 > w is w < 0
     }
 
     [Fact]
