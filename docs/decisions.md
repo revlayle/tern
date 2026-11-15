@@ -987,3 +987,4 @@ Roadmap "Before the first release: fixes and cleanup" (R1-R6), "First release". 
 
 - **Methods stay under about 100 lines, as a guideline.** One that stays longer is listed with its reason in `docs/status.md`, and the session names it to the developer. Reason (the developer's): short methods are the goal, but a long `switch` or a lookup table cannot always be split without making it harder to read.
 - **Readability comes first, with a hard maximum of 500 lines** (same day, the developer's). A method is never split only to get under 100 lines; a long `switch` or lookup may read best whole. At 500 lines a method is always split, and a lookup that long becomes a data table instead of code.
+- **Over 300 lines is almost always wrong** (same day, the developer's): such a method is split unless it is a single `switch` or lookup that reads best whole; 500 stays the maximum with no exception.
