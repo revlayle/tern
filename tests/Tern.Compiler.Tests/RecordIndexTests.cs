@@ -8,21 +8,6 @@ namespace Tern.Compiler.Tests;
 /// </summary>
 public class RecordIndexTests
 {
-    /// <summary>The instructions of main, without addresses, bytes and cycles.</summary>
-    private static string Code(Run r)
-    {
-        var listing = r.Result.Listing;
-        var start = listing.IndexOf("\nmain:", StringComparison.Ordinal);
-        var code = new List<string>();
-        foreach (var l in listing[(start + 1)..].Split('\n').Skip(1))
-        {
-            if (!l.StartsWith('$')) continue;
-            code.Add(l[17..].Split(';')[0].Trim());
-            if (code[^1] == "rts") break;   // the offset table's bytes follow main
-        }
-        return string.Join("|", code);
-    }
-
     private const string Header = """
         struct S1 { a: u8 }
         struct S2 { a: u8, b: u8 }
@@ -37,7 +22,7 @@ public class RecordIndexTests
         """;
 
     private static string Shape(string declaration, string statement) =>
-        Code(Run.Program($$"""
+        Listing.Code(Run.Program($$"""
             {{Header}}
             {{declaration}}
             var i: u8
@@ -190,7 +175,7 @@ public class RecordIndexTests
                 v = list[59].a
             }
             """);
-        Assert.Equal("lda #$07|sta list+295|lda #$FE|sta list+13|lda #$FF|sta list+14|lda list+295|sta v|rts", Code(r));
+        Assert.Equal("lda #$07|sta list+295|lda #$FE|sta list+13|lda #$FF|sta list+14|lda list+295|sta v|rts", Listing.Code(r));
         Assert.Equal(7, r.U8("v"));
         Assert.Equal(-2, (short)(r.Ram.Bytes[r.Address("list") + 13] | r.Ram.Bytes[r.Address("list") + 14] << 8));
     }

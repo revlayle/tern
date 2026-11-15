@@ -7,20 +7,6 @@ namespace Tern.Compiler.Tests;
 /// </summary>
 public class HeldVariableTests
 {
-    private static string Code(Run r, string function = "main") => Code(r.Result.Listing, function);
-
-    private static string Code(string listing, string function = "main")
-    {
-        var start = listing.IndexOf($"\n{function}:", StringComparison.Ordinal);
-        var code = new List<string>();
-        foreach (var l in listing[(start + 1)..].Split('\n').Skip(1).Select(l => l.TrimEnd('\r')))
-        {
-            if (l.EndsWith(':') && !l.StartsWith(' ') && !l.StartsWith('$') && !l.StartsWith(';') && !l.StartsWith($"{function}.")) break;
-            if (l.StartsWith('$') && l.Length > 17) code.Add(l[17..].Split(';')[0].Trim());
-        }
-        return string.Join("|", code);
-    }
-
     [Fact]
     public void A_stack_pointer_stays_in_x_through_a_match_jump_table()
     {
@@ -78,7 +64,7 @@ public class HeldVariableTests
             """);
         Assert.Equal(55, r.U8("result"));
         Assert.Equal(4, r.U8("sp"));
-        var code = Code(r);
+        var code = Listing.Code(r);
         Assert.Contains("ldx sp|jmp main.test", code);
         Assert.Equal(1, code.Split("ldx sp").Length - 1);
         Assert.DoesNotContain("inc sp", code);
@@ -109,7 +95,7 @@ public class HeldVariableTests
         int expected = start;
         for (int i = 2; i < 256; i++) if (marks[i] == 0) expected++;
         Assert.Equal(expected & 0xFF, r.U8("count"));
-        var code = Code(r);
+        var code = Listing.Code(r);
         Assert.Contains("ldy count|", code);
         Assert.Contains("iny", code);
         Assert.Contains("sty count", code);
@@ -138,7 +124,7 @@ public class HeldVariableTests
         while (j < 10 && values[j] != 0) j++;
         Assert.Equal(j, r.U8("at"));
         for (int k = 0; k < 10; k++) Assert.Equal(k < j ? (byte)(values[k] ^ 85) : 0, r.U8("out", k));
-        var code = Code(r);
+        var code = Listing.Code(r);
         Assert.Contains("inx", code);
         // j is read only from X after the loop, so its store is dead (F3).
         Assert.DoesNotContain("main.j", code);
@@ -167,7 +153,7 @@ public class HeldVariableTests
         for (int i = 0; i < 8; i++) Assert.Equal(i + 1 ^ 255, r.U8("dst", i));
         Assert.Equal(7, r.U8("big", 7));
         Assert.Equal(8, r.U8("k"));
-        var code = Code(r);
+        var code = Listing.Code(r);
         Assert.Contains("ldy k|", code);
         Assert.Contains("iny", code);
         Assert.Contains("sty k", code);
@@ -202,7 +188,7 @@ public class HeldVariableTests
         Assert.True(r.Interrupts > 20);
         Assert.Equal(50, r.U8("sp"));
         for (int k = 0; k < 50; k++) Assert.Equal(k * 4, r.U8("stack", k));
-        Assert.DoesNotContain("inc sp", Code(r));
+        Assert.DoesNotContain("inc sp", Listing.Code(r));
     }
 
     [Theory]
@@ -226,7 +212,7 @@ public class HeldVariableTests
                 }
             }
             """);
-        Assert.Contains("inc sp", Code(r));
+        Assert.Contains("inc sp", Listing.Code(r));
     }
 
     [Fact]
@@ -246,7 +232,7 @@ public class HeldVariableTests
                 }
                 """);
             Assert.Equal(10, r.U8("sp"));
-            Assert.Contains("inc sp", Code(r));
+            Assert.Contains("inc sp", Listing.Code(r));
         }
         var endless = TernCompiler.Compile("""
             var stack: [u8; 16]
@@ -258,7 +244,7 @@ public class HeldVariableTests
                 }
             }
             """);
-        Assert.Contains("inc sp", Code(endless.Listing));
+        Assert.Contains("inc sp", Listing.Code(endless));
     }
 
     [Theory]
@@ -280,8 +266,8 @@ public class HeldVariableTests
                 }
             }
             """);
-        Assert.Contains("|ldx v|", "|" + Code(r) + "|");
-        Assert.Contains("sta a,x|inx|inx|", Code(r));
+        Assert.Contains("|ldx v|", "|" + Listing.Code(r) + "|");
+        Assert.Contains("sta a,x|inx|inx|", Listing.Code(r));
         int v = start, n = 0;
         var a = new byte[256];
         while (v < limit) { a[v] = 1; v = (v + 2) & 0xFF; n++; }
@@ -307,8 +293,8 @@ public class HeldVariableTests
                 }
             }
             """);
-        Assert.Contains("|dey|dey|", Code(r));
-        Assert.DoesNotContain("sbc", Code(r));
+        Assert.Contains("|dey|dey|", Listing.Code(r));
+        Assert.DoesNotContain("sbc", Listing.Code(r));
         var b = new byte[256];
         int w = start;
         for (int i = 0; i < 16; i++) { b[w] = 1; w = (w - 2) & 0xFF; }
@@ -326,7 +312,7 @@ public class HeldVariableTests
                 while v < 100 { v += 2 }
             }
             """);
-        Assert.Equal("ldx v|inx|inx|cpx #$64|bcc main.while0|stx v|rts", Code(r).Replace("jmp main.test1|", ""));
+        Assert.Equal("ldx v|inx|inx|cpx #$64|bcc main.while0|stx v|rts", Listing.Code(r).Replace("jmp main.test1|", ""));
         Assert.Equal(101, r.U8("v"));
     }
 }

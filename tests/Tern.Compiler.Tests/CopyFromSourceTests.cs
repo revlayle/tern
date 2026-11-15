@@ -13,20 +13,6 @@ namespace Tern.Compiler.Tests;
 /// </summary>
 public class CopyFromSourceTests
 {
-    /// <summary>main's instructions, joined with |.</summary>
-    private static string Code(Run r)
-    {
-        var listing = r.Result.Listing;
-        var start = listing.IndexOf("\nmain:", StringComparison.Ordinal);
-        var code = new List<string>();
-        foreach (var l in listing[(start + 1)..].Split('\n').Skip(1).Select(l => l.TrimEnd('\r')))
-        {
-            if (l.EndsWith(':') && !l.StartsWith(' ') && !l.StartsWith('$') && !l.StartsWith(';') && !l.StartsWith("main.")) break;
-            if (l.StartsWith('$')) code.Add(l[17..].Split(';')[0].Trim());
-        }
-        return string.Join("|", code);
-    }
-
     private static string Values(byte[] values) => string.Join(", ", values);
 
     [Fact]
@@ -52,7 +38,7 @@ public class CopyFromSourceTests
             """);
         var sorted = input.Order().ToArray();
         for (int k = 0; k < sorted.Length; k++) Assert.Equal(sorted[k], r.U8("values", k));
-        var code = Code(r);
+        var code = Listing.Code(r);
         Assert.Contains("lda values+1,x|cmp values,x|bcs", code);
         Assert.Contains("ldy values,x|sta values,x|tya|sta values+1,x", code);
         Assert.DoesNotContain("main.a", code);
@@ -75,7 +61,7 @@ public class CopyFromSourceTests
                 """);
             Assert.Equal(start, r.U8("out"));
             Assert.Equal(5, r.U8("g"));
-            Assert.Equal("lda #$05|ldy g|sta g|tya|sta out|rts", Code(r));
+            Assert.Equal("lda #$05|ldy g|sta g|tya|sta out|rts", Listing.Code(r));
         }
     }
 
@@ -149,7 +135,7 @@ public class CopyFromSourceTests
             """);
         Assert.Equal(7, r.U8("out"));
         Assert.Equal(1, r.U8("big"));
-        Assert.Single(Code(r).Split('|'), i => i == "lda port");
+        Assert.Single(Listing.Code(r).Split('|'), i => i == "lda port");
     }
 
     [Fact]
@@ -167,7 +153,7 @@ public class CopyFromSourceTests
             }
             """);
         Assert.Equal(4, r.U8("n"));
-        Assert.Contains("cmp main.a", Code(r));
+        Assert.Contains("cmp main.a", Listing.Code(r));
     }
 
     [Fact]
@@ -217,7 +203,7 @@ public class CopyFromSourceTests
             """);
         var sorted = input.Order().ToArray();
         for (int k = 0; k < sorted.Length; k++) Assert.Equal(sorted[k], r.U8("values", k));
-        Assert.Contains("lda values+1,y|cmp values,y|bcs main.endif6|ldx values,y|sta values,y|txa|sta values+1,y", Code(r));
+        Assert.Contains("lda values+1,y|cmp values,y|bcs main.endif6|ldx values,y|sta values,y|txa|sta values+1,y", Listing.Code(r));
     }
 
     [Fact]
@@ -239,8 +225,8 @@ public class CopyFromSourceTests
         var sorted = input.Order().ToArray();
         for (int k = 0; k < sorted.Length; k++) Assert.Equal(sorted[k], r.U8("values", k));
         Assert.Equal(11, r.U8("passes"));
-        Assert.Contains("sta main.a", Code(r));
-        Assert.Contains("lda main.a|sta values+1,x", Code(r));
+        Assert.Contains("sta main.a", Listing.Code(r));
+        Assert.Contains("lda main.a|sta values+1,x", Listing.Code(r));
     }
 
     [Fact]

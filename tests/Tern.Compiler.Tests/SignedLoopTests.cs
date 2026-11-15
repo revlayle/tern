@@ -17,19 +17,6 @@ public class SignedLoopTests
         return values;
     }
 
-    private static string Code(Run r, string function = "main")
-    {
-        var listing = r.Result.Listing;
-        var start = listing.IndexOf($"\n{function}:", StringComparison.Ordinal);
-        var code = new List<string>();
-        foreach (var l in listing[(start + 1)..].Split('\n').Skip(1).Select(l => l.TrimEnd('\r')))
-        {
-            if (l.EndsWith(':') && !l.StartsWith(' ') && !l.StartsWith('$') && !l.StartsWith(';') && !l.StartsWith($"{function}.")) break;
-            if (l.StartsWith('$')) code.Add(l[17..].Split(';')[0].Trim());
-        }
-        return string.Join("|", code);
-    }
-
     /// <summary>
     /// Runs <c>for i in header</c> with the bounds a and b set, recording each value of i. With
     /// <paramref name="call"/> the body calls a function, so the counter stays in memory.
@@ -212,7 +199,7 @@ public class SignedLoopTests
                 for i in -10..10 using X { out = i }
             }
             """);
-        Assert.Equal("ldx #$F6|BODY|inx|cpx #$0A|bne|rts", Loop(Code(r)));
+        Assert.Equal("ldx #$F6|BODY|inx|cpx #$0A|bne|rts", Loop(Listing.Code(r)));
     }
 
     [Fact]
@@ -226,7 +213,7 @@ public class SignedLoopTests
                 for i in n..0 step -1 using X { out = i }
             }
             """);
-        Assert.Equal("ldx n|bmi|BODY|dex|bpl|ldx n|beq|bmi|BODY|dex|bne|rts", Loop(Code(r)));
+        Assert.Equal("ldx n|bmi|BODY|dex|bpl|ldx n|beq|bmi|BODY|dex|bne|rts", Loop(Listing.Code(r)));
     }
 
     [Fact]
@@ -239,7 +226,7 @@ public class SignedLoopTests
             volatile var out: i8
             fn main() { f(-1, 1) }
             """);
-        Assert.Equal("ldx f.a|txa|sec|sbc f.b|bvc|eor #$80|bpl|BODY|inx|cpx f.b|bne|rts", Loop(Code(r, "f")));
+        Assert.Equal("ldx f.a|txa|sec|sbc f.b|bvc|eor #$80|bpl|BODY|inx|cpx f.b|bne|rts", Loop(Listing.Code(r, "f")));
     }
 
     [Fact]
@@ -252,7 +239,7 @@ public class SignedLoopTests
             volatile var out: i8
             fn main() { f(-1, 1) }
             """);
-        var code = string.Join("|", Loop(Code(r, "f")).Split('|').Select(i => i.StartsWith("cmp ") || i.StartsWith("sta ") ? i[..3] : i));
+        var code = string.Join("|", Loop(Listing.Code(r, "f")).Split('|').Select(i => i.StartsWith("cmp ") || i.StartsWith("sta ") ? i[..3] : i));
         Assert.StartsWith("lda f.b|eor #$80|sta|", code);
         Assert.EndsWith("|BODY|clc|adc #$03|bvs|tax|eor #$80|cmp|bcc|rts", code);
     }

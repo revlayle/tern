@@ -7,19 +7,6 @@ namespace Tern.Compiler.Tests;
 /// </summary>
 public class LoopControlTests
 {
-    private static string Code(Run r, string function = "main")
-    {
-        var listing = r.Result.Listing;
-        var start = listing.IndexOf($"\n{function}:", StringComparison.Ordinal);
-        var code = new List<string>();
-        foreach (var l in listing[(start + 1)..].Split('\n').Skip(1).Select(l => l.TrimEnd('\r')))
-        {
-            if (l.EndsWith(':') && !l.StartsWith(' ') && !l.StartsWith('$') && !l.StartsWith(';') && !l.StartsWith($"{function}.")) break;
-            if (l.StartsWith('$') && l.Length > 17) code.Add(l[17..].Split(';')[0].Trim());
-        }
-        return string.Join("|", code);
-    }
-
     [Theory]
     [InlineData(0)]
     [InlineData(1)]
@@ -42,7 +29,7 @@ public class LoopControlTests
         Assert.Equal(start * (start + 1) / 2, r.U16("sum"));
         Assert.Equal(start, r.U8("passes"));
         Assert.Equal(0, r.U8("n"));
-        var code = Code(r);
+        var code = Listing.Code(r);
         Assert.Contains("dec n|bne main.while", code);
         Assert.DoesNotContain("jmp", code);
         Assert.Contains("lda n|beq main.wend", code);   // the entry test: n is not known
@@ -68,7 +55,7 @@ public class LoopControlTests
             """);
         Assert.Equal(start >> 8, r.U8("pages"));
         Assert.Equal(start & 0xFF, r.U16("n"));
-        Assert.Contains("dec n+1|bne main.while", Code(r));
+        Assert.Contains("dec n+1|bne main.while", Listing.Code(r));
     }
 
     [Fact]
@@ -86,7 +73,7 @@ public class LoopControlTests
             """);
         for (int i = 0; i < 10; i++) Assert.Equal(i == 0 ? 0 : i ^ 15, r.U8("out", i));
         Assert.Equal(0, r.U8("k"));
-        Assert.Contains("dex|bne main.while", Code(r));
+        Assert.Contains("dex|bne main.while", Listing.Code(r));
     }
 
     [Fact]
@@ -108,7 +95,7 @@ public class LoopControlTests
             """);
         Assert.Equal(5, r.U8("odd"));
         Assert.Equal(0, r.U8("n"));
-        Assert.DoesNotContain("dec n|bne", Code(r));
+        Assert.DoesNotContain("dec n|bne", Listing.Code(r));
     }
 
     [Theory]
@@ -129,7 +116,7 @@ public class LoopControlTests
             }
             """);
         Assert.Equal(Math.Max(0, bound - start), r.U8("passes"));
-        Assert.Equal(!known, Code(r).Contains("jmp"));
+        Assert.Equal(!known, Listing.Code(r).Contains("jmp"));
     }
 
     [Theory]
@@ -156,7 +143,7 @@ public class LoopControlTests
             """);
         var sorted = input.OrderBy(b => b).ToArray();
         for (int k = 0; k < input.Length; k++) Assert.Equal(sorted[k], r.U8("values", k));
-        var code = Code(r);
+        var code = Listing.Code(r);
         Assert.DoesNotContain("bcs main.fend", code);
         Assert.Contains("dec main.last|bne main.while", code);
     }
@@ -176,7 +163,7 @@ public class LoopControlTests
             }
             """);
         Assert.Equal(1 + 2 + 1, r.U8("total"));
-        Assert.Contains("bcs main.fend", Code(r));
+        Assert.Contains("bcs main.fend", Listing.Code(r));
     }
 
     [Theory]
@@ -196,6 +183,6 @@ public class LoopControlTests
             """);
         Assert.Equal(v > 0 ? 1 : 0, r.U8("big"));
         Assert.Equal(v <= 0 ? 1 : 0, r.U8("small"));
-        Assert.DoesNotContain("cmp", Code(r));
+        Assert.DoesNotContain("cmp", Listing.Code(r));
     }
 }

@@ -7,19 +7,6 @@ namespace Tern.Compiler.Tests;
 /// </summary>
 public class OuterCounterTests
 {
-    private static string Code(Run r, string function = "main")
-    {
-        var listing = r.Result.Listing;
-        var start = listing.IndexOf($"\n{function}:", StringComparison.Ordinal);
-        var code = new List<string>();
-        foreach (var l in listing[(start + 1)..].Split('\n').Skip(1).Select(l => l.TrimEnd('\r')))
-        {
-            if (l.EndsWith(':') && !l.StartsWith(' ') && !l.StartsWith('$') && !l.StartsWith(';') && !l.StartsWith($"{function}.")) break;
-            if (l.StartsWith('$') && l.Length > 17) code.Add(l[17..].Split(';')[0].Trim());
-        }
-        return string.Join("|", code);
-    }
-
     [Fact]
     public void The_outer_counter_is_in_y_and_the_inner_one_in_x()
     {
@@ -35,7 +22,7 @@ public class OuterCounterTests
             """);
         for (int i = 0; i < 256; i++) Assert.Equal(i ^ 90, r.U8("a", i));
         for (int j = 0; j < 5; j++) Assert.Equal(0, r.U8("b", j));   // 256 times 1, wrapped
-        var code = Code(r);
+        var code = Listing.Code(r);
         Assert.Contains("tya|eor #$5A|sta a,y", code);
         Assert.Contains("inc b,x", code);
         Assert.Contains("iny|bne", code);
@@ -60,7 +47,7 @@ public class OuterCounterTests
             for (int j = 1; j <= 4; j++) sum += j;
             Assert.Equal(sum & 0xFF, r.U8("m", i));
         }
-        var code = Code(r);
+        var code = Listing.Code(r);
         Assert.DoesNotContain("main.i", code);
         Assert.DoesNotContain("main.j", code);
     }
@@ -94,7 +81,7 @@ public class OuterCounterTests
             """, setup: ram => { for (int k = 0; k < src.Length; k++) ram.Bytes[0x4000 + k] = src[k]; });
         Assert.Equal(1, r.U8("same"));
         for (int k = 0; k < src.Length; k++) Assert.Equal(src[k], r.Ram.Bytes[0x5000 + k]);
-        var code = Code(r);
+        var code = Listing.Code(r);
         Assert.Contains("ldx #$03", code);
         Assert.Contains("dex|bne", code);
     }
@@ -115,7 +102,7 @@ public class OuterCounterTests
             """);
         for (int j = 0; j < 4; j++) Assert.Equal(4, r.U8("buf", j));
         Assert.Equal(new byte[] { 0, 1, 2, 3 }, Enumerable.Range(0, 4).Select(k => r.U8("out", k)).ToArray());
-        var code = Code(r);
+        var code = Listing.Code(r);
         Assert.Contains("sta out,x", code);       // i in X
         Assert.Contains("sta buf,y|iny", code);   // j in Y, which p[3] needs only outside the inner loop
         Assert.DoesNotContain("main.i", code);
@@ -137,6 +124,6 @@ public class OuterCounterTests
                 }
             }
             """);
-        Assert.Contains("inc main.i", Code(r));
+        Assert.Contains("inc main.i", Listing.Code(r));
     }
 }

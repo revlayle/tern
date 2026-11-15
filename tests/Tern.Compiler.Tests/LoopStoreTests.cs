@@ -13,19 +13,6 @@ namespace Tern.Compiler.Tests;
 /// </summary>
 public class LoopStoreTests
 {
-    private static string Code(Run r, string function = "main")
-    {
-        var listing = r.Result.Listing;
-        var start = listing.IndexOf($"\n{function}:", StringComparison.Ordinal);
-        var code = new List<string>();
-        foreach (var l in listing[(start + 1)..].Split('\n').Skip(1).Select(l => l.TrimEnd('\r')))
-        {
-            if (l.EndsWith(':') && !l.StartsWith(' ') && !l.StartsWith('$') && !l.StartsWith(';') && !l.StartsWith($"{function}.")) break;
-            if (l.StartsWith('$') && l.Length > 17) code.Add(l[17..].Split(';')[0].Trim());
-        }
-        return string.Join("|", code);
-    }
-
     private static byte Crc(IEnumerable<byte> data, byte poly)
     {
         byte crc = 0;
@@ -59,7 +46,7 @@ public class LoopStoreTests
             """);
         Assert.Equal(Crc(data, (byte)poly), r.U8("crc"));
         // One store per byte, after the bit loop; the jmp over the empty else is gone.
-        var code = Code(r);
+        var code = Listing.Code(r);
         Assert.Equal(1, code.Split("sta crc").Length - 1);
         Assert.DoesNotContain("jmp", code);
         Assert.Contains("asl a|bcc main.else", code);
@@ -86,7 +73,7 @@ public class LoopStoreTests
             byte target = stop == 0 ? (byte)0 : stop == 1 ? (byte)200 : (byte)77, last = 0;
             foreach (var v in values) { last = (byte)(v + 1); if (last == target) break; }
             Assert.Equal(last, r.U8("last"));
-            Assert.Equal(1, Code(r).Split("sta last").Length - 1);
+            Assert.Equal(1, Listing.Code(r).Split("sta last").Length - 1);
         }
     }
 
@@ -144,8 +131,8 @@ public class LoopStoreTests
             """);
         Assert.Equal(19, r.U8("seen"));
         Assert.Equal(9, r.U8("total"));
-        Assert.Contains("sta total|jsr look", Code(r));
-        Assert.Contains("adc seen|sta seen|inx", Code(r));
+        Assert.Contains("sta total|jsr look", Listing.Code(r));
+        Assert.Contains("adc seen|sta seen|inx", Listing.Code(r));
     }
 
     [Fact]
@@ -172,7 +159,7 @@ public class LoopStoreTests
             """, irqEvery: 50);
         Assert.Equal(199, r.U8("shared"));
         Assert.True(r.Interrupts > 5);
-        Assert.Matches(@"stx shared\|inx|sta shared", Code(r));
+        Assert.Matches(@"stx shared\|inx|sta shared", Listing.Code(r));
     }
 
     [Fact]
@@ -190,7 +177,7 @@ public class LoopStoreTests
             }
             """);
         Assert.Equal(10, r.U8("sum"));
-        Assert.Contains("sta last", Code(r).Split("bne")[0]);
+        Assert.Contains("sta last", Listing.Code(r).Split("bne")[0]);
     }
 
     [Fact]
@@ -211,7 +198,7 @@ public class LoopStoreTests
         Assert.Equal(16, r.U8("a"));
         Assert.Equal(11, r.U8("b"));
         // b's store is sunk (A holds it at the exit), a's stays in the loop.
-        Assert.Matches(@"sta a\|.*bne main\.for\d+\|sta b", Code(r));
+        Assert.Matches(@"sta a\|.*bne main\.for\d+\|sta b", Listing.Code(r));
     }
 
     // ---------- Hand-written code ----------

@@ -6,19 +6,6 @@ namespace Tern.Compiler.Tests;
 /// </summary>
 public class ByteShiftTests
 {
-    private static string Code(Run r, string function)
-    {
-        var listing = r.Result.Listing;
-        var start = listing.IndexOf($"\n{function}:", StringComparison.Ordinal);
-        var code = new List<string>();
-        foreach (var l in listing[(start + 1)..].Split('\n').Skip(1).Select(l => l.TrimEnd('\r')))
-        {
-            if (l.EndsWith(':') && !l.StartsWith(' ') && !l.StartsWith('$') && !l.StartsWith(';') && !l.StartsWith($"{function}.")) break;
-            if (l.StartsWith('$')) code.Add(l[17..].Split(';')[0].Trim());
-        }
-        return string.Join("|", code);
-    }
-
     public static TheoryData<int, int> Cases()
     {
         var data = new TheoryData<int, int>();
@@ -101,12 +88,12 @@ public class ByteShiftTests
             fn in_place() { w <<= 8 }
             fn main() { left8(); left11(); right8(); right9(); signed9(); in_place() }
             """);
-        Assert.Equal("lda v|sta w+1|lda #$00|sta w|rts", Code(r, "left8"));
-        Assert.Equal("lda v|asl a|asl a|asl a|sta w+1|lda #$00|sta w|rts", Code(r, "left11"));
-        Assert.Equal("lda v+1|sta w|lda #$00|sta w+1|rts", Code(r, "right8"));
-        Assert.Equal("lda v+1|lsr a|sta w|lda #$00|sta w+1|rts", Code(r, "right9"));
-        Assert.Matches(@"^lda s\+1\|cmp #\$80\|ror a\|sta t\|ora #\$7F\|bmi [^|]+\|lda #\$00\|sta t\+1\|rts$", Code(r, "signed9"));
-        Assert.Equal("lda w|sta w+1|lda #$00|sta w|rts", Code(r, "in_place"));
+        Assert.Equal("lda v|sta w+1|lda #$00|sta w|rts", Listing.Code(r, "left8"));
+        Assert.Equal("lda v|asl a|asl a|asl a|sta w+1|lda #$00|sta w|rts", Listing.Code(r, "left11"));
+        Assert.Equal("lda v+1|sta w|lda #$00|sta w+1|rts", Listing.Code(r, "right8"));
+        Assert.Equal("lda v+1|lsr a|sta w|lda #$00|sta w+1|rts", Listing.Code(r, "right9"));
+        Assert.Matches(@"^lda s\+1\|cmp #\$80\|ror a\|sta t\|ora #\$7F\|bmi [^|]+\|lda #\$00\|sta t\+1\|rts$", Listing.Code(r, "signed9"));
+        Assert.Equal("lda w|sta w+1|lda #$00|sta w|rts", Listing.Code(r, "in_place"));
         Assert.Equal(-1, r.I16("t"));
     }
 }

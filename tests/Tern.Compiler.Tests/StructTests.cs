@@ -4,21 +4,6 @@ namespace Tern.Compiler.Tests;
 
 public class StructTests
 {
-    /// <summary>The instructions of a function, without addresses, bytes and cycles.</summary>
-    private static string Code(Run r, string function = "main")
-    {
-        var listing = r.Result.Listing;
-        var start = listing.IndexOf($"\n{function}:", StringComparison.Ordinal);
-        var lines = listing[(start + 1)..].Split('\n').Skip(1);
-        var code = new List<string>();
-        foreach (var l in lines)
-        {
-            if (l.EndsWith(':') && !l.StartsWith(' ') && !l.StartsWith('$') && !l.StartsWith(';')) break;
-            if (l.StartsWith('$')) code.Add(l[17..].Split(';')[0].Trim());
-        }
-        return string.Join("|", code);
-    }
-
     // ---------- Declarations and layout ----------
 
     [Fact]
@@ -141,7 +126,7 @@ public class StructTests
             var i: u8
             fn main() { {{statement}} }
             """);
-        Assert.Equal(expected, Code(r));
+        Assert.Equal(expected, Listing.Code(r));
     }
 
     [Fact]
@@ -168,7 +153,7 @@ public class StructTests
 
         // The same shape as z = x + y with plain variables.
         var shape = Run.Program("struct S { a: u16, b: u16, w: u16 }\nvar s: S\nfn main() { s.w = s.a + s.b }");
-        Assert.Equal("lda s|sta s+4|lda s+1|sta s+5|clc|lda s+4|adc s+2|sta s+4|lda s+5|adc s+3|sta s+5|rts", Code(shape));
+        Assert.Equal("lda s|sta s+4|lda s+1|sta s+5|clc|lda s+4|adc s+2|sta s+4|lda s+5|adc s+3|sta s+5|rts", Listing.Code(shape));
     }
 
     [Fact]
@@ -210,7 +195,7 @@ public class StructTests
             """);
         Assert.True(r.Address("p") < 0x100);
         Assert.Equal(9, r.U8("p", 1));
-        Assert.Contains("sta p+1", Code(r));
+        Assert.Contains("sta p+1", Listing.Code(r));
     }
 
     // ---------- Structs at a fixed address ----------
@@ -233,7 +218,7 @@ public class StructTests
         Assert.Equal(100, r.Ram.Bytes[0xD000]);
         Assert.Equal(2, r.Ram.Bytes[0xD02A]);
         // Spec 3.3: vic.border = 0 is sta $D020.
-        Assert.StartsWith("lda #$06|sta vic+32|lda vic+32|clc|adc #$01|sta vic+33|", Code(r));
+        Assert.StartsWith("lda #$06|sta vic+32|lda vic+32|clc|adc #$01|sta vic+33|", Listing.Code(r));
         Assert.Contains("8D 20 D0", r.Result.Listing); // sta $D020
     }
 
@@ -251,7 +236,7 @@ public class StructTests
                 regs.status = 2
             }
             """);
-        Assert.Equal("lda regs+1|clc|adc regs+1|sta a|lda #$01|sta regs+1|lda #$02|sta regs+1|rts", Code(r));
+        Assert.Equal("lda regs+1|clc|adc regs+1|sta a|lda #$01|sta regs+1|lda #$02|sta regs+1|rts", Listing.Code(r));
     }
 
     // ---------- Through a pointer ----------
@@ -323,7 +308,7 @@ public class StructTests
             var i: u8
             fn main() { {{statement}} }
             """);
-        Assert.Equal(expected, Code(r));
+        Assert.Equal(expected, Listing.Code(r));
     }
 
     [Fact]
@@ -476,7 +461,7 @@ public class StructTests
             var i: u8
             fn main() { {{statement}} }
             """);
-        Assert.Equal(expected, Code(r));
+        Assert.Equal(expected, Listing.Code(r));
     }
 
     [Fact]
@@ -671,7 +656,7 @@ public class StructTests
             var p: ptr u8
             fn main() { p = addr(player.name) }
             """);
-        Assert.Equal("lda #(player+1).lo|sta p|lda #(player+1).hi|sta p+1|rts", Code(r));
+        Assert.Equal("lda #(player+1).lo|sta p|lda #(player+1).hi|sta p+1|rts", Listing.Code(r));
     }
 
     [Fact]

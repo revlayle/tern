@@ -10,19 +10,6 @@ public class LoopDirectionTests
 {
     private static CompileError Error(string source) => Assert.Throws<CompileError>(() => TernCompiler.Compile(source));
 
-    private static string Code(Run r, string function = "main")
-    {
-        var listing = r.Result.Listing;
-        var start = listing.IndexOf($"\n{function}:", StringComparison.Ordinal);
-        var code = new List<string>();
-        foreach (var l in listing[(start + 1)..].Split('\n').Skip(1).Select(l => l.TrimEnd('\r')))
-        {
-            if (l.EndsWith(':') && !l.StartsWith(' ') && !l.StartsWith('$') && !l.StartsWith(';') && !l.StartsWith($"{function}.")) break;
-            if (l.StartsWith('$')) code.Add(l[17..].Split(';')[0].Trim());
-        }
-        return string.Join("|", code);
-    }
-
     [Theory]
     [InlineData("for i in 9..=0 { }", "'9..=0' counts up, so it never runs. Write 'step -1' to count down")]
     [InlineData("for i in 10..0 { }", "'10..0' counts up, so it never runs")]
@@ -125,7 +112,7 @@ public class LoopDirectionTests
             }
             """);
         Assert.Equal(sum, r.U16("total"));
-        Assert.Equal("ldx n|beq main.fend0|txa|clc|adc total|sta total|bcc main.c3|inc total+1|dex|bne main.for2|rts", Code(r));
+        Assert.Equal("ldx n|beq main.fend0|txa|clc|adc total|sta total|bcc main.c3|inc total+1|dex|bne main.for2|rts", Listing.Code(r));
     }
 
     /// <summary>
@@ -156,8 +143,8 @@ public class LoopDirectionTests
             for (int i = (n + offset) & 255; i > 0; i -= step) { passes++; sum += i; }
             Assert.True((byte)(7 + passes) == r.U8("cnt"), $"n = {n}: cnt is {r.U8("cnt")}, not 7 + {passes}");
             if (!loop.Contains("{ cnt")) Assert.Equal(sum, r.U16("total"));
-            Assert.StartsWith(start, Code(r));
-            Assert.DoesNotContain("cpy", Code(r));
+            Assert.StartsWith(start, Listing.Code(r));
+            Assert.DoesNotContain("cpy", Listing.Code(r));
         }
     }
 
@@ -175,7 +162,7 @@ public class LoopDirectionTests
             }
             """);
         Assert.Equal(expected, r.U8("cnt"));
-        Assert.StartsWith("ldy s|bmi main.fskip3|ldx cnt|", Code(r));
+        Assert.StartsWith("ldy s|bmi main.fskip3|ldx cnt|", Listing.Code(r));
     }
 
     [Fact]
@@ -211,7 +198,7 @@ public class LoopDirectionTests
             }
             """);
         // Branches without their targets.
-        var code = string.Join("|", Code(r).Split('|').Select(i => i.Split(' ')[0] is "bpl" or "bne" or "beq" or "bmi" or "bcc" ? i.Split(' ')[0] : i));
+        var code = string.Join("|", Listing.Code(r).Split('|').Select(i => i.Split(' ')[0] is "bpl" or "bne" or "beq" or "bmi" or "bcc" ? i.Split(' ')[0] : i));
         Assert.StartsWith(start, code);
         Assert.Contains(step, code);
     }

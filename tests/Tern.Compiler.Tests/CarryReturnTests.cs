@@ -77,7 +77,7 @@ public class CarryReturnTests
             fn f(a: u8, b: u8) -> bool { return {{condition}} }
             fn main() { if f(3, 4) { x = 1 } }
             """);
-        Assert.Equal(code, Code(r, "f"));
+        Assert.Equal(code, Listing.Code(r, "f"));
     }
 
     [Fact]
@@ -89,19 +89,7 @@ public class CarryReturnTests
             fn main() { if f(5, 4) { x = 1 } }
             """);
         Assert.Equal(1, r.U8("x"));
-        Assert.Equal("cpx f.b|rts", Code(r, "f"));
+        Assert.Equal("cpx f.b|rts", Listing.Code(r, "f"));
     }
 
-    private static string Code(Run r, string function)
-    {
-        var listing = r.Result.Listing;
-        var start = listing.IndexOf($"\n{function}:", StringComparison.Ordinal);
-        var code = new List<string>();
-        foreach (var l in listing[(start + 1)..].Split('\n').Skip(1).Select(l => l.TrimEnd('\r')))
-        {
-            if (l.EndsWith(':') && !l.StartsWith(' ') && !l.StartsWith('$') && !l.StartsWith(';') && !l.StartsWith($"{function}.")) break;
-            if (l.StartsWith('$')) code.Add(l[17..].Split(';')[0].Trim());
-        }
-        return string.Join("|", code);
-    }
 }
