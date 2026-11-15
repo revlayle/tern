@@ -32,6 +32,25 @@ public sealed partial class Parser
     public static ProgramSyntax Parse(string source, string? file = null, ErrorList? errors = null) =>
         new Parser(Lexer.Tokenize(source, file, errors is null ? null : errors.Add), source, errors).ParseProgram();
 
+    // ---------- Nesting ----------
+
+    /// <summary>
+    /// How deep the syntax tree may be: brackets, unary operators, binary operators in a row, postfix
+    /// operators, blocks and types each count one level. Every later pass walks the tree by recursion, and
+    /// <see cref="TernCompiler.Compile"/> runs on a stack sized for this depth, so a deeper program is an
+    /// error and not a stack overflow, which .NET cannot catch (review code-quality-syntax 4).
+    /// </summary>
+    public const int MaxDepth = 256;
+    private int _depth;
+
+    private void Enter()
+    {
+        if (_depth == MaxDepth)
+            throw new CompileError(Current.Pos,
+                $"This is nested more than {MaxDepth} deep (brackets, operators in a row, blocks or types). Split it with a constant, a variable or a function");
+        _depth++;
+    }
+
     // ---------- Going on after an error (spec 13) ----------
 
     /// <summary>Statements and declarations dropped for an error, also one that was not reported.</summary>

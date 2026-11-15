@@ -114,6 +114,59 @@ public class ErrorTests
         Assert.Equal((line, column), (e.Pos.Line, e.Pos.Column));
     }
 
+    // Review code-quality-syntax 4: deep nesting is an error, not a stack overflow that kills the process.
+    [Theory]
+    [InlineData("(", ")", 300)]
+    [InlineData("(", ")", 100_000)]
+    [InlineData("-", "", 1000)]
+    [InlineData("f(", ")", 300)]
+    [InlineData("t[", "]", 300)]
+    public void Deep_nesting_is_an_error(string open, string close, int count)
+    {
+        string source = $"var t: [u8; 4]\nfn f(x: u8) -> u8 {{ return x }}\nvar out: u8\nfn main() {{ out = {Repeat(open, count)}1{Repeat(close, count)} }}";
+        var e = Assert.Throws<CompileError>(() => TernCompiler.Compile(source));
+        Assert.Equal($"This is nested more than {Syntax.Parser.MaxDepth} deep (brackets, operators in a row, blocks or types). Split it with a constant, a variable or a function", e.Description);
+    }
+
+    [Theory]
+    [InlineData("+1", 1000)]
+    [InlineData("|1", 100_000)]
+    [InlineData(" as u8", 1000)]
+    [InlineData(".lo", 1000)]
+    public void A_long_row_of_operators_is_an_error(string term, int count)
+    {
+        string source = $"var out: u8\nfn main() {{ out = 1{Repeat(term, count)} }}";
+        var e = Assert.Throws<CompileError>(() => TernCompiler.Compile(source));
+        Assert.Contains($"nested more than {Syntax.Parser.MaxDepth} deep", e.Description);
+    }
+
+    [Fact]
+    public void Deeply_nested_blocks_and_types_are_an_error()
+    {
+        var blocks = Assert.Throws<CompileError>(() => TernCompiler.Compile($"fn main() {{ {Repeat("if true { ", 300)}{Repeat("}", 300)} }}"));
+        Assert.Contains("nested more than", blocks.Description);
+        var types = Assert.Throws<CompileError>(() => TernCompiler.Compile($"var t: {Repeat("[", 300)}u8{Repeat("; 1]", 300)}\nfn main() {{ }}"));
+        Assert.Contains("nested more than", types.Description);
+    }
+
+    [Fact]
+    public void Nesting_up_to_the_limit_compiles_and_runs()
+    {
+        var r = Run.Program($$"""
+            var a: u8
+            var b: u8
+            var c: u8
+            fn main() {
+                a = {{Repeat("(", 250)}}7{{Repeat(")", 250)}}
+                b = 1{{Repeat("+1", 250)}}
+                c = {{Repeat("- ", 250)}}3
+            }
+            """);
+        Assert.Equal((7, 251, 3), (r.U8("a"), r.U8("b"), r.U8("c")));
+    }
+
+    private static string Repeat(string s, int n) => string.Concat(Enumerable.Repeat(s, n));
+
     // Review code-quality-syntax 15: a line break inside a block comment ends the statement.
     [Fact]
     public void A_line_break_inside_a_block_comment_ends_the_statement()

@@ -88,7 +88,38 @@ public static partial class TernCompiler
     /// <param name="warnLibrary">Warn about library modules too, which programs never are (for the repository's test of its library).</param>
     /// <param name="optimize">Run the optimizer over each function. Off only in tests, which compare a program's results both ways.</param>
     public static CompileResult Compile(string source, Platform? platform = null, string? sourcePath = null, string? libraryDirectory = null, int? maxErrors = null,
-        WarningMode warnings = WarningMode.Report, bool warnLibrary = false, bool optimize = true)
+        WarningMode warnings = WarningMode.Report, bool warnLibrary = false, bool optimize = true) =>
+        OnLargeStack(() => CompileHere(source, platform, sourcePath, libraryDirectory, maxErrors, warnings, warnLibrary, optimize));
+
+    /// <summary>
+    /// The stack a compile runs on. The passes walk the syntax tree by recursion, up to
+    /// <see cref="Parser.MaxDepth"/> levels deep, which takes a few kilobytes a level in the checker; the
+    /// caller's stack (1 MB on Windows) is too small for that. Reserved, not committed.
+    /// </summary>
+    private const int StackSize = 64 * 1024 * 1024;
+
+    /// <summary>Runs <paramref name="work"/> on a thread with a <see cref="StackSize"/> stack and returns its result or throws its exception.</summary>
+    private static T OnLargeStack<T>(Func<T> work)
+    {
+        T result = default!;
+        System.Runtime.ExceptionServices.ExceptionDispatchInfo? error = null;
+        var culture = System.Globalization.CultureInfo.CurrentCulture;
+        var uiCulture = System.Globalization.CultureInfo.CurrentUICulture;
+        var thread = new Thread(() =>
+        {
+            System.Globalization.CultureInfo.CurrentCulture = culture;
+            System.Globalization.CultureInfo.CurrentUICulture = uiCulture;
+            try { result = work(); }
+            catch (Exception e) { error = System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(e); }
+        }, StackSize);
+        thread.Start();
+        thread.Join();
+        error?.Throw();
+        return result;
+    }
+
+    private static CompileResult CompileHere(string source, Platform? platform, string? sourcePath, string? libraryDirectory, int? maxErrors,
+        WarningMode warnings, bool warnLibrary, bool optimize)
     {
         platform ??= Platform.C64;
 

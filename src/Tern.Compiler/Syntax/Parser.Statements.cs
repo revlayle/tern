@@ -10,6 +10,13 @@ public sealed partial class Parser
 
     private BlockStmt ParseBlock()
     {
+        Enter();
+        try { return ParseBlockBody(); }
+        finally { _depth--; }
+    }
+
+    private BlockStmt ParseBlockBody()
+    {
         SkipBreaksBeforeBrace();
         var start = Expect(TokenKind.LBrace, "'{'");
         var statements = new List<Stmt>();

@@ -637,6 +637,13 @@ public sealed partial class Parser
 
     private TypeSyntax ParseType()
     {
+        Enter();
+        try { return ParseTypeBody(); }
+        finally { _depth--; }
+    }
+
+    private TypeSyntax ParseTypeBody()
+    {
         if (At(TokenKind.LBracket))
         {
             var start = Advance();
