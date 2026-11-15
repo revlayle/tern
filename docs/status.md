@@ -5,12 +5,12 @@ Owned by the coding session. Updated at the end of every coding session.
 ## Current
 
 - **Milestone:** R2, fixes in the backend and the checker (roadmap "Before the first release: fixes and cleanup", R2; `docs/reviews/code-quality-backend.md`, `docs/reviews/code-quality-semantics.md`). R1 is merged.
-- **Branch:** `r2-fixes`, from `main` at `af9bdc4`. All of R2 is done: every correctness finding of the two files (backend 1-6, semantics 1-13), R1-1, both spec decisions (semantics 3 and 13), and R1's suggestion 4 (a `u16` column in the matrix). 5960 compiler tests pass and 1 theory is skipped (question 170), plus 36 CPU tests. No benchmark changed (1254 / 350780); `SkillTests` pass (outputs rewritten once, for semantics 12). The suite takes about 17 seconds.
-- **Next step:** `/review r2-fixes`. After its merge, R3 (fixes in the lexer, the driver, the tools and the CLI; `code-quality-syntax.md`, `code-quality-tools.md`).
+- **Branch:** `r2-fixes`, from `main` at `af9bdc4`. All of R2 is done: every correctness finding of the two files (backend 1-6, semantics 1-13), R1-1, both spec decisions (semantics 3 and 13), and R1's suggestion 4 (a `u16` column in the matrix). Review R2 said ready to merge; its four suggestions are handled (a test for backend 6, notes in the table, question 172). 5961 compiler tests pass and 1 theory is skipped (question 170), plus 36 CPU tests. No benchmark changed (1254 / 350780); `SkillTests` pass (outputs rewritten once, for semantics 12). The suite takes about 17 seconds.
+- **Next step:** `/merge r2-fixes` (or `/review r2-fixes` to re-check the suggestions). After its merge, R3 (fixes in the lexer, the driver, the tools and the CLI; `code-quality-syntax.md`, `code-quality-tools.md`).
 
 ### Review findings handled by R2
 
-Roadmap "Before the first release" (decision 2026-11-15): one row per finding of `docs/reviews/code-quality-backend.md` and `code-quality-semantics.md`, and R1's marked failures in these areas. R7 reviews from this table. Each fixed bug's test failed before its fix (checked by running it with the fix set aside, or by R1's marked theory), except backend 6, which nothing can reach.
+Roadmap "Before the first release" (decision 2026-11-15): one row per finding of `docs/reviews/code-quality-backend.md` and `code-quality-semantics.md`, and R1's marked failures in these areas. R7 reviews from this table. Each fixed bug's test failed before its fix (checked by running it with the fix set aside, or by R1's marked theory). Backend 6 cannot be reached from source; its test builds the assembler's input by hand.
 
 | Finding | Commit | Guarded by | State |
 |---|---|---|---|
@@ -19,10 +19,10 @@ Roadmap "Before the first release" (decision 2026-11-15): one row per finding of
 | backend 3 (16-bit volatile target as scratch) | `ef2b111` | `VolatileAccessTests` (30 marked cases) | fixed: `AssignVolatile16` (one byte at a time, or a temporary and a copy); a volatile byte is shifted in place only by one |
 | backend 4 (calls in `for` bounds and a compare into the carry, right to left) | `9e375dd` | `EvaluationOrderTests` (6 marked cases) | fixed: `InSourceOrder` in `GenForLoop` and `CompareIntoCarry` |
 | backend 5 (16-bit element store reloads its index) | `f384fb1` | `OperandMatrixTests.An_index_that_reads_the_written_array_is_read_before_the_store` | fixed |
-| backend 6 (long branch drops the label's offset) | `9208e14` | none: not reachable (compiler branches have offset 0, asm branches never grow) | fixed |
+| backend 6 (long branch drops the label's offset) | `9208e14` | `AssemblerTests.A_long_branch_keeps_the_label_offset` (hand-built items: no source program reaches it, since compiler branches have offset 0 and asm branches never grow) | fixed |
 | backend 7 (no CPU variant in the backend) | | | not fixed: R4 (the CPU variant as a build setting) |
 | backend 8 (memory effects in eight places) | | | not fixed: R4 (one table of instruction effects) |
-| backend 9 (control flow walked in seven places) | | | not fixed: R4 (one table of instruction effects, with control flow); backend 1 is fixed in place |
+| backend 9 (control flow walked in seven places) | | | not fixed: R4 (one table of instruction effects, with control flow); backend 1 is fixed in place. `Dispatches` (`Optimizer.DeadStores.cs`) is the interim form: in a function with a jump table it keeps every load before every compiler `rts`. R4 replaces it, in `RemoveDeadLoads` and `NzLiveAfter`, with the jump-table liveness `RegistersLive` uses (review R2, suggestion 1) |
 | backend 10 (the generator predicts its own output) | | | not fixed: R4 (theme 1); backend 2 is fixed with a constraint (Y reserved), as the finding suggests |
 | backend 11 (backend state in checker symbols and the AST) | | | not fixed: R5 (structure) |
 | backend 12 (long methods) | | | not fixed: R5 |
@@ -42,7 +42,7 @@ Roadmap "Before the first release" (decision 2026-11-15): one row per finding of
 | semantics 9 (long byte array in a struct, by declaration order) | `af84911` | `DataTests.A_struct_field_has_at_most_256_elements_in_any_order` | fixed: the two flags reach only the outermost type (the fields stay for R5, finding 18) |
 | semantics 10 (zero-page-only asm mode moves `data`) | `4d088d8` | `AsmTests.Reports_errors` | fixed: an error that suggests a pointer |
 | semantics 11 (misspelled call in a `using` loop) | `573d381` | `RoutineTests.Reports_errors` | fixed: a name that is not declared is not counted as a call |
-| semantics 12 (messages outside the convention) | `2f48182` | `ErrorTests.Reports_errors`, `FixSentenceTests` (one exemption fewer), `AsmTests`, `StructTests` | fixed; the suggested test of null suggestions over `ErrorTests` is not added: `FixSentenceTests` already reads every message in the source |
+| semantics 12 (messages outside the convention) | `2f48182` | `ErrorTests.Reports_errors`, `FixSentenceTests` (one exemption fewer), `AsmTests`, `StructTests` | fixed; the suggested test of null suggestions over `ErrorTests` is not added: `FixSentenceTests` already reads every message in the source. The last fallback, "Expected {target}, found {source}. Use a {target} here" (`Checker.TypeRules.cs`), says little for types with no conversion (one array type for another); R6 (messages as data) revisits it (review R2, suggestion 4) |
 | semantics 13 (`0..256` counts with a `u16`) | `34e10f8` | `LoopCounterTypeTests` | fixed as decided 2026-11-15; an end past 255 with a larger step ends on the carry |
 | semantics 14 (nine hand-written tree walks) | | | not fixed: R4 (one syntax-tree visitor); semantics 1 and 2 fixed in place |
 | semantics 15 (NMOS instruction effects in the checker) | | | not fixed: R4 |
@@ -922,6 +922,10 @@ Not bugs; things to improve, mostly in M7 (optimizer).
 - `w = addr(map) - 1` (or `+`) into a 16-bit variable stores `addr(map)` and then subtracts at run time; `CodeGen.AddressBytes` could make it two `lda #` / `sta` pairs, as it already does for `.lo` / `.hi`.
 
 ## Questions for the spec session
+
+Open, from R2:
+
+172. **A `u8` variable start with an end of 256** (review R2, suggestion 3). Spec 5.1 says "With a variable bound, the type comes from the bound's type". Read that way, `for i in start..256` with `start: u8` counts with a `u8` from `start` to 255, the natural way to walk from an offset to the end of a page. Built (as on `main`): an error, "256 does not fit in u8 (0 to 255), the type of 'start' ... Convert 'start' with 'as u16'"; its fix compiles. Question: should `u8_var..256` be allowed? If so, `Unify` would allow exactly an end of 256; the checker's `f.To.Type = type` path (`Checker.Bodies.cs`) and the generator's `to != 256` test (`CodeGen.Loops.cs`) already give the right loop (`inx` / `bne`).
 
 Open, from R1:
 
