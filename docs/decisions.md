@@ -980,3 +980,9 @@ Roadmap "Before the first release: fixes and cleanup" (R1-R6), "First release". 
 - **Six milestones, not one**, split along the review's area files, each with its own branch, review and merge. Reason: about 40 bugs, 43 construction findings and five spec changes are too much for one session's context and one review; a session reads one or two review files.
 - **Order: tests, then fixes, then cleanup.** R1 builds the tests that find bugs where features meet (random emulator start, a volatile bus log, optimized against unoptimized runs, operands varied by kind and place) and marks what they find; R2 and R3 fix the bugs by area; R4-R6 clean up. Reason: a refactoring is only as safe as the tests under it, and each fix's failing test then guards the cleanup. Two backend bugs came from copies of the instruction effects disagreeing; R2 fixes them in place, and R4 removes the copies.
 - **The CPU variant (R4) and platforms as data (R6) move before the release** from M29 and from C64 cartridges or the C128. The variant goes with the instruction table, since the table is where its instructions are described.
+
+## 2026-11-15: methods of about 100 lines
+
+`CLAUDE.md` (coding conventions), roadmap R5.
+
+- **Methods stay under about 100 lines, as a guideline.** One that stays longer is listed with its reason in `docs/status.md`, and the session names it to the developer. Reason (the developer's): short methods are the goal, but a long `switch` or a lookup table cannot always be split without making it harder to read.
