@@ -259,4 +259,28 @@ public class OperandMatrixTests
         Assert.Equal(@out, run.U8("out"));
         Assert.Equal(model.Calls, run.U8("calls"));
     }
+
+    /// <summary>An element store whose index reads the array being written: the index is the one before the store.</summary>
+    [Theory]
+    [InlineData("u8", 2)]
+    public void An_index_that_reads_the_written_array_is_read_before_the_store(string type, int expected)
+    {
+        var run = Run.Program($$"""
+            var a: [{{type}}; 4]
+            var b: [{{type}}; 4] = [2, 0, 0, 0]
+            var c: [{{type}}; 4] = [{{(type == "u8" ? "0" : "$0100")}}, 0, 0, 0]
+            var k: u8
+            var out: {{type}}
+            fn main() {
+                a[a[0]{{(type == "u8" ? "" : ".lo")}}] = b[k] + c[k]
+                out = a[0]
+            }
+            """);
+        Assert.Equal(expected, type == "u8" ? run.U8("out") : run.U16("out"));
+    }
+
+    [Theory(Skip = "Review code-quality-backend 5: a 16-bit element store reloads its index between the two bytes (R2)")]
+    [InlineData("u16", 0x0102)]
+    public void Fails_backend_5(string type, int expected) =>
+        An_index_that_reads_the_written_array_is_read_before_the_store(type, expected);
 }

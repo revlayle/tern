@@ -34,6 +34,8 @@ public class EvaluationOrderTests
             return t + y
         }
         fn diff(x: u8, y: u8) -> u8 { return f(x) - f(y) }
+        fn ge(x: u8, y: u8) -> bool using carry { return f(x) >= f(y) }
+        fn lt(x: u8, y: u8) -> bool { return f(x) < f(y) }
         """;
 
     private static Run Program(string body) => Run.Program(Logger + "\nfn main() {\n    vol = 10\n    p = addr(buf)\n" + body + "\n}");
@@ -85,6 +87,30 @@ public class EvaluationOrderTests
         Assert.Equal(string.Join(",", calls), Log(run));
         Assert.Equal(holds ? 1 : 2, run.U8("r"));
     }
+
+    /// <summary>The places review code-quality-tests finding 1 names: the bounds and step of a for, a compare returned as a flag.</summary>
+    [Theory]
+    [InlineData("for _ in 2..f(5) { r += 1 }", "5", 3)]
+    [InlineData("for _ in 0..20 step f(3) { r += 1 }", "3", 7)]
+    [InlineData("if lt(1, 2) { r = 1 } else { r = 2 }", "1,2", 1)]
+    [InlineData("if lt(2, 1) { r = 1 } else { r = 2 }", "2,1", 2)]
+    public void Calls_in_loop_bounds_and_returned_compares_run_left_to_right(string body, string log, int result)
+    {
+        var run = Program(body);
+        Assert.Equal(log, Log(run));
+        Assert.Equal(result, run.U8("r"));
+    }
+
+    /// <summary>Review code-quality-backend 4: the end and step run before the start, and a compare into the carry right to left.</summary>
+    [Theory(Skip = "Review code-quality-backend 4: calls in for bounds and in a return into the carry run right to left (R2)")]
+    [InlineData("for _ in f(1)..f(5) { r += 1 }", "1,5", 4)]
+    [InlineData("for _ in f(1)..=f(4) { r += 1 }", "1,4", 4)]
+    [InlineData("for _ in f(1)..f(9) step f(2) { r += 1 }", "1,9,2", 4)]
+    [InlineData("for _ in f(1)..20 step f(5) { r += 1 }", "1,5", 4)]
+    [InlineData("if ge(1, 2) { r = 1 } else { r = 2 }", "1,2", 2)]
+    [InlineData("if ge(2, 1) { r = 1 } else { r = 2 }", "2,1", 1)]
+    public void Fails_backend_4(string body, string log, int result) =>
+        Calls_in_loop_bounds_and_returned_compares_run_left_to_right(body, log, result);
 
     [Fact]
     public void A_call_in_an_index_runs_before_the_value()
