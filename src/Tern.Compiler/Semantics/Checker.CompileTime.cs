@@ -350,7 +350,7 @@ public sealed partial class Checker : ICompileTimeHost
             case null: return null;
             case ConstSymbol { Real: { } real }: return new CtReal(real);
             case ConstSymbol c: return c.Type.Kind == TypeKind.Bool ? CtBool.Of(c.Value != 0) : new CtInt(c.Value);
-            case VariableSymbol { IsData: true, Kind: VariableKind.Global } v: return DataArray(v, name, pos);
+            case VariableSymbol { IsData: true, Kind: VariableKind.Global } v: return DataValue(v, name, pos);
             case VariableSymbol:
                 throw new CompileError(pos, inConstFn
                     ? $"'{name}' is a variable, which a const fn cannot read. Use a const or data"
@@ -423,8 +423,11 @@ public sealed partial class Checker : ICompileTimeHost
         return code;
     }
 
-    /// <summary>A data table as a compile-time array, element by element (spec 4.1).</summary>
-    private CtArray DataArray(VariableSymbol v, string name, SourcePos pos)
+    /// <summary>
+    /// A data table as a compile-time array, element by element (spec 4.1); a single value of
+    /// <c>data</c> (placed, decision 2026-11-14) as that value.
+    /// </summary>
+    private CtValue DataValue(VariableSymbol v, string name, SourcePos pos)
     {
         if (_dataArrays.TryGetValue(v, out var known)) return known;
         if (v.Type.IsStruct || v.Type.IsStructArray)
@@ -433,19 +436,22 @@ public sealed partial class Checker : ICompileTimeHost
             throw new CompileError(pos, $"'{name}' holds addresses, which are decided after compile-time evaluation. Read a table without addr()");
         if (v.InitialBytes is not { } bytes)
             throw new CompileError(pos, $"'{name}' is read while its own initial value is computed, so it depends on itself. Give it a value that does not read '{name}'");
-        var element = v.Type.Element!;
+        if (v.Type.Element is not { } element) return FromBytes(v.Type, bytes, 0);
         var items = new CtValue[v.Type.Length];
         for (int k = 0; k < items.Length; k++)
-            items[k] = element.Kind switch
-            {
-                TypeKind.Bool => CtBool.Of(bytes[k] != 0),
-                TypeKind.I8 => new CtInt((sbyte)bytes[k]),
-                TypeKind.U16 or TypeKind.Ptr => new CtInt(bytes[2 * k] | bytes[2 * k + 1] << 8),
-                TypeKind.I16 => new CtInt((short)(bytes[2 * k] | bytes[2 * k + 1] << 8)),
-                _ => new CtInt(bytes[k]),
-            };
+            items[k] = FromBytes(element, bytes, k * element.Size);
         var array = new CtArray(items, element.Kind == TypeKind.Bool ? CtType.Bool : CtType.Int);
         _dataArrays[v] = array;
         return array;
     }
+
+    /// <summary>The compile-time value of one number or bool of <paramref name="type"/> at <paramref name="at"/>.</summary>
+    private static CtValue FromBytes(TernType type, byte[] bytes, int at) => type.Kind switch
+    {
+        TypeKind.Bool => CtBool.Of(bytes[at] != 0),
+        TypeKind.I8 => new CtInt((sbyte)bytes[at]),
+        TypeKind.U16 or TypeKind.Ptr => new CtInt(bytes[at] | bytes[at + 1] << 8),
+        TypeKind.I16 => new CtInt((short)(bytes[at] | bytes[at + 1] << 8)),
+        _ => new CtInt(bytes[at]),
+    };
 }
