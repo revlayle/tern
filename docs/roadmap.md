@@ -665,33 +665,75 @@ Done when: emulator tests cover `io` against an MLI and disk modelled in C# (as 
 
 Done when: an example scrolls a background and moves sprites in a NES emulator (Mesen), with code in more than one bank.
 
-## Release fixes (after M27, before the first release)
+## Before the first release: fixes and cleanup
 
-Decision 2026-11-15: the code-quality review (`docs/reviews/code-quality.md`) was done so its bugs are fixed before the release.
+Decisions 2026-11-15: the code-quality review (`docs/reviews/code-quality.md`, with one file per area) was done so the release ships without its known bugs and with a well-built codebase. Its 93 findings and five spec questions are split into six milestones, each with its own branch, review and merge, so a session reads only the review files of its area. Order: the tests that find bugs first; then the bugs, each with a test that fails before its fix; then the construction cleanup, which those tests guard. The cleanup changes no behavior: no benchmark moves and no `tern run` output changes, except where a cleanup milestone below says so.
 
-- The fifteen bugs of its "Correctness: fix first" table (wrong code where two features meet, the C64's missing `$FB-$FE` zero page, `-o` overwriting the source or another output, compiler crashes, NES label and padding errors). Each gets an end-to-end test that fails before the fix.
-- The review's five spec questions (decision 2026-11-15): `@ region` from a module (8.4), ASCII-only names (2), a loop counter typed by the values it takes (5.1), and in `tern run` the NES vblank flag, NMI and `$2006` latch, and `brk` with a program's IRQ handler (12.2). Each gets a test; a new error also gets an error test.
-- Two of the review's test improvements, which find the bugs above: the emulator in end-to-end tests starts with random registers and memory (a fixed seed, so a failure repeats), and a log of bus accesses checks that volatile variables, 16-bit ones included, are read and written exactly once (spec 4).
-- The review's other correctness findings where the fix is small (messages outside the convention, CLI and stand-in differences, edge cases of constants and literals); the ones left are listed in `docs/status.md` for the cleanup milestone.
+### R1: Tests that find bugs where features meet
 
-Done when: each of the fifteen bugs has a test that failed before its fix, the suite passes with the random start, and the benchmark baseline is rewritten in the commit of any fix that moves it.
+Review theme 7 (`code-quality-tests.md`), the parts that find bugs.
 
-## First release (after the release fixes)
+- The emulator in end-to-end tests starts with random registers and memory (a fixed seed, so a failure repeats).
+- A log of bus accesses checks that volatile variables, 16-bit ones included, are read and written exactly once (spec 4), replacing the count of listing lines.
+- Optimized runs compared against unoptimized ones for the same program.
+- Operands varied by kind and place (constant, variable, zero page, field, indexed element, pointer target, call result), not only by value, for the operators and statements.
+- One shared listing reader in the tests instead of about 30 copies.
 
-Decision 2026-11-08, changed 2026-11-13: the first release comes once the four platforms C64, Atari, Apple II and NES work; the Commander X16 and the Commodore 128 come after it. Done when: M27 and the release fixes are merged, the developer guide covers every behavior in its list, the guide (`docs/guide/`) and spec 10.1 describe the compiler and library as built, and every example builds for its platforms.
+The new tests that fail are marked (skipped with the finding's number) and listed in `docs/status.md`; R2 and R3 fix them. Done when: the random start and the bus log are on for the whole suite, and every failure they show is marked and listed.
+
+### R2: Fixes in the backend and the checker
+
+`code-quality-backend.md`, `code-quality-semantics.md`, and the failures R1 found in these areas.
+
+- Ranked bugs 1-6, 9, 12 and 13, and the other correctness findings of the two files.
+- `@ region` from a module (spec 8.4) and the loop counter typed by the values it takes (5.1), decision 2026-11-15.
+
+Done when: each fixed bug has a test that failed before its fix, R1's marked tests in these areas pass, and the benchmark baseline is rewritten in the commit of any fix that moves it.
+
+### R3: Fixes in the lexer, the driver, the tools and the CLI
+
+`code-quality-syntax.md`, `code-quality-tools.md`, and the failures R1 found in these areas.
+
+- Ranked bugs 7, 8, 10, 11, 14 and 15, and the other correctness findings of the two files.
+- ASCII-only names (spec 2), and in `tern run` the NES vblank flag, NMI and `$2006` latch and `brk` with a program's IRQ handler (12.2), decision 2026-11-15.
+
+Done when: as R2, and no marked test is left.
+
+### R4: One description per fact, and the CPU variant
+
+Review themes 1 and 2.
+
+- One table of instruction effects (memory, registers, flags, control flow) for the optimizer, the checker's assembly analysis and the assembler; the CPU variant (spec 12.1) as a build setting passed to the backend, the checker and the emulator, with the variant's instructions in the table instead of hard-coded lists of branches, stores and transfers. The table is where M29's 65C02 rows go.
+- One syntax-tree visitor used by every walk, so a new node is never skipped silently.
+- One registry of `tern run` stand-ins per machine.
+- One CLI option table that the parsers and the help text are made from.
+
+Done when: no list of instruction effects, tree walk over every node kind, stand-in or CLI option exists twice, and the benchmarks and `SkillTests` are unchanged.
+
+### R5: Structure, and readiness for the language server
+
+Review themes 4 and 6.
+
+- Long methods split by job: `TernCompiler.Build` (about 450 lines, six jobs), `ParseProgram`, the checker's `Run`; CodeGen's per-function state in one object instead of fields over four files; parser and checker modes set and reset by hand replaced with scoped helpers.
+- For M28: end positions on tokens and nodes, comments kept by the lexer, a check-only entry that returns diagnostics without building, and deep nesting reported as an error instead of a stack overflow.
+
+Done when: no method is longer than about 100 lines without a reason noted in `docs/status.md`, the check-only entry has tests, and the benchmarks and `SkillTests` are unchanged.
+
+### R6: Platforms as data, messages as data
+
+Review themes 3 and 5, and the rest of theme 7.
+
+- Each platform fact in one place, in the platform description: no tests on platform names ("has boards" for the NES, "cartridge" for NES output), and an unknown platform an error instead of the C64's stand-ins. C64 cartridges, the X16 and the C128 then add a description, not branches.
+- No control flow decided by matching error text, no exception changed after it is thrown, no meaning read from strings in the assembler.
+- Tests check error positions and whole messages, not fragments; the feature suite runs on every platform.
+
+Done when: adding a platform needs no change outside its description and its library, the feature suite passes on all four platforms, and the benchmarks and `SkillTests` are unchanged.
+
+## First release (after R6)
+
+Decision 2026-11-08, changed 2026-11-13: the first release comes once the four platforms C64, Atari, Apple II and NES work; the Commander X16 and the Commodore 128 come after it. Done when: M27 and R1-R6 are merged, the developer guide covers every behavior in its list, the guide (`docs/guide/`) and spec 10.1 describe the compiler and library as built, and every example builds for its platforms.
 
 ## After the first release
-
-### Cleanup (after the first release, before M28)
-
-Decision 2026-11-15. The construction themes of the code-quality review (`docs/reviews/code-quality.md`) that M28 builds on; no language change, and the benchmarks must not move.
-
-- One description per fact: one table of instruction effects for the optimizer, the checker's assembly analysis and the assembler; one syntax-tree visitor for every walk; one registry of `tern run` stand-ins per machine; one CLI option table that also writes the help (theme 1).
-- Long methods and state in fields split up: `TernCompiler.Build`, `ParseProgram`, the checker's `Run`, CodeGen's per-function state, modes set and reset by hand (theme 4).
-- Messages as data: no control flow decided by error text, no exception changed after it is thrown, no meaning read from strings in the assembler (theme 5).
-- Ready for the language server: end positions on tokens and nodes, comments kept, a check-only entry that returns diagnostics, deep nesting reported as an error (theme 6).
-- The rest of the test themes: operands varied by kind and place, optimized against unoptimized runs, error positions and whole messages checked, one shared listing reader, the feature suite on every platform (theme 7).
-- The correctness findings left by the release fixes.
 
 ### M28: Doc comments and a language server
 
@@ -716,7 +758,6 @@ Decision 2026-11-12. Before the X16 platform and its library, a spec session che
 
 ### M29: 65C02 and Commander X16
 
-- First (decision 2026-11-15): the CPU variant as a build setting passed to the backend, the checker and the emulator, replacing the hard-coded lists of branches, stores and transfers (code-quality review, theme 2).
 - The 65C02 CPU variant (spec 12.1): new instructions in the CPU table, emulator and code generator (`stz`, `bra`, `phx`/`phy`, `inc a`, `(zp)` addressing); code shapes per variant
 - X16 platform: memory map, banked RAM, VERA register structs, KERNAL routines
 
@@ -726,7 +767,6 @@ Done when: the benchmarks compile for the 65C02 and use the new instructions whe
 
 Decision 2026-11-10. C64 programs already run on a C128 in C64 mode; this target is for native mode. Starts with a spec session that checks the machine's details against the C128 reference.
 
-- First, unless C64 cartridge output came earlier (decision 2026-11-15): platforms as data, not tests on names, with each platform fact in one place (code-quality review, theme 3).
 
 - Platform description: the `.prg` with a BASIC 7 `SYS` line at `$1C01`, the free zero page (smaller than the C64's), volatile areas (the C64's plus the MMU and the VDC)
 - The library: most of `lib/c64` applies (VIC, SID, CIA, `sprites`, `scroll`, much of `io`). To settle: a C128 build searching `lib/c128/`, then `lib/c64/`, then `lib/` (recommended), shared chips in their own folder, or copies
@@ -750,7 +790,7 @@ Each has a reason to wait; the spec session schedules one when that reason chang
 - **The Galaxy Stars routines kept in assembly, as a measurement set** (decision 2026-11-09, gaps 16, 21, 25): `stars.draw_tile`, `explode.hits` with `hostiles.explosion_hit`, `hostiles.draw` and `title.sweep_all`, in plain Tern and as the asm port, measured and classified as in M17 (optimizer, code shape, or needs assembly). Candidates from the port: a carry known clear after an `adc` that cannot overflow, repeated reloads, the absolute value of a 16-bit difference. After M21; scheduled by a spec session.
 - **Quoted import paths and aliases** (decision 2026-11-09; spec 2.2, planned): `import "levels/level1.tern"` (relative to the importing file, `/` only) for subfolders, and `import my_io = "./io.tern"` to use a module under another name. Paths when a program wants subfolders; an alias when renaming a file cannot solve a clash. The points to settle first are in the decision.
 - **Constant parts of a pointer or 16-bit sum folded together** (decision 2026-11-09, gap 26; spec 11 row `p = q + e + K`): `p = rows[r] + (c << 1) + (COLOR_RAM - SCREEN)` as one 8-bit add with `adc #$18` in the high byte (about 18 bytes and 26 cycles, today 31 and 44; 37 and 54 with the constant first). The port writes it as two plain statements (21 bytes, 30 cycles), so nothing waits on it. Built with the optimizer work after M21, with the measurement set above.
-- **C64 cartridge output** (decision 2026-11-13): `.crt` images with modules in banks (spec 14.1), for EasyFlash, Ocean and Magic Desk cartridges (8 or 16 KB windows at `$8000`/`$A000`, a bank register at `$DE00`), with a platform function that selects the bank. Scheduled after M27, reusing the bank syntax the NES spec session settles; starts with platforms as data (code-quality review, theme 3), unless the C128 came first.
+- **C64 cartridge output** (decision 2026-11-13): `.crt` images with modules in banks (spec 14.1), for EasyFlash, Ocean and Magic Desk cartridges (8 or 16 KB windows at `$8000`/`$A000`, a bank register at `$DE00`), with a platform function that selects the bank. Scheduled after M27, reusing the bank syntax the NES spec session settles.
 - **MMC1 for the NES** (decision 2026-11-14): after the first release, or when a game needs it. Same syntax as UxROM (its usual mode fixes the last bank at `$C000`); adds CHR banks, mirroring set at run time (so the `cartridge` line takes no mirroring option), save RAM at `$6000`, and a five-write bank switch that an NMI can break, which `nes/mmc1` must document or guard.
 - **Atari banks and cartridges** (decision 2026-11-13): a spec session after M27 settles both, reusing the NES session's bank syntax. Banks: the 130XE's four 16 KB banks at `$4000–$7FFF`, selected through PORTB, with separate CPU and ANTIC access (bits 4 and 5), and perhaps the larger third-party expansions that extend the scheme. Cartridges: 8 and 16 KB images with no banks, and bank-switched ones such as the XEGS's (an 8 KB window at `$8000` with a fixed last bank at `$A000`); the image format (`.car` with its header, or raw `.rom`) is settled then. Scheduled with C64 cartridge output.
 - **An `reu` library module** (decision 2026-11-13): block copies between C64 RAM and a RAM Expansion Unit by DMA (`reu.fetch`, `reu.stash`), and the REU as a place overlays are loaded from (8.5). Not bank switching: the 6502 cannot run code or read data in the REU directly. GeoRAM (a 256-byte window at `$DE00`) is considered with it. Scheduled with or after cartridge output.

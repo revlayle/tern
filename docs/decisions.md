@@ -971,3 +971,12 @@ Roadmap "Release fixes", "First release", "Cleanup", M29, M30, C64 cartridge out
 
 - **A "release fixes" milestone comes before the first release**: the code-quality review's fifteen ranked bugs, its five spec questions (decision above), the random emulator start and the volatile bus-access log, and the small correctness findings. Reason (the developer's): the deep review was done so that the release ships without its known bugs; several give wrong code or crash the compiler. The two test improvements are included because they are what finds this kind of bug.
 - **The construction themes go where they are first needed**, not before the release: one description per fact, long methods, messages as data, readiness for the language server and the rest of the test themes in a cleanup milestone before M28; the CPU variant as a build setting at the start of M29; platforms as data before C64 cartridges or the C128, whichever comes first. Reason: they change no behavior a user sees, and each is cheapest done just before the milestone that depends on it.
+
+## 2026-11-15: the whole code-quality review before the first release
+
+Roadmap "Before the first release: fixes and cleanup" (R1-R6), "First release". Changes the entry above.
+
+- **The construction themes come before the release too**, not before M28, M29 and the C128. Reason (the developer's): as a C# developer, a well-built codebase at release matters to them as much as a correct one.
+- **Six milestones, not one**, split along the review's area files, each with its own branch, review and merge. Reason: about 40 bugs, 43 construction findings and five spec changes are too much for one session's context and one review; a session reads one or two review files.
+- **Order: tests, then fixes, then cleanup.** R1 builds the tests that find bugs where features meet (random emulator start, a volatile bus log, optimized against unoptimized runs, operands varied by kind and place) and marks what they find; R2 and R3 fix the bugs by area; R4-R6 clean up. Reason: a refactoring is only as safe as the tests under it, and each fix's failing test then guards the cleanup. Two backend bugs came from copies of the instruction effects disagreeing; R2 fixes them in place, and R4 removes the copies.
+- **The CPU variant (R4) and platforms as data (R6) move before the release** from M29 and from C64 cartridges or the C128. The variant goes with the instruction table, since the table is where its instructions are described.
