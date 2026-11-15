@@ -252,7 +252,7 @@ public sealed class ForStmt(
     public Expr From { get; set; } = from;
     public Expr To { get; set; } = to;
     public bool Inclusive { get; } = inclusive;
-    public Expr? Step { get; } = step;
+    public Expr? Step { get; set; } = step;
     /// <summary>The range as written, "9..=0", for messages.</summary>
     public string RangeText { get; init; } = "";
     public Register? UsingRegister { get; } = usingRegister;

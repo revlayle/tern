@@ -251,6 +251,8 @@ public class RoutineTests
     [InlineData("fn f() @ $C000 keeps\nfn main() { }", "Expected a register or flag")]
     [InlineData("fn f(v: u8 using A) @ $C000 keeps Y\nfn main() { for i in 0..3 using X { f(i) } }", "The loop body calls a function, which can change X. Remove 'using X', or call only routines that keep X")]
     [InlineData("fn f(v: u8 using X) @ $C000 keeps X\nfn main() { for i in 0..3 using X { f(1) } }", "'f' takes 'v' in X, which holds the loop variable")]
+    // Review code-quality-semantics 11: a misspelled call is reported as such, not as a call that changes X.
+    [InlineData("var out: u8\nfn helper(v: u8) -> u8 { return v }\nfn main() { for i in 0..3 using X { out += helpr(i) } }", "'helpr' is not a function. Check the spelling, or declare it")]
     [InlineData("fn f(v: u16 using XY) @ $C000 keeps X, Y\nfn main() { for i in 0..3 using Y { f(1) } }", "'f' takes 'v' in Y, which holds the loop variable")]
     [InlineData("fn f() @ $C000 keeps Y\nfn main() { for i in 0..3 using X { asm {\n jsr f\n } } }", "'jsr' calls a subroutine, which can change X")]
     [InlineData("fn f(true using carry) { }\nfn main() { }", "Fixed inputs are only for routines at a fixed address (fn name(...) @ $addr)")]

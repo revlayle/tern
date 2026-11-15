@@ -101,23 +101,8 @@ public class OperandMatrixTests
 
     private static int Table(int i) => (i * 7 + 1) & 0xFF;
 
-    /// <summary>
-    /// The cases that fail today, by the review finding that explains them (docs/status.md lists them).
-    /// Each finding's cases run in their own skipped theory below; when it is fixed, remove the skip.
-    /// </summary>
-    /// <param name="mustFail">The case must give an error: only a finding about a missing error applies.</param>
-    private static string? KnownFailure(string form, string place, string context, bool mustFail)
-    {
-        if (place == "for step" && form == "call" && context != "once") return "semantics 2";
-        if (mustFail) return null;
-        if (place == "indexed match" && context != "once") return "backend 1";
-        if (place == "pointer store" && form == "indexed struct array" && context == "once") return "backend 2";
-        if (place == "for step" && form is "field" or "struct array" or "indexed struct array") return "semantics 1";
-        return null;
-    }
-
     /// <summary>Every form in every place and context; the loops with one value, to keep the run short.</summary>
-    private static TheoryData<string, string, string, int> CasesWhere(Func<string?, bool> known)
+    public static TheoryData<string, string, string, int> Cases()
     {
         var data = new TheoryData<string, string, string, int>();
         foreach (var form in Forms)
@@ -126,39 +111,10 @@ public class OperandMatrixTests
                 {
                     if (place.Return is not null && context != "once") continue;
                     foreach (int v in context == "once" ? Values : Values[..1])
-                    {
-                        var failure = KnownFailure(form.Name, place.Name, context, ExpectedError(form, place, context, v) is not null);
-                        if (known(failure)) data.Add(form.Name, place.Name, context, v);
-                    }
+                        data.Add(form.Name, place.Name, context, v);
                 }
         return data;
     }
-
-    public static TheoryData<string, string, string, int> Cases() => CasesWhere(f => f is null);
-    public static TheoryData<string, string, string, int> Backend1() => CasesWhere(f => f == "backend 1");
-    public static TheoryData<string, string, string, int> Backend2() => CasesWhere(f => f == "backend 2");
-    public static TheoryData<string, string, string, int> Semantics1() => CasesWhere(f => f == "semantics 1");
-    public static TheoryData<string, string, string, int> Semantics2() => CasesWhere(f => f == "semantics 2");
-
-    [Theory(Skip = "Review code-quality-backend 1: a load of X or Y before an indexed match is removed as dead (R2)")]
-    [MemberData(nameof(Backend1))]
-    public void Fails_backend_1(string form, string place, string context, int v) =>
-        An_operand_gives_the_same_result_in_every_place(form, place, context, v);
-
-    [Theory(Skip = "Review code-quality-backend 2: p[i] = recs[j].f with an indexed record array stores the wrong value (R2)")]
-    [MemberData(nameof(Backend2))]
-    public void Fails_backend_2(string form, string place, string context, int v) =>
-        An_operand_gives_the_same_result_in_every_place(form, place, context, v);
-
-    [Theory(Skip = "Review code-quality-semantics 1: a struct field as a for step reads the struct's address (R2)")]
-    [MemberData(nameof(Semantics1))]
-    public void Fails_semantics_1(string form, string place, string context, int v) =>
-        An_operand_gives_the_same_result_in_every_place(form, place, context, v);
-
-    [Theory(Skip = "Review code-quality-semantics 2: a using loop accepts a call in an inner loop's step (R2)")]
-    [MemberData(nameof(Semantics2))]
-    public void Fails_semantics_2(string form, string place, string context, int v) =>
-        An_operand_gives_the_same_result_in_every_place(form, place, context, v);
 
     /// <summary>The program of one case: the operand forms, set to <paramref name="v"/> by main, and the place in t.</summary>
     private static string Source(Form form, Place place, string context, int v)
@@ -270,6 +226,7 @@ public class OperandMatrixTests
     /// <summary>An element store whose index reads the array being written: the index is the one before the store.</summary>
     [Theory]
     [InlineData("u8", 2)]
+    [InlineData("u16", 0x0102)]
     public void An_index_that_reads_the_written_array_is_read_before_the_store(string type, int expected)
     {
         var run = Run.Program($$"""
@@ -285,9 +242,4 @@ public class OperandMatrixTests
             """);
         Assert.Equal(expected, type == "u8" ? run.U8("out") : run.U16("out"));
     }
-
-    [Theory(Skip = "Review code-quality-backend 5: a 16-bit element store reloads its index between the two bytes (R2)")]
-    [InlineData("u16", 0x0102)]
-    public void Fails_backend_5(string type, int expected) =>
-        An_index_that_reads_the_written_array_is_read_before_the_store(type, expected);
 }

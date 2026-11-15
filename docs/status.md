@@ -4,10 +4,63 @@ Owned by the coding session. Updated at the end of every coding session.
 
 ## Current
 
-- **Milestone:** R1, tests that find bugs where features meet (roadmap "Before the first release: fixes and cleanup", R1; review theme 7, `docs/reviews/code-quality-tests.md`). M27 and its follow-up are merged.
-- **Branch:** `r1-tests`, from `main` at `3ac5ee6`. All five items are done. 4926 compiler tests pass and 9 theories are skipped (the marked failures below), plus 36 CPU tests. No benchmark changed (1254 / 350780); `SkillTests` pass. The suite takes about 17 seconds (was about 12).
-- **Review** (`docs/reviews/r1.md`): re-review ready to merge; the leftover second summary in `OperandMatrixTests` is removed. The first review had two must-fix items, both fixed: the random start in the other six harnesses (`55322c6`) and the finding table below. Suggestions 3 (matrix errors check the message, `0f9a8ef`) and 5 (`BusLog` for the raster test, `55322c6`) are done; suggestion 4 (a `u16` column in the matrix) is left for R2, next to the backend 3 and 5 fixes it would guard.
-- **Next step:** `/merge r1-tests`. After the merge, R2 (fixes in the backend and the checker) starts with the marked tests below: each fix removes the `Skip` of its finding's theory, which must then pass.
+- **Milestone:** R2, fixes in the backend and the checker (roadmap "Before the first release: fixes and cleanup", R2; `docs/reviews/code-quality-backend.md`, `docs/reviews/code-quality-semantics.md`). R1 is merged.
+- **Branch:** `r2-fixes`, from `main` at `af9bdc4`. All of R2 is done: every correctness finding of the two files (backend 1-6, semantics 1-13), R1-1, both spec decisions (semantics 3 and 13), and R1's suggestion 4 (a `u16` column in the matrix). Review R2 said ready to merge; its four suggestions are handled (a test for backend 6, notes in the table, question 172). 5961 compiler tests pass and 1 theory is skipped (question 170), plus 36 CPU tests. No benchmark changed (1254 / 350780); `SkillTests` pass (outputs rewritten once, for semantics 12). The suite takes about 17 seconds.
+- **Next step:** `/merge r2-fixes` (or `/review r2-fixes` to re-check the suggestions). After its merge, R3 (fixes in the lexer, the driver, the tools and the CLI; `code-quality-syntax.md`, `code-quality-tools.md`).
+
+### Review findings handled by R2
+
+Roadmap "Before the first release" (decision 2026-11-15): one row per finding of `docs/reviews/code-quality-backend.md` and `code-quality-semantics.md`, and R1's marked failures in these areas. R7 reviews from this table. Each fixed bug's test failed before its fix (checked by running it with the fix set aside, or by R1's marked theory). Backend 6 cannot be reached from source; its test builds the assembler's input by hand.
+
+| Finding | Commit | Guarded by | State |
+|---|---|---|---|
+| backend 1 (load before an `indexed match` removed) | `18d97ff` | `OperandMatrixTests` (the 21 marked cases) | fixed: in a function with a jump table, `rts` is not taken as the return in `RemoveDeadLoads` and `NzLiveAfter` |
+| backend 2 (`p[i] = recs[j].f`, indexed records) | `e19b10e` | `OperandMatrixTests` (2 marked cases) | fixed: Y is reserved while the value is computed |
+| backend 3 (16-bit volatile target as scratch) | `ef2b111` | `VolatileAccessTests` (30 marked cases) | fixed: `AssignVolatile16` (one byte at a time, or a temporary and a copy); a volatile byte is shifted in place only by one |
+| backend 4 (calls in `for` bounds and a compare into the carry, right to left) | `9e375dd` | `EvaluationOrderTests` (6 marked cases) | fixed: `InSourceOrder` in `GenForLoop` and `CompareIntoCarry` |
+| backend 5 (16-bit element store reloads its index) | `f384fb1` | `OperandMatrixTests.An_index_that_reads_the_written_array_is_read_before_the_store` | fixed |
+| backend 6 (long branch drops the label's offset) | `9208e14` | `AssemblerTests.A_long_branch_keeps_the_label_offset` (hand-built items: no source program reaches it, since compiler branches have offset 0 and asm branches never grow) | fixed |
+| backend 7 (no CPU variant in the backend) | | | not fixed: R4 (the CPU variant as a build setting) |
+| backend 8 (memory effects in eight places) | | | not fixed: R4 (one table of instruction effects) |
+| backend 9 (control flow walked in seven places) | | | not fixed: R4 (one table of instruction effects, with control flow); backend 1 is fixed in place. `Dispatches` (`Optimizer.DeadStores.cs`) is the interim form: in a function with a jump table it keeps every load before every compiler `rts`. R4 replaces it, in `RemoveDeadLoads` and `NzLiveAfter`, with the jump-table liveness `RegistersLive` uses (review R2, suggestion 1) |
+| backend 10 (the generator predicts its own output) | | | not fixed: R4 (theme 1); backend 2 is fixed with a constraint (Y reserved), as the finding suggests |
+| backend 11 (backend state in checker symbols and the AST) | | | not fixed: R5 (structure) |
+| backend 12 (long methods) | | | not fixed: R5 |
+| backend 13 (meaning read from section names) | | | not fixed: R6 (messages and strings as data) |
+| backend 14 (CodeGen's per-function state in fields) | | | not fixed: R5 |
+| backend 15 (an exception steers the layout retry) | | | not fixed: R6 |
+| backend 16 (small leftovers) | | | not fixed: R5 |
+| backend 17 (unnamed limits, repeated work) | | | not fixed: R5 |
+| semantics 1 (`for` step not lowered) | `af2fa27` | `OperandMatrixTests` (12 marked cases) | fixed |
+| semantics 2 (call in an inner `step` inside a `using` loop) | `af2fa27` | `OperandMatrixTests` (2 marked cases) | fixed |
+| semantics 3 (`@ region` in a module) | `94a816f` | `MemoryTests.A_module_places_declarations_in_a_region_of_the_main_file`, `A_region_name_a_module_uses_cannot_be_a_symbol_of_the_module`, `NesTests.A_module_places_tile_data_in_a_chr_area_of_the_main_file` | fixed as decided 2026-11-15: allowed; a module symbol of that name is an error |
+| semantics 4 (`const fn` reading a single placed `data` crashes) | `ab18427` | `ConstFnTests.A_const_fn_reads_a_single_placed_data_value` | fixed: the value is read |
+| semantics 5 (interrupt fns calling each other dropped) | `221cdae` | `InterruptPartTests.Handlers_that_call_each_other_are_recursion` | fixed for main-file handlers; a library function that calls itself is still reported only when a program uses it (the finding's "more generally") |
+| semantics 6 (`BOX * 30` checked against `BOX`'s type) | `34e10f8` | `ConstantExpressionTests.A_typed_constant_where_nothing_gives_a_type_does_not_narrow_a_value_too_large`, `LoopCounterTypeTests` | fixed: a typed constant narrows only when the value fits |
+| semantics 7 (`as` checks a constant against 16 bits) | `34e10f8` | `ConstantExpressionTests.As_keeps_the_low_bits_of_a_constant_wider_than_16_bits` | fixed |
+| semantics 8 (`.lo`/`.hi` of an untyped constant) | `34e10f8` | `ConstantExpressionTests.Lo_and_hi_of_an_untyped_constant_take_both_bytes` | fixed: an untyped constant is taken as 16 bits; a typed `u8` is still one byte |
+| semantics 9 (long byte array in a struct, by declaration order) | `af84911` | `DataTests.A_struct_field_has_at_most_256_elements_in_any_order` | fixed: the two flags reach only the outermost type (the fields stay for R5, finding 18) |
+| semantics 10 (zero-page-only asm mode moves `data`) | `4d088d8` | `AsmTests.Reports_errors` | fixed: an error that suggests a pointer |
+| semantics 11 (misspelled call in a `using` loop) | `573d381` | `RoutineTests.Reports_errors` | fixed: a name that is not declared is not counted as a call |
+| semantics 12 (messages outside the convention) | `2f48182` | `ErrorTests.Reports_errors`, `FixSentenceTests` (one exemption fewer), `AsmTests`, `StructTests` | fixed; the suggested test of null suggestions over `ErrorTests` is not added: `FixSentenceTests` already reads every message in the source. The last fallback, "Expected {target}, found {source}. Use a {target} here" (`Checker.TypeRules.cs`), says little for types with no conversion (one array type for another); R6 (messages as data) revisits it (review R2, suggestion 4) |
+| semantics 13 (`0..256` counts with a `u16`) | `34e10f8` | `LoopCounterTypeTests` | fixed as decided 2026-11-15; an end past 255 with a larger step ends on the carry |
+| semantics 14 (nine hand-written tree walks) | | | not fixed: R4 (one syntax-tree visitor); semantics 1 and 2 fixed in place |
+| semantics 15 (NMOS instruction effects in the checker) | | | not fixed: R4 |
+| semantics 16 ("has boards" means the NES) | | | not fixed: R6 (platforms as data) |
+| semantics 17 (control flow on error text) | | | not fixed: R6 |
+| semantics 18 (context passed through fields) | | | not fixed: R5 |
+| semantics 19 (long methods) | | | not fixed: R5 |
+| semantics 20 (rules written two or three times) | | | not fixed: R4 (one description per fact) |
+| semantics 21 (call graph as a side effect) | | | not fixed: R5 |
+| semantics 22 (small things) | | | not fixed: R5 |
+| R1-1 (16-bit volatile `x -= 1` reads the low byte twice) | `ef2b111` | `VolatileAccessTests` (2 marked cases) | fixed: the subtraction instead of `lda / bne / dec / dec` |
+| R1 suggestion 4 (a `u16` column in the matrix) | `83525ca` | `OperandMatrix16Tests` (912 cases) | done; all passed when added |
+
+### Marked failures left
+
+| Finding | Test | Cases | What fails |
+|---|---|--:|---|
+| question 170 | `VolatileAccessTests.Open_question_170` | 4 | a 16-bit volatile `x += 1` / `x += 2` writes the high byte only on a carry; open, see the question |
 
 ### Review findings handled by R1
 
@@ -30,23 +83,14 @@ Roadmap "Before the first release" (decision 2026-11-15): one row per finding of
 | tests 13 (`Run.Program` does everything in its constructor) | | | not fixed: R5 (structure) or R6 (one run model with `Runner`, tools 1) |
 | tests 14 (small things) | | | not fixed: R6; the cycle table's check goes with tools 17 in R3 |
 
-### Marked failures (for R2 and R3)
-
-Each is a theory with `Skip = "<finding>: ..."`; its cases run when the skip is removed. All are in R2's areas (backend, checker); R1 found none in R3's.
-
-| Finding | Test | Cases | What fails |
-|---|---|--:|---|
-| backend 1 | `OperandMatrixTests.Fails_backend_1` | 21 | `indexed match` inside a `using X` or `using Y` loop: wrong arm when optimized (the plain run is right) |
-| backend 2 | `OperandMatrixTests.Fails_backend_2` | 2 | `p[1] = irecs[j].f` with an `indexed` struct array stores the wrong value |
-| backend 3 | `VolatileAccessTests.Fails_backend_3` | 30 | a 16-bit volatile target of `x = a + b` (and `-`, `&`, `|`, `^`, `~`, shifts) gets the in-between value written; `x <<= 2` / `x >>= 2` write twice at 8 and 16 bits |
-| backend 4 | `EvaluationOrderTests.Fails_backend_4` | 6 | calls in both `for` bounds (and the step) and in a compare returned into the carry run right to left |
-| backend 5 | `OperandMatrixTests.Fails_backend_5` | 1 | `a[a[0].lo] = b[k] + c[k]` (u16) reloads the index between the bytes: 2, expected $0102 |
-| semantics 1 | `OperandMatrixTests.Fails_semantics_1` | 12 | a struct field, also through a struct-array element, as a `for` step: the loop never ends |
-| semantics 2 | `OperandMatrixTests.Fails_semantics_2` | 2 | a call in an inner loop's `step` inside a `using X` / `using Y` loop is accepted |
-| R1-1 (new) | `VolatileAccessTests.Fails_R1_1` | 2 | a 16-bit volatile `x -= 1` (`lda x / bne / dec x+1 / dec x`) reads the low byte twice (spec 4) |
-| question 170 | `VolatileAccessTests.Open_question_170` | 4 | a 16-bit volatile `x += 1` / `x += 2` writes the high byte only on a carry; open, see the question |
-
 ## Done
+
+- **R2: fixes in the backend and the checker** (2026-11-15, roadmap R2, reviews `code-quality-backend.md` and `code-quality-semantics.md`; the table above has one row per finding):
+  - *Backend* (`18d97ff`, `e19b10e`, `f384fb1`, `9e375dd`, `ef2b111`, `9208e14`): the dispatch `rts` of an `indexed match` is not the function's return for the dead-load and N/Z analyses (`Optimizer.Dispatches`); Y is reserved while a pointer store's value is computed; no in-place 16-bit element store when the index reads the array; `InSourceOrder` for a `for` start against its end or step and for a compare into the carry; `AssignVolatile16` writes a 16-bit volatile target once per byte, a volatile byte shifts in place only by one, and a 16-bit volatile `x -= 1` subtracts; a grown branch keeps its label's offset.
+  - *Checker* (`af2fa27`, `ab18427`, `221cdae`, `34e10f8`, `af84911`, `4d088d8`, `573d381`, `2f48182`, `94a816f`): the `for` step is lowered and walked by `ContainsCall` (`ForStmt.Step` is settable); `DataValue` reads a single `data` value at compile time; main-file interrupt fns no root reaches are walked for recursion; constant typing (a typed constant narrows only a value that fits; `as` keeps the low bits of any constant; `.lo`/`.hi` of an untyped constant are its two bytes); the loop counter's type from the values it takes (`CounterType`; `StepByOne` ends `0..256` with `inx` / `bne`, `StepGeneral` ends a u8 loop with an end past 255 on the carry); `ResolveType` passes the long-array and list-length rules to the outermost type only; data in a zero-page-only asm mode is an error; an undeclared name in a `using` loop is not counted as a call; type and asm messages with fix sentences (`FixSentenceTests` has one exemption fewer); `@ name` in a module uses the main file's regions and `chr` areas, and a module symbol of that name is an error.
+  - *Tests*: R1's marked theories now run with the others (the matrix's known-failure list is gone; `VolatileAccessTests` keeps one for question 170). New: `LoopCounterTypeTests`, `OperandMatrix16Tests` (912 cases), and the tests named in the table. Conversions of constants (`as`, `.lo`/`.hi`) now have tests, part of R1's tests 10; precedence tests are still missing.
+  - *Skill*: `language.md` says a module may place declarations in the main file's regions; `SKILL.md`'s error outputs rewritten.
+  - The demonstration programs of backend 1, 2, 5 and semantics 1, 2, 5 were run again with `tern run` / `tern`: 18, 77, `$0102`, 5 passes, and the two errors, as the findings say they should.
 
 - **R1: tests that find bugs where features meet** (2026-11-15, roadmap R1, review `code-quality-tests.md`):
   - *Random start* (`669124d`, finding 2): `StartState` fills all memory with bytes from a fixed seed (6502) before the program is loaded, and sets A, X, Y non-zero and the carry, V and N; used by `Run` and `Library`. `Run.Program(..., zeroStart: true)` gives the old state. Seventeen tests read memory nothing had written (stand-in buffers and counters, fixed-address variables, bytes past a load) and now set it in their setup; none was a compiler bug.
@@ -799,7 +843,8 @@ Cycles including `jsr` and `rts`, best and worst over the test values (`FloatTes
 
 ## Known limitations and technical debt
 
-- `OptimizerTests.A_long_function_is_optimized_quickly` (5 seconds for 4500 statements) can fail when the whole suite runs in parallel on a loaded machine; it passes alone in about 0.5 s. Seen once at the start of R1.
+- `OptimizerTests.A_long_function_is_optimized_quickly` (5 seconds for 4500 statements) can fail when the whole suite runs in parallel on a loaded machine; it passes alone in about 0.5 s. Seen once at the start of R1, and in about one full run in four during R2 (the R2 optimizer is about 10% slower on it, 620 ms against 560 ms from the CLI, from the jump-table check in `NzLiveAfter`; the failures come from the parallel load). A longer limit or running it alone would remove the flake.
+- A 16-bit volatile `w += 256` is still `inc w+1`, which reads and writes only the high byte; it is the same question as 170.
 - The optimized-against-plain comparison (R1) leaves out programs with `addr(` or `noinit`, pointer variables and runs with setup, traps, IRQs or buttons; their values may depend on the layout or timing.
 - Two interface modules whose fixed routines overlap (`api1.value` and `api2.other` both at `$8000`) give "... are placed at overlapping addresses" at `main.tern:1:1`, not at either declaration (review M27 follow-up, outside the branch; for a later milestone).
 - NES: `tern run` has no option for the pads (only tests script them with `NesBus.Buttons`), no dump of PPU memory but `--screen`, and models no timing within a frame (sprite 0 hits, the length of vblank).
@@ -877,6 +922,10 @@ Not bugs; things to improve, mostly in M7 (optimizer).
 - `w = addr(map) - 1` (or `+`) into a 16-bit variable stores `addr(map)` and then subtracts at run time; `CodeGen.AddressBytes` could make it two `lda #` / `sta` pairs, as it already does for `.lo` / `.hi`.
 
 ## Questions for the spec session
+
+Open, from R2:
+
+172. **A `u8` variable start with an end of 256** (review R2, suggestion 3). Spec 5.1 says "With a variable bound, the type comes from the bound's type". Read that way, `for i in start..256` with `start: u8` counts with a `u8` from `start` to 255, the natural way to walk from an offset to the end of a page. Built (as on `main`): an error, "256 does not fit in u8 (0 to 255), the type of 'start' ... Convert 'start' with 'as u16'"; its fix compiles. Question: should `u8_var..256` be allowed? If so, `Unify` would allow exactly an end of 256; the checker's `f.To.Type = type` path (`Checker.Bodies.cs`) and the generator's `to != 256` test (`CodeGen.Loops.cs`) already give the right loop (`inx` / `bne`).
 
 Open, from R1:
 

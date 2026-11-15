@@ -463,6 +463,18 @@ public class DataTests
         Assert.Contains(expected, e.Description);
     }
 
+    /// <summary>Review code-quality-semantics 9: a struct laid out while a global's type was resolved took its long-array rule.</summary>
+    [Theory]
+    [InlineData("var s: S")]
+    [InlineData("const N = len(s.buf)", "var s: S")]
+    [InlineData("var t: [S; 2]")]
+    public void A_struct_field_has_at_most_256_elements_in_any_order(params string[] declarations)
+    {
+        var source = "struct S { buf: [u8; 1000], n: u8 }\n" + string.Join("\n", declarations) + "\nfn main() { }";
+        var e = Assert.Throws<CompileError>(() => TernCompiler.Compile(source));
+        Assert.Contains("An array of u8 has at most 256 elements", e.Description);
+    }
+
     [Theory]
     [InlineData("var d: [u8; _]", 257, "'d' is a long byte array (257 bytes)")]
     [InlineData("data d: [u16; _]", 257, "An array of u16 has at most 256 elements")]

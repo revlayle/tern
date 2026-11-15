@@ -19,7 +19,12 @@ public static class Lowering
                 if (i.Else is not null) Apply(i.Else);
                 break;
             case WhileStmt w: w.Condition = Lower(w.Condition); Apply(w.Body); break;
-            case ForStmt f: f.From = Lower(f.From); f.To = Lower(f.To); Apply(f.Body); break;
+            case ForStmt f:
+                f.From = Lower(f.From);
+                f.To = Lower(f.To);
+                if (f.Step is not null) f.Step = Lower(f.Step);
+                Apply(f.Body);
+                break;
             case MatchStmt m:
                 m.Subject = Lower(m.Subject);
                 foreach (var arm in m.Arms) Apply(arm.Body);

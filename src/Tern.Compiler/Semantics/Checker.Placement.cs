@@ -33,11 +33,16 @@ public sealed partial class Checker
                     BinaryExpr { Op: TokenKind.Plus, Left: NameExpr named } b => (named.Name, b.Right),
                     _ => ((string?)null, (Expr?)null),
                 };
-                // Only an area name needs the memory block; a constant address does not.
-                if (areaName is not null && _module.Syntax.Memory?.Lines.Any(l => l.Kind is "region" or "chr" && l.Name == areaName) == true)
+                // Only an area name needs the memory block; a constant address does not. The block is the
+                // main file's, also for a declaration in a module (spec 8.4, decision 2026-11-15).
+                if (areaName is not null && _mainModule.Syntax.Memory?.Lines.Any(l => l.Kind is "region" or "chr" && l.Name == areaName) == true)
                 {
-                    EnsureMemoryLayout();
+                    InModule(_mainModule, EnsureMemoryLayout);
                     if (_memoryFailed) throw new FollowOnError();
+                    // In the main file a symbol with a region's name is reported at the region (Run).
+                    if (!_module.IsMain && Lookup(areaName) is { } clash)
+                        throw new CompileError(addr.Pos,
+                            $"'{areaName}' is a {(_layout.Chr.ContainsKey(areaName) ? "chr area" : "region")} of the main file and a {KindName(clash)} of this module (line {clash.Pos.Line}), so '@ {areaName}' would be ambiguous. Rename the {KindName(clash)}");
                 }
                 if (areaName is not null && Lookup(areaName) is null && (_layout.Regions.TryGetValue(areaName, out var span) | _layout.Chr.TryGetValue(areaName, out var chrSpan)))
                 {

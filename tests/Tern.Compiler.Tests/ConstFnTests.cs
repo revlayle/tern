@@ -27,6 +27,24 @@ public sealed class ConstFnTests : IDisposable
     /// <summary>C#'s rounding for round(): halves away from zero.</summary>
     private static long Round(double x) => (long)Math.Round(x, MidpointRounding.AwayFromZero);
 
+    /// <summary>Review code-quality-semantics 4: a single placed value of data crashed the compiler.</summary>
+    [Theory]
+    [InlineData("u16", "5", 5)]
+    [InlineData("u8", "200", 200)]
+    [InlineData("i8", "-3", -3)]
+    [InlineData("i16", "-1000", -1000)]
+    public void A_const_fn_reads_a_single_placed_data_value(string type, string value, int expected)
+    {
+        var r = Run.Program($$"""
+            data v: {{type}} @ $9000 = {{value}}
+            const fn f() -> int { return v + 1 }
+            const Y = f()
+            var out: i16 = Y
+            fn main() { }
+            """);
+        Assert.Equal((short)(expected + 1), (short)r.U16("out"));
+    }
+
     // ---------- Done when (roadmap M22, part 1) ----------
 
     [Fact]

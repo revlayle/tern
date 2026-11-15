@@ -8,12 +8,14 @@ public sealed partial class Checker
     // ---------- Type rules ----------
 
     /// <summary>
-    /// Type of a constant expression with no context: the type of its typed constants, or for one of
-    /// literals and untyped constants the smallest type that holds it.
+    /// Type of a constant expression with no context: the type of its typed constants when the value
+    /// fits it, otherwise the smallest type that holds it. Only the final value is checked (spec 3.1),
+    /// so <c>BOX * 30</c> with <c>BOX: u8 = 13</c> is 390, a u16.
     /// </summary>
     private static TernType DefaultType(Expr e)
     {
-        if (e.Type.Kind == TypeKind.IntLiteral && e.ConstType is { } typed) return typed;
+        if (e.Type.Kind == TypeKind.IntLiteral && e.ConstType is { } typed
+            && e.ConstValue is long v && v >= typed.MinValue && v <= typed.MaxValue) return typed;
         return LiteralType(e);
     }
 
@@ -73,8 +75,10 @@ public sealed partial class Checker
 
         if (source.Kind == TypeKind.IntLiteral)
         {
+            if (target.Kind == TypeKind.Bool)
+                throw new CompileError(e.Pos, "Expected bool, found a number. Write true or false, or compare, as in 'x != 0'");
             if (!target.IsInteger && !target.IsPointer)
-                throw new CompileError(e.Pos, $"Expected {target}, found a number");
+                throw new CompileError(e.Pos, $"Expected {target}, found a number. Use a {target} here");
             long v = e.ConstValue!.Value;
             // ~$0F is the bit pattern ...1111_0000, as wide as the type it is used as.
             if (e.IsBitPattern && v < 0 && !target.IsSigned && v >= -(1L << (8 * target.Size)))
@@ -93,8 +97,20 @@ public sealed partial class Checker
             throw new CompileError(e.Pos, $"Expected {target}, found {source}. Convert with 'as {target}'");
         if (source.IsInteger && target.IsInteger && source.IsSigned == target.IsSigned && source.Size < target.Size)
             return; // automatic widening; the code generator extends the value
-        bool convertible = (source.IsInteger || source.IsPointer) && (target.IsInteger || target.IsPointer);
-        throw new CompileError(e.Pos, $"Expected {target}, found {source}" + (convertible ? $". Convert with 'as {target}'" : ""));
+        // Only u16 converts to and from a pointer (spec 3.5).
+        if (target.IsPointer && source.IsInteger && source.Kind != TypeKind.U16)
+            throw new CompileError(e.Pos, $"Expected {target}, found {source}. Convert with 'as u16' first, then 'as {target}'");
+        if (source.IsPointer && target.IsInteger)
+            throw new CompileError(e.Pos, target.Size == 1
+                ? $"Expected {target}, found {source}. Convert with 'as u16' first, then take .lo or .hi"
+                : $"Expected {target}, found {source}. Convert with 'as u16' first, then 'as {target}'");
+        if ((source.IsInteger || source.IsPointer) && (target.IsInteger || target.IsPointer))
+            throw new CompileError(e.Pos, $"Expected {target}, found {source}. Convert with 'as {target}'");
+        if (target.Kind == TypeKind.Bool && source.IsInteger)
+            throw new CompileError(e.Pos, $"Expected bool, found {source}. Compare instead, as in 'x != 0'");
+        if (source.Kind == TypeKind.Bool && target.IsInteger)
+            throw new CompileError(e.Pos, $"Expected {target}, found bool. Use 'if' to choose a number, as in 'if b {{ x = 1 }}'");
+        throw new CompileError(e.Pos, $"Expected {target}, found {source}. Use a {target} here");
     }
 
     /// <summary>
@@ -255,6 +271,9 @@ public sealed partial class Checker
         // An implementation that no call through its interface reaches is still in its table.
         foreach (var f in tableTargets.Where(f => !seen.Contains(f) && !addressTaken.Contains(f))) addressTaken.Add(f);
         AddAll();
+        // Handlers that call each other are all parts, so no root reaches them; their cycle is still an error (spec 6.4).
+        foreach (var h in mainModule.Scope.Values.OfType<FunctionSymbol>().Where(f => f.IsInterrupt && !seen.Contains(f)).OrderBy(f => f.Pos.Line))
+            OrderReachable(h);
         return all;
     }
 

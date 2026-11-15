@@ -136,8 +136,15 @@ public sealed partial class Checker
                 }
                 if (m.Member is not ("lo" or "hi"))
                     throw new CompileError(m.Pos, $"Unknown member '.{m.Member}'. Use .lo or .hi, or a field of a struct");
-                // A typed 16-bit constant keeps its size (LINE.hi with LINE: u16 = 250 is 0); otherwise the size of the value.
-                if (m.Target.Type.Kind == TypeKind.IntLiteral) Coerce(m.Target, m.Target.ConstType is { Size: 2 } wide ? wide : LiteralType(m.Target));
+                // A typed 16-bit constant keeps its size (LINE.hi with LINE: u16 = 250 is 0), and so does an
+                // untyped one, whatever its value (BASE.hi with BASE = $C0 is 0); a typed u8 or i8 is one byte.
+                if (m.Target.Type.Kind == TypeKind.IntLiteral)
+                    Coerce(m.Target, m.Target.ConstType switch
+                    {
+                        { Size: 2 } wide => wide,
+                        null => m.Target.ConstValue < 0 ? TernType.I16 : TernType.U16,
+                        _ => LiteralType(m.Target),
+                    });
                 if (m.Target.Type.IsPointer)
                     throw new CompileError(m.Pos, $".{m.Member} needs a number; convert the pointer first: (p as u16).{m.Member}");
                 if (m.Target.Type.Size != 2 || !m.Target.Type.IsInteger)
@@ -162,6 +169,12 @@ public sealed partial class Checker
                         throw new CompileError(c.Pos, $"Cannot convert {source} to {target}; only u16 and pointers convert to a pointer. Convert to u16 first");
                     if (!(target.IsPointer || target.Kind == TypeKind.U16))
                         throw new CompileError(c.Pos, $"Cannot convert {source} to {target}; a pointer converts only to u16 or another pointer. Convert to u16 first, then take .lo or .hi");
+                }
+                else if (source.Kind == TypeKind.IntLiteral && c.Operand.ConstValue is long big && (big < -32768 || big > 65535))
+                {
+                    // 'as' never checks a value: it keeps the low bits, of a constant of any size too (spec 3.5).
+                    c.Operand.ConstValue = Normalize(big, target);
+                    c.Operand.Type = target;
                 }
                 else if (source.Kind == TypeKind.IntLiteral)
                     Coerce(c.Operand, c.Operand.IsBitPattern && c.Operand.ConstValue < 0 ? target : LiteralType(c.Operand));

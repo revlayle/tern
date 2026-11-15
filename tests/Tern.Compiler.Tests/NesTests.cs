@@ -396,6 +396,23 @@ public class NesTests
         Assert.DoesNotContain(r.Result.Sections, s => s.Name is "bg" or "font");
     }
 
+    /// <summary>Decision 2026-11-15 (review code-quality-semantics 3): a font module places its tiles in the main file's chr area.</summary>
+    [Fact]
+    public void A_module_places_tile_data_in_a_chr_area_of_the_main_file()
+    {
+        var dir = Directory.CreateTempSubdirectory("tern");
+        try
+        {
+            File.WriteAllText(Path.Combine(dir.FullName, "font.tern"), "data glyphs: [u8; 4] @ tiles + $10 = [1, 2, 3, 4]\nfn base() -> u16 { return addr(glyphs) }\n");
+            var r = Run.Program("import font\n" + Tiles + "var at: u16\nfn main() { at = font.base() }",
+                sourcePath: Path.Combine(dir.FullName, "main.tern"), platform: Platform.Nes);
+            Assert.Equal(0x0010, r.U16("at"));
+            Assert.Equal([1, 2, 3, 4], r.Result.File[(16 + 0x4000 + 0x10)..(16 + 0x4000 + 0x14)]);
+            Assert.Equal(3, r.Nes!.Ppu[0x12]);
+        }
+        finally { dir.Delete(recursive: true); }
+    }
+
     [Fact]
     public void A_chr_area_may_be_part_of_the_pattern_tables()
     {

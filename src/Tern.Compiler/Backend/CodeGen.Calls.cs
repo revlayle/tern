@@ -119,7 +119,14 @@ public sealed partial class CodeGen
         var (p, temp) = PointerBase(ix.Target);
         LoadPointerIndex(ix, 0);
         if (source is not null) Emit(Lda, IndirectIndexed, Var(source));
-        else GenA(value);
+        else
+        {
+            // Y holds the index now: the value's code must pick X for its own indexes
+            // (an indexed record array would use Y for its offset table).
+            bool reserved = _reserved.Add(Register.Y);
+            GenA(value);
+            if (reserved) _reserved.Remove(Register.Y);
+        }
         Emit(Sta, IndirectIndexed, p);
         if (temp is not null) Release(temp);
         return true;

@@ -49,7 +49,7 @@ public sealed partial class Checker
                     throw new CompileError(f.Pos, $"Field '{f.Name}' is declared twice in '{s.Name}' (first at {twice.Pos}). Rename one of them");
                 var type = ResolveType(f.Type);
                 if (type.IsArray && type.Element!.IsStruct)
-                    throw new CompileError(f.Pos, "A field cannot be an array of structs yet. Use an array of structs outside the struct, or a pointer");
+                    throw new CompileError(f.Pos, "A field that is an array of structs is not supported yet. Use an array of structs outside the struct, or a pointer");
                 int offset = next;
                 if (f.Offset is not null)
                 {

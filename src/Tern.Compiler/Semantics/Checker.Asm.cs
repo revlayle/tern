@@ -182,7 +182,7 @@ public sealed partial class Checker
         if (Has(Relative))
         {
             if (ins.Form != AsmForm.Direct || ins.Index is not null || v!.Label is null && v.Function is null || v.High is not null)
-                throw new CompileError(ins.Pos, $"'{name}' needs a label, e.g. {name} .loop");
+                throw new CompileError(ins.Pos, $"'{name}' needs a label. Use one, as in '{name} .loop'");
             return Relative;
         }
         if (v!.High is not null)
@@ -233,6 +233,11 @@ public sealed partial class Checker
         }
         if (v.Variable is not { } var)
             throw new CompileError(pos, $"{what} needs a zero-page address, not a {(v.Function is not null ? "function" : "label")}. Use a variable in zero page");
+        // Data is never moved into zero page (on a cartridge it is ROM): the operand is almost always meant to be a pointer to it.
+        if (var.IsData)
+            throw new CompileError(pos, ins.Form is AsmForm.IndexedIndirect or AsmForm.IndirectIndexed
+                ? $"{what} needs a pointer in zero page, but '{var.Name}' is data, not a pointer. Declare one, as in 'var p: ptr u8 = addr({var.Name})', and use (p),y"
+                : $"{what} needs a zero-page address, but '{var.Name}' is data, which is never in zero page. Use another addressing mode, or a variable in zero page");
         if (var.FixedAddress is int a && a + v.Number > 0xFF)
             throw new CompileError(pos, $"{what} needs a zero-page address, but '{var.Name}' is at ${a:X4}. Place it in zero page ('@ zp' or an address below $100)");
         var.AsmZeroPage = true;

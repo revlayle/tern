@@ -135,7 +135,7 @@ public sealed partial class Checker
                 if (type.IsStruct || type.IsStructArray)
                     throw new CompileError(decl.Init.Pos, "A struct cannot have an initial value. Assign its fields");
                 if (type.IsArray && IsCompileTimeArray(decl.Init)) CheckExpr(decl.Init);
-                if (type.IsArray) throw new CompileError(decl.Init.Pos, "Local arrays cannot have initial values yet. Assign the elements, or use a global or data");
+                if (type.IsArray) throw new CompileError(decl.Init.Pos, "An initial value for a local array is not supported yet. Assign the elements, or use a global or data");
                 CheckExpr(decl.Init);
                 Coerce(decl.Init, type);
                 v.Weight += Weight();
@@ -235,12 +235,14 @@ public sealed partial class Checker
     {
         CheckExpr(f.From);
         CheckExpr(f.To);
+        if (f.Step is not null) CheckExpr(f.Step);
         foreach (var bound in new[] { f.From, f.To })
         {
             if (!(bound.Type.IsInteger || bound.Type.Kind == TypeKind.IntLiteral))
                 throw new CompileError(bound.Pos, "Loop bounds must be numbers. Use integer values, or convert with 'as'");
-            // A typed constant gives the counter its type, as a variable of that type would.
-            if (bound is { Type.Kind: TypeKind.IntLiteral, ConstType: { } typed }) Coerce(bound, typed);
+            // A typed constant gives the counter its type, as a variable of that type would, when its value fits it.
+            if (bound is { Type.Kind: TypeKind.IntLiteral, ConstType: { } typed, ConstValue: long value }
+                && value >= typed.MinValue && value <= typed.MaxValue) Coerce(bound, typed);
         }
 
         // The loop variable's type: the wider of the bounds, or u8/u16 for literals. A negative
@@ -253,7 +255,7 @@ public sealed partial class Checker
             if (a < 0 || b < 0)
                 type = Math.Min(a, b) >= -128 && Math.Max(a, b) <= 127 ? TernType.I8 : TernType.I16;
             else
-                type = DefaultType(f.From).Size >= DefaultType(f.To).Size ? DefaultType(f.From) : DefaultType(f.To);
+                type = CounterType(f, a, b) ?? (DefaultType(f.From).Size >= DefaultType(f.To).Size ? DefaultType(f.From) : DefaultType(f.To));
         }
         else if (fromLiteral != toLiteral)
         {
@@ -267,10 +269,11 @@ public sealed partial class Checker
         else
             type = Unify(f.From, f.To, f.Pos);
         Coerce(f.From, type);
-        Coerce(f.To, type);
+        // An end the counter never reaches may lie past its type: 0..256 counts with a u8.
+        if (type.Kind == TypeKind.U8 && f.To is { Type.Kind: TypeKind.IntLiteral, ConstValue: > 255 }) f.To.Type = type;
+        else Coerce(f.To, type);
 
         long? from = f.From.ConstValue, to = f.To.ConstValue;
-        if (f.Step is not null) CheckExpr(f.Step);
         if (f.Step is { ConstValue: null, Type.IsInteger: true })
             CheckVariableStep(f, type, from, to);
         else if (f.Step is not null)
@@ -364,6 +367,20 @@ public sealed partial class Checker
                 $"The loop reaches {last}, past the end of '{name}' (length {length}). Make the loop stop before {length}");
     }
 
+    /// <summary>
+    /// The counter type of a loop over non-negative constant bounds, from the values it takes (spec 5.1,
+    /// decision 2026-11-15): <c>0..256</c> and <c>0..=300 step 127</c> count with a u8, <c>1..257</c>
+    /// with a u16. Null when the loop runs no passes or its step is not a usable constant.
+    /// </summary>
+    private static TernType? CounterType(ForStmt f, long from, long to)
+    {
+        long step = f.Step is null ? 1 : f.Step.ConstValue ?? 0;
+        if (step == 0 || Math.Abs(step) > 127) return null;
+        if (LargestLoopValue(from, to, f.Inclusive, (int)step) is not long last) return null;
+        long largest = Math.Max(from, last);
+        return largest <= 255 ? TernType.U8 : largest <= 65535 ? TernType.U16 : null;
+    }
+
     /// <summary>The largest value a loop with constant bounds reaches, or null if it runs no passes. Also used by the code generator (spec 3.2's fold).</summary>
     internal static long? LargestLoopValue(long from, long to, bool inclusive, int step)
     {
@@ -427,12 +444,13 @@ public sealed partial class Checker
     /// <summary>True if the code calls a function that may change <paramref name="reg"/>: any function except a routine that keeps it.</summary>
     private bool ContainsCall(Node node, Register reg) => node switch
     {
-        CallExpr c => (c.Name is not ("addr" or "len" or "sizeof" or "offset") && !(Lookup(c.Name) is FunctionSymbol f && f.Keeps.Contains(reg)))
+        // A name that is not declared is not counted: checking the body reports it (review code-quality-semantics 11).
+        CallExpr c => (c.Name is not ("addr" or "len" or "sizeof" or "offset") && Lookup(c.Name) is { } called && !(called is FunctionSymbol f && f.Keeps.Contains(reg)))
             || c.Args.Any(a => ContainsCall(a, reg)),
         BlockStmt b => b.Statements.Any(x => ContainsCall(x, reg)),
         IfStmt i => ContainsCall(i.Condition, reg) || ContainsCall(i.Then, reg) || (i.Else is not null && ContainsCall(i.Else, reg)),
         WhileStmt w => ContainsCall(w.Condition, reg) || ContainsCall(w.Body, reg),
-        ForStmt f => ContainsCall(f.From, reg) || ContainsCall(f.To, reg) || ContainsCall(f.Body, reg),
+        ForStmt f => ContainsCall(f.From, reg) || ContainsCall(f.To, reg) || (f.Step is not null && ContainsCall(f.Step, reg)) || ContainsCall(f.Body, reg),
         MatchStmt m => ContainsCall(m.Subject, reg) || m.Arms.Any(a => ContainsCall(a.Body, reg)),
         ReturnStmt r => r.Value is not null && ContainsCall(r.Value, reg),
         AssignStmt a => ContainsCall(a.Target, reg) || ContainsCall(a.Value, reg),

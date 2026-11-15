@@ -572,6 +572,7 @@ public static partial class Optimizer
     private static bool RemoveDeadLoads(List<AsmItem> code, FunctionSymbol function)
     {
         bool removed = false;
+        bool dispatches = Dispatches(code);
         // From the end, so each decision sees the code after it as it will be.
         for (int k = code.Count - 1; k >= 0; k--)
         {
@@ -585,8 +586,9 @@ public static partial class Optimizer
             {
                 if (code[j] is Comment or SourceLine or LabelDef) continue;
                 if (code[j] is not Instr n || FromAsm(n)) break;
-                // rts reads only the return value's registers (N and Z for a bool in a flag).
-                bool deadAtReturn = n.Mnemonic == Rts
+                // rts reads only the return value's registers (N and Z for a bool in a flag), unless
+                // it may be an indexed match's dispatch, which enters an arm.
+                bool deadAtReturn = n.Mnemonic == Rts && !dispatches
                     && function.ReturnRegister is not (Register.Zero or Register.Negative)
                     && !(function.ReturnRegister is { } ret && ret.Uses(register));
                 if (!deadAtReturn && (n.Mnemonic is Jsr or Rts or Rti or Brk or Mnemonic.Jmp || IsBranch(n.Mnemonic))) break;
@@ -745,6 +747,12 @@ public static partial class Optimizer
         LabelTable or DataBytes or AddressByte => false,
         _ => true,
     };
+
+    /// <summary>
+    /// True if the code has a jump table, so a compiler <c>rts</c> in it may be an <c>indexed match</c>'s
+    /// dispatch (<c>pha / pha / rts</c>) into an arm rather than the function's return.
+    /// </summary>
+    private static bool Dispatches(List<AsmItem> code) => code.Exists(item => item is LabelTable);
 
     /// <summary>
     /// Labels that may be entered from somewhere the analysis cannot see: named other than by a jump

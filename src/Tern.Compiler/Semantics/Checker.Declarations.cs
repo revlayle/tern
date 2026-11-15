@@ -885,6 +885,15 @@ public sealed partial class Checker
     /// <param name="layOut">False for the target of a pointer, which may be a struct still being laid out (<c>next: ptr Enemy</c>).</param>
     private TernType ResolveType(TypeSyntax syntax, bool layOut = true)
     {
+        // A global's long byte array and '_' length are for its own type only, not for a struct laid
+        // out or a constant declared while it is resolved (review code-quality-semantics 9).
+        var (longBytes, listLength) = (_allowLongBytes, _listLength);
+        (_allowLongBytes, _listLength) = (false, null);
+        return ResolveType(syntax, layOut, longBytes, listLength);
+    }
+
+    private TernType ResolveType(TypeSyntax syntax, bool layOut, bool longBytes, int? listLength)
+    {
         switch (syntax)
         {
             case NamedTypeSyntax n:
@@ -919,16 +928,15 @@ public sealed partial class Checker
                 long len;
                 if (a.Length is null)
                 {
-                    len = _listLength ?? throw new CompileError(a.Pos,
+                    len = listLength ?? throw new CompileError(a.Pos,
                         "The length '_' is taken from a list or string initial value, a list built with 'for' or a const fn's array, so it works only on a global var or data with one, as in 'data t: [u8; _] = [1, 2, 3]'. Write the length here");
-                    _listLength = null;
                 }
                 else
                 {
                     CheckExpr(a.Length);
                     len = a.Length.ConstValue ?? throw new CompileError(a.Length.Pos, "Array length must be known at compile time. Use a number or a constant");
                 }
-                if (len < 1 || len > 256 && !(_allowLongBytes && element.Size == 1 && element.IsInteger))
+                if (len < 1 || len > 256 && !(longBytes && element.Size == 1 && element.IsInteger))
                     throw new CompileError(a.Length?.Pos ?? a.Pos, len > 256
                         ? $"An array of {element} has at most 256 elements. Only a global var or data of u8 or i8 may be longer (spec 3.2), and it is used through a pointer. Split it into arrays of at most 256"
                         : $"Array length must be 1 to 256, not {len}. Use a length in that range");

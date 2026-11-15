@@ -548,7 +548,7 @@ public class StructTests
     [InlineData("struct S { x: u8, x: u16 }\nfn main() { }", "Field 'x' is declared twice in 'S'")]
     [InlineData("struct S { inner: S }\nfn main() { }", "Struct 'S' contains itself")]
     [InlineData("struct A { b: B }\nstruct B { a: A }\nfn main() { }", "contains itself")]
-    [InlineData(P + "struct S { ps: [Point; 2] }\nfn main() { }", "A field cannot be an array of structs yet")]
+    [InlineData(P + "struct S { ps: [Point; 2] }\nfn main() { }", "A field that is an array of structs is not supported yet")]
     [InlineData("struct S { x: u8 @ -1 }\nfn main() { }", "Field offset -1 is outside memory")]
     [InlineData("struct S { a: u16 @ $FFFF }\nfn main() { }", "Struct 'S' is 65537 bytes, more than memory")]
     [InlineData("struct S { a: u16, b: u8 @ 1 }\nfn main() { }", "Field 'b' (offset 1, 1 byte(s)) overlaps field 'a' (offset 0, 2 byte(s))")]
