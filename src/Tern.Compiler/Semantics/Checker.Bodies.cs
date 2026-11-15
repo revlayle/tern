@@ -432,7 +432,7 @@ public sealed partial class Checker
         BlockStmt b => b.Statements.Any(x => ContainsCall(x, reg)),
         IfStmt i => ContainsCall(i.Condition, reg) || ContainsCall(i.Then, reg) || (i.Else is not null && ContainsCall(i.Else, reg)),
         WhileStmt w => ContainsCall(w.Condition, reg) || ContainsCall(w.Body, reg),
-        ForStmt f => ContainsCall(f.From, reg) || ContainsCall(f.To, reg) || ContainsCall(f.Body, reg),
+        ForStmt f => ContainsCall(f.From, reg) || ContainsCall(f.To, reg) || (f.Step is not null && ContainsCall(f.Step, reg)) || ContainsCall(f.Body, reg),
         MatchStmt m => ContainsCall(m.Subject, reg) || m.Arms.Any(a => ContainsCall(a.Body, reg)),
         ReturnStmt r => r.Value is not null && ContainsCall(r.Value, reg),
         AssignStmt a => ContainsCall(a.Target, reg) || ContainsCall(a.Value, reg),
