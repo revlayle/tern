@@ -273,7 +273,7 @@ public static partial class Optimizer
                 if (i.Mnemonic is Jsr or Rti) break;
                 if (i.Mnemonic == Rts)
                 {
-                    if (FromAsm(i) || returnsInNz) return true;
+                    if (FromAsm(i) || returnsInNz || Dispatches(code)) return true;
                     break;
                 }
                 var (reads, writes) = AsmEffects.Of(i.Mnemonic, i.Mode);

@@ -109,7 +109,6 @@ public class OperandMatrixTests
     private static string? KnownFailure(string form, string place, string context, bool mustFail)
     {
         if (mustFail) return null;
-        if (place == "indexed match" && context != "once") return "backend 1";
         if (place == "pointer store" && form == "indexed struct array" && context == "once") return "backend 2";
         return null;
     }
@@ -133,13 +132,7 @@ public class OperandMatrixTests
     }
 
     public static TheoryData<string, string, string, int> Cases() => CasesWhere(f => f is null);
-    public static TheoryData<string, string, string, int> Backend1() => CasesWhere(f => f == "backend 1");
     public static TheoryData<string, string, string, int> Backend2() => CasesWhere(f => f == "backend 2");
-
-    [Theory(Skip = "Review code-quality-backend 1: a load of X or Y before an indexed match is removed as dead (R2)")]
-    [MemberData(nameof(Backend1))]
-    public void Fails_backend_1(string form, string place, string context, int v) =>
-        An_operand_gives_the_same_result_in_every_place(form, place, context, v);
 
     [Theory(Skip = "Review code-quality-backend 2: p[i] = recs[j].f with an indexed record array stores the wrong value (R2)")]
     [MemberData(nameof(Backend2))]
