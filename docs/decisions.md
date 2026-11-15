@@ -988,3 +988,11 @@ Roadmap "Before the first release: fixes and cleanup" (R1-R6), "First release". 
 - **Methods stay under about 100 lines, as a guideline.** One that stays longer is listed with its reason in `docs/status.md`, and the session names it to the developer. Reason (the developer's): short methods are the goal, but a long `switch` or a lookup table cannot always be split without making it harder to read.
 - **Readability comes first, with a hard maximum of 500 lines** (same day, the developer's). A method is never split only to get under 100 lines; a long `switch` or lookup may read best whole. At 500 lines a method is always split, and a lookup that long becomes a data table instead of code.
 - **Over 300 lines is almost always wrong** (same day, the developer's): such a method is split unless it is a single `switch` or lookup that reads best whole; 500 stays the maximum with no exception.
+
+## 2026-11-15: a follow-up review of the fixes (R7)
+
+Roadmap R7, "Before the first release", "First release"; `.claude/commands/review.md`.
+
+- **After R6, one Fable review session checks that the code-quality findings were fixed**, before the release. Reason (the developer's): the fixes should be checked against the review that found them, by a reviewer as capable as the first.
+- **Its scope is smaller than the first review's, for cost:** one session instead of five; a verdict per earlier finding, not a search for new ones; the demonstration programs run again; the construction themes checked by searching for what should be gone; the R1-R6 reviews' own checks not repeated. Reason: each fix milestone already gets a regular review, so R7 only has to close the loop with the first review.
+- **R1-R6 keep a finding table in `docs/status.md`** (finding, commit, test, or "not fixed" and why). Reason: R7 then reads the table and the fix diffs instead of rediscovering what was done, which is most of the cost saved.

@@ -7,6 +7,8 @@ You are the **review session** for the Tern compiler. You start with no memory o
 
 Branch to review: $ARGUMENTS (if empty, use the branch named in `docs/status.md`).
 
+If $ARGUMENTS names a roadmap milestone that defines its own review (R7, the follow-up review of the code-quality fixes), follow that milestone's scope, input and output in `docs/roadmap.md` instead of steps 2-5, and keep to its scope. Step 6 and 7 still apply.
+
 1. Read `CLAUDE.md`, `docs/roadmap.md` (the milestone's scope and "done when" list), `docs/decisions.md`, and the spec sections the milestone lists.
 2. Look at the changes: `git diff main...<branch>` and `git log main..<branch>`. You are in the main checkout; do not switch branches here. To build and test the branch, use the coding worktree (`../6502-language-dev`) if it has the branch checked out, otherwise a temporary worktree that you remove afterwards.
 3. Run `dotnet test` on the branch.
