@@ -117,7 +117,7 @@ public sealed class Platform
 
     /// <summary>
     /// Commodore 64: a .prg loaded at $0801 that starts with the BASIC line "10 SYS 2061".
-    /// Uses BASIC's zero page ($02-$8F), so the program does not return to BASIC.
+    /// Uses BASIC's zero page ($02-$8F), so the program does not return to BASIC, and $FB-$FE.
     /// </summary>
     public static readonly Platform C64 = new()
     {
@@ -133,7 +133,7 @@ public sealed class Platform
             0x00,                   // end of line
             0x00, 0x00,             // end of program
         ],
-        ZeroPage = [(0x02, 0x8F)],
+        ZeroPage = [(0x02, 0x8F), (0xFB, 0xFE)],    // spec 12.2; $FB-$FE is free in the KERNAL too
         RamEnd = 0x9FFF,
         VolatileAreas =
         [

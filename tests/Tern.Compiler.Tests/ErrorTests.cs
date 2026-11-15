@@ -238,14 +238,36 @@ public class ErrorTests
     [Fact]
     public void Dereferenced_pointer_that_does_not_fit_in_zero_page_is_an_error()
     {
-        // $02-$8F is 142 bytes; the array leaves one byte, too few for a pointer.
+        // $02-$8F and $FB-$FE are 146 bytes; the array fills the first, two pointers the second.
         var e = Assert.Throws<CompileError>(() => TernCompiler.Compile("""
-            var big: [u8; 141] @ zp
+            var big: [u8; 142] @ zp
             var p: ptr u8
-            fn main() { p[0] = 1 }
+            var q: ptr u8
+            var r: ptr u8
+            fn main() { p[0] = 1; q[0] = 1; r[0] = 1 }
             """));
-        Assert.Contains("Zero page is full: '@ zp' variables, dereferenced pointers and zero-page assembly operands need 143 bytes, 142 are free", e.Description);
-        Assert.Contains("big (141), p (2)", e.Description);
+        Assert.Contains("Zero page is full: '@ zp' variables, dereferenced pointers and zero-page assembly operands need 148 bytes, 146 are free", e.Description);
+        Assert.Contains("big (142), p (2), q (2), r (2)", e.Description);
+    }
+
+    // Review code-quality-syntax 3: the C64's free zero page is $02-$8F and $FB-$FE (spec 12.2).
+    [Fact]
+    public void The_c64_uses_fb_to_fe_after_02_to_8f()
+    {
+        var r = Run.Program("""
+            var big: [u8; 142] @ zp
+            var p: ptr u8
+            var q: ptr u8
+            var out: u8
+            data t: [u8; 2] = [7, 9]
+            fn main() {
+                p = addr(t)
+                q = addr(t) + 1
+                out = p[0] + q[0]
+            }
+            """);
+        Assert.Equal(16, r.U8("out"));
+        Assert.Equal([0xFB, 0xFD], new[] { r.Address("p"), r.Address("q") }.Order());
     }
 
     [Fact]
