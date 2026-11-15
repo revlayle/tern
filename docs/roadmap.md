@@ -669,6 +669,8 @@ Done when: an example scrolls a background and moves sprites in a NES emulator (
 
 Decisions 2026-11-15: the code-quality review (`docs/reviews/code-quality.md`, with one file per area) was done so the release ships without its known bugs and with a well-built codebase. Its 93 findings and five spec questions are split into six milestones, each with its own branch, review and merge, so a session reads only the review files of its area. Order: the tests that find bugs first; then the bugs, each with a test that fails before its fix; then the construction cleanup, which those tests guard. The cleanup changes no behavior: no benchmark moves and no `tern run` output changes, except where a cleanup milestone below says so.
 
+Each of R1-R6 keeps a table in `docs/status.md`, one row per review finding it handles: the area and number (`backend 3`), the commit, the test that guards it, or "not fixed" with the reason. R7 reviews from that table. Each milestone also gets the usual review before its merge.
+
 ### R1: Tests that find bugs where features meet
 
 Review theme 7 (`code-quality-tests.md`), the parts that find bugs.
@@ -729,9 +731,22 @@ Review themes 3 and 5, and the rest of theme 7.
 
 Done when: adding a platform needs no change outside its description and its library, the feature suite passes on all four platforms, and the benchmarks and `SkillTests` are unchanged.
 
-## First release (after R6)
+### R7: Follow-up review of the fixes
 
-Decision 2026-11-08, changed 2026-11-13: the first release comes once the four platforms C64, Atari, Apple II and NES work; the Commander X16 and the Commodore 128 come after it. Done when: M27 and R1-R6 are merged, the developer guide covers every behavior in its list, the guide (`docs/guide/`) and spec 10.1 describe the compiler and library as built, and every example builds for its platforms.
+Decision 2026-11-15. After R6 is merged, one review session, on Claude Fable (the developer picks the model), checks that the code-quality review's findings were fixed. Its scope is smaller than the first review's, for cost: it checks the earlier findings, it does not look for new ones. Started with `/review R7`, on `main`.
+
+- **Input:** the five area files and the summary (`docs/reviews/code-quality*.md`), the finding table in `docs/status.md`, and the R1-R6 review files. The code read is each fix's diff and the code its finding names, not the whole codebase.
+- **Each of the 93 findings gets a verdict:** fixed, partly fixed, not fixed, or left by a decision (with the decision's date). Not fixed includes a finding the table marks fixed when the fix does not cover the case the finding describes.
+- **The demonstrated findings:** each finding's demonstration program from the area file is compiled and run again on `main` and must now behave as the finding says it should. This is the main check, and it is cheap: the programs are in the review files.
+- **The construction themes:** R4-R6's "done when" items are checked by searching for what should be gone (a second list of instruction effects, a tree walk with its own node switch, a test on a platform's name, control flow on error text, methods over 300 lines not listed in `docs/status.md`), not by reading every file.
+- **Out of scope:** code no fix touched, new kinds of finding, style, and what the R1-R6 reviews already checked (the suite passing, the five spec changes against the spec). A bug found inside a fix's own diff is reported.
+- **Output:** `docs/reviews/code-quality-followup.md`: a table of the 93 verdicts, then must-fix items (findings not fixed or broken again with no decision to leave them), most serious first.
+
+Done when: every finding has a verdict, and each must-fix item is fixed (by a coding session on a branch `r7-fixes`, reviewed as usual) or the developer accepts it for after the release, recorded in `docs/decisions.md`.
+
+## First release (after R7)
+
+Decision 2026-11-08, changed 2026-11-13: the first release comes once the four platforms C64, Atari, Apple II and NES work; the Commander X16 and the Commodore 128 come after it. Done when: M27 and R1-R6 are merged, R7's must-fix items are fixed or accepted, the developer guide covers every behavior in its list, the guide (`docs/guide/`) and spec 10.1 describe the compiler and library as built, and every example builds for its platforms.
 
 ## After the first release
 
