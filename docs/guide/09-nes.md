@@ -148,7 +148,7 @@ Which bank is selected is not checked ([10.9](10-behavior.md#109-overlays-and-ba
 
 ## 9.7 `tern run` on the NES
 
-The built-in emulator models PPU memory and sprite memory, not pixels: writes through `$2006`/`$2007` go to a 16 KB PPU memory, and DMA to the 256-byte OAM. `$2002` reports vblank once a frame, an NMI comes every frame when bit 7 of `$2000` is set, and writes to the UxROM latch switch the bank at `$8000`. The controllers read as no buttons. `--screen` shows nametable 0, each tile as the character the program's default encoding gives it. Graphics are checked in Mesen.
+The built-in emulator models PPU memory and sprite memory, not pixels: writes through `$2006`/`$2007` go to a 16 KB PPU memory, and DMA to the 256-byte OAM. `$2002` reports vblank from the start of each frame until a read or the end of vblank, an NMI comes every frame when bit 7 of `$2000` is set (at once if it is set during vblank), a `brk` runs your IRQ handler if you set one, and writes to the UxROM latch switch the bank at `$8000`. The controllers read as no buttons. `--screen` shows nametable 0, each tile as the character the program's default encoding gives it. Graphics are checked in Mesen.
 
 ## 9.8 Examples
 
