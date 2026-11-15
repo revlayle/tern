@@ -226,6 +226,7 @@ public class OperandMatrixTests
     /// <summary>An element store whose index reads the array being written: the index is the one before the store.</summary>
     [Theory]
     [InlineData("u8", 2)]
+    [InlineData("u16", 0x0102)]
     public void An_index_that_reads_the_written_array_is_read_before_the_store(string type, int expected)
     {
         var run = Run.Program($$"""
@@ -241,9 +242,4 @@ public class OperandMatrixTests
             """);
         Assert.Equal(expected, type == "u8" ? run.U8("out") : run.U16("out"));
     }
-
-    [Theory(Skip = "Review code-quality-backend 5: a 16-bit element store reloads its index between the two bytes (R2)")]
-    [InlineData("u16", 0x0102)]
-    public void Fails_backend_5(string type, int expected) =>
-        An_index_that_reads_the_written_array_is_read_before_the_store(type, expected);
 }

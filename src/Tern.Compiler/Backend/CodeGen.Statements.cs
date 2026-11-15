@@ -606,7 +606,8 @@ public sealed partial class CodeGen
             {
                 var arr = ArrayOf(ix);
                 // a[i] = b[j] + c[k]: each byte straight into the element (lda b,x / adc c,x / sta a,x).
-                if (value is BinaryExpr bv && Simple2(value) is null && IndexedOperand(ix, 2) is { } element
+                // Not when i reads a: the element's index is loaded for each byte, after the low store.
+                if (value is BinaryExpr bv && Simple2(value) is null && !ReadsVar(ix.Index, arr) && IndexedOperand(ix, 2) is { } element
                     && Binary16InPlace(bv, element, arr))
                     break;
                 VariableSymbol? temp = null;
