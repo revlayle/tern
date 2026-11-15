@@ -255,6 +255,9 @@ public sealed partial class Checker
         // An implementation that no call through its interface reaches is still in its table.
         foreach (var f in tableTargets.Where(f => !seen.Contains(f) && !addressTaken.Contains(f))) addressTaken.Add(f);
         AddAll();
+        // Handlers that call each other are all parts, so no root reaches them; their cycle is still an error (spec 6.4).
+        foreach (var h in mainModule.Scope.Values.OfType<FunctionSymbol>().Where(f => f.IsInterrupt && !seen.Contains(f)).OrderBy(f => f.Pos.Line))
+            OrderReachable(h);
         return all;
     }
 

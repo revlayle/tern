@@ -36,6 +36,21 @@ public sealed class InterruptPartTests : IDisposable
         }
         """;
 
+    /// <summary>Review code-quality-semantics 5: both were parts, so no root reached them and they were dropped.</summary>
+    [Fact]
+    public void Handlers_that_call_each_other_are_recursion()
+    {
+        var e = Fail("""
+            var out: u8
+            interrupt fn a() { out += 1
+             b() }
+            interrupt fn b() { out += 2
+             a() }
+            fn main() { out = 1 }
+            """);
+        Assert.Contains("Recursion is not allowed: a -> b -> a", e.Message);
+    }
+
     [Fact]
     public void A_part_with_parameters_and_a_flag_return_runs_inside_the_handler()
     {
