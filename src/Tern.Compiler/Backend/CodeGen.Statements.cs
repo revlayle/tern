@@ -461,6 +461,11 @@ public sealed partial class CodeGen
                 Op(Inc, Var(v, 1));
                 Place(done);
             }
+            else if (v.IsVolatile)
+            {
+                // lda / bne / dec / dec would read the low byte twice (spec 4): the subtraction instead.
+                Assign(target, new BinaryExpr(a.Pos, TokenKind.Minus, target, a.Value) { Type = target.Type });
+            }
             else
             {
                 var done = NewLabel("dec");
@@ -509,9 +514,9 @@ public sealed partial class CodeGen
             return;
         }
 
-        // Shifts of a memory byte: shift in place.
+        // Shifts of a memory byte: shift in place. A volatile byte only by one, so no value in between is written.
         if (a.Op is TokenKind.ShlEq or TokenKind.ShrEq && target is NameExpr { Symbol: { InMemory: true } sv }
-            && sv.Type.Size == 1 && !(a.Op == TokenKind.ShrEq && sv.Type.IsSigned))
+            && sv.Type.Size == 1 && !(a.Op == TokenKind.ShrEq && sv.Type.IsSigned) && !(sv.IsVolatile && a.Value.ConstValue != 1))
         {
             for (int i = 0; i < a.Value.ConstValue; i++) Op(a.Op == TokenKind.ShlEq ? Asl : Lsr, Var(sv));
             return;
@@ -553,6 +558,23 @@ public sealed partial class CodeGen
             _ => TokenKind.Shr,
         };
         Assign(target, new BinaryExpr(a.Pos, op, target, a.Value) { Type = target.Type });
+    }
+
+    /// <summary>
+    /// A computed 16-bit value into volatile memory: each byte is written once, with no value in
+    /// between, and read no more often than the source reads it (spec 4). <c>v = v + a</c> and
+    /// <c>v = a + b</c> go one byte at a time (<c>lda / adc / sta</c>); anything else is computed into
+    /// a temporary and copied, since <see cref="Gen16"/> uses its destination as scratch memory.
+    /// </summary>
+    private void AssignVolatile16(VariableSymbol v, Expr value)
+    {
+        var d = new Loc(v);
+        if (value is BinaryExpr b && Binary16InPlace(b, (m, k) => Op(m, k == 0 ? d.Lo : d.Hi), v)) return;
+        var t = AcquireTemp(2);
+        Gen16(value, new Loc(t));
+        Op(Lda, Var(t)); Op(Sta, d.Lo);
+        Op(Lda, Var(t, 1)); Op(Sta, d.Hi);
+        Release(t);
     }
 
     /// <summary>The operation of <c>x op= v</c> on the element in A: a shift by a constant, or an arithmetic or logic instruction with a simple operand.</summary>
@@ -597,6 +619,9 @@ public sealed partial class CodeGen
 
         switch (target)
         {
+            case NameExpr { Symbol: { IsVolatile: true } v } when Simple2(value) is null:
+                AssignVolatile16(v, value);
+                break;
             case NameExpr { Symbol: { } v }:
                 Gen16(value, new Loc(v));
                 break;

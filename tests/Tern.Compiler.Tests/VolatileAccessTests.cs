@@ -47,20 +47,8 @@ public class VolatileAccessTests
     /// The cases that fail today, by the finding that explains them (docs/status.md lists them).
     /// Each finding's cases run in their own skipped theory below; when it is fixed, remove the skip.
     /// </summary>
-    private static string? KnownFailure(string type, string target, string statement)
-    {
-        if (target == "arr[i]") return null;   // an element target is computed elsewhere and stored once
-        if (statement is "X <<= 2" or "X >>= 2") return "backend 3";
-        if (type != "u16") return null;
-        return statement switch
-        {
-            "X = a + b" or "X = a - b" or "X = a + b - 7" or "X = a & b" or "X = a | b" or "X = a ^ b" or "X = ~a"
-                or "X = a << 1" or "X = a << 3" or "X = a >> 1" or "X = a >> 3" => "backend 3",
-            "X -= 1" => "R1-1",
-            "X += 1" or "X += 2" => "question 170",
-            _ => null,
-        };
-    }
+    private static string? KnownFailure(string type, string target, string statement) =>
+        type == "u16" && target != "arr[i]" && statement is "X += 1" or "X += 2" ? "question 170" : null;
 
     private static TheoryData<string, string, string> CasesWhere(Func<string?, bool> known)
     {
@@ -74,19 +62,7 @@ public class VolatileAccessTests
     }
 
     public static TheoryData<string, string, string> Cases() => CasesWhere(f => f is null);
-    public static TheoryData<string, string, string> Backend3() => CasesWhere(f => f == "backend 3");
-    public static TheoryData<string, string, string> R1_1() => CasesWhere(f => f == "R1-1");
     public static TheoryData<string, string, string> Question170() => CasesWhere(f => f == "question 170");
-
-    [Theory(Skip = "Review code-quality-backend 3: a volatile destination is used as scratch memory (R2)")]
-    [MemberData(nameof(Backend3))]
-    public void Fails_backend_3(string type, string target, string statement) =>
-        A_volatile_target_is_read_and_written_once(type, target, statement);
-
-    [Theory(Skip = "R1-1: a 16-bit volatile 'x -= 1' reads the low byte twice (R2)")]
-    [MemberData(nameof(R1_1))]
-    public void Fails_R1_1(string type, string target, string statement) =>
-        A_volatile_target_is_read_and_written_once(type, target, statement);
 
     [Theory(Skip = "Question 170: a 16-bit volatile 'x += 1' writes the high byte only on a carry")]
     [MemberData(nameof(Question170))]
