@@ -231,6 +231,9 @@ public static class Lexer
                     i++;
                 }
                 if (i >= source.Length) throw new CompileError(start, "Unterminated block comment. Add '*/' where the comment ends");
+                // A line break inside the comment ends the statement, as one outside it does (spec 2).
+                if (line > start.Line && nesting == 0 && tokens.Count > 0 && EndsStatement(tokens[^1].Kind))
+                    Add(TokenKind.Newline, "\\n", 0, i);
                 i += 2;
                 return;
             }
@@ -241,10 +244,11 @@ public static class Lexer
                 return;
             }
 
-            if (char.IsLetter(c) || c == '_')
+            if (char.IsAsciiLetter(c) || c == '_')
             {
                 int start = i;
-                while (i < source.Length && (char.IsLetterOrDigit(source[i]) || source[i] == '_')) i++;
+                while (i < source.Length && (char.IsAsciiLetterOrDigit(source[i]) || source[i] == '_')) i++;
+                if (i < source.Length && char.IsLetterOrDigit(source[i])) throw NotAscii(i);
                 string word = source[start..i];
                 // A name right before a quote is an encoding prefix: screen"HELLO". The checker
                 // reports unknown encodings. Keywords are never prefixes: return'A'.
@@ -254,10 +258,10 @@ public static class Lexer
                     return;
                 }
                 // A module's encoding: font.tiles"HI" (spec 2.1).
-                if (Peek(source, i) == '.' && (char.IsLetter(Peek(source, i + 1)) || Peek(source, i + 1) == '_') && !Keywords.ContainsKey(word))
+                if (Peek(source, i) == '.' && (char.IsAsciiLetter(Peek(source, i + 1)) || Peek(source, i + 1) == '_') && !Keywords.ContainsKey(word))
                 {
                     int end = i + 1;
-                    while (end < source.Length && (char.IsLetterOrDigit(source[end]) || source[end] == '_')) end++;
+                    while (end < source.Length && (char.IsAsciiLetterOrDigit(source[end]) || source[end] == '_')) end++;
                     string member = source[(i + 1)..end];
                     if (Peek(source, end) is '"' or '\'' && !Keywords.ContainsKey(member))
                     {
@@ -270,7 +274,18 @@ public static class Lexer
                 return;
             }
 
-            if (char.IsDigit(c) || (c == '$' && IsHexDigit(Peek(source, i + 1))))
+            // Spec 2: names are ASCII only, since they go into the emulators' label files.
+            if (!char.IsAscii(c) && char.IsLetterOrDigit(c)) throw NotAscii(i);
+
+            // C's 0x10 (spec 13).
+            if (c == '0' && Peek(source, i + 1) is 'x' or 'X' && IsHexDigit(Peek(source, i + 2)))
+            {
+                int end = i + 2;
+                while (end < source.Length && (IsHexDigit(source[end]) || source[end] == '_')) end++;
+                throw new CompileError(Pos(i), $"Tern has no '0x'. Write hex numbers with '$', as in ${source[(i + 2)..end]}");
+            }
+
+            if (char.IsAsciiDigit(c) || (c == '$' && IsHexDigit(Peek(source, i + 1))))
             {
                 int start = i;
                 int radix = 10;
@@ -331,6 +346,9 @@ public static class Lexer
             if (!matched)
                 throw new CompileError(Pos(i), $"Unexpected character '{c}'. Remove it, or put it in a string or a comment");
         }
+
+        CompileError NotAscii(int at) =>
+            new(Pos(at), $"'{source[at]}' cannot be in a name: names use A-Z, a-z, 0-9 and '_'. Write the name with these");
     }
 
     /// <summary>Reads a quoted char or string literal starting at the quote, and decodes its escapes.</summary>
@@ -346,6 +364,9 @@ public static class Lexer
                 throw new CompileError(pos, quote == '"' ? "String is not closed with '\"'. Add '\"' at its end, on the same line" : "Character literal is not closed with '''. Add ''' after the character");
             char c = source[i++];
             if (c == quote) return sb.ToString();
+            // The compiler keeps \$NN bytes as these characters, so one in the source would become a raw byte.
+            if (IsRawByte(c))
+                throw new CompileError(posAt(i - 1), $"The character U+{(int)c:X4} has no code in any encoding. Write the byte it stands for as \\$NN");
             if (c != '\\')
             {
                 sb.Append(c);

@@ -99,6 +99,37 @@ public class ErrorTests
         Assert.Equal((line, column), (e.Pos.Line, e.Pos.Column));
     }
 
+    // Review code-quality-syntax 12, 16 and 19: the whole message, at the character that causes it.
+    [Theory]
+    [InlineData("var café: u8\nfn main() { }", 1, 8, "'é' cannot be in a name: names use A-Z, a-z, 0-9 and '_'. Write the name with these")]
+    [InlineData("var αβ: u8\nfn main() { }", 1, 5, "'α' cannot be in a name: names use A-Z, a-z, 0-9 and '_'. Write the name with these")]
+    [InlineData("var x١: u8\nfn main() { }", 1, 6, "'١' cannot be in a name: names use A-Z, a-z, 0-9 and '_'. Write the name with these")]
+    [InlineData("var v: u8\nfn main() { v = ١ }", 2, 17, "'١' cannot be in a name: names use A-Z, a-z, 0-9 and '_'. Write the name with these")]
+    [InlineData("var v: u8\nfn main() { v = 0x1F }", 2, 17, "Tern has no '0x'. Write hex numbers with '$', as in $1F")]
+    [InlineData("data t = \"AC\"\nfn main() { }", 1, 12, "The character U+E042 has no code in any encoding. Write the byte it stands for as \\$NN")]
+    public void Reports_lexer_errors_at_the_character(string source, int line, int column, string expected)
+    {
+        var e = Assert.Throws<CompileError>(() => TernCompiler.Compile(source));
+        Assert.Equal(expected, e.Description);
+        Assert.Equal((line, column), (e.Pos.Line, e.Pos.Column));
+    }
+
+    // Review code-quality-syntax 15: a line break inside a block comment ends the statement.
+    [Fact]
+    public void A_line_break_inside_a_block_comment_ends_the_statement()
+    {
+        var r = Run.Program("""
+            var a: u8
+            var b: u8
+            fn main() {
+                a = 1 /* note
+                */ b = 2
+                a += 2 /* on one line */ + 3
+            }
+            """);
+        Assert.Equal((6, 2), (r.U8("a"), r.U8("b")));
+    }
+
     [Fact]
     public void A_keyword_where_no_name_was_meant_gets_no_rename_hint()
     {
