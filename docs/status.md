@@ -4,9 +4,57 @@ Owned by the coding session. Updated at the end of every coding session.
 
 ## Current
 
-- **Milestone:** R2, fixes in the backend and the checker (roadmap "Before the first release: fixes and cleanup", R2; `docs/reviews/code-quality-backend.md`, `docs/reviews/code-quality-semantics.md`). R1 is merged.
-- **Branch:** `r2-fixes`, from `main` at `af9bdc4`. All of R2 is done: every correctness finding of the two files (backend 1-6, semantics 1-13), R1-1, both spec decisions (semantics 3 and 13), and R1's suggestion 4 (a `u16` column in the matrix). Review R2 said ready to merge; its four suggestions are handled (a test for backend 6, notes in the table, question 172). 5961 compiler tests pass and 1 theory is skipped (question 170), plus 36 CPU tests. No benchmark changed (1254 / 350780); `SkillTests` pass (outputs rewritten once, for semantics 12). The suite takes about 17 seconds.
-- **Next step:** `/merge r2-fixes` (or `/review r2-fixes` to re-check the suggestions). After its merge, R3 (fixes in the lexer, the driver, the tools and the CLI; `code-quality-syntax.md`, `code-quality-tools.md`).
+- **Milestone:** R3, fixes in the lexer, the driver, the tools and the CLI (roadmap "Before the first release: fixes and cleanup", R3; `docs/reviews/code-quality-syntax.md`, `docs/reviews/code-quality-tools.md`). R1 and R2 are merged.
+- **Branch:** `r3-fixes`, from `main` at `7fdf77b`. All of R3 is done: every correctness finding of the two files (syntax 2-5 and 12-19, tools 2, 3 and 8-16), the three spec decisions of 2026-11-15 in R3 (ASCII names; the NES vblank flag, NMI and `$2006`; `brk` with an IRQ handler), and tools 17's cycle-table test (left to R3 by R1's table). 6037 compiler tests pass and 1 theory is skipped (question 170), plus 37 CPU tests. No benchmark changed (1254 / 350780); `SkillTests` pass (no output moved; one sentence of `SKILL.md` on the NES's `tern run`). The suite takes about 11-18 seconds.
+- **Next step:** `/review r3-fixes`. Then R4 (one description per fact, and the CPU variant).
+- **Done when, not met:** "no marked test is left": `VolatileAccessTests.Open_question_170` is still skipped, since question 170 is open for the spec session; no R1 test is marked for R3's areas.
+
+### Review findings handled by R3
+
+Roadmap "Before the first release" (decision 2026-11-15): one row per finding of `docs/reviews/code-quality-syntax.md` and `code-quality-tools.md`. R7 reviews from this table. Each fixed bug's test failed before its fix (checked by running it with the fix set aside), except where the test uses a member the fix adds (named in the row); there the review's demonstration program is the before.
+
+| Finding | Commit | Guarded by | State |
+|---|---|---|---|
+| syntax 1 (`Build` is 450 lines, six jobs) | | | not fixed: R5 (long methods) |
+| syntax 2 (nested const fn error loses "called from") | `1b072cb` | `ConstFnTests.A_nested_call_error_names_the_line_that_started_it` | fixed: the catch tests `e.CalledFrom is null`, not the frame count or the message text |
+| syntax 3 (C64 zero page lacks `$FB-$FE`) | `d7b6f55` | `ErrorTests.The_c64_uses_fb_to_fe_after_02_to_8f`, `Dereferenced_pointer_that_does_not_fit_in_zero_page_is_an_error` | fixed; no benchmark moved |
+| syntax 4 (deep nesting crashes) | `ba8917c` | `ErrorTests.Deep_nesting_is_an_error`, `A_long_row_of_operators_is_an_error`, `Deeply_nested_blocks_and_types_are_an_error`, `Nesting_up_to_the_limit_compiles_and_runs` | fixed: `Parser.MaxDepth` (256, question 173) counts brackets, unary operators, binary operators in a row (a 200-term sum also overflowed, in the checker), postfix chains, blocks and types; `TernCompiler.Compile` runs on a 64 MB stack |
+| syntax 5 (CHR data as RAM in the Mesen labels) | `0c62722` | `NesTests.Tile_data_is_labelled_in_chr_rom` (uses the new `VariableInfo.InChr`) | fixed: `NesChrRom:offset:name`; `--dump` of tile data says it is in the PPU's memory |
+| syntax 6 (platform facts spread over the driver) | | | not fixed: R6 (platforms as data) |
+| syntax 7 (one exception, changed after it is thrown) | | | not fixed: R5 (the check-only entry) and R6 (messages as data) |
+| syntax 8 (no end positions, comments dropped) | | | not fixed: R5 (readiness for the language server) |
+| syntax 9 (statement ends decided in the lexer) | | | not fixed: R5 (structure); syntax 15 is fixed in place |
+| syntax 10 (`ParseProgram` 280 lines) | | | not fixed: R5; syntax 18 is fixed in place (`Dropped`) |
+| syntax 11 (message text as data in the interpreter) | | | partly: the "(called from " text test is gone with syntax 2; `WithNote`, `ReadOnly` and `CountsUp` are R6 (messages as data) |
+| syntax 12 (Unicode names) | `af43526` | `ErrorTests.Reports_the_whole_message_at_its_place` | fixed as decided 2026-11-15: "'é' cannot be in a name: names use A-Z, a-z, 0-9 and '_'" |
+| syntax 13 (generator named like a mnemonic) | `88bd21f` | `ErrorTests.Reports_the_whole_message_at_its_place` | fixed: an error at the declaration of a const fn with no return type named like a mnemonic; the set is still the enum's (R4: from the CPU variant) |
+| syntax 14 (const fn array ignores its written length) | `1b072cb` | `ConstFnTests.A_local_array_has_the_length_it_is_declared_with` | fixed |
+| syntax 15 (line break in a block comment) | `af43526` | `ErrorTests.A_line_break_inside_a_block_comment_ends_the_statement` | fixed |
+| syntax 16 (private-use character becomes a raw byte) | `af43526` | `ErrorTests.Reports_the_whole_message_at_its_place` | fixed: an error that says to write `\$NN` |
+| syntax 17 (NES alignment padding `$00`) | `0c62722` | `NesTests.Alignment_padding_in_rom_is_ff` | fixed: `Padding.Fill`, `$FF` on a cartridge |
+| syntax 18 (`noinit linear data` two errors) | `b38279f` | `NoinitTests.A_modifier_error_is_the_only_error_of_its_declaration` | fixed |
+| syntax 19 (three messages) | `af43526`, `b38279f` | `ErrorTests.Reports_the_whole_message_at_its_place`, `DataTests.Reports_errors` | fixed: `0x`, `emit {` outside a const fn, `ascii` "not supported yet" |
+| syntax 20 (parser modes in fields) | | | not fixed: R5 (scoped helpers) |
+| syntax 21 (contextual words as strings) | | | not fixed: R4 (one description per fact) |
+| syntax 22 (small things) | | | not fixed: R5 |
+| tools 1 (run model split over three classes) | | | not fixed: R4 (one registry of stand-ins) and R6 (platforms as data) |
+| tools 2 (paths end in a stack trace) | `fd7068f` | `CliTests` (paths section) | fixed: `FileProblem` on every read and write, `-o` checked before compiling, a last catch ("Internal error", exit code 4), bench of a binary without main a failed variant |
+| tools 3 (`-o` overwrites the source or another output) | `fd7068f` | `CliTests.An_output_never_overwrites_the_source`, `Two_outputs_never_share_a_file`, `An_overlay_file_never_overwrites_the_program` | fixed: every path known before writing, compared by full path (case ignored on Windows and macOS) |
+| tools 4 (one instruction set) | | | not fixed: R4 (the CPU variant) |
+| tools 5 (three option parsers) | | | not fixed: R4 (one CLI option table); tools 13 is fixed in place with `Count` and `RunCount` |
+| tools 6 (stand-ins in four places) | | | not fixed: R4; the help's paragraph is now built from `StandIns` (tools 14) |
+| tools 7 (JSON shapes and `Diagnostic`) | | | not fixed: R5 (check-only entry); command-line problems are JSON with `--json` (tools 13) |
+| tools 8 (bench `ok` against its exit code) | `fd7068f` | `CliTests.Bench_fails_a_variant_that_did_not_return_in_json_and_exit_code`, `Bench_fails_a_dump_that_names_nothing` | fixed: `BenchResult.Failed` gives `ok` and the exit code; the help gives bench's exit codes |
+| tools 9 (NES vblank flag) | `e3454b3` | `RunModelTests` (NES section; uses the new `NesBus.VblankCycles`) | fixed as decided 2026-11-15: the flag clears at the end of vblank, an NMI at once when bit 7 of `$2000` is set during vblank, `$2006` on its second write |
+| tools 10 (profile leaves out interrupt cycles) | `e3454b3` | `RunModelTests.The_profile_counts_the_cycles_of_taking_interrupts`, `The_nmis_cycles_are_not_in_the_instruction_before_it` (use the new `Profile.InterruptCycles`) | fixed: "; total N cycles, and M taking K interrupts" |
+| tools 11 (C64 stand-ins differ from the KERNAL) | `e3454b3` | `RunModelTests.Chrout_writes_color_0_and_a_missing_load_returns_4`, `Get_file_info_gives_a_sapling_for_a_file_over_512_bytes`, `The_atari_cursor_wraps_from_the_top_row_to_the_bottom` | fixed, with the finding's smaller ones (Apple II storage type, Atari cursor up; down wraps too, as in the screen editor) |
+| tools 12 (`brk` always stops) | `e3454b3` | `RunModelTests.Brk_on_the_nes_runs_the_programs_irq_handler`, `Brk_without_a_handler_stops_the_run` | fixed as decided 2026-11-15 (`CompileResult.SetsIrqVector`); the opcode is read through the NES's RAM mirror; in the help |
+| tools 13 (bad option value as unknown option) | `fd7068f` | `CliTests.A_bad_option_value_names_the_option_and_the_value`, `A_command_line_problem_with_json_is_json` | fixed |
+| tools 14 (help lists fewer stand-ins) | `e3454b3` | `CliTests.The_help_names_every_stand_in_and_their_cost` | fixed: built from each machine's `StandIns`; "a stand-in takes no cycles" |
+| tools 15 (bus cannot add cycles) | | | not fixed: R4 or R5 (structure; no behavior wrong) |
+| tools 16 (stand-in copy past `$FFFF`) | `e3454b3` | `RunModelTests.A_load_past_ffff_stops_the_run`, `The_atari_screen_scrolls_and_wraps_at_ffff` | fixed: LOAD stops the run with a message; the Atari's scroll and clear wrap |
+| tools 17 (what no test covers in the emulator) | `8c44cd6` | `InstructionSetTests.Every_opcode_has_the_datasheets_cycles` | the cycle table is checked (all 256 agreed); the limits are in `Cpu6502`'s comment and the help. Not done: Bruce Clark's invalid-BCD test, the `cli`/`sei` delay, dummy reads |
+| tools 18 (small things) | | | not fixed: R5; "(1 bytes)", `file::` and `LineTable`'s `Max` on an empty list are small output bugs left there |
 
 ### Review findings handled by R2
 
@@ -84,6 +132,16 @@ Roadmap "Before the first release" (decision 2026-11-15): one row per finding of
 | tests 14 (small things) | | | not fixed: R6; the cycle table's check goes with tools 17 in R3 |
 
 ## Done
+
+- **R3: fixes in the lexer, the driver, the tools and the CLI** (2026-11-15, roadmap R3, reviews `code-quality-syntax.md` and `code-quality-tools.md`; the table above has one row per finding):
+  - *Lexer and parser* (`af43526`, `ba8917c`, `b38279f`, `88bd21f`): ASCII-only names; a block comment with a line break ends the statement; `0x`, private-use characters, `emit {` outside a const fn and `ascii` get messages that name the cause; a generator named like a mnemonic is an error at its declaration; a `noinit`/`volatile` error drops its declaration; `Parser.MaxDepth` with `TernCompiler.Compile` on a 64 MB stack (`OnLargeStack`).
+  - *Interpreter* (`1b072cb`): nested const fn errors keep "(called from ...)" and `CalledFrom`; a local array's written length is checked.
+  - *Platforms and driver* (`d7b6f55`, `0c62722`): the C64's zero page `$02-$8F` then `$FB-$FE`; NES tile data in the Mesen labels as `NesChrRom` (`LabelFormat.ChrRom`, `VariableInfo.InChr`); `@ align` padding `$FF` in cartridge ROM (`Padding.Fill`).
+  - *CLI* (`fd7068f`): file errors as messages (`FileProblem`, `ReadProblem`, `OutputProblem`), outputs checked against the source and each other (`Clash`), option values (`Count`, `RunCount`, `Unknown`), JSON for command-line problems with `--json`, a last catch with exit code 4 (`Cli.InternalError`), `BenchResult.Failed`.
+  - *`tern run`* (`e3454b3`): the NES's vblank flag, NMI on enabling during vblank and `$2006` latch; `brk` into a NES program's IRQ handler (`CompileResult.SetsIrqVector`); `Profile.InterruptCycles`; C64 colour and LOAD errors, LOAD past `$FFFF`, the Atari's wrapping screen and cursor, the Apple II's storage type; the help's run paragraph built from the stand-in lists (`Cli.RunModelHelp`).
+  - *CPU* (`8c44cd6`): every opcode's cycles against the datasheet; the emulator's limits in its class comment.
+  - *Tests*: new `CliTests` (28), `RunModelTests` (16), and the tests named in the table.
+  - *Skill*: the NES's `tern run` sentence in `SKILL.md` (vblank flag, `brk`).
 
 - **R2: fixes in the backend and the checker** (2026-11-15, roadmap R2, reviews `code-quality-backend.md` and `code-quality-semantics.md`; the table above has one row per finding):
   - *Backend* (`18d97ff`, `e19b10e`, `f384fb1`, `9e375dd`, `ef2b111`, `9208e14`): the dispatch `rts` of an `indexed match` is not the function's return for the dead-load and N/Z analyses (`Optimizer.Dispatches`); Y is reserved while a pointer store's value is computed; no in-place 16-bit element store when the index reads the array; `InSourceOrder` for a `for` start against its end or step and for a compare into the carry; `AssignVolatile16` writes a 16-bit volatile target once per byte, a volatile byte shifts in place only by one, and a 16-bit volatile `x -= 1` subtracts; a grown branch keeps its label's offset.
@@ -843,6 +901,10 @@ Cycles including `jsr` and `rts`, best and worst over the test values (`FloatTes
 
 ## Known limitations and technical debt
 
+- Long methods R3 touched (the method-length convention; R5 splits them): `Cli.Run` is about 260 lines (was about 230), since its three commands are local functions that share the writers; R3 added the path checks and the last catch to it. R4's option table and R5's split replace it. `Runner.Run` is about 125 lines (one loop around each step; R4's one run model per machine splits it).
+- Small output bugs of tools 18, left for R5: "(1 bytes)" in the run report, `IndexError.ToString` prints `file::` with no line, `LineTable.Format` throws on an empty table, and the Apple II stand-ins read the stack without wrapping at `$01FF`.
+- `TernCompiler.Compile` starts a thread for each compile (`OnLargeStack`), about 0.1 ms; callers that catch `CompileError` see it rethrown with its stack trace kept.
+
 - `OptimizerTests.A_long_function_is_optimized_quickly` (5 seconds for 4500 statements) can fail when the whole suite runs in parallel on a loaded machine; it passes alone in about 0.5 s. Seen once at the start of R1, and in about one full run in four during R2 (the R2 optimizer is about 10% slower on it, 620 ms against 560 ms from the CLI, from the jump-table check in `NzLiveAfter`; the failures come from the parallel load). A longer limit or running it alone would remove the flake.
 - A 16-bit volatile `w += 256` is still `inc w+1`, which reads and writes only the high byte; it is the same question as 170.
 - The optimized-against-plain comparison (R1) leaves out programs with `addr(` or `noinit`, pointer variables and runs with setup, traps, IRQs or buttons; their values may depend on the layout or timing.
@@ -922,6 +984,10 @@ Not bugs; things to improve, mostly in M7 (optimizer).
 - `w = addr(map) - 1` (or `+`) into a 16-bit variable stores `addr(map)` and then subtracts at run time; `CodeGen.AddressBytes` could make it two `lda #` / `sta` pairs, as it already does for `.lo` / `.hi`.
 
 ## Questions for the spec session
+
+Open, from R3:
+
+173. **How deep a program may nest** (review code-quality-syntax 4, provisional). Every pass walks the tree by recursion, so a limit is needed for an error instead of a stack overflow. Built: `Parser.MaxDepth` = 256 levels, where brackets, unary operators, binary operators in a row (`a + b + c` is two levels: the tree is left-deep), `[i]` / `.name` / `as` chains, blocks and types each count one; past it, "This is nested more than 256 deep (brackets, operators in a row, blocks or types). Split it with a constant, a variable or a function". A 251-term sum compiles (tested); a 1000-term one is the error. The review suggested 64 for brackets alone; counting operators in a row made 256 the smaller restriction. Question: should spec 13 (or 2) name the limit, and is 256 right?
 
 Open, from R2:
 
