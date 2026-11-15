@@ -135,7 +135,7 @@ public sealed partial class Checker
                 if (type.IsStruct || type.IsStructArray)
                     throw new CompileError(decl.Init.Pos, "A struct cannot have an initial value. Assign its fields");
                 if (type.IsArray && IsCompileTimeArray(decl.Init)) CheckExpr(decl.Init);
-                if (type.IsArray) throw new CompileError(decl.Init.Pos, "Local arrays cannot have initial values yet. Assign the elements, or use a global or data");
+                if (type.IsArray) throw new CompileError(decl.Init.Pos, "An initial value for a local array is not supported yet. Assign the elements, or use a global or data");
                 CheckExpr(decl.Init);
                 Coerce(decl.Init, type);
                 v.Weight += Weight();

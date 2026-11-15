@@ -75,8 +75,10 @@ public sealed partial class Checker
 
         if (source.Kind == TypeKind.IntLiteral)
         {
+            if (target.Kind == TypeKind.Bool)
+                throw new CompileError(e.Pos, "Expected bool, found a number. Write true or false, or compare, as in 'x != 0'");
             if (!target.IsInteger && !target.IsPointer)
-                throw new CompileError(e.Pos, $"Expected {target}, found a number");
+                throw new CompileError(e.Pos, $"Expected {target}, found a number. Use a {target} here");
             long v = e.ConstValue!.Value;
             // ~$0F is the bit pattern ...1111_0000, as wide as the type it is used as.
             if (e.IsBitPattern && v < 0 && !target.IsSigned && v >= -(1L << (8 * target.Size)))
@@ -95,8 +97,20 @@ public sealed partial class Checker
             throw new CompileError(e.Pos, $"Expected {target}, found {source}. Convert with 'as {target}'");
         if (source.IsInteger && target.IsInteger && source.IsSigned == target.IsSigned && source.Size < target.Size)
             return; // automatic widening; the code generator extends the value
-        bool convertible = (source.IsInteger || source.IsPointer) && (target.IsInteger || target.IsPointer);
-        throw new CompileError(e.Pos, $"Expected {target}, found {source}" + (convertible ? $". Convert with 'as {target}'" : ""));
+        // Only u16 converts to and from a pointer (spec 3.5).
+        if (target.IsPointer && source.IsInteger && source.Kind != TypeKind.U16)
+            throw new CompileError(e.Pos, $"Expected {target}, found {source}. Convert with 'as u16' first, then 'as {target}'");
+        if (source.IsPointer && target.IsInteger)
+            throw new CompileError(e.Pos, target.Size == 1
+                ? $"Expected {target}, found {source}. Convert with 'as u16' first, then take .lo or .hi"
+                : $"Expected {target}, found {source}. Convert with 'as u16' first, then 'as {target}'");
+        if ((source.IsInteger || source.IsPointer) && (target.IsInteger || target.IsPointer))
+            throw new CompileError(e.Pos, $"Expected {target}, found {source}. Convert with 'as {target}'");
+        if (target.Kind == TypeKind.Bool && source.IsInteger)
+            throw new CompileError(e.Pos, $"Expected bool, found {source}. Compare instead, as in 'x != 0'");
+        if (source.Kind == TypeKind.Bool && target.IsInteger)
+            throw new CompileError(e.Pos, $"Expected {target}, found bool. Use 'if' to choose a number, as in 'if b {{ x = 1 }}'");
+        throw new CompileError(e.Pos, $"Expected {target}, found {source}. Use a {target} here");
     }
 
     /// <summary>

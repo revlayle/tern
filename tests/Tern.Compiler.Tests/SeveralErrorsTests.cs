@@ -495,7 +495,7 @@ public sealed class SeveralErrorsTests : IDisposable
         Assert.Single(e.All);
         Assert.Contains("Recursion is not allowed", e.Description);
         e = Assert.Throws<CompileError>(() => TernCompiler.Compile("var x: u8\nfn a() { b() }\nfn b() { a() }\nfn main() {\n a()\n x = true\n}"));
-        Assert.Equal(["Expected u8, found bool"], e.All.Select(x => x.Description));
+        Assert.Equal(["Expected u8, found bool. Use 'if' to choose a number, as in 'if b { x = 1 }'"], e.All.Select(x => x.Description));
     }
 
     // ---------- The tools ----------
@@ -521,7 +521,7 @@ public sealed class SeveralErrorsTests : IDisposable
         var (code, _, error) = Tern(path);
         Assert.Equal(1, code);
         Assert.Equal([
-            $"{path}:3:9: error: Expected u8, found bool",
+            $"{path}:3:9: error: Expected u8, found bool. Use 'if' to choose a number, as in 'if b {{ x = 1 }}'",
             $"{path}:4:9: error: 300 does not fit in u8 (0 to 255). Use a value in that range, or a wider type",
             $"{path}:5:9: error: Expected an expression, found ')'",
             "3 errors",

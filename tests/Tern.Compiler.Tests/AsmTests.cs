@@ -487,7 +487,7 @@ public class AsmTests
     [InlineData("fn main() { asm {\n lda $12,z\n } }", "Expected x or y after ',', found 'z'")]
     [InlineData("fn main() { asm {\n lda ($12,y)\n } }", "Expected x in (address,x), found 'y'")]
     [InlineData("fn main() { asm {\n lda ($12),x\n } }", "Expected y in (address),y, found 'x'")]
-    [InlineData("fn main() { asm {\n bne 5\n } }", "'bne' needs a label, e.g. bne .loop")]
+    [InlineData("fn main() { asm {\n bne 5\n } }", "'bne' needs a label. Use one, as in 'bne .loop'")]
     [InlineData("var v: u8\nfn main() { asm {\n beq v\n } }", "'beq' needs a label")]
     [InlineData("var v: u16\nfn main() { asm {\n lda v.lo\n } }", ".lo and .hi give a byte value, not an address")]
     [InlineData("var v: u8\nvar w: u8\nfn main() { asm {\n lda v+w\n } }", "an address can only have a constant added or subtracted")]

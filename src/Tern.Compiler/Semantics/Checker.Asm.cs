@@ -182,7 +182,7 @@ public sealed partial class Checker
         if (Has(Relative))
         {
             if (ins.Form != AsmForm.Direct || ins.Index is not null || v!.Label is null && v.Function is null || v.High is not null)
-                throw new CompileError(ins.Pos, $"'{name}' needs a label, e.g. {name} .loop");
+                throw new CompileError(ins.Pos, $"'{name}' needs a label. Use one, as in '{name} .loop'");
             return Relative;
         }
         if (v!.High is not null)
