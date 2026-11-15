@@ -62,7 +62,8 @@ public static class Cli
         of $2000 is set, the UxROM bank latch; the controllers read as no buttons.
         The emulator reports an array index outside its array and an 'indexed match' value
         outside its span, with the source line (a match value outside stops the run). Exit
-        code: 0 when main returned, 2 when it did not, 3 when it did but an index was outside.
+        code: 0 when main returned, 2 when it did not, 3 when it did but an index was outside,
+        1 when the program did not compile. Every command exits with 4 on an internal error.
           --cycles <n>    stop after n cycles (default 20000000)
           --irq <n>        raise an IRQ every n cycles, through the vector at $FFFE
           --set <a>=<v>    write the byte v at address a before the run, e.g. a joystick
@@ -81,7 +82,9 @@ public static class Cli
         program bytes, the measured function's bytes, its calls and cycles (with what it
         calls), and the memory chosen for its variables and the program's globals. A variant
         whose run finds an array index outside its array fails, and the errors are printed.
-        Warnings are not reported, since compared snippets often leave values unused.
+        Warnings are not reported, since compared snippets often leave values unused. Exit
+        code: 0 when every variant compiled, returned and passed the index check, and each
+        --dump named a variable or memory; 1 otherwise.
           <file.tern>      a variant: a whole program
           --code <stmts>   a variant: statements run as the body of main (';' or newlines
                            between statements); may be given more than once
@@ -143,12 +146,24 @@ public static class Cli
             output.WriteLine(Usage);
             return args.Length < 1 ? 1 : 0;
         }
-        return args[0] switch
+        bool jsonOut = args.Contains("--json");
+        try
         {
-            "run" => RunCommand(args[1..]),
-            "bench" => BenchCommand(args[1..]),
-            _ => CompileCommand(args),
-        };
+            return args[0] switch
+            {
+                "run" => RunCommand(args[1..]),
+                "bench" => BenchCommand(args[1..]),
+                _ => CompileCommand(args),
+            };
+        }
+        catch (Exception e)
+        {
+            // A bug in the compiler or the emulator: a message and a fixed exit code, never a stack trace (review code-quality-tools 2).
+            string text = $"Internal error ({e.GetType().Name}): {e.Message}. Report it with the program that caused it";
+            if (jsonOut) output.WriteLine(Diagnostic.ToJson(false, [], null, [new Diagnostic("", 0, 0, "error", text, null)]));
+            else error.WriteLine(text);
+            return InternalError;
+        }
 
         // ---------- tern <file.tern> ----------
 
@@ -165,31 +180,47 @@ public static class Cli
                 else if (target.Parse(arguments, ref i)) { }
                 else if (warnings.Parse(arguments[i])) { }
                 else if (arguments[i] == "-o" && i + 1 < arguments.Length) outputPath = arguments[++i];
-                else if (arguments[i] == "--max-errors" && i + 1 < arguments.Length && int.TryParse(arguments[i + 1], out maxErrors) && maxErrors > 0) i++;
+                else if (arguments[i] == "--max-errors")
+                {
+                    if (Count(arguments, ref i, int.MaxValue, out long n) is { } bad) return Usage1(bad);
+                    maxErrors = (int)n;
+                }
                 else if (input is null && !arguments[i].StartsWith('-')) input = arguments[i];
-                else return Usage1($"Unknown argument: {arguments[i]}");
+                else return Usage1(Unknown(arguments[i]));
             }
-            if (input is null) return Usage1("No source file given");
+            if (string.IsNullOrWhiteSpace(input)) return Usage1("No source file given");
             if (warnings.Problem is { } both) return Usage1(both);
             if (target.Platform(out var noTarget) is not { } platform) return Usage1(noTarget);
+            if (outputPath is not null && OutputProblem(outputPath) is { } badOutput) return Fail(json, new Diagnostic(input, 0, 0, "error", badOutput, null), badOutput);
             var result = CompileFile(input, platform, json, maxErrors, warnings.Mode);
             if (result is null) return 1;
             outputPath ??= Path.ChangeExtension(input, result.HaltAddress < 0 ? platform.BinaryExtension : platform.FileExtension);
-            var files = new List<string>();
-            void Write(string path, Action<string> write)
+
+            // Every path first, so that no output overwrites the source or another output (review code-quality-tools 3).
+            var writes = new List<(string Path, Action<string> Write)>
             {
-                write(path);
-                files.Add(path);
-            }
-            Write(outputPath, p => File.WriteAllBytes(p, result.File));
-            Write(Path.ChangeExtension(outputPath, ".lst"), p => File.WriteAllText(p, result.Listing));
-            Write(Path.ChangeExtension(outputPath, platform.Labels.Extension), p => File.WriteAllText(p, result.Labels));
-            Write(Path.ChangeExtension(outputPath, ".lines"), p => File.WriteAllText(p, LineTable.Format(LineTable.Rows(result, Path.GetFileName(input)))));
+                (outputPath, p => File.WriteAllBytes(p, result.File)),
+                (Path.ChangeExtension(outputPath, ".lst"), p => File.WriteAllText(p, result.Listing)),
+                (Path.ChangeExtension(outputPath, platform.Labels.Extension), p => File.WriteAllText(p, result.Labels)),
+                (Path.ChangeExtension(outputPath, ".lines"), p => File.WriteAllText(p, LineTable.Format(LineTable.Rows(result, Path.GetFileName(input))))),
+            };
             string directory = Path.GetDirectoryName(Path.GetFullPath(outputPath))!;
             foreach (var overlay in result.Overlays)
-                Write(Path.Combine(directory, overlay.Name + platform.BinaryExtension), p => File.WriteAllBytes(p, overlay.File));
+                writes.Add((Path.Combine(directory, overlay.Name + platform.BinaryExtension), p => File.WriteAllBytes(p, overlay.File)));
             if (result.ApiModule is not null)
-                Write(Path.Combine(directory, result.ApiModuleName + ".tern"), p => File.WriteAllText(p, result.ApiModule));
+                writes.Add((Path.Combine(directory, result.ApiModuleName + ".tern"), p => File.WriteAllText(p, result.ApiModule)));
+            if (Clash(input, writes.Select(w => w.Path).ToList()) is { } clash) return Fail(json, new Diagnostic(input, 0, 0, "error", clash, null), clash);
+            var files = new List<string>();
+            foreach (var (path, write) in writes)
+            {
+                try { write(path); }
+                catch (Exception e) when (FileProblem(e) is { } why)
+                {
+                    string text = $"Cannot write {path}: {why}";
+                    return Fail(json, new Diagnostic(input, 0, 0, "error", text, null), text);
+                }
+                files.Add(path);
+            }
 
             if (json)
             {
@@ -229,13 +260,11 @@ public static class Cli
                 else if (a == "--screen") screen = true;
                 else if (a == "--profile") profile = true;
                 else if (a == "--dump" && hasValue) dumps.Add(arguments[++i]);
-                else if (a == "--cycles" && hasValue && long.TryParse(arguments[i + 1], out cycles) && cycles > 0) i++;
-                else if (a == "--irq" && hasValue && long.TryParse(arguments[i + 1], out irq) && irq > 0) i++;
-                else if (a == "--max-errors" && hasValue && int.TryParse(arguments[i + 1], out maxErrors) && maxErrors > 0) i++;
+                else if (RunCount(arguments, ref i, ref cycles, ref irq, ref maxErrors, out var bad)) { if (bad is not null) return Usage1(bad); }
                 else if (input is null && !a.StartsWith('-')) input = a;
-                else return Usage1($"Unknown or incomplete argument: {a}");
+                else return Usage1(Unknown(a));
             }
-            if (input is null) return Usage1("No source file given");
+            if (string.IsNullOrWhiteSpace(input)) return Usage1("No source file given");
             if (warnings.Problem is { } both) return Usage1(both);
             if (target.Platform(out var noTarget) is not { } platform) return Usage1(noTarget);
 
@@ -280,11 +309,9 @@ public static class Cli
                 else if (a == "--decl" && hasValue) declarations.Add(arguments[++i]);
                 else if (a == "--fn" && hasValue) function = arguments[++i];
                 else if (a == "--dump" && hasValue) dumps.Add(arguments[++i]);
-                else if (a == "--cycles" && hasValue && long.TryParse(arguments[i + 1], out cycles) && cycles > 0) i++;
-                else if (a == "--irq" && hasValue && long.TryParse(arguments[i + 1], out irq) && irq > 0) i++;
-                else if (a == "--max-errors" && hasValue && int.TryParse(arguments[i + 1], out maxErrors) && maxErrors > 0) i++;
+                else if (RunCount(arguments, ref i, ref cycles, ref irq, ref maxErrors, out var bad)) { if (bad is not null) return Usage1(bad); }
                 else if (!a.StartsWith('-')) variants.Add((a, null));
-                else return Usage1($"Unknown or incomplete argument: {a}");
+                else return Usage1(Unknown(a));
             }
             if (variants.Count == 0) return Usage1("No variant given: name .tern files or give --code");
             if (target.Platform(out var noTarget) is not { } platform) return Usage1(noTarget);
@@ -302,12 +329,16 @@ public static class Cli
                 {
                     string name = duplicateNames.Contains(Path.GetFileName(path!)) ? path! : Path.GetFileName(path!);
                     try { variant = new BenchVariant(name, File.ReadAllText(path!), path); }
-                    catch (IOException e) { return Fail(json, new Diagnostic(path!, 0, 0, "error", $"Cannot read {path}: {e.Message}", null), $"Cannot read {path}: {e.Message}"); }
+                    catch (Exception e) when (FileProblem(e) is { } why)
+                    {
+                        string text = ReadProblem(path!, why);
+                        return Fail(json, new Diagnostic(path!, 0, 0, "error", text, null), text);
+                    }
                 }
                 results.Add(Bench.Measure(variant, function, dumps, new RunOptions { MaxCycles = cycles, IrqEvery = irq, Sets = sets }, maxErrors > 0 ? maxErrors : null, platform));
             }
             output.Write(json ? Bench.Json(results) + Environment.NewLine : Bench.Text(results));
-            return results.All(r => r.Error is null && r.Returned && r.IndexErrors.Count == 0) ? 0 : 1;
+            return results.Any(r => r.Failed) ? 1 : 0;
         }
 
         // ---------- shared ----------
@@ -319,9 +350,9 @@ public static class Cli
             {
                 source = File.ReadAllText(input);
             }
-            catch (IOException e)
+            catch (Exception e) when (FileProblem(e) is { } why)
             {
-                string text = $"Cannot read {input}: {e.Message}";
+                string text = ReadProblem(input, why);
                 Fail(json, new Diagnostic(input, 0, 0, "error", text, null), text);
                 return null;
             }
@@ -362,8 +393,90 @@ public static class Cli
 
         int Usage1(string problem)
         {
-            error.WriteLine($"{problem}. Run 'tern --help' for the options.");
+            string text = $"{problem}. Run 'tern --help' for the options";
+            // With --json, a command-line problem is JSON too, with no file (review code-quality-tools 13).
+            if (jsonOut) output.WriteLine(Diagnostic.ToJson(false, [], null, [new Diagnostic("", 0, 0, "error", text, null)]));
+            else error.WriteLine(text + ".");
             return 1;
         }
+    }
+
+    /// <summary>The exit code when the compiler or the emulator fails with an exception it did not expect.</summary>
+    public const int InternalError = 4;
+
+    /// <summary>Options that take a value after them.</summary>
+    private static readonly HashSet<string> ValueOptions = ["-o", "--target", "--set", "--dump", "--code", "--decl", "--fn", "--cycles", "--irq", "--max-errors"];
+
+    private static string Unknown(string argument) =>
+        ValueOptions.Contains(argument) ? $"{argument} needs a value after it" : $"Unknown argument: {argument}";
+
+    /// <summary>
+    /// The whole number from 1 to <paramref name="max"/> after the option at <paramref name="i"/>, or what is
+    /// wrong with it: "--cycles needs a whole number above 0, found 'abc'" (review code-quality-tools 13).
+    /// </summary>
+    private static string? Count(string[] arguments, ref int i, long max, out long value)
+    {
+        string option = arguments[i];
+        value = 0;
+        if (i + 1 >= arguments.Length) return $"{option} needs a whole number above 0 after it";
+        string text = arguments[++i];
+        if (!long.TryParse(text, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out value) || value < 1 || value > max)
+            return max == long.MaxValue ? $"{option} needs a whole number above 0, found '{text}'" : $"{option} needs a whole number from 1 to {max}, found '{text}'";
+        return null;
+    }
+
+    /// <summary><c>--cycles</c>, <c>--irq</c> and <c>--max-errors</c> of <c>tern run</c> and <c>tern bench</c>: true when the argument is one, with any problem in <paramref name="problem"/>.</summary>
+    private static bool RunCount(string[] arguments, ref int i, ref long cycles, ref long irq, ref int maxErrors, out string? problem)
+    {
+        problem = null;
+        long n;
+        switch (arguments[i])
+        {
+            case "--cycles": problem = Count(arguments, ref i, long.MaxValue, out n); if (problem is null) cycles = n; return true;
+            case "--irq": problem = Count(arguments, ref i, long.MaxValue, out n); if (problem is null) irq = n; return true;
+            case "--max-errors": problem = Count(arguments, ref i, int.MaxValue, out n); if (problem is null) maxErrors = (int)n; return true;
+            default: return false;
+        }
+    }
+
+    /// <summary>Why a path cannot be read or written, for the exceptions a path can give; null for any other exception.</summary>
+    private static string? FileProblem(Exception e) => e switch
+    {
+        DirectoryNotFoundException => "the folder does not exist",
+        FileNotFoundException => "the file does not exist",
+        UnauthorizedAccessException => "access is denied (it may be a folder or read-only)",
+        IOException or ArgumentException or NotSupportedException => e.Message,
+        _ => null,
+    };
+
+    private static string ReadProblem(string path, string why) =>
+        Directory.Exists(path) ? $"Cannot read {path}: it is a folder. Give a .tern file" : $"Cannot read {path}: {why}. Check the path";
+
+    /// <summary>What is wrong with <c>-o</c> before compiling: a folder, or a path in a folder that does not exist.</summary>
+    private static string? OutputProblem(string outputPath)
+    {
+        if (Directory.Exists(outputPath))
+            return $"-o {outputPath} is a folder. Give a file name in it, as in -o {Path.Combine(outputPath, "game")}";
+        string? folder = Path.GetDirectoryName(Path.GetFullPath(outputPath));
+        return folder is not null && !Directory.Exists(folder)
+            ? $"Cannot write {outputPath}: the folder {folder} does not exist. Create it, or give -o a path in a folder that exists"
+            : null;
+    }
+
+    /// <summary>An output that would overwrite the source file or another output, or null (review code-quality-tools 3).</summary>
+    private static string? Clash(string input, IReadOnlyList<string> outputs)
+    {
+        var comparer = OperatingSystem.IsWindows() || OperatingSystem.IsMacOS() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
+        string source = Path.GetFullPath(input);
+        var seen = new Dictionary<string, string>(comparer);
+        foreach (var path in outputs)
+        {
+            string full = Path.GetFullPath(path);
+            if (comparer.Equals(full, source))
+                return $"{path} would overwrite the source file {input}. Give -o another name";
+            if (!seen.TryAdd(full, path))
+                return $"Two outputs would be written to {path}. Give -o another name";
+        }
+        return null;
     }
 }

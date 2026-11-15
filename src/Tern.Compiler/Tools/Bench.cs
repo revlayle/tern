@@ -56,6 +56,15 @@ public sealed record BenchResult(
     public bool MoreErrors { get; init; }
     public int MaxErrors { get; init; }
 
+    /// <summary>A <c>--dump</c> named no variable or memory: the variant's results cannot be compared.</summary>
+    public bool BadDump { get; init; }
+
+    /// <summary>
+    /// The variant fails: it did not compile, main did not return (its cycles mean nothing), the index
+    /// check found errors, or a <c>--dump</c> was wrong. Decides <c>ok</c>, the exit code and the text.
+    /// </summary>
+    public bool Failed => Error is not null || !Returned || IndexErrors.Count > 0 || BadDump;
+
     public long CyclesPerCall => Calls == 0 ? 0 : Cycles / Calls;
     public int ZeroPageBytes => Memory.Where(v => v.Address < 0x100).Sum(v => v.Size);
     public int OtherBytes => Memory.Where(v => v.Address >= 0x100).Sum(v => v.Size);
@@ -104,6 +113,10 @@ public static class Bench
                 inModule.Count == 0 ? null : "Use " + string.Join(" or ", inModule.Select(f => $"'{f}'")) + ": a module's function is named with its module"));
         }
 
+        if (program.HaltAddress < 0)
+            return Failed(new Diagnostic(variant.Name, 0, 0, "error", "A binary without main cannot be run on its own.",
+                "Measure the function in a program that loads and calls it"));
+
         var run = Runner.Run(program, (options ?? new RunOptions()) with { MainFile = variant.Name });
         var indexErrors = run.IndexErrors.Select(e =>
         {
@@ -116,6 +129,7 @@ public static class Bench
             .Where(v => v.Function == measured || (v.Function is null && !v.IsData && !v.Name.Contains('.')))
             .OrderBy(v => v.Function is not null).ThenBy(v => v.Address).ToList();
         var results = new List<(string, string)>();
+        bool badDump = false;
         foreach (var text in dumps)
         {
             string value;
@@ -124,11 +138,15 @@ public static class Bench
                 var d = MemoryDump.Parse(text, program);
                 value = d.Value(run.Ram.Bytes) is { } v ? v.ToString() : string.Join(" ", run.Ram.Bytes.AsSpan(d.Address, d.Size).ToArray().Select(b => b.ToString("X2")));
             }
-            catch (FormatException e) { value = "(" + e.Message + ")"; }
+            catch (FormatException e)
+            {
+                value = "(" + e.Message + ")";
+                badDump = true;
+            }
             results.Add((text, value));
         }
         return new BenchResult(variant.Name, null, measured, program.Image.Length, section.Size, time?.Calls ?? 0, time?.Cycles ?? 0,
-            run.Returned, run.Stop, memory, results, indexErrors);
+            run.Returned, run.Stop, memory, results, indexErrors) { BadDump = badDump };
 
         BenchResult Failed(Diagnostic d) => new(variant.Name, d, measured, 0, 0, 0, 0, false, d.Message, [], [], []);
     }
@@ -190,7 +208,7 @@ public static class Bench
     public static string Json(IReadOnlyList<BenchResult> results) =>
         JsonSerializer.Serialize(new
         {
-            ok = results.All(r => r.Error is null && r.IndexErrors.Count == 0),
+            ok = !results.Any(r => r.Failed),
             variants = results.Select(r => new
             {
                 variant = r.Variant,
