@@ -4,13 +4,35 @@ Owned by the coding session. Updated at the end of every coding session.
 
 ## Current
 
-- **Milestone:** M27 follow-up: the three changes of questions 157-169 (roadmap "M27: NES", last item; decision 2026-11-14). M27 itself is merged (`06423ea`).
-- **Branch:** `m27-followup`, from `main` at `06423ea`. All three changes are done, each with tests. 3720 compiler tests pass plus 36 CPU tests. No benchmark changed (1254 / 350780); `SkillTests` pass.
-- **Review** (`docs/reviews/m27-followup.md`): ready to merge, no findings.
-- **Next step:** `/merge m27-followup`. After that the first release (roadmap "First release"): the spec session brings `docs/guide.md` and spec 10.1 up to the compiler as built; every example must build for its platforms. When the OS-B and XL OS ROM images are registered in Altirra, rerun the Atari examples on them (decision 2026-11-13, question 137).
+- **Milestone:** R1, tests that find bugs where features meet (roadmap "Before the first release: fixes and cleanup", R1; review theme 7, `docs/reviews/code-quality-tests.md`). M27 and its follow-up are merged.
+- **Branch:** `r1-tests`, from `main` at `3ac5ee6`. All five items are done. 4926 compiler tests pass and 9 theories are skipped (the marked failures below), plus 36 CPU tests. No benchmark changed (1254 / 350780); `SkillTests` pass. The suite takes about 17 seconds (was about 12).
+- **Next step:** `/review r1-tests`. After the merge, R2 (fixes in the backend and the checker) starts with the marked tests below: each fix removes the `Skip` of its finding's theory, which must then pass.
+
+### Marked failures (for R2 and R3)
+
+Each is a theory with `Skip = "<finding>: ..."`; its cases run when the skip is removed. All are in R2's areas (backend, checker); R1 found none in R3's.
+
+| Finding | Test | Cases | What fails |
+|---|---|--:|---|
+| backend 1 | `OperandMatrixTests.Fails_backend_1` | 21 | `indexed match` inside a `using X` or `using Y` loop: wrong arm when optimized (the plain run is right) |
+| backend 2 | `OperandMatrixTests.Fails_backend_2` | 2 | `p[1] = irecs[j].f` with an `indexed` struct array stores the wrong value |
+| backend 3 | `VolatileAccessTests.Fails_backend_3` | 30 | a 16-bit volatile target of `x = a + b` (and `-`, `&`, `|`, `^`, `~`, shifts) gets the in-between value written; `x <<= 2` / `x >>= 2` write twice at 8 and 16 bits |
+| backend 4 | `EvaluationOrderTests.Fails_backend_4` | 6 | calls in both `for` bounds (and the step) and in a compare returned into the carry run right to left |
+| backend 5 | `OperandMatrixTests.Fails_backend_5` | 1 | `a[a[0].lo] = b[k] + c[k]` (u16) reloads the index between the bytes: 2, expected $0102 |
+| semantics 1 | `OperandMatrixTests.Fails_semantics_1` | 12 | a struct field, also through a struct-array element, as a `for` step: the loop never ends |
+| semantics 2 | `OperandMatrixTests.Fails_semantics_2` | 2 | a call in an inner loop's `step` inside a `using X` / `using Y` loop is accepted |
+| R1-1 (new) | `VolatileAccessTests.Fails_R1_1` | 2 | a 16-bit volatile `x -= 1` (`lda x / bne / dec x+1 / dec x`) reads the low byte twice (spec 4) |
+| question 170 | `VolatileAccessTests.Open_question_170` | 4 | a 16-bit volatile `x += 1` / `x += 2` writes the high byte only on a carry; open, see the question |
 
 ## Done
 
+- **R1: tests that find bugs where features meet** (2026-11-15, roadmap R1, review `code-quality-tests.md`):
+  - *Random start* (`669124d`, finding 2): `StartState` fills all memory with bytes from a fixed seed (6502) before the program is loaded, and sets A, X, Y non-zero and the carry, V and N; used by `Run` and `Library`. `Run.Program(..., zeroStart: true)` gives the old state. Seventeen tests read memory nothing had written (stand-in buffers and counters, fixed-address variables, bytes past a load) and now set it in their setup; none was a compiler bug.
+  - *Bus log* (`1ea03d9`, finding 3): `BusLog` wraps the bus in `Run.Program(..., watch: result => addresses)` and logs the CPU's reads and writes of those addresses; `Writes` leaves out an NMOS read-modify-write's write-back of the old value. `VolatileTests`, `Apple2Tests`, `AtariTests` and `IndexedOperandTests` count volatile reads and writes on the bus instead of in the listing. `VolatileAccessTests`: 27 statements into a volatile variable, array element and struct field at 8 and 16 bits, each checked for the one value written per byte and the reads, and reads of a volatile source.
+  - *Optimized against plain* (`d061f7d`, finding 8): `TernCompiler.Compile(..., optimize: false)` skips `Optimizer.Run` (functions and interrupt handlers; not in the CLI). Every `Run.Program` with no setup, traps, IRQs or buttons is repeated without the optimizer, and every global (not pointers) must end with the same value; programs with `addr(` or `noinit` are left out, since addresses and noinit memory differ with the layout. `comparePlain: false` turns it off for one run (used once, for an asm block that stores an address). About 60% of runs are compared.
+  - *Operand matrix* (`53ae764`, `1da18e0`, finding 1): `OperandMatrixTests` puts 12 operand forms (global, zero page, local, parameter, field at offset 1, element of a linear and of an indexed struct array, array element, pointer target, a call that changes X and Y, volatile, constant) in 24 places (for start, end and step, match, indexed match, index read and write, arguments, conditions, operators, while, pointer store, assignment targets, return, return into the carry), once and in `using X` / `using Y` loops that start at 1, against a C# model; forms a place does not allow must give an error (calls in a `using` loop, a pointer access in a `using Y` loop, writes to a call or constant, constants out of range). 1067 cases pass in about 3 seconds. `EvaluationOrderTests` adds `for` bounds and steps and returned compares.
+  - *One listing reader* (`7e9d042`, `408b339`, finding 7): `Listing` (tests) reads a function's instructions from `CompileResult.Instructions` by section, so inlined code belongs to its caller and a function ends where its section does (the copies disagreed on this); `Lines`, `Annotated` (with the function's labels and source comments), `CodeWithLabels` and `Count`. About 30 per-file readers are gone; no test cuts instructions out of listing text, and no expected string changed.
+  - Not in R1 (left for R4-R6 as the roadmap says): scoping the 91 whole-listing `Assert.Contains` (finding 9), full-text error checks (4), the feature suite on every platform (5), the shared `TempFolder` and `Cli.Tern` helpers (7).
 - **M27 follow-up** (2026-11-14, decision 2026-11-14 on questions 157-169):
   - Question 160 (`5b1bf3f`): a `program` line on the NES is a plain error, "A 'program' line has no meaning on the NES: the board 'nrom' gives the code areas (...), and the variables are in RAM, $0000-$07FF. Remove the line, or use 'reserved' or 'region' ...". `NesTests.Cartridge_line_errors` (nrom and uxrom).
   - Question 166 (`a09bc47`): two modules in one bank implementing the same interface are an error naming both and the bank, at the second import's interface name (`Checker.CheckImplements`). `NesBankTests.Two_modules_in_one_bank_cannot_implement_the_same_interface`. The order inside a bank stays the compiler's (as built).
@@ -754,6 +776,8 @@ Cycles including `jsr` and `rts`, best and worst over the test values (`FloatTes
 
 ## Known limitations and technical debt
 
+- `OptimizerTests.A_long_function_is_optimized_quickly` (5 seconds for 4500 statements) can fail when the whole suite runs in parallel on a loaded machine; it passes alone in about 0.5 s. Seen once at the start of R1.
+- The optimized-against-plain comparison (R1) leaves out programs with `addr(` or `noinit`, pointer variables and runs with setup, traps, IRQs or buttons; their values may depend on the layout or timing.
 - Two interface modules whose fixed routines overlap (`api1.value` and `api2.other` both at `$8000`) give "... are placed at overlapping addresses" at `main.tern:1:1`, not at either declaration (review M27 follow-up, outside the branch; for a later milestone).
 - NES: `tern run` has no option for the pads (only tests script them with `NesBus.Buttons`), no dump of PPU memory but `--screen`, and models no timing within a frame (sprite 0 hits, the length of vblank).
 - NES: `addr()` of a function or variable inside `chr` data would be zeros in CHR ROM (the address fill is not applied there); tile data has no use for one.
@@ -830,6 +854,11 @@ Not bugs; things to improve, mostly in M7 (optimizer).
 - `w = addr(map) - 1` (or `+`) into a 16-bit variable stores `addr(map)` and then subtracts at run time; `CodeGen.AddressBytes` could make it two `lda #` / `sta` pairs, as it already does for `.lo` / `.hi`.
 
 ## Questions for the spec session
+
+Open, from R1:
+
+170. **A 16-bit volatile `x += 1`.** Spec 11 gives `w += 1` (u16) as `inc w` / `bne +` / `inc w+1`, and the compiler uses it for a volatile `w` too (also `x += 2`: `lda` / `clc` / `adc #2` / `sta` / `bcc +` / `inc w+1`). The high byte is then read and written only when the low byte carries. Spec 4 says every read and write of volatile memory in the source happens exactly once; it does not say whether a byte the operation leaves unchanged counts. For a register pair that latches on the high write (a timer latch, a VERA address) the skipped write matters. Built: the shape above, also for volatile. Proposed: a volatile 16-bit `+=`/`-=` writes both bytes (the add of the general case, as spec 11 already says for an 8-bit volatile `x += 2`). The marked test `VolatileAccessTests.Open_question_170` expects that. (Not the same as R1-1, where `x -= 1` reads the low byte twice, which spec 4 forbids either way.)
+- Provisional (R1): "the bus log on for the whole suite" (roadmap R1, done when) is read as: every `Run` can log (`watch:`), and every test that checked volatile reads or writes by counting listing lines now uses the log. The log does not check anything by itself, since only the test knows what the source reads and writes.
 
 Questions 157-169 (from M27) were settled on 2026-11-14 (decisions.md): as built, except 160, 166 and 169 (errors), built on `m27-followup`.
 
