@@ -99,7 +99,7 @@ public class ErrorTests
         Assert.Equal((line, column), (e.Pos.Line, e.Pos.Column));
     }
 
-    // Review code-quality-syntax 12, 16 and 19: the whole message, at the character that causes it.
+    // Review code-quality-syntax 12, 13, 16 and 19: the whole message, at its place.
     [Theory]
     [InlineData("var café: u8\nfn main() { }", 1, 8, "'é' cannot be in a name: names use A-Z, a-z, 0-9 and '_'. Write the name with these")]
     [InlineData("var αβ: u8\nfn main() { }", 1, 5, "'α' cannot be in a name: names use A-Z, a-z, 0-9 and '_'. Write the name with these")]
@@ -108,7 +108,9 @@ public class ErrorTests
     [InlineData("var v: u8\nfn main() { v = 0x1F }", 2, 17, "Tern has no '0x'. Write hex numbers with '$', as in $1F")]
     [InlineData("fn main() {\n    emit { lda #1 }\n}", 2, 5, "'emit' adds assembly to the caller only in a const fn, a code generator. Write the assembly in an 'asm { }' block here, or move it into a const fn")]
     [InlineData("data t = \"AC\"\nfn main() { }", 1, 12,"The character U+E042 has no code in any encoding. Write the byte it stands for as \\$NN")]
-    public void Reports_lexer_errors_at_the_character(string source, int line, int column, string expected)
+    [InlineData("const fn dec(n: int) {\n    emit { ldx #n }\n}\nfn main() { }", 1, 7, "'dec' is a 6502 instruction, so an asm line cannot call a generator of that name. Use another name")]
+    [InlineData("const fn Inc() {\n    emit { nop }\n}\nfn main() { }", 1, 7, "'Inc' is a 6502 instruction, so an asm line cannot call a generator of that name. Use another name")]
+    public void Reports_the_whole_message_at_its_place(string source, int line, int column, string expected)
     {
         var e = Assert.Throws<CompileError>(() => TernCompiler.Compile(source));
         Assert.Equal(expected, e.Description);

@@ -560,6 +560,9 @@ public sealed partial class Parser
             var f = ParseFn();
             if (f.Address is not null)
                 throw new CompileError(f.Pos, "A const fn runs at compile time and has no address. Remove '@' and the address, and give it a body");
+            // A generator is called from asm lines, where a mnemonic is read as the instruction (review code-quality-syntax 13).
+            if (f.ReturnType is null && Enum.GetNames<Mnemonic>().Contains(f.Name, StringComparer.OrdinalIgnoreCase))
+                throw new CompileError(f.Pos, $"'{f.Name}' is a 6502 instruction, so an asm line cannot call a generator of that name. Use another name");
             return new FnDecl(start.Pos, f.Name, f.Parameters, f.ReturnType, f.ReturnUsing, f.Body) { IsConst = true };
         }
         finally { _inConstFn = false; }
