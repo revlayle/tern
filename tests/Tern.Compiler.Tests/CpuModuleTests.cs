@@ -3,15 +3,6 @@ namespace Tern.Compiler.Tests;
 /// <summary>M19: the <c>cpu</c> library module, the flags after an asm block (spec 7, 10.1).</summary>
 public class CpuModuleTests
 {
-    private static List<string> Code(Run r, string function)
-    {
-        var lines = r.Result.Listing.Split('\n').Select(l => l.TrimEnd('\r')).ToList();
-        int start = lines.IndexOf($"{function}:");
-        Assert.True(start >= 0, $"No function {function} in the listing");
-        int end = lines.FindIndex(start + 1, l => l.EndsWith(':') && !l.Contains('.') && !l.StartsWith(' '));
-        return lines[start..(end < 0 ? lines.Count : end)].Select(l => l.Trim()).Where(l => l.StartsWith('$')).ToList();
-    }
-
     /// <summary>The flag that <c>lda #a / clc / adc #b</c> leaves.</summary>
     private static bool Flag(string name, int a, int b)
     {
@@ -132,9 +123,9 @@ public class CpuModuleTests
                 if cpu.{{flag}}() { yes = 1 }
             }
             """);
-        var main = Code(r, "main");
-        int adc = main.FindIndex(l => l.Contains(" adc "));
-        Assert.Contains($" {branch} ", main[adc + 1]);
-        Assert.DoesNotContain(main, l => l.Contains("jsr"));
+        var main = Listing.Instructions(r);
+        int adc = main.FindIndex(l => l.StartsWith("adc "));
+        Assert.StartsWith($"{branch} ", main[adc + 1]);
+        Assert.DoesNotContain(main, l => l.StartsWith("jsr"));
     }
 }

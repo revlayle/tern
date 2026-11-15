@@ -417,10 +417,7 @@ public class SmallShapeTests
             """);
         Assert.Equal(123, r.U16("a"));
         Assert.Equal(45, r.U16("b"));
-        var listing = r.Result.Listing;
-        var text = listing[listing.IndexOf("\nf:", StringComparison.Ordinal)..];
-        var lines = text.Split('\n').Select(l => l.Trim()).Where(l => l.StartsWith(';') || l.StartsWith('$'))
-            .Select(l => l.StartsWith('$') ? l[17..].Split(';')[0].Trim() : l).TakeWhile(l => l != "rts").ToList();
+        var lines = Listing.Annotated(r, "f").Where(l => !l.EndsWith(':')).TakeWhile(l => l != "rts").ToList();
         int A(string s) => lines.FindIndex(l => l.Contains(s));
         Assert.True(A("a = 123") < A("lda #$7B") && A("sta a") < A("b = 45") && A("b = 45") < A("lda #$2D"), string.Join("\n", lines));
         Assert.Equal(1, lines.Count(l => l == "lda #$00"));

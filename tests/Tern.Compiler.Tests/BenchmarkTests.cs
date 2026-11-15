@@ -179,11 +179,10 @@ public class BenchmarkTests
     {
         string dir = Directory_;
         var path = Path.Combine(dir, "sieve.tern");
-        var listing = TernCompiler.Compile(File.ReadAllText(path), sourcePath: path).Listing
-            .Split((char)10).Select(l => l.TrimEnd((char)13)).ToList();
-        int start = listing.FindIndex(l => l.StartsWith("main.for"));
-        int end = listing.FindIndex(start, l => l.StartsWith("main.fend"));
-        var tern = listing[start..end].Where(l => l.StartsWith('$')).Select(l => l[17..].Split(';')[0].Trim().Split(' ')[0]).ToList();
+        var main = Listing.Annotated(TernCompiler.Compile(File.ReadAllText(path), sourcePath: path));
+        int start = main.FindIndex(l => l.StartsWith("main.for"));
+        int end = main.FindIndex(start, l => l.StartsWith("main.fend"));
+        var tern = main[start..end].Where(l => !l.EndsWith(':') && !l.StartsWith(';')).Select(l => l.Split(' ')[0]).ToList();
 
         // The loop of asm/sieve.asm, from "mark" to its bcc.
         var asm = File.ReadAllLines(Path.Combine(dir, "asm", "sieve.asm"));

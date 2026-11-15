@@ -44,16 +44,6 @@ public class RoutineTests
         ram.Load(0xC080, [0x8E, 0xF2, 0xC5, 0x8D, 0xF3, 0xC5, 0x60]);    // stx $C5F2 / sta $C5F3 / rts
     }
 
-    /// <summary>The mnemonics and operands of main's instructions, one per line, e.g. "ldx row".</summary>
-    private static List<string> MainCode(Run r)
-    {
-        var listing = r.Result.Listing;
-        var lines = listing[(listing.IndexOf("\nmain:") + 1)..].Split('\n').Skip(1);
-        return lines.TakeWhile(l => l.StartsWith('$') || l.StartsWith(' '))
-            .Where(l => l.StartsWith('$'))
-            .Select(l => l[17..].Split(';')[0].Trim()).ToList();
-    }
-
     private const string Declarations = """
         const STUBS = $C000
         fn put(v: u8 using A, at: u8 using X) @ STUBS keeps A, X
@@ -193,7 +183,7 @@ public class RoutineTests
         Assert.Equal(10, r.Ram.Bytes[0xC5F1]);
         Assert.Equal(0x0A05, r.U16("pos"));
         // Spec 6.6 and 11: the carry is set or cleared right before the jsr.
-        Assert.Equal(["ldx row", "ldy #$0A", "clc", "jsr $C060", "sec", "jsr $C060", "stx pos", "sty pos+1", "rts"], MainCode(r));
+        Assert.Equal(["ldx row", "ldy #$0A", "clc", "jsr $C060", "sec", "jsr $C060", "stx pos", "sty pos+1", "rts"], Listing.Instructions(r));
     }
 
     [Theory]

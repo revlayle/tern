@@ -41,18 +41,28 @@ public static class Listing
 
     public static List<string> Lines(Run run, string function = "main") => Lines(run.Result, function);
 
-    /// <summary>The instructions of <paramref name="function"/> with its own labels (<c>main.for1:</c>) where they stand.</summary>
-    public static string CodeWithLabels(CompileResult result, string function = "main", string separator = "|")
+    /// <summary>
+    /// The instructions of <paramref name="function"/> in listing order, with its own labels (<c>main.for1:</c>)
+    /// and the source comments (<c>;    7: x = 1</c>) where they stand. Data bytes are left out.
+    /// </summary>
+    public static List<string> Annotated(CompileResult result, string function = "main")
     {
-        var placed = result.Instructions.Where(i => i.Section == function).Select(i => $"${i.Address:X4} ").ToHashSet();
-        var code = new List<string>();
+        var placed = result.Instructions.Where(i => i.Section == function).ToDictionary(i => $"${i.Address:X4} ", i => i.Text);
+        var lines = new List<string>();
         foreach (var l in Lines(result, function).Skip(1))
         {
-            if (l.StartsWith($"{function}.") && l.EndsWith(':')) code.Add(l);
-            else if (l.Length > 6 && placed.Contains(l[..6])) code.Add(l[17..].Split(';')[0].Trim());
+            if (l.Length > 6 && placed.TryGetValue(l[..6], out var text)) lines.Add(text);
+            else if (l.TrimStart().StartsWith(';')) lines.Add(l.Trim());
+            else if (l.StartsWith($"{function}.") && l.EndsWith(':')) lines.Add(l);
         }
-        return string.Join(separator, code);
+        return lines;
     }
+
+    public static List<string> Annotated(Run run, string function = "main") => Annotated(run.Result, function);
+
+    /// <summary>The instructions of <paramref name="function"/> with its own labels (<c>main.for1:</c>) where they stand.</summary>
+    public static string CodeWithLabels(CompileResult result, string function = "main", string separator = "|") =>
+        string.Join(separator, Annotated(result, function).Where(l => !l.StartsWith(';')));
 
     public static string CodeWithLabels(Run run, string function = "main", string separator = "|") =>
         CodeWithLabels(run.Result, function, separator);

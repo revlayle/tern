@@ -6,22 +6,6 @@ namespace Tern.Compiler.Tests;
 /// </summary>
 public class OptimizerTests
 {
-    /// <summary>The instructions of main, without addresses, bytes and cycles.</summary>
-    private static string Main(Run r) => Main(r.Result);
-
-    private static string Main(CompileResult result)
-    {
-        var listing = result.Listing;
-        var start = listing.IndexOf("\nmain:", StringComparison.Ordinal);
-        var code = new List<string>();
-        foreach (var l in listing[(start + 1)..].Split('\n').Skip(1).Select(l => l.TrimEnd('\r')))
-        {
-            if (l.EndsWith(':') && !l.StartsWith(' ') && !l.StartsWith('$') && !l.StartsWith("main.")) break;
-            if (l.StartsWith('$')) code.Add(l[17..].Split(';')[0].Trim());
-        }
-        return string.Join(" / ", code);
-    }
-
     [Fact]
     public void A_stored_value_is_not_loaded_again()
     {
@@ -33,7 +17,7 @@ public class OptimizerTests
                 y = x
             }
             """);
-        Assert.Equal("lda #$05 / sta x / sta y / rts", Main(r));
+        Assert.Equal("lda #$05 / sta x / sta y / rts", Listing.Code(r, separator: " / "));
         Assert.Equal(5, r.U8("y"));
     }
 
@@ -49,7 +33,7 @@ public class OptimizerTests
                 b[i] = 9
             }
             """);
-        Assert.Equal("lda #$07 / ldx i / sta a,x / lda #$09 / sta b,x / rts", Main(r));
+        Assert.Equal("lda #$07 / ldx i / sta a,x / lda #$09 / sta b,x / rts", Listing.Code(r, separator: " / "));
         Assert.Equal(9, r.U8("b", 2));
     }
 
@@ -69,7 +53,7 @@ public class OptimizerTests
             """);
         // a and b are both at fixed addresses, so they may overlap: b is read again.
         Assert.Equal(7, r.U8("v"));
-        Assert.Contains("lda b / sta v", Main(r));
+        Assert.Contains("lda b / sta v", Listing.Code(r, separator: " / "));
     }
 
     [Fact]
@@ -86,7 +70,7 @@ public class OptimizerTests
             }
             """);
         // After the if, A is 3 only on the path that skips it; the store of 1 changed A.
-        Assert.Contains("lda x / sta y", Main(r));
+        Assert.Contains("lda x / sta y", Listing.Code(r, separator: " / "));
         Assert.Equal(3, r.U8("y"));
     }
 
@@ -101,7 +85,7 @@ public class OptimizerTests
                 v = reg
             }
             """);
-        Assert.Equal("lda #$01 / sta reg / lda reg / sta v / rts", Main(r));
+        Assert.Equal("lda #$01 / sta reg / lda reg / sta v / rts", Listing.Code(r, separator: " / "));
     }
 
     [Fact]
@@ -138,7 +122,7 @@ public class OptimizerTests
                 v = x
             }
             """);
-        Assert.Contains("lda x / sta v", Main(r));
+        Assert.Contains("lda x / sta v", Listing.Code(r, separator: " / "));
         Assert.Equal(between.StartsWith("asm") ? 7 : 9, r.U8("v"));
     }
 
@@ -164,7 +148,7 @@ public class OptimizerTests
             }
             """);
         // A held 5 (the value just stored in x). Kept: "sta y" follows the block with no reload.
-        Assert.Equal(kept, !Main(r).Contains("lda x"));
+        Assert.Equal(kept, !Listing.Code(r, separator: " / ").Contains("lda x"));
         Assert.Equal(5, r.U8("y"));
     }
 
@@ -188,7 +172,7 @@ public class OptimizerTests
         Assert.Equal(6, r.U8("y"));
         Assert.Equal(6, r.U8("z"));
         // A held 6 and the block did not change it, so "sta z" needs no load; x was changed, so it is loaded again.
-        Assert.Contains("inc x / sta z / lda x / sta y", Main(r));
+        Assert.Contains("inc x / sta z / lda x / sta y", Listing.Code(r, separator: " / "));
     }
 
     [Fact]
@@ -215,7 +199,7 @@ public class OptimizerTests
                 while true { x += 1 }
             }
             """);
-        Assert.Equal("inc x / jmp main.while0", Main(r));
+        Assert.Equal("inc x / jmp main.while0", Listing.Code(r, separator: " / "));
     }
 
     [Fact]
@@ -235,7 +219,7 @@ public class OptimizerTests
             }
             """);
         // Only the rts the compiler adds after the block is removed: nothing reaches it.
-        Assert.Equal("lda #$01 / sta x / lda x / sta x / rts / nop", Main(r));
+        Assert.Equal("lda #$01 / sta x / lda x / sta x / rts / nop", Listing.Code(r, separator: " / "));
     }
 
     [Fact]
@@ -266,7 +250,7 @@ public class OptimizerTests
             }
             """);
         // The step is copied once before the loop (a global may change); inside, A already holds Y after the sta.
-        Assert.Contains("tya / sta a,y / clc / adc main._t0 / tay / bcc ", Main(r));
+        Assert.Contains("tya / sta a,y / clc / adc main._t0 / tay / bcc ", Listing.Code(r, separator: " / "));
         Assert.Equal(6, r.U8("a", 6));
         Assert.Equal(252, r.U8("a", 252));
         Assert.Equal(0, r.U8("a", 7));
@@ -322,9 +306,9 @@ public class OptimizerTests
         Assert.Equal(b, r.U8("clear_arm"));
         Assert.Equal(c, r.U8("plain"));
         // Two folded tests: no "and #$80" is left except the one-armed test, which has no second shift to share.
-        Assert.Equal(1, Main(r).Split("and #$80").Length - 1);
-        Assert.Contains("asl a / bcc ", Main(r));
-        Assert.Contains("asl a / bcs ", Main(r));
+        Assert.Equal(1, Listing.Code(r, separator: " / ").Split("and #$80").Length - 1);
+        Assert.Contains("asl a / bcc ", Listing.Code(r, separator: " / "));
+        Assert.Contains("asl a / bcs ", Listing.Code(r, separator: " / "));
     }
 
     [Theory]
@@ -343,7 +327,7 @@ public class OptimizerTests
             """);
         Assert.Equal(c == 1 ? 9 : 4, r.U8("stack", 1));
         Assert.Equal(c == 1 ? 2 : 7, r.U8("sp"));
-        Assert.Equal(1, Main(r).Split("ldx sp").Length - 1);
+        Assert.Equal(1, Listing.Code(r, separator: " / ").Split("ldx sp").Length - 1);
     }
 
     [Theory]
@@ -367,7 +351,7 @@ public class OptimizerTests
             }
             """);
         Assert.Equal(op == 0 ? 10 : op == 1 ? 20 : 30, r.U8("out"));
-        var code = Main(r);
+        var code = Listing.Code(r, separator: " / ");
         Assert.DoesNotContain("jmp main.endif", code);
     }
 
@@ -424,7 +408,7 @@ public class OptimizerTests
             }
             """);
         Assert.Equal(33, r.U8("b", 2));
-        Assert.Equal(1, Main(r).Split(" / ").Count(s => s.StartsWith("ldx") || s == "tax"));   // X is loaded once
+        Assert.Equal(1, Listing.Code(r, separator: " / ").Split(" / ").Count(s => s.StartsWith("ldx") || s == "tax"));   // X is loaded once
     }
 
     [Theory]
@@ -523,7 +507,7 @@ public class OptimizerTests
                 crc = (byte)(op switch { "^" => crc ^ b, "&" => crc & b, "|" => crc | b, _ => crc + b });
             }
             Assert.Equal(crc, r.U8("crc"));
-            Assert.Contains($"sta b / {(op == "+" ? "clc / " : "")}{mnemonic} crc / sta crc", Main(r));
+            Assert.Contains($"sta b / {(op == "+" ? "clc / " : "")}{mnemonic} crc / sta crc", Listing.Code(r, separator: " / "));
         }
     }
 
@@ -539,7 +523,7 @@ public class OptimizerTests
             }
             """);
         Assert.Equal(70, r.U8("t"));
-        Assert.Equal("lda #$1E / sta b / lda t / sec / sbc b / sta t / rts", Main(r));
+        Assert.Equal("lda #$1E / sta b / lda t / sec / sbc b / sta t / rts", Listing.Code(r, separator: " / "));
     }
 
     [Fact]
@@ -555,26 +539,13 @@ public class OptimizerTests
             }
             """);
         Assert.Equal(3 ^ 9, r.U8("t"));
-        Assert.Contains("lda t / eor b", Main(r));
+        Assert.Contains("lda t / eor b", Listing.Code(r, separator: " / "));
     }
 }
 
 /// <summary>A parameter passed in X or Y stays in its register when the body allows it (roadmap M7).</summary>
 public class RegisterParameterTests
 {
-    private static string Code(Run r, string function)
-    {
-        var listing = r.Result.Listing;
-        var start = listing.IndexOf($"\n{function}:", StringComparison.Ordinal);
-        var code = new List<string>();
-        foreach (var l in listing[(start + 1)..].Split('\n').Skip(1).Select(l => l.TrimEnd('\r')))
-        {
-            if (l.EndsWith(':') && !l.StartsWith(' ') && !l.StartsWith('$') && !l.StartsWith($"{function}.")) break;
-            if (l.StartsWith('$')) code.Add(l[17..].Split(';')[0].Trim());
-        }
-        return string.Join(" / ", code);
-    }
-
     [Fact]
     public void A_parameter_in_x_indexes_directly()
     {
@@ -586,7 +557,7 @@ public class RegisterParameterTests
                 set(5, 9)
             }
             """);
-        Assert.Equal("lda set.v / sta a,x / rts", Code(r, "set"));
+        Assert.Equal("lda set.v / sta a,x / rts", Listing.Code(r, "set", " / "));
         Assert.Equal(7, r.U8("a", 3));
         Assert.Equal(9, r.U8("a", 5));
         Assert.DoesNotContain("set.i", r.Result.Symbols.Keys);
@@ -604,7 +575,7 @@ public class RegisterParameterTests
                 out = get(2)
             }
             """, setup: ram => ram.Bytes[0xC002] = 42);
-        Assert.Equal("lda (p),y / rts", Code(r, "get"));
+        Assert.Equal("lda (p),y / rts", Listing.Code(r, "get", " / "));
         Assert.Equal(42, r.U8("out"));
     }
 

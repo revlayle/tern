@@ -5,15 +5,6 @@ namespace Tern.Compiler.Tests;
 /// <summary>M9: <c>inline asm fn</c> (spec 6.2, 7).</summary>
 public class InlineAsmTests
 {
-    private static string[] Lines(Run r, string function)
-    {
-        var lines = r.Result.Listing.Split('\n').Select(l => l.TrimEnd('\r')).ToList();
-        int start = lines.IndexOf($"{function}:");
-        Assert.True(start >= 0, $"No function {function} in the listing");
-        int end = lines.FindIndex(start + 1, l => l.EndsWith(':') && !l.Contains('.') && !l.StartsWith(' '));
-        return lines[start..(end < 0 ? lines.Count : end)].ToArray();
-    }
-
     [Theory]
     [InlineData(0)]
     [InlineData(1)]
@@ -33,7 +24,7 @@ public class InlineAsmTests
             }
             """);
         Assert.Equal(((x << 1) | 1) & 0xFF, r.U8("out"));
-        var main = string.Join("\n", Lines(r, "main"));
+        var main = string.Join("\n", Listing.Lines(r, "main"));
         Assert.DoesNotContain("jsr", main);
         Assert.DoesNotContain("twice_plus_one:", r.Result.Listing);
     }
@@ -67,7 +58,7 @@ public class InlineAsmTests
         Assert.Equal(expected ? 1 : 0, r.U8("if_yes"));
         Assert.Equal(expected ? 0 : 1, r.U8("if_no"));
         Assert.Equal(expected ? 1 : 0, r.U8("stored"));
-        Assert.DoesNotContain("jsr", string.Join("\n", Lines(r, "main")));
+        Assert.DoesNotContain("jsr", string.Join("\n", Listing.Lines(r, "main")));
     }
 
     [Theory]
@@ -191,7 +182,7 @@ public class InlineAsmTests
                 if carry_set() { yes = 1 }
             }
             """);
-        var main = Lines(r, "main").Select(l => l.Trim()).Where(l => l.StartsWith('$')).ToList();
+        var main = Listing.Lines(r, "main").Select(l => l.Trim()).Where(l => l.StartsWith('$')).ToList();
         int cmp = main.FindIndex(l => l.Contains(" cmp "));
         Assert.Contains(" bcc ", main[cmp + 1]);
         Assert.Equal(1, r.U8("yes"));
@@ -207,7 +198,7 @@ public class InlineAsmTests
                 c64.interrupts_on()
             }
             """); 
-        var main = Lines(r, "main").Select(l => l.Trim()).ToList();
+        var main = Listing.Lines(r, "main").Select(l => l.Trim()).ToList();
         Assert.DoesNotContain(main, l => l.Contains("jsr"));
         Assert.Contains(main, l => l.EndsWith(" sei") || l.Contains(" sei"));
         Assert.Contains(main, l => l.Contains(" cli"));

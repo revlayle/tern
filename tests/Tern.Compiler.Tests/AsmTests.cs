@@ -6,16 +6,6 @@ public class AsmTests
 {
     private static byte[] Bytes(Run r, string name, int n) => r.Ram.Bytes.AsSpan(r.Address(name), n).ToArray();
 
-    /// <summary>The listing lines of one function, from its label to the next label without a dot.</summary>
-    private static string ListingOf(Run r, string function)
-    {
-        var lines = r.Result.Listing.Split('\n').Select(l => l.TrimEnd('\r')).ToList();
-        int start = lines.IndexOf($"{function}:");
-        Assert.True(start >= 0, $"No function {function} in the listing");
-        int end = lines.FindIndex(start + 1, l => l.EndsWith(':') && !l.Contains('.') && !l.StartsWith(' '));
-        return string.Join("\n", lines[start..(end < 0 ? lines.Count : end)]);
-    }
-
     [Theory]
     [InlineData(100)]
     [InlineData(245)]
@@ -74,7 +64,7 @@ public class AsmTests
         Assert.Equal(7, r.U8("out"));
         Assert.False(r.Result.Symbols.ContainsKey("put.v"));
         Assert.Contains("lda #$07", r.Result.Listing);
-        var put = ListingOf(r, "put");
+        var put = string.Join("\n", Listing.Lines(r, "put"));
         Assert.Contains("sta out", put);
         Assert.DoesNotContain("put.v", put);
     }
@@ -146,13 +136,11 @@ public class AsmTests
             }
             """);
         Assert.Equal(4, r.U8("n"));
-        Assert.Equal(1, Count(ListingOf(r, "ends_with_rts"), " rts "));
-        Assert.Contains("ends_with_label.done", ListingOf(r, "ends_with_label"));
-        Assert.Equal(1, Count(ListingOf(r, "ends_with_label"), " rts "));
-        Assert.Equal(0, Count(ListingOf(r, "ends_with_jmp"), " rts "));
+        Assert.Equal(1, Listing.Count(Listing.Instructions(r, "ends_with_rts"), "rts"));
+        Assert.Contains("ends_with_label.done", Listing.CodeWithLabels(r, "ends_with_label"));
+        Assert.Equal(1, Listing.Count(Listing.Instructions(r, "ends_with_label"), "rts"));
+        Assert.Equal(0, Listing.Count(Listing.Instructions(r, "ends_with_jmp"), "rts"));
     }
-
-    private static int Count(string text, string part) => text.Split(part).Length - 1;
 
     [Fact]
     public void Constants_chars_and_addresses_as_operands()
@@ -436,7 +424,7 @@ public class AsmTests
                 }
             }
             """);
-        var lines = ListingOf(r, "main").Split('\n').Where(l => l.StartsWith('$')).Select(l => l[16..].Split(';')[0].Trim()).ToArray();
+        var lines = Listing.Instructions(r);
         Assert.Equal(["lda v", "lda v", "nop", "sta v", "lda #$00", "cmp #$00", "rts"], lines);
     }
 
@@ -607,12 +595,8 @@ public class AsmTests
         Assert.Equal(0xFFD2, r.Address("chrout"));
         Assert.Equal(
             ["ldx #$00", "cpx print.n", "bcs print.fend0", "txa", "tay", "lda (print.s),y", "jsr $FFD2", "inx", "cpx print.n", "bne print.for2", "rts"],
-            Instructions(ListingOf(r, "print")));
+            Listing.Instructions(r, "print"));
     }
-
-    private static string[] Instructions(string listing) =>
-        listing.Split('\n').Where(l => l.StartsWith('$') && l.Length > 17 && l[16] == ' ' && char.IsLetter(l[17]))
-            .Select(l => l[16..].Split(';')[0].Trim()).ToArray();
 
     [Fact]
     public void Kernal_example_listing_has_no_stand_in_for_chrout()

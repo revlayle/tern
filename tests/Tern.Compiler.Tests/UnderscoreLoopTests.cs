@@ -64,19 +64,6 @@ public class UnderscoreLoopTests
             $"for _ took {plain.Cpu.Cycles} cycles, for i {named.Cpu.Cycles}\n{plain.Result.Listing}\n{named.Result.Listing}");
     }
 
-    /// <summary>The instructions of main, separated by '|'.</summary>
-    private static string Code(string listing)
-    {
-        var start = listing.IndexOf("\nmain:", StringComparison.Ordinal);
-        var code = new List<string>();
-        foreach (var l in listing[(start + 1)..].Split('\n').Skip(1).Select(l => l.TrimEnd('\r')))
-        {
-            if (l.EndsWith(':') && !l.StartsWith(' ') && !l.StartsWith("main.")) break;
-            if (l.StartsWith('$') && l.Length > 17) code.Add(l[17..].Split(';')[0].Trim());
-        }
-        return string.Join("|", code);
-    }
-
     [Fact]
     public void A_repeat_loop_holds_a_variable_in_the_free_index_register()
     {
@@ -84,7 +71,7 @@ public class UnderscoreLoopTests
         var plain = Loop("_ in 9..=0 step -1", "n += 1", 0);
         var named = Loop("i in 9..=0 step -1", "n += 1", 0);
         Assert.Equal(17, plain.U8("n"));
-        Assert.Equal("ldx #$0A|ldy n|iny|dex|bne main.for2|sty n|rts", Code(plain.Result.Listing));
+        Assert.Equal("ldx #$0A|ldy n|iny|dex|bne main.for2|sty n|rts", Listing.Code(plain));
         Assert.True(plain.Cpu.Cycles <= named.Cpu.Cycles, $"{plain.Cpu.Cycles} > {named.Cpu.Cycles}");
     }
 }

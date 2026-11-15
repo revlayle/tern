@@ -116,7 +116,7 @@ public class ElementValueTests
             Assert.Equal(hits[i], r.U8("hits", i));
         }
         // The tests read the new x from A: xs[i] is loaded once, before the add.
-        var code = string.Join("|", r.Result.Listing.Split('\n').Where(l => l.StartsWith('$') && l.Length > 17).Select(l => l[17..].Split(';')[0].Trim()));
+        var code = Listing.Code(r);
         Assert.Contains("sta xs,x|cmp #$08", code);
         Assert.Single(code.Split('|'), i => i == "lda xs,x");
     }

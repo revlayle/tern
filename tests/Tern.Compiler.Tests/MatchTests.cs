@@ -5,21 +5,6 @@ namespace Tern.Compiler.Tests;
 /// <summary><c>match</c> (spec 5): values, alternatives, ranges and <c>_</c>; compare chains and jump tables.</summary>
 public class MatchTests
 {
-    /// <summary>The instructions of a function, without addresses, bytes and cycles.</summary>
-    private static string Code(Run r, string function = "main")
-    {
-        var listing = r.Result.Listing;
-        var start = listing.IndexOf($"\n{function}:", StringComparison.Ordinal);
-        var code = new List<string>();
-        foreach (var l in listing[(start + 1)..].Split('\n').Skip(1).Select(l => l.TrimEnd('\r')))
-        {
-            if (l.EndsWith(':') && !l.StartsWith(' ') && !l.StartsWith('$') && !l.StartsWith(';') && !l.StartsWith($"{function}.")) break;
-            if (l.StartsWith('$') && l.Length > 17 && !l.Contains("; hi:") && !l.Contains("; lo:")) code.Add(l[17..].Split(';')[0].Trim());
-            else if (l.StartsWith($"{function}.")) code.Add(l.Trim());
-        }
-        return string.Join("|", code);
-    }
-
     /// <summary>Runs <paramref name="classify"/> (a function <c>f(v) -> u8</c>) on every byte and returns the results.</summary>
     private static byte[] Table(string classify, string type = "u8")
     {
@@ -105,7 +90,7 @@ public class MatchTests
         var r = Run.Program("var out: [u8; 256]\n" + source + "\nfn main() { out[0] = f(3) }");
         Assert.DoesNotContain("jumphi", r.Result.Listing);
         Assert.DoesNotContain("Jump table of the indexed match", r.Result.Report);
-        Assert.Contains("cmp #$0A|beq", Code(r, "f"));
+        Assert.Contains("cmp #$0A|beq", Listing.CodeWithLabels(r, "f"));
     }
 
     [Fact]
@@ -118,7 +103,7 @@ public class MatchTests
         var r = Run.Program("var out: [u8; 256]\n" + source + "\nfn main() { out[0] = f(12) }");
         Assert.Equal(2, r.U8("out"));
         // No range check: the value minus the lowest pattern indexes the tables.
-        var code = Code(r, "f");
+        var code = Listing.CodeWithLabels(r, "f");
         Assert.Matches(@"sec\|sbc #\$0A\|tax\|lda f\.jumphi\d+,x\|pha\|lda f\.jumplo\d+,x\|pha\|rts", code);
         Assert.DoesNotContain("cmp", code);
         Assert.Matches(@"Jump table of the indexed match at 4:\d+ in f: \$[0-9A-F]{4}-\$[0-9A-F]{4}, 22 bytes for 11 values", r.Result.Report);
@@ -142,8 +127,8 @@ public class MatchTests
         for (int v = 0; v <= 6; v++) Assert.Equal(v switch { 0 => 7, 1 => 6, 3 => 4, 5 or 6 => 2, _ => 200 }, res[v]);
         var r = Run.Program("var out: [u8; 256]\n" + source + "\nfn main() { out[0] = f(3) }");
         // A lowest value of 0 needs no subtraction.
-        Assert.Matches(@"lda f\.v\|tax\|lda f\.jumphi", Code(r, "f"));
-        Assert.DoesNotContain("sbc", Code(r, "f"));
+        Assert.Matches(@"lda f\.v\|tax\|lda f\.jumphi", Listing.CodeWithLabels(r, "f"));
+        Assert.DoesNotContain("sbc", Listing.CodeWithLabels(r, "f"));
     }
 
     [Fact]
@@ -185,8 +170,8 @@ public class MatchTests
         var r = Run.Program("var out: [u8; 256]\n" + source + "\nfn main() { out[0] = f(-1) }");
         Assert.Equal(4, r.U8("out"));
         // v - (-4) is the same byte with or without the bias: no eor #$80.
-        Assert.Matches(@"lda f\.v\|sec\|sbc #\$FC\|tax\|lda f\.jumphi", Code(r, "f"));
-        Assert.DoesNotContain("eor", Code(r, "f"));
+        Assert.Matches(@"lda f\.v\|sec\|sbc #\$FC\|tax\|lda f\.jumphi", Listing.CodeWithLabels(r, "f"));
+        Assert.DoesNotContain("eor", Listing.CodeWithLabels(r, "f"));
     }
 
     [Fact]
@@ -365,7 +350,7 @@ public class MatchTests
             }
             """);
         Assert.Equal(new byte[] { 9, 8, 7, 6, 5, 4, 3, 2, 9, 8, 7, 6 }, r.Ram.Bytes[r.Address("out")..(r.Address("out") + 12)]);
-        Assert.Matches(@"tay\|lda main\.jumphi\d+,y", Code(r));
+        Assert.Matches(@"tay\|lda main\.jumphi\d+,y", Listing.CodeWithLabels(r));
     }
 
     [Fact]
@@ -407,7 +392,7 @@ public class MatchTests
             var r: u8
             fn main() { match reg { _ => r = 1 } }
             """);
-        Assert.Equal("lda reg|lda #$01|sta r|rts", Code(r));
+        Assert.Equal("lda reg|lda #$01|sta r|rts", Listing.CodeWithLabels(r));
     }
 
     [Fact]
@@ -466,7 +451,7 @@ public class MatchTests
                 {{statement}}
             }
             """);
-        Assert.Equal(expected, Code(r));
+        Assert.Equal(expected, Listing.CodeWithLabels(r));
     }
 
     [Theory]

@@ -5,15 +5,6 @@ namespace Tern.Compiler.Tests;
 /// <summary>M19: <c>-> bool using overflow</c>, the V flag as a return value (spec 6.1, 7).</summary>
 public class OverflowTests
 {
-    private static List<string> Code(Run r, string function)
-    {
-        var lines = r.Result.Listing.Split('\n').Select(l => l.TrimEnd('\r')).ToList();
-        int start = lines.IndexOf($"{function}:");
-        Assert.True(start >= 0, $"No function {function} in the listing");
-        int end = lines.FindIndex(start + 1, l => l.EndsWith(':') && !l.Contains('.') && !l.StartsWith(' '));
-        return lines[start..(end < 0 ? lines.Count : end)].Select(l => l.Trim()).Where(l => l.StartsWith('$')).ToList();
-    }
-
     [Theory]
     [InlineData(0x00)]
     [InlineData(0x40)]
@@ -40,7 +31,7 @@ public class OverflowTests
         Assert.Equal(set ? 1 : 0, r.U8("if_yes"));
         Assert.Equal(set ? 0 : 1, r.U8("if_no"));
         Assert.Equal(set ? 1 : 0, r.U8("stored"));
-        Assert.DoesNotContain(Code(r, "main"), l => l.Contains("jsr"));
+        Assert.DoesNotContain(Listing.Instructions(r), l => l.StartsWith("jsr"));
     }
 
     [Theory]
@@ -121,9 +112,9 @@ public class OverflowTests
                 ram.Bytes[0xC010] = (byte)value;
             });
         Assert.Equal((value & 0x40) != 0 ? 1 : 0, r.U8("yes"));
-        var main = Code(r, "main");
-        int jsr = main.FindIndex(l => l.Contains("jsr"));
-        Assert.Contains(" bvc ", main[jsr + 1]);
+        var main = Listing.Instructions(r);
+        int jsr = main.FindIndex(l => l.StartsWith("jsr"));
+        Assert.StartsWith("bvc ", main[jsr + 1]);
     }
 
     [Theory]
@@ -191,9 +182,9 @@ public class OverflowTests
                 if overflow_set() { yes = 1 }
             }
             """);
-        var main = Code(r, "main");
-        int adc = main.FindIndex(l => l.Contains(" adc "));
-        Assert.Contains(" bvc ", main[adc + 1]);
+        var main = Listing.Instructions(r);
+        int adc = main.FindIndex(l => l.StartsWith("adc "));
+        Assert.StartsWith("bvc ", main[adc + 1]);
         Assert.Equal(1, r.U8("yes"));
     }
 
