@@ -717,7 +717,7 @@ Review themes 4 and 6.
 - Long methods split by job: `TernCompiler.Build` (about 450 lines, six jobs), `ParseProgram`, the checker's `Run`; CodeGen's per-function state in one object instead of fields over four files; parser and checker modes set and reset by hand replaced with scoped helpers.
 - For M28: end positions on tokens and nodes, comments kept by the lexer, a check-only entry that returns diagnostics without building, and deep nesting reported as an error instead of a stack overflow.
 
-Done when: methods follow the 100-line guideline (`CLAUDE.md`), with each one still longer listed in `docs/status.md` and in the session's report to the developer, the check-only entry has tests, and the benchmarks and `SkillTests` are unchanged.
+Done when: methods follow the 100-line guideline and the 500-line maximum (`CLAUDE.md`), with each one longer than 100 lines listed in `docs/status.md` and in the session's report to the developer, the check-only entry has tests, and the benchmarks and `SkillTests` are unchanged.
 
 ### R6: Platforms as data, messages as data
 
