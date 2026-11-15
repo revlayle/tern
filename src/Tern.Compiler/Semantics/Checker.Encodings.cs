@@ -127,6 +127,9 @@ public sealed partial class Checker
             case { } other:
                 throw new CompileError(pos, $"'{name}' is a {KindName(other)}, not an encoding. Use an encoding's name before the quote");
         }
+        // Spec 2.1 lists 'ascii', built with the Commander X16 (review code-quality-syntax 19).
+        if (name == "ascii")
+            throw new CompileError(pos, $"The 'ascii' encoding is not supported yet. Use one of: {string.Join(", ", known)}, or declare an encoding");
         throw new CompileError(pos, $"Unknown encoding '{name}'. Use one of: {string.Join(", ", known)}");
     }
 

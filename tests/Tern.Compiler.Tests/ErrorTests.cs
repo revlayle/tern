@@ -106,7 +106,8 @@ public class ErrorTests
     [InlineData("var x١: u8\nfn main() { }", 1, 6, "'١' cannot be in a name: names use A-Z, a-z, 0-9 and '_'. Write the name with these")]
     [InlineData("var v: u8\nfn main() { v = ١ }", 2, 17, "'١' cannot be in a name: names use A-Z, a-z, 0-9 and '_'. Write the name with these")]
     [InlineData("var v: u8\nfn main() { v = 0x1F }", 2, 17, "Tern has no '0x'. Write hex numbers with '$', as in $1F")]
-    [InlineData("data t = \"AC\"\nfn main() { }", 1, 12, "The character U+E042 has no code in any encoding. Write the byte it stands for as \\$NN")]
+    [InlineData("fn main() {\n    emit { lda #1 }\n}", 2, 5, "'emit' adds assembly to the caller only in a const fn, a code generator. Write the assembly in an 'asm { }' block here, or move it into a const fn")]
+    [InlineData("data t = \"AC\"\nfn main() { }", 1, 12,"The character U+E042 has no code in any encoding. Write the byte it stands for as \\$NN")]
     public void Reports_lexer_errors_at_the_character(string source, int line, int column, string expected)
     {
         var e = Assert.Throws<CompileError>(() => TernCompiler.Compile(source));

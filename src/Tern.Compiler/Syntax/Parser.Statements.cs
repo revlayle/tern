@@ -61,6 +61,10 @@ public sealed partial class Parser
                 var t = Advance();
                 return new EmitStmt(t.Pos, ParseAsmBody(emit: true));
             }
+            // Outside a const fn, 'emit {' would be read as a struct literal (review code-quality-syntax 19).
+            case TokenKind.Identifier when Current.Text == "emit" && PeekAt(1).Kind == TokenKind.LBrace:
+                throw new CompileError(Current.Pos,
+                    "'emit' adds assembly to the caller only in a const fn, a code generator. Write the assembly in an 'asm { }' block here, or move it into a const fn");
             case TokenKind.Linear when PeekAt(1).Kind == TokenKind.Data:
                 throw new CompileError(PeekAt(1).Pos, "'data' must be declared outside functions. Move it to the top level of the file");
             case TokenKind.Linear: return ParseLinearVar();

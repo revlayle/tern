@@ -310,7 +310,7 @@ public class DataTests
     [InlineData("data d = \"A{\"\nfn main() { }", "'{' has no code in the petscii encoding")]
     [InlineData("data d = screen\"A\\n\"\nfn main() { }", "'\\n' has no code in the screen encoding")]
     [InlineData("var c: u8 = petscii_mixed'π'\nfn main() { }", "'π' has no code in the petscii_mixed encoding")]
-    [InlineData("data d = ascii\"A\"\nfn main() { }", "Unknown encoding 'ascii'. Use one of: petscii, petscii_mixed, screen, screen_mixed, atascii, atari_screen")]
+    [InlineData("data d = ascii\"A\"\nfn main() { }", "The 'ascii' encoding is not supported yet. Use one of: petscii, petscii_mixed, screen, screen_mixed, atascii, atari_screen")]
     [InlineData("var c: u8\nfn main() { c = scren'A' }", "Unknown encoding 'scren'")]
     [InlineData("data d = include_bytes(screen\"x\")\nfn main() { }", "takes a file name in quotes")]
     [InlineData("data d = \"A\\q\"\nfn main() { }", "Unknown escape '\\q'")]
