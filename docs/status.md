@@ -6,8 +6,8 @@ Owned by the coding session. Updated at the end of every coding session.
 
 - **Milestone:** R1, tests that find bugs where features meet (roadmap "Before the first release: fixes and cleanup", R1; review theme 7, `docs/reviews/code-quality-tests.md`). M27 and its follow-up are merged.
 - **Branch:** `r1-tests`, from `main` at `3ac5ee6`. All five items are done. 4926 compiler tests pass and 9 theories are skipped (the marked failures below), plus 36 CPU tests. No benchmark changed (1254 / 350780); `SkillTests` pass. The suite takes about 17 seconds (was about 12).
-- **Review** (`docs/reviews/r1.md`): not ready, two must-fix items. Both are fixed: the random start in the other six harnesses (`55322c6`) and the finding table below. Suggestions 3 (matrix errors check the message, `0f9a8ef`) and 5 (`BusLog` for the raster test, `55322c6`) are done; suggestion 4 (a `u16` column in the matrix) is left for R2, next to the backend 3 and 5 fixes it would guard.
-- **Next step:** re-review (`/review r1-tests`). After the merge, R2 (fixes in the backend and the checker) starts with the marked tests below: each fix removes the `Skip` of its finding's theory, which must then pass.
+- **Review** (`docs/reviews/r1.md`): re-review ready to merge; the leftover second summary in `OperandMatrixTests` is removed. The first review had two must-fix items, both fixed: the random start in the other six harnesses (`55322c6`) and the finding table below. Suggestions 3 (matrix errors check the message, `0f9a8ef`) and 5 (`BusLog` for the raster test, `55322c6`) are done; suggestion 4 (a `u16` column in the matrix) is left for R2, next to the backend 3 and 5 fixes it would guard.
+- **Next step:** `/merge r1-tests`. After the merge, R2 (fixes in the backend and the checker) starts with the marked tests below: each fix removes the `Skip` of its finding's theory, which must then pass.
 
 ### Review findings handled by R1
 

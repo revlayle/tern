@@ -219,7 +219,6 @@ public class OperandMatrixTests
             """;
     }
 
-    /// <summary>Why a case is an error, or null when it must compile.</summary>
     /// <summary>
     /// A part of the error a case must give, or null when it must compile. Where two rules apply, the
     /// first one here is the error the checker reports first.
