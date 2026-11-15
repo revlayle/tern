@@ -40,6 +40,8 @@ public sealed record MemoryDump(string What, int Address, int Size, VariableInfo
             var near = program.Variables.Keys.Where(k => k.EndsWith("." + what) || k.Equals(what, StringComparison.OrdinalIgnoreCase)).Take(3).ToList();
             throw new FormatException($"No variable '{what}'" + (near.Count > 0 ? $". Did you mean {string.Join(" or ", near.Select(n => $"'{n}'"))}?" : ". Locals are written 'function.name'"));
         }
+        if (v.InChr)
+            throw new FormatException($"'{v.Name}' is tile data in a chr area, at ${v.Address:X4} in the PPU's memory, and --dump shows the CPU's memory");
         if (v.Address + (size ?? v.Size) > 0x10000) throw new FormatException($"'{text}' goes past $FFFF ('{v.Name}' is at ${v.Address:X4})");
         return new MemoryDump(text, v.Address, size ?? v.Size, v);
     }

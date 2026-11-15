@@ -34,6 +34,8 @@ public sealed class LabelFormat
 
     /// <summary>In a value for <see cref="Mesen"/>: the label is in PRG ROM, at the offset below this bit.</summary>
     public const int PrgRom = 0x100000;
+    /// <summary>In a value for <see cref="Mesen"/>: the label is in CHR ROM, at the offset below this bit.</summary>
+    public const int ChrRom = 0x200000;
 
     /// <summary>VICE's monitor commands: "al C:0810 .main".</summary>
     public static readonly LabelFormat Vice = new() { Extension = ".vs", Line = (address, name) => $"al C:{address:x4} .{name}" };
@@ -59,14 +61,15 @@ public sealed class LabelFormat
 
     /// <summary>
     /// Mesen's label files (.mlb): "NesPrgRom:offset:name" for an offset into PRG ROM (the value has
-    /// <see cref="PrgRom"/> set), "NesInternalRam:address:name" for RAM. Mesen's labels have no dots, so
-    /// a dot is written as '_'.
+    /// <see cref="PrgRom"/> set), "NesChrRom:offset:name" for tile data (<see cref="ChrRom"/> set),
+    /// "NesInternalRam:address:name" for RAM. Mesen's labels have no dots, so a dot is written as '_'.
     /// </summary>
     public static readonly LabelFormat Mesen = new()
     {
         Extension = ".mlb",
-        Line = (value, name) => (value & PrgRom) != 0
-            ? $"NesPrgRom:{value & ~PrgRom:X4}:{name.Replace('.', '_')}"
+        Line = (value, name) =>
+            (value & PrgRom) != 0 ? $"NesPrgRom:{value & ~PrgRom:X4}:{name.Replace('.', '_')}"
+            : (value & ChrRom) != 0 ? $"NesChrRom:{value & ~ChrRom:X4}:{name.Replace('.', '_')}"
             : $"NesInternalRam:{value:X4}:{name.Replace('.', '_')}",
     };
 }

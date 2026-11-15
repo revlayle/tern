@@ -436,7 +436,7 @@ public static class Assembler
                     break;
                 }
                 case Padding p when s.Size > 0:
-                    bytes.AddRange(new byte[s.Size]);
+                    bytes.AddRange(Enumerable.Repeat(p.Fill, s.Size));
                     listing.AppendLine($"${s.Address:X4}  {s.Size} byte(s) of padding: {p.Reason}");
                     break;
                 case LabelDef l:

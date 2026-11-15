@@ -14,7 +14,8 @@ namespace Tern.Compiler;
 public sealed record OverlayFile(string Name, string Area, int LoadAddress, byte[] Image, byte[] File);
 
 /// <summary>A variable's place: its type as written (<c>u16</c>, <c>[u8; 10]</c>), and the function whose frame holds it (null for a global).</summary>
-public sealed record VariableInfo(string Name, int Address, int Size, string Type, string? Function, bool IsData);
+/// <param name="InChr">Tile data in a NES chr area: <paramref name="Address"/> is in the PPU's memory, not the CPU's.</param>
+public sealed record VariableInfo(string Name, int Address, int Size, string Type, string? Function, bool IsData, bool InChr = false);
 
 public sealed class CompileResult
 {
@@ -298,7 +299,7 @@ public static partial class TernCompiler
                 imageLabels[g] = label;
                 // A bank's data is in the bank, with its code (spec 8.5).
                 items.Add(new SectionStart(g.Name, Overlay: g.Module?.InBank == true ? g.OverlayUnit : null));
-                if (ImagePadding(g) is { } padding) items.Add(padding);
+                if (ImagePadding(g, cartridge is null ? (byte)0 : (byte)0xFF) is { } padding) items.Add(padding);
                 items.Add(new LabelDef(label));
                 items.AddRange(ImageBytes(g, gen.LabelOf));
             }
@@ -392,7 +393,7 @@ public static partial class TernCompiler
         foreach (var g in program.Globals)
         {
             symbols[g.Name] = g.Address;
-            variables[g.Name] = new VariableInfo(g.Name, g.Address, g.Type.Size, g.Type.ToString(), null, g.IsData);
+            variables[g.Name] = new VariableInfo(g.Name, g.Address, g.Type.Size, g.Type.ToString(), null, g.IsData, g.InChr);
         }
         foreach (var f in program.Functions)
         {
@@ -406,7 +407,7 @@ public static partial class TernCompiler
         }
 
         // The emulators accept dots inside labels, so names stay as in the listing and cannot clash (util.bump, util_bump).
-        string labels = platform.Labels.Write(symbols, cartridge is null ? null : NesLabelMap(prgFirst, bankCount, banks.ToDictionary(m => m.Name, m => m.Bank!.Value)));
+        string labels = platform.Labels.Write(symbols, cartridge is null ? null : NesLabelMap(prgFirst, bankCount, banks.ToDictionary(m => m.Name, m => m.Bank!.Value), program.Globals.Where(g => g.InChr).Select(g => g.Name).ToHashSet()));
 
         var entries = new List<(string Name, int Address)>();
         string? apiModule = null, apiName = null;
