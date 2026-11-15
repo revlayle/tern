@@ -436,7 +436,7 @@ public class MemoryTests
     }
 
     [Fact]
-    public void A_module_cannot_have_a_memory_block_or_name_a_region()
+    public void A_module_cannot_have_a_memory_block()
     {
         var dir = Directory.CreateTempSubdirectory("tern");
         try
@@ -445,11 +445,63 @@ public class MemoryTests
             File.WriteAllText(Path.Combine(dir.FullName, "m.tern"), "memory { $2000..=$2FFF reserved }\n");
             var e = Assert.Throws<CompileError>(() => TernCompiler.Compile("import m\nfn main() { }", sourcePath: main));
             Assert.Contains("Only the program's main file may have a memory block", e.Description);
+        }
+        finally { dir.Delete(recursive: true); }
+    }
 
-            File.WriteAllText(Path.Combine(dir.FullName, "m.tern"), "var v: u8 @ buffers\nfn touch() { v = 1 }\n");
-            e = Assert.Throws<CompileError>(() => TernCompiler.Compile(
-                "import m\nmemory { $C000..=$C0FF region buffers }\nfn main() { m.touch() }", sourcePath: main));
-            Assert.Contains("'buffers' is not declared", e.Description);
+    /// <summary>Review code-quality-semantics 3, decision 2026-11-15: a module places declarations in the main file's regions by name.</summary>
+    [Fact]
+    public void A_module_places_declarations_in_a_region_of_the_main_file()
+    {
+        var dir = Directory.CreateTempSubdirectory("tern");
+        try
+        {
+            File.WriteAllText(Path.Combine(dir.FullName, "m.tern"), """
+                noinit var buf: [u8; 16] @ buffers
+                var count: u8 @ buffers + 16
+                data table: [u8; 3] @ buffers + 32 = [9, 8, 7]
+                fn fill() {
+                    buf[0] = 7
+                    count = table[1]
+                }
+                """);
+            var r = Run.Program("""
+                import m
+                memory {
+                    $C000..=$CFFF  region buffers
+                }
+                var out: u8
+                var n: u8
+                fn main() {
+                    m.fill()
+                    out = m.buf[0]
+                    n = m.count
+                }
+                """, sourcePath: Path.Combine(dir.FullName, "main.tern"));
+            Assert.Equal(7, r.U8("out"));
+            Assert.Equal(8, r.U8("n"));
+            Assert.Equal(0xC000, r.Address("m.buf"));
+            Assert.Equal(0xC010, r.Address("m.count"));
+            Assert.Equal(0xC020, r.Address("m.table"));
+        }
+        finally { dir.Delete(recursive: true); }
+    }
+
+    [Theory]
+    [InlineData("const buffers = $C000\nvar v: u8 @ buffers\nfn touch() { v = 1 }", "constant of this module (line 1)")]
+    [InlineData("fn buffers() { }\nvar v: u8 @ buffers\nfn touch() { v = 1 }", "function of this module (line 1)")]
+    [InlineData("var v: u8 @ buffers\nvar buffers: u8\nfn touch() { v = 1 }", "variable of this module (line 2)")]
+    public void A_region_name_a_module_uses_cannot_be_a_symbol_of_the_module(string module, string expected)
+    {
+        var dir = Directory.CreateTempSubdirectory("tern");
+        try
+        {
+            File.WriteAllText(Path.Combine(dir.FullName, "m.tern"), module + "\n");
+            var e = Assert.Throws<CompileError>(() => TernCompiler.Compile(
+                "import m\nmemory { $C000..=$C0FF region buffers }\nfn main() { m.touch() }", sourcePath: Path.Combine(dir.FullName, "main.tern")));
+            Assert.StartsWith("'buffers' is a region of the main file and a ", e.Description);
+            Assert.Contains(expected + ", so '@ buffers' would be ambiguous. Rename the ", e.Description);
+            Assert.EndsWith("m.tern", e.Pos.File);
         }
         finally { dir.Delete(recursive: true); }
     }

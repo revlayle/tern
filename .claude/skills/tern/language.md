@@ -652,7 +652,9 @@ a $0003 u8 = 21 ($15)
 - Only what is reached is compiled. Module parameters: `import sprites(COUNT = 24)`; a module
   declares them with `module sprites(COUNT: u8 = 32)` and checks them with `assert`.
 - A `memory { }` block in the main file reserves ranges (`$2000..=$2FFF reserved`), adds regions,
-  overlay areas and zero page. A main file with `export` lines and no `main` is a binary for another
+  overlay areas and zero page. Any module may place declarations in the main file's regions and
+  `chr` areas by name (`noinit var buf: [u8; 16] @ buffers`, `data font @ tiles` in a font module),
+  as long as it has no symbol of that name. A main file with `export` lines and no `main` is a binary for another
   program (`name_api.tern` is written for the host). See `docs/guide.md` sections 3.11 and 3.12.
 - Overlays: `import level1 @ levels` puts a module in an overlay area; it gets its own file
   (`level1.prg`, on the Atari `level1.xex`, on the Apple II `level1.bin`), loaded with `c64.load`, the Atari's `io.load_xex` or the Apple II's `io.load_bin`, and
