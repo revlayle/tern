@@ -26,7 +26,12 @@ public sealed class IllegalOpcodeException(byte opcode, ushort address)
 }
 
 /// <summary>
-/// Instruction-level 6502 emulator with exact cycle counts for documented opcodes.
+/// Instruction-level 6502 emulator with exact cycle counts for documented opcodes (checked against the
+/// datasheet in <c>InstructionSetTests</c>). Not modelled: undocumented opcodes (they throw
+/// <see cref="IllegalOpcodeException"/>); N, V and Z after decimal arithmetic on invalid BCD; the
+/// one-instruction delay of cli, sei and plp before an IRQ is seen; the dummy reads of indexed
+/// instructions, so a register with read side effects is not touched by them (the double write of
+/// read-modify-write is modelled); an NMI during brk, and interrupts in the middle of an instruction.
 /// </summary>
 public sealed class Cpu6502(IBus bus, CpuVariant variant = CpuVariant.Nmos6502)
 {
