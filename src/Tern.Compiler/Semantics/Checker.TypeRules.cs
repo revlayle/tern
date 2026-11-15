@@ -8,12 +8,14 @@ public sealed partial class Checker
     // ---------- Type rules ----------
 
     /// <summary>
-    /// Type of a constant expression with no context: the type of its typed constants, or for one of
-    /// literals and untyped constants the smallest type that holds it.
+    /// Type of a constant expression with no context: the type of its typed constants when the value
+    /// fits it, otherwise the smallest type that holds it. Only the final value is checked (spec 3.1),
+    /// so <c>BOX * 30</c> with <c>BOX: u8 = 13</c> is 390, a u16.
     /// </summary>
     private static TernType DefaultType(Expr e)
     {
-        if (e.Type.Kind == TypeKind.IntLiteral && e.ConstType is { } typed) return typed;
+        if (e.Type.Kind == TypeKind.IntLiteral && e.ConstType is { } typed
+            && e.ConstValue is long v && v >= typed.MinValue && v <= typed.MaxValue) return typed;
         return LiteralType(e);
     }
 

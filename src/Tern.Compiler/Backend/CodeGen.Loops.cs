@@ -535,7 +535,7 @@ public sealed partial class CodeGen
             if (!inclusive)
             {
                 IncCounter(c);
-                CompareCounter(c, bound.Lo);
+                if (to != 256) CompareCounter(c, bound.Lo);   // 0..256: the step to 0 sets Z (spec 5.1)
                 Branch(Bne, top);
             }
             else if (to == 255)
@@ -796,8 +796,9 @@ public sealed partial class CodeGen
                 Op(Sta, Var(c, 1));
             }
         }
-        // Up to 255 inclusive: the carry is the whole test, so the loop goes on while there is none.
-        if (up && inclusive && c.Type.Size == 1 && to == 255)
+        // Up to 255 inclusive, or to an end past 255 (0..256 step 3 counts with a u8, spec 5.1): the
+        // carry is the whole test, so the loop goes on while there is none.
+        if (up && c.Type.Size == 1 && to is long last && (inclusive ? last >= 255 : last >= 256))
         {
             Branch(Bcc, top);
             return;

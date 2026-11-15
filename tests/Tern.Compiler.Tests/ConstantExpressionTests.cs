@@ -141,6 +141,67 @@ public class ConstantExpressionTests
         Assert.Equal(5, r.U8("n"));
     }
 
+    /// <summary>Review code-quality-semantics 6: with nothing to give a type, a typed constant narrows only when the value fits.</summary>
+    [Fact]
+    public void A_typed_constant_where_nothing_gives_a_type_does_not_narrow_a_value_too_large()
+    {
+        var r = Run.Program("""
+            const BOX: u8 = 13
+            var out: u16
+            var n: u16
+            fn main() {
+                var v = BOX * 30
+                out = v
+                for i in 0..BOX * 30 { n += 1 }
+            }
+            """);
+        Assert.Equal(390, r.U16("out"));
+        Assert.Equal(390, r.U16("n"));
+    }
+
+    /// <summary>Review code-quality-semantics 7: 'as' keeps the low bits of a constant of any size (spec 3.5).</summary>
+    [Fact]
+    public void As_keeps_the_low_bits_of_a_constant_wider_than_16_bits()
+    {
+        var r = Run.Program("""
+            const BIG = 70000
+            const NEG = -70000
+            var w: u16
+            var b: u8
+            var s: i16
+            fn main() {
+                w = BIG as u16
+                b = BIG as u8
+                s = NEG as i16
+            }
+            """);
+        Assert.Equal(70000 & 0xFFFF, r.U16("w"));
+        Assert.Equal(70000 & 0xFF, r.U8("b"));
+        Assert.Equal(unchecked((short)-70000), (short)r.U16("s"));
+    }
+
+    /// <summary>Review code-quality-semantics 8: '.lo' and '.hi' of an untyped constant do not depend on its size.</summary>
+    [Theory]
+    [InlineData("$C0", 0xC0, 0x00)]
+    [InlineData("$C000", 0x00, 0xC0)]
+    [InlineData("0", 0x00, 0x00)]
+    [InlineData("-1", 0xFF, 0xFF)]
+    [InlineData("-300", 0xD4, 0xFE)]
+    public void Lo_and_hi_of_an_untyped_constant_take_both_bytes(string value, int lo, int hi)
+    {
+        var r = Run.Program($$"""
+            const BASE = {{value}}
+            var l: u8
+            var h: u8
+            fn main() {
+                l = BASE.lo
+                h = BASE.hi
+            }
+            """);
+        Assert.Equal(lo, r.U8("l"));
+        Assert.Equal(hi, r.U8("h"));
+    }
+
     [Theory]
     [InlineData("const BOX: u8 = 13\nconst B: u8 = BOX + 250\nfn main() { }", "263 does not fit in u8 (0 to 255)")]
     [InlineData("const BOX: u8 = 13\nvar v: u8 = BOX * 20\nfn main() { }", "260 does not fit in u8 (0 to 255)")]
@@ -181,5 +242,6 @@ public class ConstantExpressionTests
         "-300 does not fit in u8 (0 to 255), the type of 'x', which it is combined with. Use a smaller value")]
     [InlineData("var w: u16\nfn main() { w += 70000 }",
         "70000 does not fit in u16 (0 to 65535), the type of 'w', which it is combined with. Use a smaller value")]
+    [InlineData("const C: u8 = 5\nvar x: u8\nfn main() { x = C.hi }", ".hi needs a 16-bit value, not u8")]
     public void Reports_errors(string source, string expected) => Assert.Contains(expected, Error(source));
 }
