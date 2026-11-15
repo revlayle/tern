@@ -444,7 +444,8 @@ public sealed partial class Checker
     /// <summary>True if the code calls a function that may change <paramref name="reg"/>: any function except a routine that keeps it.</summary>
     private bool ContainsCall(Node node, Register reg) => node switch
     {
-        CallExpr c => (c.Name is not ("addr" or "len" or "sizeof" or "offset") && !(Lookup(c.Name) is FunctionSymbol f && f.Keeps.Contains(reg)))
+        // A name that is not declared is not counted: checking the body reports it (review code-quality-semantics 11).
+        CallExpr c => (c.Name is not ("addr" or "len" or "sizeof" or "offset") && Lookup(c.Name) is { } called && !(called is FunctionSymbol f && f.Keeps.Contains(reg)))
             || c.Args.Any(a => ContainsCall(a, reg)),
         BlockStmt b => b.Statements.Any(x => ContainsCall(x, reg)),
         IfStmt i => ContainsCall(i.Condition, reg) || ContainsCall(i.Then, reg) || (i.Else is not null && ContainsCall(i.Else, reg)),
