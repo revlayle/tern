@@ -36,6 +36,9 @@ public sealed partial class CodeGen
 
     private void GenForLoop(ForStmt f)
     {
+        // The start runs before the end and the step (spec 5), though the end is computed first below.
+        var later = HasEffect(f.To) ? f.To : f.Step;
+        if (later is not null && InSourceOrder(f.From, later, e => f.From = e, () => GenForLoop(f))) return;
         var c = f.Symbol!;
         var type = c.Type;
 

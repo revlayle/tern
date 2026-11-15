@@ -387,6 +387,7 @@ public sealed partial class CodeGen
         if (value is not BinaryExpr { Op: TokenKind.Less or TokenKind.LessEq or TokenKind.Greater or TokenKind.GreaterEq } b
             || b.Left.Type is not { Size: 1, IsSigned: false } || b.Right.Type is not { Size: 1, IsSigned: false })
             return false;
+        if (InSourceOrder(b.Left, b.Right, e => b.Left = e, () => CompareIntoCarry(value))) return true;
         Expr l = b.Left, r = b.Right;
         var op = b.Op;
         if (op is TokenKind.Less or TokenKind.LessEq)
