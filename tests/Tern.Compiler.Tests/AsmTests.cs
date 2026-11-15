@@ -477,6 +477,12 @@ public class AsmTests
     [InlineData("var b: u8 @ $D020\nfn main() { asm {\n lda (b),y\n } }", "needs a zero-page address, but 'b' is at $D020")]
     [InlineData("fn main() { asm {\n lda (main),y\n } }", "needs a zero-page address, not a function")]
     [InlineData("fn main() { asm {\n stx $1234,y\n } }", "'stx address,y' needs a zero-page address")]
+    // Review code-quality-semantics 10: data was moved into zero page.
+    [InlineData("data msg = \"HI\"\nvar out: u8\nfn main() { asm {\n ldy #0\n lda (msg),y\n sta out\n } }",
+        "'lda (address),y' needs a pointer in zero page, but 'msg' is data, not a pointer. Declare one, as in 'var p: ptr u8 = addr(msg)', and use (p),y")]
+    [InlineData("data t: [u8; 4] = [1, 2, 3, 4]\nfn main() { asm {\n ldx #0\n lda (t,x)\n } }", "but 't' is data, not a pointer")]
+    [InlineData("data t: [u8; 4] = [1, 2, 3, 4]\nfn main() { asm {\n ldy #0\n stx t,y\n } }",
+        "'stx address,y' needs a zero-page address, but 't' is data, which is never in zero page. Use another addressing mode")]
     [InlineData("fn main() { asm {\n stx $12,x\n } }", "'stx' has no address,x mode")]
     [InlineData("fn main() { asm {\n lda $12,z\n } }", "Expected x or y after ',', found 'z'")]
     [InlineData("fn main() { asm {\n lda ($12,y)\n } }", "Expected x in (address,x), found 'y'")]
