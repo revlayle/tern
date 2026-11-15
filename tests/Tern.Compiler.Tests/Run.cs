@@ -19,8 +19,12 @@ public sealed class Run
     /// <summary>Array indexes and indexed match values outside their tables (M20). A run with any fails, unless checkIndexes is false.</summary>
     public IReadOnlyList<Tools.IndexError> IndexErrors { get; }
 
+    /// <summary>The reads and writes of the watched addresses; null when the run watches none.</summary>
+    public BusLog? Log { get; }
+
     private Run(string source, long maxCycles, string? sourcePath, Action<Ram>? setup, string? libraryDirectory, long irqEvery,
-        IReadOnlyDictionary<int, Action<Run>>? traps, bool checkIndexes, Platform? platform, Func<long, int, byte>? buttons, bool zeroStart)
+        IReadOnlyDictionary<int, Action<Run>>? traps, bool checkIndexes, Platform? platform, Func<long, int, byte>? buttons, bool zeroStart,
+        Func<CompileResult, IEnumerable<int>>? watch)
     {
         Result = TernCompiler.Compile(source, platform, sourcePath: sourcePath, libraryDirectory: libraryDirectory);
         if (!zeroStart) StartState.Fill(Ram);
@@ -39,7 +43,9 @@ public sealed class Run
         else Ram.Load((ushort)Result.LoadAddress, Result.Image);
         setup?.Invoke(Ram);
         // As after reset: no IRQ until the program enables it.
-        Cpu = new Cpu6502(Nes is null ? Ram : Nes, Result.Platform.Cpu) { PC = (ushort)Result.Entry, SP = 0xFF, I = true };
+        IBus bus = Nes is null ? Ram : Nes;
+        if (watch is not null) bus = Log = new BusLog(bus, watch(Result));
+        Cpu = new Cpu6502(bus, Result.Platform.Cpu) { PC = (ushort)Result.Entry, SP = 0xFF, I = true };
         if (!zeroStart) StartState.Set(Cpu);
         if (Nes is not null) Nes.Cpu = Cpu;
         long nextIrq = irqEvery;
@@ -82,10 +88,12 @@ public sealed class Run
     /// <param name="platform">The target; the C64 if null.</param>
     /// <param name="buttons">On the NES: the buttons of pad 1 or 2 in a frame (<see cref="Tools.NesBus.Buttons"/>).</param>
     /// <param name="zeroStart">Starts with zero memory and zero registers instead of the <see cref="StartState"/>.</param>
+    /// <param name="watch">The addresses whose reads and writes the CPU makes are logged in <see cref="Log"/>, given the compiled program.</param>
     public static Run Program(string source, long maxCycles = 5_000_000, string? sourcePath = null, Action<Ram>? setup = null,
         string? libraryDirectory = null, long irqEvery = 0, IReadOnlyDictionary<int, Action<Run>>? traps = null, bool checkIndexes = true,
-        Platform? platform = null, Func<long, int, byte>? buttons = null, bool zeroStart = false) =>
-        new(source, maxCycles, sourcePath, setup, libraryDirectory, irqEvery, traps, checkIndexes, platform, buttons, zeroStart);
+        Platform? platform = null, Func<long, int, byte>? buttons = null, bool zeroStart = false,
+        Func<CompileResult, IEnumerable<int>>? watch = null) =>
+        new(source, maxCycles, sourcePath, setup, libraryDirectory, irqEvery, traps, checkIndexes, platform, buttons, zeroStart, watch);
 
     public int Address(string name) =>
         Result.Symbols.TryGetValue(name, out var a) ? a : throw new KeyNotFoundException($"No symbol '{name}'");

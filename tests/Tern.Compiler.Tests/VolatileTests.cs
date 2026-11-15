@@ -10,24 +10,22 @@ public class VolatileTests
 {
     /// <summary>
     /// <c>dst[i] = src[i]</c> loads Y once when <c>i</c> is ordinary memory, and reads <c>i</c> twice
-    /// when it is volatile: the number of reads of <c>i</c> shows which. A volatile <c>i</c> is read
-    /// for the destination first (spec 5), into a temporary.
+    /// when it is volatile: the number of reads of <c>i</c> the CPU makes shows which (review
+    /// code-quality-tests, finding 3). A volatile <c>i</c> is read for the destination first (spec 5), into a temporary.
     /// </summary>
     private static int IndexReads(string declaration, string extra = "")
     {
-        var r = TernCompiler.Compile($$"""
+        var r = Run.Program($$"""
             {{declaration}}
-            var src: ptr u8 @ zp
-            var dst: ptr u8 @ zp
+            var src: ptr u8 @ zp = $3000
+            var dst: ptr u8 @ zp = $3100
             {{extra}}
             fn main() { dst[i] = src[i] }
-            """);
-        var main = r.Listing[r.Listing.IndexOf("\nmain:", StringComparison.Ordinal)..];
-        return Count(main, "ldy i ") + Count(main, "lda i ");
+            """, watch: c => [c.Symbols["i"]]);
+        int i = r.Address("i");
+        Assert.Equal(r.Ram.Bytes[0x3000 + r.Ram.Bytes[i]], r.Ram.Bytes[0x3100 + r.Ram.Bytes[i]]);
+        return r.Log!.Reads(i);
     }
-
-    private static int Count(string listing, string instruction) =>
-        listing.Split('\n').Count(l => l.StartsWith('$') && l.Contains(instruction));
 
     [Theory]
     [InlineData("var i: u8", 1)]
@@ -52,14 +50,15 @@ public class VolatileTests
     [Fact]
     public void A_volatile_struct_makes_every_field_volatile()
     {
-        var r = TernCompiler.Compile("""
+        var r = Run.Program("""
             struct S { a: u8, i: u8 }
             volatile var s: S @ $C000
-            var src: ptr u8 @ zp
-            var dst: ptr u8 @ zp
+            var src: ptr u8 @ zp = $3000
+            var dst: ptr u8 @ zp = $3100
             fn main() { dst[s.i] = src[s.i] }
-            """);
-        Assert.Equal(2, Count(r.Listing, "ldy s+1 ") + Count(r.Listing, "lda s+1 "));
+            """, watch: _ => [0xC000, 0xC001]);
+        Assert.Equal(2, r.Log!.Reads(0xC001));
+        Assert.Equal(0, r.Log.Reads(0xC000));
     }
 
     [Fact]
@@ -72,16 +71,31 @@ public class VolatileTests
     [Fact]
     public void A_global_used_by_two_handlers_is_volatile()
     {
-        var r = TernCompiler.Compile("""
+        // h1 runs once, from an IRQ; main waits for it.
+        var r = Run.Program("""
             var i: u8
-            var src: ptr u8 @ zp
-            var dst: ptr u8 @ zp
-            interrupt fn h1() { dst[i] = src[i] }
+            var done: bool
+            var src: ptr u8 @ zp = $3000
+            var dst: ptr u8 @ zp = $3100
+            interrupt fn h1() {
+                dst[i] = src[i]
+                done = true
+                asm { sei }
+            }
             interrupt fn h2() { i += 1 }
-            fn main() { }
-            """);
-        var h1 = r.Listing[r.Listing.IndexOf("\nh1:", StringComparison.Ordinal)..r.Listing.IndexOf("\nh2:", StringComparison.Ordinal)];
-        Assert.Equal(2, Count(h1, "ldy i ") + Count(h1, "lda i "));
+            fn main() {
+                asm {
+                    lda #h1.lo
+                    sta $FFFE
+                    lda #h1.hi
+                    sta $FFFF
+                    cli
+                }
+                while !done { }
+            }
+            """, irqEvery: 500, watch: c => [c.Symbols["i"]]);
+        Assert.Equal(1, r.Interrupts);
+        Assert.Equal(2, r.Log!.Reads(r.Address("i")));
     }
 
     [Fact]
