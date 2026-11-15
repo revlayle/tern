@@ -86,8 +86,9 @@ public static partial class TernCompiler
     /// </exception>
     /// <param name="warnings">Report warnings (spec 13), leave them out (<c>--no-warnings</c>), or report each as an error (<c>--warnings-as-errors</c>).</param>
     /// <param name="warnLibrary">Warn about library modules too, which programs never are (for the repository's test of its library).</param>
+    /// <param name="optimize">Run the optimizer over each function. Off only in tests, which compare a program's results both ways.</param>
     public static CompileResult Compile(string source, Platform? platform = null, string? sourcePath = null, string? libraryDirectory = null, int? maxErrors = null,
-        WarningMode warnings = WarningMode.Report, bool warnLibrary = false)
+        WarningMode warnings = WarningMode.Report, bool warnLibrary = false, bool optimize = true)
     {
         platform ??= Platform.C64;
 
@@ -106,7 +107,7 @@ public static partial class TernCompiler
         if (warnings == WarningMode.AsErrors && found!.Count > 0) ThrowWarningsAsErrors();
         try
         {
-            var result = Build(program, platform, sourcePath);
+            var result = Build(program, platform, sourcePath, optimize);
             result.Warnings = found is null ? [] : errors.Sort(found);
             return result;
         }
@@ -131,9 +132,9 @@ public static partial class TernCompiler
     }
 
     /// <summary>Allocation, code generation and layout, for a program whose checks found no error.</summary>
-    private static CompileResult Build(CheckedProgram program, Platform platform, string? sourcePath)
+    private static CompileResult Build(CheckedProgram program, Platform platform, string? sourcePath, bool optimize)
     {
-        var gen = new CodeGen(program);
+        var gen = new CodeGen(program, optimize);
         var functionCode = gen.GenerateFunctions();
         // Indexed arrays placed so that they do not cross a page, with the variables starting on one;
         // if the program areas have no room for that, the variables are placed one after another (F12).

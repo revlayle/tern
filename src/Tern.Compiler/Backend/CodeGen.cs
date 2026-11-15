@@ -36,9 +36,13 @@ public sealed partial class CodeGen
     private readonly List<VariableSymbol> _freeTemps = [];
     private int _tempCounter;
 
-    public CodeGen(CheckedProgram program)
+    /// <summary>False when the program is compiled without the optimizer (<see cref="TernCompiler.Compile"/>).</summary>
+    private readonly bool _optimize;
+
+    public CodeGen(CheckedProgram program, bool optimize = true)
     {
         _program = program;
+        _optimize = optimize;
         foreach (var m in program.Modules)
             _sourceLines[m.Path ?? ""] = m.Source.Split('\n');
         _mainFile = program.Modules[^1].Path;
@@ -65,7 +69,7 @@ public sealed partial class CodeGen
             // An interrupt handler's body is optimized before its saving code is added.
             // main runs once, right after the startup code has cleared memory.
             bool startsProgram = f == _program.Main && !_program.IsBinary && !f.AddressTaken;
-            if (!f.Declaration!.IsAsm && !(f.IsInterrupt && !f.IsPart)) Optimizer.Run(_out, f, startsProgram);
+            if (_optimize && !f.Declaration!.IsAsm && !(f.IsInterrupt && !f.IsPart)) Optimizer.Run(_out, f, startsProgram);
             FunctionItems[f] = _out.ToList();
             all.AddRange(_out);
         }
@@ -433,7 +437,7 @@ public sealed partial class CodeGen
         if (_out[^1] is Instr { Mnemonic: Mnemonic.Jmp, Operand: LabelOperand { Label: var l } } && l == _interruptExit)
             _out.RemoveAt(_out.Count - 1);
         var body = _out.GetRange(start, _out.Count - start);
-        Optimizer.Run(body, f);
+        if (_optimize) Optimizer.Run(body, f);
         _out.RemoveRange(start, _out.Count - start);
         _out.AddRange(body);
 
