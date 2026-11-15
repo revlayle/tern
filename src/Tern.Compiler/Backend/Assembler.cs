@@ -397,7 +397,8 @@ public static class Assembler
                     {
                         // bne far  ->  beq +3 / jmp far
                         Encoder.Encode(Invert(i.Mnemonic), AddressingMode.Relative, s.Address + 5, s.Address, bytes);
-                        Encoder.Encode(Mnemonic.Jmp, AddressingMode.Absolute, Resolve(((LabelOperand)i.Operand!).Label), s.Address + 2, bytes);
+                        var far = (LabelOperand)i.Operand!;
+                        Encoder.Encode(Mnemonic.Jmp, AddressingMode.Absolute, Resolve(far.Label) + far.Offset, s.Address + 2, bytes);
                     }
                     else
                         Encoder.Encode(i.Mnemonic, s.Mode, OperandValue(i, s.Mode), s.Address, bytes);
