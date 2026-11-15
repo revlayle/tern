@@ -429,18 +429,6 @@ public class C64LibraryTests
         Assert.Equal(1, m[0xD015]);
     }
 
-    /// <summary>Memory that records the values written to one address.</summary>
-    private sealed class WatchBus(Ram ram, int watched) : IBus
-    {
-        public List<byte> Writes { get; } = [];
-        public byte Read(ushort address) => ram.Read(address);
-        public void Write(ushort address, byte value)
-        {
-            if (address == watched) Writes.Add(value);
-            ram.Write(address, value);
-        }
-    }
-
     [Fact]
     public void Interrupts_on_and_off_are_inline_without_a_call()
     {
@@ -610,9 +598,11 @@ public class C64LibraryTests
         var path = AsmTests.FindExample("raster.tern");
         var result = TernCompiler.Compile(File.ReadAllText(path), sourcePath: path);
         var ram = new Ram();
+        StartState.Fill(ram);
         ram.Load((ushort)result.LoadAddress, result.Image);
-        var bus = new WatchBus(ram, 0xD020);
+        var bus = new BusLog(ram, [0xD020]);
         var cpu = new Cpu6502(bus) { PC = (ushort)result.Entry, SP = 0xFF, I = true };
+        StartState.Set(cpu);
         long next = 1000;
         int taken = 0;
         while (cpu.Cycles < 400_000)
@@ -626,10 +616,11 @@ public class C64LibraryTests
         }
 
         byte[] colors = [2, 8, 7, 5, 3, 6, 4, 15];  // red, orange, yellow, green, cyan, blue, purple, light grey
-        Assert.True(bus.Writes.Count > 100, $"{bus.Writes.Count} border writes");
-        Assert.Equal(taken, bus.Writes.Count);
-        for (int i = 0; i < bus.Writes.Count; i++)
-            Assert.Equal(colors[i % 8], bus.Writes[i]);
+        var writes = bus.Writes(0xD020);
+        Assert.True(writes.Count > 100, $"{writes.Count} border writes");
+        Assert.Equal(taken, writes.Count);
+        for (int i = 0; i < writes.Count; i++)
+            Assert.Equal(colors[i % 8], writes[i]);
 
         byte[] m = ram.Bytes;
         Assert.Equal(0x35, m[0x01]);

@@ -221,6 +221,7 @@ public class AtariLibraryTests
         (Ram, Cpu6502) Run(int nmiAt, ref int count)
         {
             var ram = new Ram();
+            StartState.Fill(ram);
             ram.Load((ushort)result.LoadAddress, result.Image);
             // The OS: the VBI entry at $E000 pushes A, X, Y and jumps through VVBLKI; SYSVBV ($E45F)
             // counts the frame at $E010 and goes on through VVBLKD; XITVBV ($E462) pulls and returns.
@@ -234,6 +235,7 @@ public class AtariLibraryTests
             ram.Bytes[0x0224] = 0x62; ram.Bytes[0x0225] = 0xE4;   // VVBLKD = XITVBV
             ram.Bytes[0xFFFA] = 0x00; ram.Bytes[0xFFFB] = 0xE0;
             var cpu = new Cpu6502(ram) { PC = (ushort)result.Entry, SP = 0xFF };
+            StartState.Set(cpu);
             bool inVbi = false;
             int sp = 0;
             for (int guard = 0; guard < 100_000 && cpu.PC != result.HaltAddress; guard++)
@@ -285,8 +287,10 @@ public class AtariLibraryTests
     {
         var result = TernCompiler.Compile("import atari\nvar done: u8\nfn main() {\n    atari.wait_frame()\n    done = 1\n}\n", Platform.Atari);
         var ram = new Ram();
+        StartState.Fill(ram);
         ram.Load((ushort)result.LoadAddress, result.Image);
         var cpu = new Cpu6502(ram) { PC = (ushort)result.Entry, SP = 0xFF };
+        StartState.Set(cpu);
         for (int i = 0; i < 2000; i++) cpu.Step();
         Assert.NotEqual(result.HaltAddress, cpu.PC);
         ram.Bytes[0x14]++;
