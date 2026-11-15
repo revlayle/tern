@@ -220,15 +220,22 @@ public class OperandMatrixTests
     }
 
     /// <summary>Why a case is an error, or null when it must compile.</summary>
+    /// <summary>
+    /// A part of the error a case must give, or null when it must compile. Where two rules apply, the
+    /// first one here is the error the checker reports first.
+    /// </summary>
     private static string? ExpectedError(Form form, Place place, string context, int v)
     {
-        if (place.Writes && !form.Assignable) return "assigns to a form that cannot be written";
-        if (form.Name == "constant" && place.Name == "for start" && v >= 10) return "a constant range that counts up and never runs (spec 5.1)";
-        if (context != "once" && (form.IsCall || place.Calls)) return "calls a function in a 'using' loop (spec 6.6)";
-        if (context == "using Y" && (form.Name == "pointer target" || place.Name == "pointer store"))
-            return "a pointer access needs Y, which holds the loop variable";
-        if (form.Name == "constant" && v > 127 && place.Name == "for step") return "a constant step outside -127..127";
-        if (form.Name == "constant" && v > 127 && place.Name == "shift") return "a constant that does not fit u8 after the shift";
+        // A call in a using loop (spec 6.6).
+        if (context != "once" && (form.IsCall || place.Calls)) return $"calls a function, which can change {context[^1]}";
+        // A call or a constant on the left of an assignment.
+        if (place.Writes && !form.Assignable) return "left side of an assignment";
+        // A constant range that counts up and never runs (spec 5.1).
+        if (form.Name == "constant" && place.Name == "for start" && v >= 10) return "never runs";
+        // A pointer access needs Y, which holds the loop variable.
+        if (context == "using Y" && (form.Name == "pointer target" || place.Name == "pointer store")) return "needs the Y register";
+        if (form.Name == "constant" && v > 127 && place.Name == "for step") return "between -127 and 127";
+        if (form.Name == "constant" && v > 127 && place.Name == "shift") return "does not fit in u8";
         return null;
     }
 
@@ -242,7 +249,8 @@ public class OperandMatrixTests
         var error = ExpectedError(form, place, context, v);
         if (error is not null)
         {
-            Assert.Throws<CompileError>(() => TernCompiler.Compile(source));
+            var e = Assert.Throws<CompileError>(() => TernCompiler.Compile(source));
+            Assert.Contains(error, e.Description);
             return;
         }
         var model = new Model(v, form.IsCall);
