@@ -101,20 +101,8 @@ public class OperandMatrixTests
 
     private static int Table(int i) => (i * 7 + 1) & 0xFF;
 
-    /// <summary>
-    /// The cases that fail today, by the review finding that explains them (docs/status.md lists them).
-    /// Each finding's cases run in their own skipped theory below; when it is fixed, remove the skip.
-    /// </summary>
-    /// <param name="mustFail">The case must give an error: only a finding about a missing error applies.</param>
-    private static string? KnownFailure(string form, string place, string context, bool mustFail)
-    {
-        if (mustFail) return null;
-        if (place == "pointer store" && form == "indexed struct array" && context == "once") return "backend 2";
-        return null;
-    }
-
     /// <summary>Every form in every place and context; the loops with one value, to keep the run short.</summary>
-    private static TheoryData<string, string, string, int> CasesWhere(Func<string?, bool> known)
+    public static TheoryData<string, string, string, int> Cases()
     {
         var data = new TheoryData<string, string, string, int>();
         foreach (var form in Forms)
@@ -123,21 +111,10 @@ public class OperandMatrixTests
                 {
                     if (place.Return is not null && context != "once") continue;
                     foreach (int v in context == "once" ? Values : Values[..1])
-                    {
-                        var failure = KnownFailure(form.Name, place.Name, context, ExpectedError(form, place, context, v) is not null);
-                        if (known(failure)) data.Add(form.Name, place.Name, context, v);
-                    }
+                        data.Add(form.Name, place.Name, context, v);
                 }
         return data;
     }
-
-    public static TheoryData<string, string, string, int> Cases() => CasesWhere(f => f is null);
-    public static TheoryData<string, string, string, int> Backend2() => CasesWhere(f => f == "backend 2");
-
-    [Theory(Skip = "Review code-quality-backend 2: p[i] = recs[j].f with an indexed record array stores the wrong value (R2)")]
-    [MemberData(nameof(Backend2))]
-    public void Fails_backend_2(string form, string place, string context, int v) =>
-        An_operand_gives_the_same_result_in_every_place(form, place, context, v);
 
     /// <summary>The program of one case: the operand forms, set to <paramref name="v"/> by main, and the place in t.</summary>
     private static string Source(Form form, Place place, string context, int v)
