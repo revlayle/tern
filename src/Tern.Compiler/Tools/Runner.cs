@@ -120,9 +120,11 @@ public static class Runner
         {
             if (cpu.PC == program.HaltAddress) { returned = true; stop = "main returned"; break; }
             if (cpu.Cycles >= options.MaxCycles) { stop = $"stopped after {options.MaxCycles} cycles; main had not returned"; break; }
+            long beforeIrq = cpu.Cycles;
             if (options.IrqEvery > 0 && cpu.Cycles >= nextIrq && cpu.Irq())
             {
                 interrupts++;
+                profile.InterruptCycles += cpu.Cycles - beforeIrq;
                 nextIrq = cpu.Cycles + options.IrqEvery;
                 Entered(cpu.PC);
             }
@@ -142,22 +144,32 @@ public static class Runner
                 stop = $"reached ${pc:X4} in ROM, which the emulator does not have (stand-ins: {machine.StandIns})";
                 break;
             }
-            byte opcode = ram.Bytes[pc];
-            if (opcode == 0x00) { stop = $"brk at ${pc:X4} (often a jump into empty memory)"; break; }
+            // The NES's RAM is mirrored up to $1FFF.
+            byte opcode = ram.Bytes[nes is not null && pc < 0x2000 ? pc & 0x07FF : pc];
+            // On the NES a program that sets the IRQ vector gets brk's interrupt; the other machines run without
+            // their ROMs, so a brk there stops the run (decision 2026-11-15, review code-quality-tools 12).
+            if (opcode == 0x00 && !(nes is not null && program.SetsIrqVector))
+            {
+                stop = $"brk at ${pc:X4} (often a jump into empty memory)";
+                break;
+            }
             if (pc == main && mainStart is null) mainStart = cpu.Cycles;
             if (checker.Before(cpu)) { stop = "stopped at an 'indexed match' value outside its span (see the index check)"; break; }
             long before = cpu.Cycles;
             int place = PlaceOf(pc);
             try { cpu.Step(); }
             catch (IllegalOpcodeException e) { stop = $"illegal opcode ${e.Opcode:X2} at ${e.Address:X4}"; break; }
+            // The instruction's cycles; an NMI the NES takes after it is counted apart.
+            profile.Add(place, cpu.Cycles - before);
             if (nes is not null)
             {
                 int nmis = nes.Nmis;
+                long beforeNmi = cpu.Cycles;
                 nes.Tick(cpu);
+                profile.InterruptCycles += cpu.Cycles - beforeNmi;
                 if (nes.Nmis > nmis) { interrupts++; Entered(cpu.PC); }
             }
-            profile.Add(place, cpu.Cycles - before);
-            if (opcode == 0x20) Entered(cpu.PC);   // jsr
+            if (opcode is 0x20 or 0x00) Entered(cpu.PC);   // jsr, or brk into the IRQ handler
             Left();
         }
         while (active.Count > 0) Close(active.Pop());

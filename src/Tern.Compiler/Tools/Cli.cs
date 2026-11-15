@@ -9,7 +9,7 @@ namespace Tern.Compiler.Tools;
 /// </summary>
 public static class Cli
 {
-    public const string Usage = """
+    public static readonly string Usage = $"""
         Usage:
           tern --target <machine> [--json] [--max-errors <n>] [--no-warnings | --warnings-as-errors] <file.tern> [-o <output>]
           tern run --target <machine> <file.tern> [options]
@@ -51,15 +51,7 @@ public static class Cli
         as unused. Warnings come only when the checks found no error, listed by place with
         the errors; they do not stop the build.
 
-        tern run <file.tern> compiles the program and runs it in the built-in emulator until
-        main returns, then prints the cycles taken and the registers. Memory is plain RAM (no
-        VIC-II, SID or CIA; no ANTIC, GTIA, POKEY or PIA); a few ROM routines have stand-ins,
-        and other ROM calls stop the run. On the C64: CHROUT, GETIN and PLOT; SETNAM, SETLFS
-        and LOAD load the program's own overlay files ("LEVEL1" is level1.prg). On the Atari:
-        CIOV for put bytes on IOCB 0 (the screen editor), and SETVBV. On the Apple II:
-        COUT, HOME, the startup code's ROM calls, and the MLI's CLOSE and QUIT. On the NES:
-        PPU memory and sprite memory (not pixels), vblank and an NMI every frame when bit 7
-        of $2000 is set, the UxROM bank latch; the controllers read as no buttons.
+        {RunModelHelp()}
         The emulator reports an array index outside its array and an 'indexed match' value
         outside its span, with the source line (a match value outside stops the run). Exit
         code: 0 when main returned, 2 when it did not, 3 when it did but an index was outside,
@@ -399,6 +391,33 @@ public static class Cli
             else error.WriteLine(text + ".");
             return 1;
         }
+    }
+
+    /// <summary>
+    /// The help's paragraph on what <c>tern run</c> models, with each machine's stand-ins from its own list
+    /// (<see cref="Machine.StandIns"/>), so the help cannot fall behind them (review code-quality-tools 14).
+    /// </summary>
+    private static string RunModelHelp()
+    {
+        string StandIns(Platform p) => Machine.For(p).StandIns;
+        string text =
+            "tern run <file.tern> compiles the program and runs it in the built-in emulator until main returns, then prints the cycles taken and the registers. " +
+            "Memory is plain RAM (no VIC-II, SID or CIA; no ANTIC, GTIA, POKEY or PIA); a few ROM routines have stand-ins, which take no cycles, and other ROM calls stop the run. " +
+            $"On the C64: {StandIns(Platform.C64)}; LOAD loads the program's own overlay files (\"LEVEL1\" is level1.prg). " +
+            $"On the Atari: {StandIns(Platform.Atari)}. On the Apple II: {StandIns(Platform.Apple2)}. " +
+            "On the NES: PPU memory and sprite memory (not pixels); the vblank flag, set at the start of vblank and cleared by a read of $2002 or at the end of vblank; " +
+            "an NMI every frame when bit 7 of $2000 is set, and at once when it is set during vblank; the UxROM bank latch; the controllers read as no buttons. " +
+            "A brk stops the run, except on the NES when the program sets the IRQ vector, which then runs its handler; an undocumented opcode stops the run too.";
+        var lines = new List<string>();
+        var line = new System.Text.StringBuilder();
+        foreach (var word in text.Split(' '))
+        {
+            if (line.Length > 0 && line.Length + 1 + word.Length > 86) { lines.Add(line.ToString()); line.Clear(); }
+            if (line.Length > 0) line.Append(' ');
+            line.Append(word);
+        }
+        lines.Add(line.ToString());
+        return string.Join(Environment.NewLine, lines);
     }
 
     /// <summary>The exit code when the compiler or the emulator fails with an exception it did not expect.</summary>

@@ -50,7 +50,8 @@ public static class LineTable
     }
 
     /// <summary>The table as text: one row per line, in source order.</summary>
-    public static string Format(IReadOnlyList<Row> rows)
+    /// <param name="interrupts">For a run: the cycles of taking interrupts and how many were taken, for the total line.</param>
+    public static string Format(IReadOnlyList<Row> rows, (long Cycles, int Count)? interrupts = null)
     {
         bool run = rows.Any(r => r.Executed is not null);
         bool modules = rows.Select(r => r.File).Where(f => f.Length > 0).Distinct().Count() > 1;
@@ -75,7 +76,9 @@ public static class LineTable
                 ? $"  {file}{line,5} {r.Bytes,5} {cycles,7} {r.Runs,8} {r.Executed,10}  {addresses}  {r.Source}"
                 : $"  {file}{line,5} {r.Bytes,5} {cycles,7}  {addresses}  {r.Source}");
         }
-        if (run) sb.AppendLine($"; total {rows.Sum(r => r.Executed ?? 0)} cycles");
+        if (run)
+            sb.AppendLine($"; total {rows.Sum(r => r.Executed ?? 0)} cycles"
+                + (interrupts is { Count: > 0 } i ? $", and {i.Cycles} taking {i.Count} interrupt{(i.Count == 1 ? "" : "s")}" : ""));
         return sb.ToString();
     }
 }
@@ -92,7 +95,11 @@ public sealed class Profile
         _cycles[place] = _cycles.GetValueOrDefault(place) + cycles;
     }
 
-    public long Total => _cycles.Values.Sum();
+    /// <summary>The cycles of taking interrupts (7 each), which belong to no instruction (review code-quality-tools 10).</summary>
+    public long InterruptCycles { get; set; }
+
+    /// <summary>Every cycle of the run: the instructions' and <see cref="InterruptCycles"/>.</summary>
+    public long Total => _cycles.Values.Sum() + InterruptCycles;
 
     /// <summary>The cycles of the instructions, including the jmp of a long branch, which starts inside its entry.</summary>
     public long CyclesOf(IEnumerable<PlacedInstruction> instructions) =>

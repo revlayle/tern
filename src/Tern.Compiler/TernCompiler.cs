@@ -68,6 +68,8 @@ public sealed class CompileResult
     public CharEncoding? TextEncoding { get; init; }
     /// <summary>The warnings (spec 13), sorted by place; none with <see cref="WarningMode.Off"/>.</summary>
     public IReadOnlyList<CompileError> Warnings { get; internal set; } = [];
+    /// <summary>On a cartridge: the program sets the IRQ vector, so <c>tern run</c> runs its handler on <c>brk</c> (spec 12.2).</summary>
+    public bool SetsIrqVector { get; init; }
 }
 
 /// <summary>What the compiler does with warnings (spec 13).</summary>
@@ -174,6 +176,7 @@ public static partial class TernCompiler
         List<AsmItem> items = null!;
         AssembledCode code = null!;
         Dictionary<VariableSymbol, Label> imageLabels = null!;
+        (bool Nmi, bool Irq) vectors = default;
         var layout = program.Layout;
         bool binary = program.IsBinary;
         var start = new Label("start");
@@ -226,7 +229,7 @@ public static partial class TernCompiler
             if (program.ExportTableAddress is int tableAt)
                 CheckExportTable(program, new AddressRange(tableAt, tableAt + 3 * program.Exports.Count - 1));
 
-            var vectors = cartridge is null ? default : CheckVectors(plan);
+            vectors = cartridge is null ? default : CheckVectors(plan);
             if (!binary)
             {
                 items = [new SectionStart("startup"), new DataBytes(platform.Header), new LabelDef(start), new Comment("startup")];
@@ -598,6 +601,7 @@ public static partial class TernCompiler
             Platform = platform,
             Entry = system ? platform.LoadAddress : start.Address,
             HaltAddress = halt.Address,
+            SetsIrqVector = vectors.Irq,
             Listing = code.Listing,
             Symbols = symbols,
             Labels = labels,

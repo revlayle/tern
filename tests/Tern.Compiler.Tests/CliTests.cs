@@ -168,6 +168,21 @@ public sealed class CliTests : IDisposable
         Assert.Equal("--target needs a value after it. Run 'tern --help' for the options", d.GetProperty("message").GetString() + (d.GetProperty("suggestion").GetString() is { } s ? ". " + s : ""));
     }
 
+    // ---------- The help (tools 14) ----------
+
+    [Fact]
+    public void The_help_names_every_stand_in_and_their_cost()
+    {
+        var (code, output, _) = Tern("--help");
+        Assert.Equal(0, code);
+        string help = string.Join(" ", output.Split(['\n', '\r'], StringSplitOptions.RemoveEmptyEntries).Select(l => l.Trim()));
+        foreach (var name in new[] { "CHROUT $FFD2", "LOAD $FFD5", "CIOV $E456", "IOCBs 1-7", "SETVBV $E45C", "COUT $FDED", "GET_PREFIX", "CLOSE", "reading the build's overlay files" })
+            Assert.Contains(name, help);
+        Assert.Contains("which take no cycles", help);
+        Assert.Contains("A brk stops the run, except on the NES when the program sets the IRQ vector", help);
+        Assert.Contains("exits with 4 on an internal error", help);
+    }
+
     // ---------- Bench's ok and exit code (tools 8) ----------
 
     [Fact]
