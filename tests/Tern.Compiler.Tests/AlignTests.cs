@@ -310,7 +310,7 @@ public class AlignTests
                 buf[x] = 3
                 out = buf[out]
             }
-            """);
+            """, setup: ram => ram.Bytes[0xC000] = 0);   // a fixed-address variable is never zeroed (spec 4)
         int font = r.Address("font"), buf = r.Address("buf");
         Assert.Equal(0, font % 2048);
         Assert.InRange(buf, font + 8, font + 0x100);
@@ -330,7 +330,7 @@ public class AlignTests
                 var y: u8 = font[out]
                 out = y
             }
-            """);
+            """, setup: ram => ram.Bytes[0xC000] = 0);
         Assert.Equal(0x8000, r.Address("font"));
         Assert.Equal(1, r.Ram.Bytes[0xC000]);
     }

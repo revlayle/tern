@@ -98,7 +98,11 @@ public class AtariIoTests
         fn main() {
             {{body}}
         }
-        """, traps: cio.Traps, platform: Platform.Atari, setup: ram => fill?.CopyTo(ram.Bytes, Buf));
+        """, traps: cio.Traps, platform: Platform.Atari, setup: ram =>
+        {
+            ram.Bytes.AsSpan(Buf, 0x2000).Clear();   // so a test can see where a load stopped
+            fill?.CopyTo(ram.Bytes, Buf);
+        });
 
     private static byte[] Bytes(Run r, int at, int n) => r.Ram.Bytes.AsSpan(at, n).ToArray();
 

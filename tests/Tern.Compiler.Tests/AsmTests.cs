@@ -582,6 +582,7 @@ public class AsmTests
         {
             // The emulator has no ROM. CHROUT appends A to a buffer at $C000 (count at $C0FE);
             // PLOT returns row 0 and the column of the last character printed.
+            ram.Bytes[0xC0FE] = 0;
             ram.Load(0xFFD2, [
                 0x8E, 0xFF, 0xC0,   // stx $C0FF
                 0xAE, 0xFE, 0xC0,   // ldx $C0FE

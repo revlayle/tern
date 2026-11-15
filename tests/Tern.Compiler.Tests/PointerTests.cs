@@ -327,9 +327,9 @@ public class PointerTests
                 got = (rows[j] + 1)[i]
                 (rows[0] + 300)[0] = 7
             }
-            """);
+            """, setup: ram => ram.Bytes[0x3106] = 99);
         Assert.Equal(42, r.Ram.Bytes[0x3105]);
-        Assert.Equal(0, r.U8("got"));
+        Assert.Equal(99, r.U8("got"));
         Assert.Equal(7, r.Ram.Bytes[0x3000 + 300]);
     }
 

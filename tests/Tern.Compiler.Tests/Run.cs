@@ -20,9 +20,10 @@ public sealed class Run
     public IReadOnlyList<Tools.IndexError> IndexErrors { get; }
 
     private Run(string source, long maxCycles, string? sourcePath, Action<Ram>? setup, string? libraryDirectory, long irqEvery,
-        IReadOnlyDictionary<int, Action<Run>>? traps, bool checkIndexes, Platform? platform, Func<long, int, byte>? buttons)
+        IReadOnlyDictionary<int, Action<Run>>? traps, bool checkIndexes, Platform? platform, Func<long, int, byte>? buttons, bool zeroStart)
     {
         Result = TernCompiler.Compile(source, platform, sourcePath: sourcePath, libraryDirectory: libraryDirectory);
+        if (!zeroStart) StartState.Fill(Ram);
         if (Result.Platform.Format == OutputFormat.System)
         {
             // An Apple II system file loads at $2000, and its startup code moves the areas into place. The
@@ -39,6 +40,7 @@ public sealed class Run
         setup?.Invoke(Ram);
         // As after reset: no IRQ until the program enables it.
         Cpu = new Cpu6502(Nes is null ? Ram : Nes, Result.Platform.Cpu) { PC = (ushort)Result.Entry, SP = 0xFF, I = true };
+        if (!zeroStart) StartState.Set(Cpu);
         if (Nes is not null) Nes.Cpu = Cpu;
         long nextIrq = irqEvery;
         var checker = new Tools.IndexChecker(Result, sourcePath is null ? "program.tern" : Path.GetFileName(sourcePath),
@@ -79,10 +81,11 @@ public sealed class Run
     /// <param name="traps">Stand-ins for ROM routines: when the CPU reaches the address, the action runs and the routine returns without executing.</param>
     /// <param name="platform">The target; the C64 if null.</param>
     /// <param name="buttons">On the NES: the buttons of pad 1 or 2 in a frame (<see cref="Tools.NesBus.Buttons"/>).</param>
+    /// <param name="zeroStart">Starts with zero memory and zero registers instead of the <see cref="StartState"/>.</param>
     public static Run Program(string source, long maxCycles = 5_000_000, string? sourcePath = null, Action<Ram>? setup = null,
         string? libraryDirectory = null, long irqEvery = 0, IReadOnlyDictionary<int, Action<Run>>? traps = null, bool checkIndexes = true,
-        Platform? platform = null, Func<long, int, byte>? buttons = null) =>
-        new(source, maxCycles, sourcePath, setup, libraryDirectory, irqEvery, traps, checkIndexes, platform, buttons);
+        Platform? platform = null, Func<long, int, byte>? buttons = null, bool zeroStart = false) =>
+        new(source, maxCycles, sourcePath, setup, libraryDirectory, irqEvery, traps, checkIndexes, platform, buttons, zeroStart);
 
     public int Address(string name) =>
         Result.Symbols.TryGetValue(name, out var a) ? a : throw new KeyNotFoundException($"No symbol '{name}'");

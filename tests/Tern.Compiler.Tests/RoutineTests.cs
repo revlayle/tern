@@ -18,6 +18,7 @@ public class RoutineTests
     /// </summary>
     private static void Stubs(Ram ram)
     {
+        ram.Bytes.AsSpan(0xC400, 0x200).Clear();   // the put and log buffers, and the log count, start empty
         ram.Load(0xC000, [0x9D, 0x00, 0xC4, 0xA0, 0xEE, 0x60]);             // sta $C400,x / ldy #$EE / rts
         ram.Load(0xC010, [0x0A, 0x60]);                                     // asl / rts
         ram.Load(0xC020, [0xC9, 0x64, 0x60]);                               // cmp #100 / rts

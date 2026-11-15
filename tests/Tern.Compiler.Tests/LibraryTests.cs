@@ -251,6 +251,7 @@ public class C64LibraryTests
     /// </summary>
     private static void Kernal(Ram ram)
     {
+        ram.Bytes[0xC5FF] = 0;   // the CHROUT buffer starts empty
         ram.Load(0xFFD2, [0x4C, 0x40, 0xC0]);   // jmp $C040
         ram.Load(0xC040, [
             0x8C, 0xFE, 0xC5,   // sty $C5FE
@@ -301,7 +302,11 @@ public class C64LibraryTests
     public void Library_example_prints_and_writes_to_the_screen()
     {
         var path = AsmTests.FindExample("library.tern");
-        var r = Run.Program(File.ReadAllText(path), sourcePath: path, setup: Kernal);
+        var r = Run.Program(File.ReadAllText(path), sourcePath: path, setup: ram =>
+        {
+            Kernal(ram);
+            ram.Bytes.AsSpan(0xD800, 1000).Clear();   // colour RAM, so the checks below see where the fill stopped
+        });
         var printed = "HELLO FROM THE TERN LIBRARY.\nYEAR 1982".Select(c => (byte)CharEncoding.Petscii.Encode(c)!.Value);
         Assert.Equal([0x93, .. printed], r.Ram.Bytes.AsSpan(0xC500, r.Ram.Bytes[0xC5FF]).ToArray());
         var row = 0x0400 + 400;
