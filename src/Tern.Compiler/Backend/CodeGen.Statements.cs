@@ -435,126 +435,14 @@ public sealed partial class CodeGen
             Assign(a.Target, a.Value);
             return;
         }
+        // The shorter forms, in order (spec 11).
+        if (StepHeldRegister(a) || StepMemory(a) || StepByteTwice(a) || StepHighByte(a) || StepElementInX(a) || ShiftInPlace(a)) return;
 
         var target = a.Target;
-        bool byOne = a.Value.ConstValue == 1 && a.Op is TokenKind.PlusEq or TokenKind.MinusEq;
-
-        // x += 1 / x -= 1 on a variable held in a register for a loop: inx / dex / iny / dey; x += 2 / x -= 2 twice (spec 11).
-        if (a.Op is TokenKind.PlusEq or TokenKind.MinusEq && a.Value.ConstValue is 1 or 2
-            && target is NameExpr { Symbol.Register: Register.X or Register.Y } held)
-        {
-            bool x = held.Symbol!.Register == Register.X;
-            for (long k = 0; k < a.Value.ConstValue; k++) Emit(a.Op == TokenKind.PlusEq ? (x ? Inx : Iny) : (x ? Dex : Dey));
-            return;
-        }
-
-        // x += 1 / x -= 1 on memory: inc / dec.
-        if (byOne && target is NameExpr { Symbol: { InMemory: true } v })
-        {
-            if (v.Type.Size == 1)
-            {
-                Op(a.Op == TokenKind.PlusEq ? Inc : Dec, Var(v));
-            }
-            else if (v.IsVolatile)
-            {
-                // inc / bne / inc would write the high byte only on a carry, and lda / bne / dec / dec would read
-                // the low byte twice: every byte is read and written once (spec 4), so the add or subtraction instead.
-                Assign(target, new BinaryExpr(a.Pos, a.Op == TokenKind.PlusEq ? TokenKind.Plus : TokenKind.Minus, target, a.Value) { Type = target.Type });
-            }
-            else if (a.Op == TokenKind.PlusEq)
-            {
-                var done = NewLabel("inc");
-                Op(Inc, Var(v));
-                Branch(Bne, done);
-                Op(Inc, Var(v, 1));
-                Place(done);
-            }
-            else
-            {
-                var done = NewLabel("dec");
-                Op(Lda, Var(v));
-                Branch(Bne, done);
-                Op(Dec, Var(v, 1));
-                Place(done);
-                Op(Dec, Var(v));
-            }
-            return;
-        }
-
-        // x += 2 / x -= 2 on a byte in memory: two inc / dec, shorter than the add at the same cycles (spec 11).
-        // Not on a volatile byte, where the value in between would be written to the hardware.
-        if (a.Op is TokenKind.PlusEq or TokenKind.MinusEq && a.Value.ConstValue == 2
-            && target is NameExpr { Symbol: { InMemory: true, Type.Size: 1, IsVolatile: false } v2 })
-        {
-            Op(a.Op == TokenKind.PlusEq ? Inc : Dec, Var(v2));
-            Op(a.Op == TokenKind.PlusEq ? Inc : Dec, Var(v2));
-            return;
-        }
-
-        // w += 256 / w -= 256 on a 16-bit variable: inc w+1 / dec w+1; another multiple of 256 adds to the high byte only.
-        // Not on a volatile variable, whose low byte is read and written too (spec 4).
-        if (a.Op is TokenKind.PlusEq or TokenKind.MinusEq && target is NameExpr { Symbol: { InMemory: true, Type.Size: 2, IsVolatile: false } wv }
-            && a.Value.ConstValue is long whole && (whole & 0xFF) == 0 && whole is > 0 and <= 0xFF00)
-        {
-            long k = whole >> 8;
-            if (k == 1) Op(a.Op == TokenKind.PlusEq ? Inc : Dec, Var(wv, 1));
-            else
-            {
-                Op(Lda, Var(wv, 1));
-                CarryFor(a.Op == TokenKind.PlusEq ? TokenKind.Plus : TokenKind.Minus);
-                Op(a.Op == TokenKind.PlusEq ? Adc : Sbc, Byte(k));
-                Op(Sta, Var(wv, 1));
-            }
-            return;
-        }
-
-        // a[i] += 1 / a[i] -= 1 with the index in X: inc a,x / dec a,x (there is no inc a,y).
-        if (byOne && target is IndexExpr { Type.Size: 1 } incx && !IsPointerIndex(incx) && incx.Index.ConstValue is null
-            && FoldIndexOffset(incx.Index, ArrayOf(incx)) is var (incIndex, incShift) && IndexIsCheap(incIndex)
-            && (incIndex is NameExpr { Symbol.Register: Register.X } || (incIndex is not NameExpr { Symbol.Register: not null } && !_reserved.Contains(Register.X))))
-        {
-            var incReg = LoadIndex(incIndex);
-            CheckRegister(incReg, Register.X, "the index of inc a,x loads into X");
-            Emit(a.Op == TokenKind.PlusEq ? Inc : Dec, AbsoluteX, Indexed(ArrayOf(incx), 0, incShift, incIndex));
-            return;
-        }
-
-        // Shifts of a memory byte: shift in place. A volatile byte only by one, so no value in between is written.
-        if (a.Op is TokenKind.ShlEq or TokenKind.ShrEq && target is NameExpr { Symbol: { InMemory: true } sv }
-            && sv.Type.Size == 1 && !(a.Op == TokenKind.ShrEq && sv.Type.IsSigned) && !(sv.IsVolatile && a.Value.ConstValue != 1))
-        {
-            for (int i = 0; i < a.Value.ConstValue; i++) Op(a.Op == TokenKind.ShlEq ? Asl : Lsr, Var(sv));
-            return;
-        }
-
         if (ContainsCall(target))
             throw new CompileError(a.Pos, "Compound assignment to an element whose index calls a function is not supported. Store the index in a variable first");
 
-        // p[i] op= v: read, change and write the element with one Y load.
-        if (target is IndexExpr pix && IsPointerIndex(pix) && pix.Type.Size == 1
-            && (a.Op is TokenKind.ShlEq or TokenKind.ShrEq || Simple1(a.Value) is not null))
-        {
-            var (p, temp) = PointerBase(pix.Target);
-            LoadPointerIndex(pix, 0);
-            Emit(Lda, IndirectIndexed, p);
-            ApplyCompound(a, pix.Type);
-            Emit(Sta, IndirectIndexed, p);
-            if (temp is not null) Release(temp);
-            return;
-        }
-
-        // arr[expensive index] op= v: compute the index once (a shift or an offset table), read, change and write.
-        if (target is IndexExpr aix && !IsPointerIndex(aix) && aix.Type.Size == 1 && aix.Index.ConstValue is null
-            && (a.Op is TokenKind.ShlEq or TokenKind.ShrEq || Simple1(a.Value) is not null)
-            && FoldIndexOffset(aix.Index, ArrayOf(aix)) is var (index, shift) && !IndexIsCheap(index))
-        {
-            var reg = LoadIndex(index);
-            var mode = reg == Register.X ? AbsoluteX : AbsoluteY;
-            Emit(Lda, mode, Indexed(ArrayOf(aix), 0, shift, index));
-            ApplyCompound(a, aix.Type);
-            Emit(Sta, mode, Indexed(ArrayOf(aix), 0, shift, index));
-            return;
-        }
+        if (CompoundThroughPointer(a) || CompoundAtExpensiveIndex(a)) return;
 
         var op = a.Op switch
         {
@@ -563,6 +451,144 @@ public sealed partial class CodeGen
             _ => TokenKind.Shr,
         };
         Assign(target, new BinaryExpr(a.Pos, op, target, a.Value) { Type = target.Type });
+    }
+
+    /// <summary>x += 1 / x -= 1 on a variable held in a register for a loop: inx / dex / iny / dey; x += 2 / x -= 2 twice (spec 11). False when it does not apply.</summary>
+    private bool StepHeldRegister(AssignStmt a)
+    {
+        var target = a.Target;
+        if (!(a.Op is TokenKind.PlusEq or TokenKind.MinusEq && a.Value.ConstValue is 1 or 2
+            && target is NameExpr { Symbol.Register: Register.X or Register.Y } held))
+            return false;
+        bool x = held.Symbol!.Register == Register.X;
+        for (long k = 0; k < a.Value.ConstValue; k++) Emit(a.Op == TokenKind.PlusEq ? (x ? Inx : Iny) : (x ? Dex : Dey));
+        return true;
+    }
+
+    /// <summary>x += 1 / x -= 1 on memory: inc / dec. False when it does not apply.</summary>
+    private bool StepMemory(AssignStmt a)
+    {
+        var target = a.Target;
+        bool byOne = a.Value.ConstValue == 1 && a.Op is TokenKind.PlusEq or TokenKind.MinusEq;
+        if (!(byOne && target is NameExpr { Symbol: { InMemory: true } v }))
+            return false;
+        if (v.Type.Size == 1)
+        {
+            Op(a.Op == TokenKind.PlusEq ? Inc : Dec, Var(v));
+        }
+        else if (v.IsVolatile)
+        {
+            // inc / bne / inc would write the high byte only on a carry, and lda / bne / dec / dec would read
+            // the low byte twice: every byte is read and written once (spec 4), so the add or subtraction instead.
+            Assign(target, new BinaryExpr(a.Pos, a.Op == TokenKind.PlusEq ? TokenKind.Plus : TokenKind.Minus, target, a.Value) { Type = target.Type });
+        }
+        else if (a.Op == TokenKind.PlusEq)
+        {
+            var done = NewLabel("inc");
+            Op(Inc, Var(v));
+            Branch(Bne, done);
+            Op(Inc, Var(v, 1));
+            Place(done);
+        }
+        else
+        {
+            var done = NewLabel("dec");
+            Op(Lda, Var(v));
+            Branch(Bne, done);
+            Op(Dec, Var(v, 1));
+            Place(done);
+            Op(Dec, Var(v));
+        }
+        return true;
+    }
+
+    /// <summary>x += 2 / x -= 2 on a byte in memory: two inc / dec, shorter than the add at the same cycles (spec 11). Not on a volatile byte, where the value in between would be written to the hardware. False when it does not apply.</summary>
+    private bool StepByteTwice(AssignStmt a)
+    {
+        var target = a.Target;
+        if (!(a.Op is TokenKind.PlusEq or TokenKind.MinusEq && a.Value.ConstValue == 2
+            && target is NameExpr { Symbol: { InMemory: true, Type.Size: 1, IsVolatile: false } v2 }))
+            return false;
+        Op(a.Op == TokenKind.PlusEq ? Inc : Dec, Var(v2));
+        Op(a.Op == TokenKind.PlusEq ? Inc : Dec, Var(v2));
+        return true;
+    }
+
+    /// <summary>w += 256 / w -= 256 on a 16-bit variable: inc w+1 / dec w+1; another multiple of 256 adds to the high byte only. Not on a volatile variable, whose low byte is read and written too (spec 4). False when it does not apply.</summary>
+    private bool StepHighByte(AssignStmt a)
+    {
+        var target = a.Target;
+        if (!(a.Op is TokenKind.PlusEq or TokenKind.MinusEq && target is NameExpr { Symbol: { InMemory: true, Type.Size: 2, IsVolatile: false } wv }
+            && a.Value.ConstValue is long whole && (whole & 0xFF) == 0 && whole is > 0 and <= 0xFF00))
+            return false;
+        long k = whole >> 8;
+        if (k == 1) Op(a.Op == TokenKind.PlusEq ? Inc : Dec, Var(wv, 1));
+        else
+        {
+            Op(Lda, Var(wv, 1));
+            CarryFor(a.Op == TokenKind.PlusEq ? TokenKind.Plus : TokenKind.Minus);
+            Op(a.Op == TokenKind.PlusEq ? Adc : Sbc, Byte(k));
+            Op(Sta, Var(wv, 1));
+        }
+        return true;
+    }
+
+    /// <summary>a[i] += 1 / a[i] -= 1 with the index in X: inc a,x / dec a,x (there is no inc a,y). False when it does not apply.</summary>
+    private bool StepElementInX(AssignStmt a)
+    {
+        var target = a.Target;
+        bool byOne = a.Value.ConstValue == 1 && a.Op is TokenKind.PlusEq or TokenKind.MinusEq;
+        if (!(byOne && target is IndexExpr { Type.Size: 1 } incx && !IsPointerIndex(incx) && incx.Index.ConstValue is null
+            && FoldIndexOffset(incx.Index, ArrayOf(incx)) is var (incIndex, incShift) && IndexIsCheap(incIndex)
+            && (incIndex is NameExpr { Symbol.Register: Register.X } || (incIndex is not NameExpr { Symbol.Register: not null } && !_reserved.Contains(Register.X)))))
+            return false;
+        var incReg = LoadIndex(incIndex);
+        CheckRegister(incReg, Register.X, "the index of inc a,x loads into X");
+        Emit(a.Op == TokenKind.PlusEq ? Inc : Dec, AbsoluteX, Indexed(ArrayOf(incx), 0, incShift, incIndex));
+        return true;
+    }
+
+    /// <summary>Shifts of a memory byte: shift in place. A volatile byte only by one, so no value in between is written. False when it does not apply.</summary>
+    private bool ShiftInPlace(AssignStmt a)
+    {
+        var target = a.Target;
+        if (!(a.Op is TokenKind.ShlEq or TokenKind.ShrEq && target is NameExpr { Symbol: { InMemory: true } sv }
+            && sv.Type.Size == 1 && !(a.Op == TokenKind.ShrEq && sv.Type.IsSigned) && !(sv.IsVolatile && a.Value.ConstValue != 1)))
+            return false;
+        for (int i = 0; i < a.Value.ConstValue; i++) Op(a.Op == TokenKind.ShlEq ? Asl : Lsr, Var(sv));
+        return true;
+    }
+
+    /// <summary>p[i] op= v: read, change and write the element with one Y load. False when it does not apply.</summary>
+    private bool CompoundThroughPointer(AssignStmt a)
+    {
+        var target = a.Target;
+        if (!(target is IndexExpr pix && IsPointerIndex(pix) && pix.Type.Size == 1
+            && (a.Op is TokenKind.ShlEq or TokenKind.ShrEq || Simple1(a.Value) is not null)))
+            return false;
+        var (p, temp) = PointerBase(pix.Target);
+        LoadPointerIndex(pix, 0);
+        Emit(Lda, IndirectIndexed, p);
+        ApplyCompound(a, pix.Type);
+        Emit(Sta, IndirectIndexed, p);
+        if (temp is not null) Release(temp);
+        return true;
+    }
+
+    /// <summary>arr[expensive index] op= v: compute the index once (a shift or an offset table), read, change and write. False when it does not apply.</summary>
+    private bool CompoundAtExpensiveIndex(AssignStmt a)
+    {
+        var target = a.Target;
+        if (!(target is IndexExpr aix && !IsPointerIndex(aix) && aix.Type.Size == 1 && aix.Index.ConstValue is null
+            && (a.Op is TokenKind.ShlEq or TokenKind.ShrEq || Simple1(a.Value) is not null)
+            && FoldIndexOffset(aix.Index, ArrayOf(aix)) is var (index, shift) && !IndexIsCheap(index)))
+            return false;
+        var reg = LoadIndex(index);
+        var mode = reg == Register.X ? AbsoluteX : AbsoluteY;
+        Emit(Lda, mode, Indexed(ArrayOf(aix), 0, shift, index));
+        ApplyCompound(a, aix.Type);
+        Emit(Sta, mode, Indexed(ArrayOf(aix), 0, shift, index));
+        return true;
     }
 
     /// <summary>
