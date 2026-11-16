@@ -740,9 +740,19 @@ Decision 2026-11-15, moved before R6 on 2026-11-16. After R5 is merged and befor
 
 Done when: every finding has a verdict, and each must-fix item is fixed (by a coding session on a branch `r7-fixes`, reviewed as usual, before or after R6) or the developer accepts it for after the release, recorded in `docs/decisions.md`.
 
+### R7 fixes: what no milestone owned
+
+Decision 2026-11-16, from R7's review (`docs/reviews/code-quality-followup.md`, "Must fix"). R7 found no fix broken; its must-fix items are findings, or parts of them, that no milestone or decision owned. A coding session on the branch `r7-fixes`, after R7 and before R6, reviewed and merged as usual.
+
+- Tests 10, the rest: a precedence theory (spec 3.6) and the runtime conversion table (3.5), each case compared against C#, before R6 changes more of the compiler. A failure is a bug, fixed with its test as in R2.
+- Tools 18, the two parts a user sees: an unknown NES mapper is an error in `tern run`, not a run as NROM; `Cli` no longer reports any `InvalidOperationException` as a binary without `main`. Each with a test that fails before its fix.
+- Two one-line leftovers: the unused `platform` parameter of `Allocator.Allocate` (backend 7); a default that throws in `Inner` in `Checker.Warnings.cs` (semantics 14), so a new node is not skipped silently.
+
+Done when: each item has its test, the benchmarks and `SkillTests` are unchanged, and the status table lists each item as in R1-R6.
+
 ### R6: Platforms as data, messages as data
 
-After R7 (decision 2026-11-16). Its review also checks the code-quality findings it handles, as R7 does for R1-R5: a verdict per finding, the demonstration programs run again.
+After R7 and its fixes (decision 2026-11-16). Also tests 13 (`Run.Program` does all its work in its constructor), with the run model of tools 1. Its review also checks the code-quality findings it handles, as R7 does for R1-R5: a verdict per finding, the demonstration programs run again.
 
 Review themes 3 and 5, and the rest of theme 7.
 
