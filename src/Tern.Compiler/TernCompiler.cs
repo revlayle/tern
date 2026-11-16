@@ -70,6 +70,8 @@ public sealed class CompileResult
     public IReadOnlyList<CompileError> Warnings { get; internal set; } = [];
     /// <summary>On a cartridge: the program sets the IRQ vector, so <c>tern run</c> runs its handler on <c>brk</c> (spec 12.2).</summary>
     public bool SetsIrqVector { get; init; }
+    /// <summary>The files the compile read: the main file and every module it imports, the library's included. No output may replace one.</summary>
+    public IReadOnlyList<string> SourceFiles { get; init; } = [];
 }
 
 /// <summary>What the compiler does with warnings (spec 13).</summary>
@@ -602,6 +604,7 @@ public static partial class TernCompiler
             Entry = system ? platform.LoadAddress : start.Address,
             HaltAddress = halt.Address,
             SetsIrqVector = vectors.Irq,
+            SourceFiles = program.Modules.Where(m => m.Path is not null).Select(m => m.Path!).ToList(),
             Listing = code.Listing,
             Symbols = symbols,
             Labels = labels,

@@ -111,6 +111,21 @@ public sealed class CliTests : IDisposable
         Assert.Equal(Program, File.ReadAllText(b));
     }
 
+    // Review R3, finding 1: an imported module is source too.
+    [Fact]
+    public void An_output_never_overwrites_an_imported_module()
+    {
+        const string util = "var n: u8\nfn bump() { n += 1 }\n";
+        string module = Write("util.tern", util);
+        string main = Write("main.tern", "import util\nvar out: u8\nfn main() {\n    util.bump()\n    out = 1\n}\n");
+        var (code, _, error) = Tern("--target", "c64", main, "-o", module);
+        Assert.Equal(1, code);
+        Assert.Equal($"{module} would overwrite the source file {module}. Give -o another name", error);
+        Assert.Equal(util, File.ReadAllText(module));
+        Assert.Equal(0, Tern("--target", "c64", main, "-o", Path.Combine(_dir.FullName, "util.prg")).Code);
+        Assert.Equal(util, File.ReadAllText(module));
+    }
+
     [Theory]
     [InlineData(".lst")]
     [InlineData(".vs")]

@@ -201,7 +201,7 @@ public static class Cli
                 writes.Add((Path.Combine(directory, overlay.Name + platform.BinaryExtension), p => File.WriteAllBytes(p, overlay.File)));
             if (result.ApiModule is not null)
                 writes.Add((Path.Combine(directory, result.ApiModuleName + ".tern"), p => File.WriteAllText(p, result.ApiModule)));
-            if (Clash(input, writes.Select(w => w.Path).ToList()) is { } clash) return Fail(json, new Diagnostic(input, 0, 0, "error", clash, null), clash);
+            if (Clash(result.SourceFiles.Append(input), writes.Select(w => w.Path).ToList()) is { } clash) return Fail(json, new Diagnostic(input, 0, 0, "error", clash, null), clash);
             var files = new List<string>();
             foreach (var (path, write) in writes)
             {
@@ -482,17 +482,19 @@ public static class Cli
             : null;
     }
 
-    /// <summary>An output that would overwrite the source file or another output, or null (review code-quality-tools 3).</summary>
-    private static string? Clash(string input, IReadOnlyList<string> outputs)
+    /// <summary>An output that would overwrite a source file or another output, or null (review code-quality-tools 3).</summary>
+    private static string? Clash(IEnumerable<string> sources, IReadOnlyList<string> outputs)
     {
         var comparer = OperatingSystem.IsWindows() || OperatingSystem.IsMacOS() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
-        string source = Path.GetFullPath(input);
+        // Every file the compile read: the main file and the modules it imports (review R3, finding 1).
+        var source = new Dictionary<string, string>(comparer);
+        foreach (var s in sources) source.TryAdd(Path.GetFullPath(s), s);
         var seen = new Dictionary<string, string>(comparer);
         foreach (var path in outputs)
         {
             string full = Path.GetFullPath(path);
-            if (comparer.Equals(full, source))
-                return $"{path} would overwrite the source file {input}. Give -o another name";
+            if (source.TryGetValue(full, out var file))
+                return $"{path} would overwrite the source file {file}. Give -o another name";
             if (!seen.TryAdd(full, path))
                 return $"Two outputs would be written to {path}. Give -o another name";
         }
