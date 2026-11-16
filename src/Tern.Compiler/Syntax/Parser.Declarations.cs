@@ -297,7 +297,7 @@ public sealed partial class Parser
 
     private bool IsMemoryBlock()
     {
-        if (!At(TokenKind.Identifier) || Current.Text != "memory") return false;
+        if (!AtWord(Word.Memory)) return false;
         int i = 1;
         while (PeekAt(i).Kind == TokenKind.Newline) i++;
         return PeekAt(i).Kind == TokenKind.LBrace;
@@ -324,7 +324,7 @@ public sealed partial class Parser
         {
             if (At(TokenKind.Eof)) throw new CompileError(start.Pos, "The memory block is not closed with '}'. Add '}' after its last range");
             // cartridge board option...: before the ranges, at most once (spec 8.4).
-            if (At(TokenKind.Identifier) && Current.Text == "cartridge" && PeekAt(1).Kind == TokenKind.Identifier)
+            if (AtWord(Word.Cartridge) && PeekAt(1).Kind == TokenKind.Identifier)
             {
                 var word = Advance();
                 if (cartridge is not null)
@@ -344,13 +344,11 @@ public sealed partial class Parser
                 throw new CompileError(Current.Pos, "A memory range includes its last address. Write first..=last");
             Expect(TokenKind.DotDotEq, "'..=' and the last address of the range");
             var last = ParseExpr();
-            var kind = At(TokenKind.Volatile) ? Advance() : Expect(TokenKind.Identifier, "the kind of memory: program, zeropage, reserved, region, volatile, overlay, bank or chr");
-            if (kind.Text is not ("program" or "zeropage" or "reserved" or "region" or "volatile" or "overlay" or "bank" or "chr"))
-                throw new CompileError(kind.Pos, $"Unknown kind of memory '{kind.Text}'. Use program, zeropage, reserved, region, volatile, overlay, bank or chr");
-            string? name = null;
-            if (kind.Text is "region" or "overlay" or "bank" or "chr")
-                name = Expect(TokenKind.Identifier, $"a name after '{kind.Text}'").Text;
-            lines.Add(new MemoryLine(kind.Pos, first, last, kind.Text, name));
+            var kind = At(TokenKind.Volatile) ? Advance() : Expect(TokenKind.Identifier, $"the kind of memory: {MemoryKinds.List}");
+            if (MemoryKinds.Named(kind.Text) is not { } memoryKind)
+                throw new CompileError(kind.Pos, $"Unknown kind of memory '{kind.Text}'. Use {MemoryKinds.List}");
+            string? name = memoryKind.HasName() ? Expect(TokenKind.Identifier, $"a name after '{kind.Text}'").Text : null;
+            lines.Add(new MemoryLine(kind.Pos, first, last, memoryKind, name));
             // The lexer ends no statement after the keyword 'volatile'.
             if (kind.Kind == TokenKind.Volatile) Accept(TokenKind.Semicolon);
             else ExpectEndOfStatement();
@@ -378,7 +376,7 @@ public sealed partial class Parser
             Expect(TokenKind.Colon, "':' and the field's type");
             var type = ParseType();
             bool placed = Accept(TokenKind.At);
-            if (placed && At(TokenKind.Identifier) && Current.Text == "align" && PeekAt(1).Kind == TokenKind.LParen)
+            if (placed && AtWord(Word.Align) && PeekAt(1).Kind == TokenKind.LParen)
                 throw new CompileError(Current.Pos, "A struct field's '@' is its offset from the start of the struct, so it cannot be aligned. Write the offset, as in '@ 2'");
             Expr? offset = placed ? ParseExpr() : null;
             fields.Add(new FieldSyntax(field.Pos, field.Text, type, offset));
@@ -390,10 +388,10 @@ public sealed partial class Parser
     }
 
     /// <summary><c>encoding</c> is a word only at the start of a top-level declaration (spec 2.1), so it is still a usable name elsewhere.</summary>
-    private bool IsEncodingWord() => At(TokenKind.Identifier) && Current.Text == "encoding" && PeekAt(1).Kind == TokenKind.Identifier;
+    private bool IsEncodingWord() => AtWord(Word.Encoding) && PeekAt(1).Kind == TokenKind.Identifier;
 
     /// <summary><c>default</c> is a word only before <c>encoding</c> (spec 2.1).</summary>
-    private bool IsDefaultEncoding() => At(TokenKind.Identifier) && Current.Text == "default" && PeekAt(1) is { Kind: TokenKind.Identifier, Text: "encoding" };
+    private bool IsDefaultEncoding() => AtWord(Word.Default) && Word.Is(PeekAt(1), Word.Encoding);
 
     /// <summary>An encoding's name, <c>tiles</c> or <c>font.tiles</c>, and where it starts.</summary>
     private (string Name, SourcePos Pos) ParseEncodingName(string what)
@@ -451,7 +449,7 @@ public sealed partial class Parser
     }
 
     /// <summary><c>indexed</c> is a word only before <c>var</c> (spec 3.3), so it is still a usable name elsewhere.</summary>
-    private bool IsIndexedWord() => At(TokenKind.Identifier) && Current.Text == "indexed" && PeekAt(1).Kind is TokenKind.Var or TokenKind.Linear or TokenKind.Data;
+    private bool IsIndexedWord() => AtWord(Word.Indexed) && PeekAt(1).Kind is TokenKind.Var or TokenKind.Linear or TokenKind.Data;
 
     /// <summary><c>indexed var name: [T; n]</c></summary>
     private VarDecl ParseIndexedVar()
@@ -469,7 +467,7 @@ public sealed partial class Parser
     private VarDecl ParseLinearVar()
     {
         var linear = Expect(TokenKind.Linear, "'linear'");
-        if (At(TokenKind.Identifier) && Current.Text == "indexed")
+        if (AtWord(Word.Indexed))
             throw new CompileError(Current.Pos, "'indexed' replaces 'linear': it stores records the same way. Write 'indexed var', not 'linear indexed var'");
         if (!At(TokenKind.Var) && !At(TokenKind.Data))
             throw new CompileError(Current.Pos, $"'linear' goes before 'var' or 'data', e.g. 'linear var list: [Enemy; 8]'; found {Describe(Current)}. Write 'linear var' or remove 'linear'");
@@ -512,7 +510,7 @@ public sealed partial class Parser
             return OneLocation(new Placement(PlacementKind.ZeroPage));
         }
         // 'align' is a word only after '@' (spec 4).
-        if (At(TokenKind.Identifier) && Current.Text == "align")
+        if (AtWord(Word.Align))
         {
             Advance();
             Expect(TokenKind.LParen, "'(' and the alignment, as in '@ align(256)'");
@@ -528,7 +526,7 @@ public sealed partial class Parser
     {
         bool second = placement.Kind == PlacementKind.Align
             ? At(TokenKind.Zp) || At(TokenKind.Identifier) || At(TokenKind.Number)
-            : At(TokenKind.Identifier) && Current.Text == "align";
+            : AtWord(Word.Align);
         if (second)
             throw new CompileError(Current.Pos,
                 "'@' takes one location (an address, a region, 'zp' or 'align(n)'), and this has two. Remove 'align(n)', or the other location");
@@ -636,14 +634,8 @@ public sealed partial class Parser
     private Register ParseRegister()
     {
         var t = Expect(TokenKind.Identifier, "a register or flag (A, X, Y, AX, AY, XY, carry, zero, negative, overflow)");
-        return t.Text switch
-        {
-            "A" => Register.A, "X" => Register.X, "Y" => Register.Y,
-            "AX" => Register.AX, "AY" => Register.AY, "XY" => Register.XY,
-            "carry" => Register.Carry, "zero" => Register.Zero, "negative" => Register.Negative,
-            "overflow" => Register.Overflow,
-            _ => throw new CompileError(t.Pos, $"Unknown register or flag '{t.Text}'. Use A, X, Y, AX, AY, XY, carry, zero, negative or overflow"),
-        };
+        return Registers.Named(t.Text)
+            ?? throw new CompileError(t.Pos, $"Unknown register or flag '{t.Text}'. Use A, X, Y, AX, AY, XY, carry, zero, negative or overflow");
     }
 
     private TypeSyntax ParseType()
@@ -661,13 +653,13 @@ public sealed partial class Parser
             var element = ParseType();
             Expect(TokenKind.Semicolon, "';'");
             Expr? length = null;
-            if (At(TokenKind.Identifier) && Current.Text == "_") Advance();
+            if (AtWord(Word.Discard)) Advance();
             else length = ParseExpr();
             Expect(TokenKind.RBracket, "']'");
             return new ArrayTypeSyntax(start.Pos, element, length);
         }
         var name = Expect(TokenKind.Identifier, "a type");
-        if (name.Text == "ptr" && (At(TokenKind.Identifier) || At(TokenKind.LBracket)))
+        if (name.Text == Word.Ptr && (At(TokenKind.Identifier) || At(TokenKind.LBracket)))
             return new PointerTypeSyntax(name.Pos, ParseType());
         // A struct type in a module: c64.Vic (the checker reports a missing import).
         if (At(TokenKind.Dot) && PeekAt(1).Kind == TokenKind.Identifier)

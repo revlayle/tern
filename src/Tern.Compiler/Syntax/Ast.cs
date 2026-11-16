@@ -649,12 +649,11 @@ public sealed class MemoryDecl(SourcePos pos, List<MemoryLine> lines) : Node(pos
 public sealed record CartridgeLine(SourcePos Pos, string Board, SourcePos BoardPos, IReadOnlyList<(string Name, SourcePos Pos)> Options);
 
 /// <summary>One line of the memory block: <c>first..=last kind [name]</c>.</summary>
-public sealed class MemoryLine(SourcePos pos, Expr first, Expr last, string kind, string? name) : Node(pos)
+public sealed class MemoryLine(SourcePos pos, Expr first, Expr last, MemoryKind kind, string? name) : Node(pos)
 {
     public Expr First { get; } = first;
     public Expr Last { get; } = last;
-    /// <summary>program, zeropage, reserved, region, volatile, overlay, bank or chr.</summary>
-    public string Kind { get; } = kind;
+    public MemoryKind Kind { get; } = kind;
     /// <summary>The name after <c>region</c>, <c>overlay</c>, <c>bank</c> or <c>chr</c>.</summary>
     public string? Name { get; } = name;
 }

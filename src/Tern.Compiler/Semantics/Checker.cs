@@ -153,10 +153,10 @@ public sealed partial class Checker
             Recover(() => throw new CompileError(new SourcePos(1, 1, modules[^1].Path), MemoryLayout.NeedsCartridge(_platform)));
 
         // "@ name" means a region or an address, never either depending on other declarations (spec 8.4).
-        foreach (var line in modules[^1].Syntax.Memory?.Lines.Where(l => l.Kind is "region" or "chr") ?? [])
+        foreach (var line in modules[^1].Syntax.Memory?.Lines.Where(l => l.Kind is MemoryKind.Region or MemoryKind.Chr) ?? [])
             if (modules[^1].Scope.TryGetValue(line.Name!, out var clash) && clash is not ErrorSymbol || modules[^1].Imports.ContainsKey(line.Name!))
                 Recover(() => throw new CompileError(line.Pos,
-                    $"The {(line.Kind == "chr" ? "chr area" : "region")} '{line.Name}' has the name of {(clash is null ? "an imported module" : $"a {KindName(clash)} of the main file (line {clash.Pos.Line})")}, so '@ {line.Name}' would be ambiguous. Rename the region"));
+                    $"The {(line.Kind == MemoryKind.Chr ? "chr area" : "region")} '{line.Name}' has the name of {(clash is null ? "an imported module" : $"a {KindName(clash)} of the main file (line {clash.Pos.Line})")}, so '@ {line.Name}' would be ambiguous. Rename the region"));
 
         foreach (var import in modules[^1].Syntax.Imports.Where(i => i.Area is not null))
         {

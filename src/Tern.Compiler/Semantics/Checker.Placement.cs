@@ -35,7 +35,7 @@ public sealed partial class Checker
                 };
                 // Only an area name needs the memory block; a constant address does not. The block is the
                 // main file's, also for a declaration in a module (spec 8.4, decision 2026-11-15).
-                if (areaName is not null && _mainModule.Syntax.Memory?.Lines.Any(l => l.Kind is "region" or "chr" && l.Name == areaName) == true)
+                if (areaName is not null && _mainModule.Syntax.Memory?.Lines.Any(l => l.Kind is MemoryKind.Region or MemoryKind.Chr && l.Name == areaName) == true)
                 {
                     InModule(_mainModule, EnsureMemoryLayout);
                     if (_memoryFailed) throw new FollowOnError();

@@ -172,7 +172,7 @@ public sealed partial class Parser
         var to = ParseExpr();
         string range = TokenText(rangeStart, _pos);
         Expr? step = null;
-        if (At(TokenKind.Identifier) && Current.Text == "step")
+        if (AtWord(Word.Step))
         {
             Advance();
             step = ParseExpr();
@@ -182,7 +182,7 @@ public sealed partial class Parser
         if (At(TokenKind.If))
             throw new CompileError(Current.Pos, "A list built with 'for' has no filter. Write a const fn with a loop and an 'if' for that");
         Expect(TokenKind.RBracket, "']' after the range of the list");
-        return new ListForExpr(pos, element, name.Text == "_" ? null : name.Text, from, to, inclusive, step) { RangeText = range };
+        return new ListForExpr(pos, element, name.Text == Word.Discard ? null : name.Text, from, to, inclusive, step) { RangeText = range };
     }
 
     private Expr ParsePrimary()
