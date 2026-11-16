@@ -254,7 +254,7 @@ public sealed partial class CodeGen
             Emit(Rts);
             Place(hiTable); _out.Add(new LabelTable(targets, High: true, Offset: -1));
             Place(loTable); _out.Add(new LabelTable(targets, High: false, Offset: -1));
-            MatchTables.Add((_fn, m.Pos, hiTable, loTable, span));
+            MatchTables.Add((_ctx.Function, m.Pos, hiTable, loTable, span));
             order = arms;
         }
         else
@@ -320,7 +320,7 @@ public sealed partial class CodeGen
             return;
         }
         var value = r.Value;
-        switch (_fn.ReturnRegister)
+        switch (_ctx.Function.ReturnRegister)
         {
             case Register.A: GenA(value); break;
             case Register.X: GenA(value); Emit(Tax); break;
@@ -336,7 +336,7 @@ public sealed partial class CodeGen
                     pair = (Var(temp), Var(temp, 1));
                 }
                 var (lo, hi) = pair.Value;
-                switch (_fn.ReturnRegister)
+                switch (_ctx.Function.ReturnRegister)
                 {
                     case Register.AX: Op(Ldx, hi); Op(Lda, lo); break;
                     case Register.AY: Op(Ldy, hi); Op(Lda, lo); break;
@@ -349,8 +349,8 @@ public sealed partial class CodeGen
             {
                 Mnemonic setTrue, setFalse;
                 Operand? trueOp = null, falseOp = null;
-                if (_fn.ReturnRegister == Register.Carry) { setTrue = Sec; setFalse = Clc; }
-                else if (_fn.ReturnRegister == Register.Zero) { setTrue = Lda; trueOp = Byte(0); setFalse = Lda; falseOp = Byte(1); }
+                if (_ctx.Function.ReturnRegister == Register.Carry) { setTrue = Sec; setFalse = Clc; }
+                else if (_ctx.Function.ReturnRegister == Register.Zero) { setTrue = Lda; trueOp = Byte(0); setFalse = Lda; falseOp = Byte(1); }
                 else { setTrue = Lda; trueOp = Byte(0x80); setFalse = Lda; falseOp = Byte(0); }
 
                 void Set(Mnemonic m, Operand? op) { if (op is null) Emit(m); else Op(m, op); }
@@ -359,7 +359,7 @@ public sealed partial class CodeGen
                 {
                     if (c != 0) Set(setTrue, trueOp); else Set(setFalse, falseOp);
                 }
-                else if (_fn.ReturnRegister == Register.Carry && CompareIntoCarry(value))
+                else if (_ctx.Function.ReturnRegister == Register.Carry && CompareIntoCarry(value))
                 {
                     // The compare left the result in the carry.
                 }

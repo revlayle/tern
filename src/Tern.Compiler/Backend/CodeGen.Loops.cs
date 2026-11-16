@@ -243,9 +243,9 @@ public sealed partial class CodeGen
             reg = _reserved.Contains(Register.X) ? Register.Y : Register.X;
         }
         else return;
-        if (_fn.ReturnRegister is { } ret && ret.Uses(reg) && f.Body.Descendants().Any(n => n is ReturnStmt { Value: not null })) return;
+        if (_ctx.Function.ReturnRegister is { } ret && ret.Uses(reg) && f.Body.Descendants().Any(n => n is ReturnStmt { Value: not null })) return;
         c.Register = reg;
-        _fn.FrameVariables.Remove(c);
+        _ctx.Function.FrameVariables.Remove(c);
     }
 
     /// <summary>
@@ -295,7 +295,7 @@ public sealed partial class CodeGen
         foreach (var l in inner.Where(l => l.Symbol!.Register is not null))
             if (l.Symbol!.Register == reg || !IndexesHeld(l.Body, l.Symbol, c, reg)) return;
         c.Register = reg;
-        _fn.FrameVariables.Remove(c);
+        _ctx.Function.FrameVariables.Remove(c);
     }
 
     /// <summary>
