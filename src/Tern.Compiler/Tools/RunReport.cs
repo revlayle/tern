@@ -40,6 +40,8 @@ public sealed record MemoryDump(string What, int Address, int Size, VariableInfo
             var near = program.Variables.Keys.Where(k => k.EndsWith("." + what) || k.Equals(what, StringComparison.OrdinalIgnoreCase)).Take(3).ToList();
             throw new FormatException($"No variable '{what}'" + (near.Count > 0 ? $". Did you mean {string.Join(" or ", near.Select(n => $"'{n}'"))}?" : ". Locals are written 'function.name'"));
         }
+        if (v.InChr)
+            throw new FormatException($"'{v.Name}' is tile data in a chr area, at ${v.Address:X4} in the PPU's memory, and --dump shows the CPU's memory");
         if (v.Address + (size ?? v.Size) > 0x10000) throw new FormatException($"'{text}' goes past $FFFF ('{v.Name}' is at ${v.Address:X4})");
         return new MemoryDump(text, v.Address, size ?? v.Size, v);
     }
@@ -118,7 +120,7 @@ public static class RunReport
                 sb.AppendLine("Functions (cycles include the functions they call):");
                 foreach (var f in run.Functions) sb.AppendLine($"  {f.Name,-24} {f.Calls,8} calls {f.Cycles,10} cycles");
             }
-            sb.Append(LineTable.Format(profile));
+            sb.Append(LineTable.Format(profile, (run.Profile.InterruptCycles, run.Interrupts)));
         }
         return sb.ToString();
     }
@@ -140,6 +142,7 @@ public static class RunReport
             cycles = run.Cycles,
             mainCycles = run.MainCycles,
             interrupts = run.Interrupts,
+            interruptCycles = run.Profile.InterruptCycles,
             registers = new { a = run.Cpu.A, x = run.Cpu.X, y = run.Cpu.Y, sp = run.Cpu.SP, pc = run.Cpu.PC },
             output = run.Output,
             indexErrors = run.IndexErrors.Select(e => new { file = e.File, line = e.Line, source = e.Source, message = e.Message, cycle = e.Cycle, count = e.Count }),

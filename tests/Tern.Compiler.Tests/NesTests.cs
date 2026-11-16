@@ -484,4 +484,30 @@ public class NesTests
         Assert.Contains($"NesPrgRom:{r.Symbols["main"] - 0xC000:X4}:main", lines);
         Assert.Equal(".mlb", Platform.Nes.Labels.Extension);
     }
+
+    // Review code-quality-syntax 17: padding before aligned data in PRG ROM is $FF, erased ROM (spec 12.2).
+    [Fact]
+    public void Alignment_padding_in_rom_is_ff()
+    {
+        var r = Compile(Nrom + "data a: [u8; 3] = [1, 2, 3]\ndata b: [u8; 4] @ align(256) = [9, 9, 9, 9]\nvar out: u8\nfn main() { out = a[0] + b[0] }");
+        int aEnd = r.Symbols["a"] + 3, b = r.Symbols["b"];
+        Assert.Equal(0, b & 0xFF);
+        Assert.True(b - aEnd > 0);
+        Assert.All(r.File[(16 + aEnd - 0xC000)..(16 + b - 0xC000)], x => Assert.Equal(0xFF, x));
+        Assert.Equal([9, 9, 9, 9], r.File[(16 + b - 0xC000)..(16 + b - 0xC000 + 4)]);
+    }
+
+    // Review code-quality-syntax 5: tile data is labelled in CHR ROM, not as RAM, and --dump does not read CPU memory for it.
+    [Fact]
+    public void Tile_data_is_labelled_in_chr_rom()
+    {
+        var r = Compile(Tiles + "data bg: [u8; 16] @ tiles + $20 = repeat($11, 16)\nvar out: u8\nfn main() { out = 1 }");
+        var lines = r.Labels.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        Assert.Contains("NesChrRom:0020:bg", lines);
+        Assert.DoesNotContain(lines, l => l.StartsWith("NesInternalRam:") && l.EndsWith(":bg"));
+        Assert.Contains($"NesInternalRam:{r.Symbols["out"]:X4}:out", lines);
+        Assert.True(r.Variables["bg"].InChr);
+        var e = Assert.Throws<FormatException>(() => Tools.MemoryDump.Parse("bg", r));
+        Assert.Equal("'bg' is tile data in a chr area, at $0020 in the PPU's memory, and --dump shows the CPU's memory", e.Message);
+    }
 }

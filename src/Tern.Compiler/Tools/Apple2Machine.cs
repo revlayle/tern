@@ -26,7 +26,7 @@ internal sealed class Apple2Machine(IReadOnlyList<OverlayFile> overlays) : Machi
     private const int Wndlft = 0x20, Wndwdth = 0x21, Wndtop = 0x22, Wndbtm = 0x23, Ch = 0x24, Cv = 0x25, Basl = 0x28, Invflg = 0x32, Csw = 0x36, Ksw = 0x38;
     private const int Blank = 0xA0;
 
-    public override string StandIns => "COUT $FDED, HOME $FC58, SETNORM $FE84, INIT $FB2F, SETVID $FE93, SETKBD $FE89, and the MLI at $BF00 for QUIT, GET_PREFIX, SET_PREFIX, and for reading the build's overlay files";
+    public override string StandIns => "COUT $FDED, HOME $FC58, SETNORM $FE84, INIT $FB2F, SETVID $FE93, SETKBD $FE89, and the MLI at $BF00 for QUIT, CLOSE, GET_PREFIX, SET_PREFIX, and for reading the build's overlay files";
 
     private const int BadPath = 0x40, TooManyFiles = 0x42, BadRef = 0x43, NotFound = 0x46, Eof = 0x4C;
     /// <summary>The overlay file open under each reference number, and the next byte to read.</summary>
@@ -159,8 +159,10 @@ internal sealed class Apple2Machine(IReadOnlyList<OverlayFile> overlays) : Machi
                 Put(3, 0xC3, 1);
                 Put(4, 0x06, 1);
                 Put(5, file.LoadAddress);
-                Put(7, 1, 1);
-                Put(8, (file.Image.Length + 511) / 512 + 1);
+                // A seedling holds up to 512 bytes in one block; a sapling has an index block too.
+                bool seedling = file.Image.Length <= 512;
+                Put(7, seedling ? 1 : 2, 1);
+                Put(8, seedling ? 1 : (file.Image.Length + 511) / 512 + 1);
                 for (int i = 10; i < 18; i++) b[(list + i) & 0xFFFF] = 0;
                 return 0;
             }

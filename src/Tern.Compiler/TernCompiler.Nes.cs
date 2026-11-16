@@ -181,10 +181,12 @@ public static partial class TernCompiler
     /// <summary>
     /// A label's place for Mesen (<see cref="LabelFormat.Mesen"/>): RAM as itself, ROM as its offset into
     /// PRG ROM, registers left out. With <paramref name="bankCount"/> banks, the fixed bank is the last,
-    /// and a label of a module in <paramref name="moduleBanks"/> is in that module's bank.
+    /// and a label of a module in <paramref name="moduleBanks"/> is in that module's bank. Tile data
+    /// (<paramref name="chr"/>) has a PPU address, which is its offset into CHR ROM.
     /// </summary>
-    private static Func<string, int, int> NesLabelMap(int prgFirst, int bankCount, IReadOnlyDictionary<string, int> moduleBanks) => (name, address) =>
+    private static Func<string, int, int> NesLabelMap(int prgFirst, int bankCount, IReadOnlyDictionary<string, int> moduleBanks, IReadOnlySet<string> chr) => (name, address) =>
     {
+        if (chr.Contains(name)) return LabelFormat.ChrRom | address;
         if (address < 0x2000) return address & 0x07FF;
         if (address < 0x8000) return -1;
         if (bankCount == 0) return address >= prgFirst ? LabelFormat.PrgRom | (address - prgFirst) : -1;

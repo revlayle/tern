@@ -8,15 +8,19 @@ namespace Tern.Compiler.Tools;
 /// visible PRG ROM is copied there too, at $8000-$FFFF, and a write to the UxROM latch copies the bank it
 /// selects to $8000-$BFFF. Writes through $2006/$2007 go to <see cref="Ppu"/>, 16 KB with the nametable
 /// mirroring of the board and the palette's mirrors; OAM DMA ($4014) copies a page to <see cref="Oam"/>.
-/// <see cref="Tick"/> starts a frame every 29,781 cycles: it sets the vblank flag that $2002 reports (a
-/// read clears it) and, with bit 7 of $2000 set, raises an NMI. The controllers read as no buttons, or as
+/// <see cref="Tick"/> starts a frame every 29,781 cycles: it sets the vblank flag that $2002 reports, which
+/// a read clears and the end of vblank (<see cref="VblankCycles"/> later) clears too, and with bit 7 of
+/// $2000 set raises an NMI; setting that bit while the flag is set raises one at once. $2006 takes the
+/// address on its second write (decision 2026-11-15). The controllers read as no buttons, or as
 /// <see cref="Buttons"/> gives them for a frame. Not modelled: rendering, sprite 0 hits, sprite overflow,
-/// sound, timing within a frame.
+/// sound, other timing within a frame.
 /// </summary>
 public sealed class NesBus : IBus
 {
     /// <summary>CPU cycles in one NTSC frame.</summary>
     public const int FrameCycles = 29_781;
+    /// <summary>CPU cycles from the start of vblank to its end (20 scan lines), when the PPU clears the flag.</summary>
+    public const int VblankCycles = 2_273;
     private const int Bank = 0x4000;
 
     private readonly Ram _ram;
@@ -26,8 +30,14 @@ public sealed class NesBus : IBus
     private readonly int _mapper;
     private long _nextFrame = FrameCycles;
     private bool _vblank;
+    /// <summary>The cycle at which the current vblank ends.</summary>
+    private long _vblankEnd;
+    /// <summary>Bit 7 of $2000 was set during vblank: an NMI at the end of the instruction.</summary>
+    private bool _nmiNow;
     private bool _latch;
     private int _address;
+    /// <summary>The high byte of the first $2006 write, until the second.</summary>
+    private int _addressHigh;
     private byte _readBuffer;
     private byte _oamAddress;
     private int _shift1, _shift2;
@@ -75,8 +85,15 @@ public sealed class NesBus : IBus
     /// <summary>Starts the frames that are due by the CPU's cycle count: vblank, and the NMI if it is on.</summary>
     public void Tick(Cpu6502 cpu)
     {
+        if (_nmiNow)
+        {
+            _nmiNow = false;
+            Nmis++;
+            cpu.Nmi();
+        }
         while (cpu.Cycles >= _nextFrame)
         {
+            _vblankEnd = _nextFrame + VblankCycles;
             _nextFrame += FrameCycles;
             Frame++;
             _vblank = true;
@@ -88,6 +105,9 @@ public sealed class NesBus : IBus
         }
     }
 
+    /// <summary>The vblank flag as $2002 reports it: set at the start of vblank, clear after its end or a read.</summary>
+    private bool InVblank => _vblank && (Cpu is null || Cpu.Cycles < _vblankEnd);
+
     public byte Read(ushort address)
     {
         if (address < 0x2000) return _ram.Bytes[address & 0x07FF];
@@ -96,7 +116,7 @@ public sealed class NesBus : IBus
             switch (address & 7)
             {
                 case 2:
-                    byte status = (byte)(_vblank ? 0x80 : 0);
+                    byte status = (byte)(InVblank ? 0x80 : 0);
                     _vblank = false;
                     _latch = false;
                     return status;
@@ -126,7 +146,10 @@ public sealed class NesBus : IBus
         {
             switch (address & 7)
             {
-                case 0: Control = value; break;
+                case 0:
+                    if ((Control & 0x80) == 0 && (value & 0x80) != 0 && InVblank) _nmiNow = true;
+                    Control = value;
+                    break;
                 case 1: Mask = value; break;
                 case 3: _oamAddress = value; break;
                 case 4: Oam[_oamAddress++] = value; break;
@@ -135,7 +158,8 @@ public sealed class NesBus : IBus
                     _latch = !_latch;
                     break;
                 case 6:
-                    _address = !_latch ? (value & 0x3F) << 8 | (_address & 0xFF) : (_address & 0x3F00) | value;
+                    if (!_latch) _addressHigh = value & 0x3F;
+                    else _address = _addressHigh << 8 | value;
                     _latch = !_latch;
                     break;
                 case 7:

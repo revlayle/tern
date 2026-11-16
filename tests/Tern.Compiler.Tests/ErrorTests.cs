@@ -99,6 +99,93 @@ public class ErrorTests
         Assert.Equal((line, column), (e.Pos.Line, e.Pos.Column));
     }
 
+    // Review code-quality-syntax 12, 13, 16 and 19: the whole message, at its place.
+    [Theory]
+    [InlineData("var café: u8\nfn main() { }", 1, 8, "'é' (U+00E9) cannot be in a name: names use A-Z, a-z, 0-9 and '_'. Write the name with these")]
+    [InlineData("var αβ: u8\nfn main() { }", 1, 5, "'α' (U+03B1) cannot be in a name: names use A-Z, a-z, 0-9 and '_'. Write the name with these")]
+    [InlineData("var x١: u8\nfn main() { }", 1, 6, "'١' (U+0661) cannot be in a name: names use A-Z, a-z, 0-9 and '_'. Write the name with these")]
+    [InlineData("var v: u8\nfn main() { v = ١ }", 2, 17, "'١' (U+0661) cannot be in a name: names use A-Z, a-z, 0-9 and '_'. Write the name with these")]
+    [InlineData("var v: u8\nfn main() { v = 0x1F }", 2, 17, "Tern has no '0x'. Write hex numbers with '$', as in $1F")]
+    [InlineData("fn main() {\n    emit { lda #1 }\n}", 2, 5, "'emit' adds assembly to the caller only in a const fn, a code generator. Write the assembly in an 'asm { }' block here, or move it into a const fn")]
+    [InlineData("data t = \"AC\"\nfn main() { }", 1, 12,"The character U+E042 has no code in any encoding. Write the byte it stands for as \\$NN")]
+    [InlineData("const fn dec(n: int) {\n    emit { ldx #n }\n}\nfn main() { }", 1, 7, "'dec' is a 6502 instruction, so an asm line cannot call a generator of that name. Use another name")]
+    [InlineData("const fn Inc() {\n    emit { nop }\n}\nfn main() { }", 1, 7, "'Inc' is a 6502 instruction, so an asm line cannot call a generator of that name. Use another name")]
+    public void Reports_the_whole_message_at_its_place(string source, int line, int column, string expected)
+    {
+        var e = Assert.Throws<CompileError>(() => TernCompiler.Compile(source));
+        Assert.Equal(expected, e.Description);
+        Assert.Equal((line, column), (e.Pos.Line, e.Pos.Column));
+    }
+
+    // Review code-quality-syntax 4: deep nesting is an error, not a stack overflow that kills the process.
+    [Theory]
+    [InlineData("(", ")", 300)]
+    [InlineData("(", ")", 100_000)]
+    [InlineData("-", "", 1000)]
+    [InlineData("f(", ")", 300)]
+    [InlineData("t[", "]", 300)]
+    public void Deep_nesting_is_an_error(string open, string close, int count)
+    {
+        string source = $"var t: [u8; 4]\nfn f(x: u8) -> u8 {{ return x }}\nvar out: u8\nfn main() {{ out = {Repeat(open, count)}1{Repeat(close, count)} }}";
+        var e = Assert.Throws<CompileError>(() => TernCompiler.Compile(source));
+        Assert.Equal($"This is nested more than {Syntax.Parser.MaxDepth} deep (brackets, operators in a row, blocks or types). Split it with a constant, a variable or a function", e.Description);
+    }
+
+    [Theory]
+    [InlineData("+1", 1000)]
+    [InlineData("|1", 100_000)]
+    [InlineData(" as u8", 1000)]
+    [InlineData(".lo", 1000)]
+    public void A_long_row_of_operators_is_an_error(string term, int count)
+    {
+        string source = $"var out: u8\nfn main() {{ out = 1{Repeat(term, count)} }}";
+        var e = Assert.Throws<CompileError>(() => TernCompiler.Compile(source));
+        Assert.Contains($"nested more than {Syntax.Parser.MaxDepth} deep", e.Description);
+    }
+
+    [Fact]
+    public void Deeply_nested_blocks_and_types_are_an_error()
+    {
+        var blocks = Assert.Throws<CompileError>(() => TernCompiler.Compile($"fn main() {{ {Repeat("if true { ", 300)}{Repeat("}", 300)} }}"));
+        Assert.Contains("nested more than", blocks.Description);
+        var types = Assert.Throws<CompileError>(() => TernCompiler.Compile($"var t: {Repeat("[", 300)}u8{Repeat("; 1]", 300)}\nfn main() {{ }}"));
+        Assert.Contains("nested more than", types.Description);
+    }
+
+    [Fact]
+    public void Nesting_up_to_the_limit_compiles_and_runs()
+    {
+        var r = Run.Program($$"""
+            var a: u8
+            var b: u8
+            var c: u8
+            fn main() {
+                a = {{Repeat("(", 250)}}7{{Repeat(")", 250)}}
+                b = 1{{Repeat("+1", 250)}}
+                c = {{Repeat("- ", 250)}}3
+            }
+            """);
+        Assert.Equal((7, 251, 3), (r.U8("a"), r.U8("b"), r.U8("c")));
+    }
+
+    private static string Repeat(string s, int n) => string.Concat(Enumerable.Repeat(s, n));
+
+    // Review code-quality-syntax 15: a line break inside a block comment ends the statement.
+    [Fact]
+    public void A_line_break_inside_a_block_comment_ends_the_statement()
+    {
+        var r = Run.Program("""
+            var a: u8
+            var b: u8
+            fn main() {
+                a = 1 /* note
+                */ b = 2
+                a += 2 /* on one line */ + 3
+            }
+            """);
+        Assert.Equal((6, 2), (r.U8("a"), r.U8("b")));
+    }
+
     [Fact]
     public void A_keyword_where_no_name_was_meant_gets_no_rename_hint()
     {
@@ -151,14 +238,36 @@ public class ErrorTests
     [Fact]
     public void Dereferenced_pointer_that_does_not_fit_in_zero_page_is_an_error()
     {
-        // $02-$8F is 142 bytes; the array leaves one byte, too few for a pointer.
+        // $02-$8F and $FB-$FE are 146 bytes; the array fills the first, two pointers the second.
         var e = Assert.Throws<CompileError>(() => TernCompiler.Compile("""
-            var big: [u8; 141] @ zp
+            var big: [u8; 142] @ zp
             var p: ptr u8
-            fn main() { p[0] = 1 }
+            var q: ptr u8
+            var r: ptr u8
+            fn main() { p[0] = 1; q[0] = 1; r[0] = 1 }
             """));
-        Assert.Contains("Zero page is full: '@ zp' variables, dereferenced pointers and zero-page assembly operands need 143 bytes, 142 are free", e.Description);
-        Assert.Contains("big (141), p (2)", e.Description);
+        Assert.Contains("Zero page is full: '@ zp' variables, dereferenced pointers and zero-page assembly operands need 148 bytes, 146 are free", e.Description);
+        Assert.Contains("big (142), p (2), q (2), r (2)", e.Description);
+    }
+
+    // Review code-quality-syntax 3: the C64's free zero page is $02-$8F and $FB-$FE (spec 12.2).
+    [Fact]
+    public void The_c64_uses_fb_to_fe_after_02_to_8f()
+    {
+        var r = Run.Program("""
+            var big: [u8; 142] @ zp
+            var p: ptr u8
+            var q: ptr u8
+            var out: u8
+            data t: [u8; 2] = [7, 9]
+            fn main() {
+                p = addr(t)
+                q = addr(t) + 1
+                out = p[0] + q[0]
+            }
+            """);
+        Assert.Equal(16, r.U8("out"));
+        Assert.Equal([0xFB, 0xFD], new[] { r.Address("p"), r.Address("q") }.Order());
     }
 
     [Fact]

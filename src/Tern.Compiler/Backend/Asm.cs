@@ -107,8 +107,11 @@ public sealed record LabelTable(IReadOnlyList<Label> Labels, bool High, int Offs
 /// </summary>
 public sealed record AddressByte(Label? Label, VariableSymbol? Variable, int Offset, bool High, string Name) : AsmItem;
 
-/// <summary>Zero bytes whose count depends on the address where they start, worked out during layout.</summary>
-public sealed record Padding(Func<int, int> SizeAt, string Reason) : AsmItem;
+/// <summary>Bytes of <see cref="Fill"/> whose count depends on the address where they start, worked out during layout.</summary>
+public sealed record Padding(Func<int, int> SizeAt, string Reason) : AsmItem
+{
+    public byte Fill { get; init; }
+}
 
 /// <summary>A source line, shown in the listing above the code it produced.</summary>
 /// <param name="File">The file name for lines from a module; null for the main file.</param>

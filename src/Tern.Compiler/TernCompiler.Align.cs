@@ -8,10 +8,11 @@ namespace Tern.Compiler;
 public static partial class TernCompiler
 {
     /// <summary>
-    /// Zero bytes before a global in the program's or an overlay's file, so that it starts at a multiple of
+    /// Bytes before a global in the program's or an overlay's file, so that it starts at a multiple of
     /// its alignment and no <c>jmp (...)</c> vector in it starts at $xxFF; null when it needs neither.
+    /// They are <paramref name="fill"/>: zero, or $FF in a cartridge's ROM, the value of erased ROM (spec 12.2).
     /// </summary>
-    private static Padding? ImagePadding(VariableSymbol g)
+    private static Padding? ImagePadding(VariableSymbol g, byte fill = 0)
     {
         if (g.Alignment == 1 && g.JumpVectorOffsets.Count == 0) return null;
         int n = g.Alignment;
@@ -24,7 +25,7 @@ public static partial class TernCompiler
                 if (Assembler.AvoidPageEnd(pc + skip, g.JumpVectorOffsets) == 0) return skip;
             throw new CompileError(g.Pos,
                 $"'{g.Name}' is used as jmp ({g.Name}+...), and at every multiple of ${n:X} a vector in it would start at $xxFF, where the 6502 reads it wrongly. Use a smaller alignment, or move the vector in the data");
-        }, reason);
+        }, reason) { Fill = fill };
     }
 
     /// <summary>The bytes between an aligned global and whatever ends below it in the same memory: the padding its alignment costs.</summary>

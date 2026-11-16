@@ -92,9 +92,10 @@ module's variables are in RAM, usable from anywhere. Code is in ROM and variable
 default encoding: text needs an `encoding` of the game's tiles and `default encoding` (or a prefix).
 The program sets the NMI vector itself: `data nmi_vector: u16 @ $FFFA = addr(frame)`, with
 `frame` an `interrupt fn` that calls `nes.vblank()` first (sprite DMA, frame count); `main` loops on
-`nes.wait_frame()`. `tern run` models PPU memory and sprite memory (not pixels), vblank and the NMI
-each frame, the UxROM latch, and no buttons on the pads; `--screen` shows nametable 0, each tile as
-the character the program's default encoding gives it. Graphics show in Mesen:
+`nes.wait_frame()`. `tern run` models PPU memory and sprite memory (not pixels), the vblank flag
+(cleared by a read of `$2002` or at the end of vblank, as on the NES), the NMI each frame, the UxROM
+latch, `brk` into the program's IRQ handler, and no buttons on the pads; `--screen` shows nametable
+0, each tile as the character the program's default encoding gives it. Graphics show in Mesen:
 `pwsh tests/tools/mesen-shot.ps1 game.nes shot.png 60` saves a screenshot after 60 frames (more
 frame counts, more screenshots). See `examples/nes/hello.tern` and `examples/nes/scroll.tern`.
 

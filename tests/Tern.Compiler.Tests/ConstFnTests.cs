@@ -687,6 +687,30 @@ public sealed class ConstFnTests : IDisposable
         Assert.Contains(expected, e.Description);
     }
 
+    // Review code-quality-syntax 2: an error two or three const fn calls deep names the line that started the evaluation too.
+    [Theory]
+    [InlineData("const fn neg(x: int) -> int { return -x }\nconst K = neg(-9223372036854775807 - 1)", 2)]
+    [InlineData("const fn neg(x: int) -> int { return -x }\nconst fn outer(x: int) -> int { return neg(x) }\nconst K = outer(-9223372036854775807 - 1)", 3)]
+    [InlineData("const fn neg(x: int) -> int { return -x }\nconst fn mid(x: int) -> int { return neg(x) }\nconst fn outer(x: int) -> int { return mid(x) }\nconst K = outer(-9223372036854775807 - 1)", 4)]
+    [InlineData("var score: u8 = 3\nconst fn get() -> int { return score }\nconst fn outer() -> int { return get() }\nconst K = outer()", 4)]
+    public void A_nested_call_error_names_the_line_that_started_it(string source, int line)
+    {
+        var e = Error(source + "\nfn main() { }");
+        Assert.Contains($"(called from line {line})", e.Description);
+        Assert.Equal(line, e.CalledFrom?.Line);
+    }
+
+    // Review code-quality-syntax 14: a local array's written length is checked against its value.
+    [Fact]
+    public void A_local_array_has_the_length_it_is_declared_with()
+    {
+        var e = Error("const fn f() -> int {\n    var a: [int; 4] = [1, 2]\n    return len(a)\n}\nconst A = f()\nfn main() { }");
+        Assert.Equal("'a' is declared with 4 elements, but its value has 2 (called from line 5). Write [int; _], or give 4 values", e.Description);
+        Assert.Equal((2, 23), (e.Pos.Line, e.Pos.Column));
+        var r = Run.Program("const fn f() -> int {\n    var a: [int; 2] = [1, 2]\n    var b: [int; _] = [1, 2, 3]\n    return len(a) * 10 + len(b)\n}\nvar out: u8 = f()\nfn main() { }");
+        Assert.Equal(23, r.U8("out"));
+    }
+
     [Theory]
     [InlineData("const fn f(n: u8) -> int { return n }", "'u8' is a runtime type. Use int; the value is checked when it leaves the const fn")]
     [InlineData("const fn f() -> u16 { return 1 }", "'u16' is a runtime type. Use int; the value is checked when it leaves the const fn")]

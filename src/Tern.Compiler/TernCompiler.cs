@@ -14,7 +14,8 @@ namespace Tern.Compiler;
 public sealed record OverlayFile(string Name, string Area, int LoadAddress, byte[] Image, byte[] File);
 
 /// <summary>A variable's place: its type as written (<c>u16</c>, <c>[u8; 10]</c>), and the function whose frame holds it (null for a global).</summary>
-public sealed record VariableInfo(string Name, int Address, int Size, string Type, string? Function, bool IsData);
+/// <param name="InChr">Tile data in a NES chr area: <paramref name="Address"/> is in the PPU's memory, not the CPU's.</param>
+public sealed record VariableInfo(string Name, int Address, int Size, string Type, string? Function, bool IsData, bool InChr = false);
 
 public sealed class CompileResult
 {
@@ -67,6 +68,10 @@ public sealed class CompileResult
     public CharEncoding? TextEncoding { get; init; }
     /// <summary>The warnings (spec 13), sorted by place; none with <see cref="WarningMode.Off"/>.</summary>
     public IReadOnlyList<CompileError> Warnings { get; internal set; } = [];
+    /// <summary>On a cartridge: the program sets the IRQ vector, so <c>tern run</c> runs its handler on <c>brk</c> (spec 12.2).</summary>
+    public bool SetsIrqVector { get; init; }
+    /// <summary>The files the compile read: the main file and every module it imports, the library's included. No output may replace one.</summary>
+    public IReadOnlyList<string> SourceFiles { get; init; } = [];
 }
 
 /// <summary>What the compiler does with warnings (spec 13).</summary>
@@ -88,7 +93,38 @@ public static partial class TernCompiler
     /// <param name="warnLibrary">Warn about library modules too, which programs never are (for the repository's test of its library).</param>
     /// <param name="optimize">Run the optimizer over each function. Off only in tests, which compare a program's results both ways.</param>
     public static CompileResult Compile(string source, Platform? platform = null, string? sourcePath = null, string? libraryDirectory = null, int? maxErrors = null,
-        WarningMode warnings = WarningMode.Report, bool warnLibrary = false, bool optimize = true)
+        WarningMode warnings = WarningMode.Report, bool warnLibrary = false, bool optimize = true) =>
+        OnLargeStack(() => CompileHere(source, platform, sourcePath, libraryDirectory, maxErrors, warnings, warnLibrary, optimize));
+
+    /// <summary>
+    /// The stack a compile runs on. The passes walk the syntax tree by recursion, up to
+    /// <see cref="Parser.MaxDepth"/> levels deep, which takes a few kilobytes a level in the checker; the
+    /// caller's stack (1 MB on Windows) is too small for that. Reserved, not committed.
+    /// </summary>
+    private const int StackSize = 64 * 1024 * 1024;
+
+    /// <summary>Runs <paramref name="work"/> on a thread with a <see cref="StackSize"/> stack and returns its result or throws its exception.</summary>
+    private static T OnLargeStack<T>(Func<T> work)
+    {
+        T result = default!;
+        System.Runtime.ExceptionServices.ExceptionDispatchInfo? error = null;
+        var culture = System.Globalization.CultureInfo.CurrentCulture;
+        var uiCulture = System.Globalization.CultureInfo.CurrentUICulture;
+        var thread = new Thread(() =>
+        {
+            System.Globalization.CultureInfo.CurrentCulture = culture;
+            System.Globalization.CultureInfo.CurrentUICulture = uiCulture;
+            try { result = work(); }
+            catch (Exception e) { error = System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(e); }
+        }, StackSize);
+        thread.Start();
+        thread.Join();
+        error?.Throw();
+        return result;
+    }
+
+    private static CompileResult CompileHere(string source, Platform? platform, string? sourcePath, string? libraryDirectory, int? maxErrors,
+        WarningMode warnings, bool warnLibrary, bool optimize)
     {
         platform ??= Platform.C64;
 
@@ -142,6 +178,7 @@ public static partial class TernCompiler
         List<AsmItem> items = null!;
         AssembledCode code = null!;
         Dictionary<VariableSymbol, Label> imageLabels = null!;
+        (bool Nmi, bool Irq) vectors = default;
         var layout = program.Layout;
         bool binary = program.IsBinary;
         var start = new Label("start");
@@ -194,7 +231,7 @@ public static partial class TernCompiler
             if (program.ExportTableAddress is int tableAt)
                 CheckExportTable(program, new AddressRange(tableAt, tableAt + 3 * program.Exports.Count - 1));
 
-            var vectors = cartridge is null ? default : CheckVectors(plan);
+            vectors = cartridge is null ? default : CheckVectors(plan);
             if (!binary)
             {
                 items = [new SectionStart("startup"), new DataBytes(platform.Header), new LabelDef(start), new Comment("startup")];
@@ -267,7 +304,7 @@ public static partial class TernCompiler
                 imageLabels[g] = label;
                 // A bank's data is in the bank, with its code (spec 8.5).
                 items.Add(new SectionStart(g.Name, Overlay: g.Module?.InBank == true ? g.OverlayUnit : null));
-                if (ImagePadding(g) is { } padding) items.Add(padding);
+                if (ImagePadding(g, cartridge is null ? (byte)0 : (byte)0xFF) is { } padding) items.Add(padding);
                 items.Add(new LabelDef(label));
                 items.AddRange(ImageBytes(g, gen.LabelOf));
             }
@@ -361,7 +398,7 @@ public static partial class TernCompiler
         foreach (var g in program.Globals)
         {
             symbols[g.Name] = g.Address;
-            variables[g.Name] = new VariableInfo(g.Name, g.Address, g.Type.Size, g.Type.ToString(), null, g.IsData);
+            variables[g.Name] = new VariableInfo(g.Name, g.Address, g.Type.Size, g.Type.ToString(), null, g.IsData, g.InChr);
         }
         foreach (var f in program.Functions)
         {
@@ -375,7 +412,7 @@ public static partial class TernCompiler
         }
 
         // The emulators accept dots inside labels, so names stay as in the listing and cannot clash (util.bump, util_bump).
-        string labels = platform.Labels.Write(symbols, cartridge is null ? null : NesLabelMap(prgFirst, bankCount, banks.ToDictionary(m => m.Name, m => m.Bank!.Value)));
+        string labels = platform.Labels.Write(symbols, cartridge is null ? null : NesLabelMap(prgFirst, bankCount, banks.ToDictionary(m => m.Name, m => m.Bank!.Value), program.Globals.Where(g => g.InChr).Select(g => g.Name).ToHashSet()));
 
         var entries = new List<(string Name, int Address)>();
         string? apiModule = null, apiName = null;
@@ -566,6 +603,8 @@ public static partial class TernCompiler
             Platform = platform,
             Entry = system ? platform.LoadAddress : start.Address,
             HaltAddress = halt.Address,
+            SetsIrqVector = vectors.Irq,
+            SourceFiles = program.Modules.Where(m => m.Path is not null).Select(m => m.Path!).ToList(),
             Listing = code.Listing,
             Symbols = symbols,
             Labels = labels,

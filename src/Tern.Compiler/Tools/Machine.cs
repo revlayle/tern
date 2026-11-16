@@ -77,7 +77,11 @@ internal sealed class C64Machine(IReadOnlyList<OverlayFile> overlays) : Machine
     {
         ram.Bytes.AsSpan(ScreenAddress, Columns * Rows).Fill(32);
         ram.Bytes.AsSpan(0xD800, Columns * Rows).Fill(14);
+        ram.Bytes[TextColor] = 14;     // the KERNAL's light blue
     }
+
+    /// <summary>The color CHROUT writes into color RAM (COLOR, $0286).</summary>
+    private const int TextColor = 0x0286;
 
     public override bool Has(int pc) => pc is Chrout or Getin or Plot or Setnam or Setlfs or Load;
 
@@ -98,8 +102,14 @@ internal sealed class C64Machine(IReadOnlyList<OverlayFile> overlays) : Machine
                 // The build's overlays are the disk. Secondary address 0 loads to X/Y; X/Y return the end.
                 var file = overlays.FirstOrDefault(o => o.Name.ToUpperInvariant() == _fileName);
                 cpu.C = file is null;
-                if (file is null) return null;
+                if (file is null)
+                {
+                    cpu.A = 4;      // the KERNAL's "file not found"
+                    return null;
+                }
                 int at = _secondary == 0 ? cpu.X | cpu.Y << 8 : file.LoadAddress;
+                if (at + file.Image.Length > 0x10000)
+                    return $"LOAD of '{_fileName}' at ${at:X4} goes past $FFFF ({file.Image.Length} bytes)";
                 ram.Load((ushort)at, file.Image);
                 int end = at + file.Image.Length;
                 (cpu.X, cpu.Y) = ((byte)end, (byte)(end >> 8));
@@ -144,7 +154,7 @@ internal sealed class C64Machine(IReadOnlyList<OverlayFile> overlays) : Machine
             if (code < 0) return;
             output.Append(ScreenChar((byte)code));
             ram.Bytes[ScreenAddress + _cursor.Row * Columns + _cursor.Column] = (byte)code;
-            ram.Bytes[0xD800 + _cursor.Row * Columns + _cursor.Column] = ram.Bytes[0x0286] == 0 ? (byte)14 : ram.Bytes[0x0286];
+            ram.Bytes[0xD800 + _cursor.Row * Columns + _cursor.Column] = ram.Bytes[TextColor];
             if (++_cursor.Column == Columns) NewLine();
         }
 
@@ -311,8 +321,9 @@ internal sealed class AtariMachine(IReadOnlyList<OverlayFile> overlays) : Machin
                     Clear(0, Rows);
                     (row, column) = (0, left);
                     break;
-                case 0x1C: if (row > 0) row--; break;
-                case 0x1D: if (row < Rows - 1) row++; break;
+                // Up and down wrap from the top row to the bottom one and back, as in the screen editor.
+                case 0x1C: row = row > 0 ? row - 1 : Rows - 1; break;
+                case 0x1D: row = row < Rows - 1 ? row + 1 : 0; break;
                 case 0x1E: if (column > left) column--; break;
                 case 0x1F: if (column < right) column++; break;
                 case 0x7E:
@@ -336,11 +347,16 @@ internal sealed class AtariMachine(IReadOnlyList<OverlayFile> overlays) : Machin
             {
                 column = left;
                 if (row < Rows - 1) { row++; return; }
-                ram.Bytes.AsSpan(screen + Columns, Columns * (Rows - 1)).CopyTo(ram.Bytes.AsSpan(screen));
+                // Byte by byte, wrapping at $FFFF: the program may point SAVMSC anywhere (review code-quality-tools 16).
+                for (int i = 0; i < Columns * (Rows - 1); i++)
+                    ram.Bytes[(screen + i) & 0xFFFF] = ram.Bytes[(screen + Columns + i) & 0xFFFF];
                 Clear(Rows - 1, 1);
             }
 
-            void Clear(int first, int rows) => ram.Bytes.AsSpan(screen + first * Columns, rows * Columns).Clear();
+            void Clear(int first, int rows)
+            {
+                for (int i = first * Columns; i < (first + rows) * Columns; i++) ram.Bytes[(screen + i) & 0xFFFF] = 0;
+            }
         }
     }
 

@@ -548,7 +548,7 @@ public sealed partial class Interpreter
         {
             Flow flow;
             try { flow = ExecBlock(fn.Declaration.Body, newScope: false); }
-            catch (CompileError e) when (_frames.Count == 2 && !e.Description.Contains("(called from "))
+            catch (CompileError e) when (e.CalledFrom is null)
             {
                 // An error the checker raised (a name the const fn cannot read, a constant out of range):
                 // it names the line that started the evaluation too (review M22, finding 2).
@@ -593,7 +593,17 @@ public sealed partial class Interpreter
                 if (v.TypeSyntax is not null)
                 {
                     type = Types.Resolve(v.TypeSyntax);
-                    if (v.Init is not null) value = Convert(Eval(v.Init), type, v.Init.Pos, $"The value of '{v.Name}'");
+                    if (v.Init is not null)
+                    {
+                        value = Convert(Eval(v.Init), type, v.Init.Pos, $"The value of '{v.Name}'");
+                        // A written length is checked, as for data and globals (review code-quality-syntax 14).
+                        if (v.TypeSyntax is ArrayTypeSyntax { Length: { } written } && value is CtArray given)
+                        {
+                            long n = Int(Eval(written), written.Pos, "An array's length");
+                            if (n != given.Items.Length)
+                                throw Error(v.Init.Pos, $"'{v.Name}' is declared with {n} elements, but its value has {given.Items.Length}. Write [{type.Element}; _], or give {n} values");
+                        }
+                    }
                     else if (v.TypeSyntax is ArrayTypeSyntax { Length: { } lengthExpr } at && type.Element!.Kind is CtKind.Int or CtKind.Real or CtKind.Bool)
                     {
                         long n = Int(Eval(lengthExpr), lengthExpr.Pos, "An array's length");

@@ -151,6 +151,14 @@ public sealed partial class Parser
             return d;
         }
 
+        // A modifier's error after the declaration it modifies was added: the declaration is dropped, so it
+        // is not checked too (spec 13: one error per declaration; review code-quality-syntax 18).
+        CompileError Dropped(SourcePos pos, string message)
+        {
+            globals.RemoveAt(globals.Count - 1);
+            return new CompileError(pos, message);
+        }
+
         // Parses one top-level declaration and returns its name.
         string ParseDeclaration()
         {
@@ -239,8 +247,8 @@ public sealed partial class Parser
                         throw new CompileError(t.Pos, $"'noinit' goes before 'var', e.g. 'noinit var buffer: [u8; 256]'; found {Describe(Current)}. Write 'noinit var' or remove 'noinit'");
                     var name = ParseDeclaration();
                     var d = globals[^1];
-                    if (d.IsData) throw new CompileError(t.Pos, "'noinit' is for variables; data is never zeroed. Remove 'noinit'");
-                    if (d.IsNoinit) throw new CompileError(t.Pos, "'noinit' is written twice. Remove one");
+                    if (d.IsData) throw Dropped(t.Pos, "'noinit' is for variables; data is never zeroed. Remove 'noinit'");
+                    if (d.IsNoinit) throw Dropped(t.Pos, "'noinit' is written twice. Remove one");
                     d.IsNoinit = true;
                     return name;
                 }
@@ -251,8 +259,8 @@ public sealed partial class Parser
                         throw new CompileError(t.Pos, $"'volatile' goes before 'var', e.g. 'volatile var flags: u8 @ $C000'; found {Describe(Current)}. Write 'volatile var' or remove 'volatile'");
                     var name = ParseDeclaration();
                     var d = globals[^1];
-                    if (d.IsData) throw new CompileError(t.Pos, "'volatile' is for variables; data is read-only, so nothing changes it. Remove 'volatile'");
-                    if (d.IsVolatile) throw new CompileError(t.Pos, "'volatile' is written twice. Remove one");
+                    if (d.IsData) throw Dropped(t.Pos, "'volatile' is for variables; data is read-only, so nothing changes it. Remove 'volatile'");
+                    if (d.IsVolatile) throw Dropped(t.Pos, "'volatile' is written twice. Remove one");
                     d.IsVolatile = true;
                     return name;
                 }
@@ -552,6 +560,9 @@ public sealed partial class Parser
             var f = ParseFn();
             if (f.Address is not null)
                 throw new CompileError(f.Pos, "A const fn runs at compile time and has no address. Remove '@' and the address, and give it a body");
+            // A generator is called from asm lines, where a mnemonic is read as the instruction (review code-quality-syntax 13).
+            if (f.ReturnType is null && Enum.GetNames<Mnemonic>().Contains(f.Name, StringComparer.OrdinalIgnoreCase))
+                throw new CompileError(f.Pos, $"'{f.Name}' is a 6502 instruction, so an asm line cannot call a generator of that name. Use another name");
             return new FnDecl(start.Pos, f.Name, f.Parameters, f.ReturnType, f.ReturnUsing, f.Body) { IsConst = true };
         }
         finally { _inConstFn = false; }
@@ -636,6 +647,13 @@ public sealed partial class Parser
     }
 
     private TypeSyntax ParseType()
+    {
+        Enter();
+        try { return ParseTypeBody(); }
+        finally { _depth--; }
+    }
+
+    private TypeSyntax ParseTypeBody()
     {
         if (At(TokenKind.LBracket))
         {

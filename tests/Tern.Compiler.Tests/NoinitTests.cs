@@ -85,4 +85,15 @@ public class NoinitTests
         var e = Assert.Throws<CompileError>(() => TernCompiler.Compile(source));
         Assert.Contains(expected, e.Description);
     }
+
+    // Review code-quality-syntax 18: a modifier's error is the declaration's only error (spec 13).
+    [Theory]
+    [InlineData("noinit linear data t: [u8; 2] = [1, 2]\nfn main() { }", "'noinit' is for variables; data is never zeroed. Remove 'noinit'")]
+    [InlineData("volatile linear data t: [u8; 2] = [1, 2]\nfn main() { }", "'volatile' is for variables; data is read-only, so nothing changes it. Remove 'volatile'")]
+    [InlineData("noinit noinit linear var t: [u16; 2]\nfn main() { }", "'noinit' is written twice. Remove one")]
+    public void A_modifier_error_is_the_only_error_of_its_declaration(string source, string expected)
+    {
+        var e = Assert.Throws<CompileError>(() => TernCompiler.Compile(source));
+        Assert.Equal(expected, Assert.Single(e.All).Description);
+    }
 }

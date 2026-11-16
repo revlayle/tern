@@ -8,7 +8,12 @@ public sealed partial class Parser
 {
     // ---------- Expressions ----------
 
-    private Expr ParseExpr() => ParseOr();
+    private Expr ParseExpr()
+    {
+        Enter();
+        try { return ParseOr(); }
+        finally { _depth--; }
+    }
 
     /// <summary>
     /// Set while the expression of an <c>if</c>, <c>while</c>, <c>for</c> or <c>match</c> header is parsed:
@@ -89,13 +94,21 @@ public sealed partial class Parser
     private Expr ParseLeftAssoc(Func<Expr> next, params TokenKind[] ops)
     {
         var left = next();
-        while (ops.Contains(Current.Kind))
+        // Each operator in a row is one level deeper in the tree: a + b + c is (a + b) + c.
+        int chain = 0;
+        try
         {
-            var op = Advance();
-            var right = next();
-            left = new BinaryExpr(op.Pos, op.Kind, left, right);
+            while (ops.Contains(Current.Kind))
+            {
+                Enter();
+                chain++;
+                var op = Advance();
+                var right = next();
+                left = new BinaryExpr(op.Pos, op.Kind, left, right);
+            }
+            return left;
         }
-        return left;
+        finally { _depth -= chain; }
     }
 
     private Expr ParseUnary()
@@ -103,7 +116,9 @@ public sealed partial class Parser
         if (Current.Kind is TokenKind.Minus or TokenKind.Plus or TokenKind.Tilde or TokenKind.Bang)
         {
             var op = Advance();
-            return new UnaryExpr(op.Pos, op.Kind, ParseUnary());
+            Enter();
+            try { return new UnaryExpr(op.Pos, op.Kind, ParseUnary()); }
+            finally { _depth--; }
         }
         return ParsePostfix();
     }
@@ -111,28 +126,35 @@ public sealed partial class Parser
     private Expr ParsePostfix()
     {
         var expr = ParsePrimary();
-        while (true)
+        // Each [i], .name and 'as' is one level deeper in the tree.
+        int chain = 0;
+        try
         {
-            if (At(TokenKind.LBracket))
+            while (true)
             {
-                var t = Advance();
-                var index = ParseExpr();
-                Expect(TokenKind.RBracket, "']'");
-                expr = new IndexExpr(t.Pos, expr, index);
+                if (At(TokenKind.LBracket) || At(TokenKind.Dot) || At(TokenKind.As)) { Enter(); chain++; }
+                if (At(TokenKind.LBracket))
+                {
+                    var t = Advance();
+                    var index = ParseExpr();
+                    Expect(TokenKind.RBracket, "']'");
+                    expr = new IndexExpr(t.Pos, expr, index);
+                }
+                else if (At(TokenKind.Dot))
+                {
+                    var t = Advance();
+                    var member = Expect(TokenKind.Identifier, "member name");
+                    expr = new MemberExpr(t.Pos, expr, member.Text);
+                }
+                else if (At(TokenKind.As))
+                {
+                    var t = Advance();
+                    expr = new CastExpr(t.Pos, expr, ParseType());
+                }
+                else return expr;
             }
-            else if (At(TokenKind.Dot))
-            {
-                var t = Advance();
-                var member = Expect(TokenKind.Identifier, "member name");
-                expr = new MemberExpr(t.Pos, expr, member.Text);
-            }
-            else if (At(TokenKind.As))
-            {
-                var t = Advance();
-                expr = new CastExpr(t.Pos, expr, ParseType());
-            }
-            else return expr;
         }
+        finally { _depth -= chain; }
     }
 
     /// <summary>The rest of <c>[expr for i in from..to step k]</c>, after the element (spec 4.1).</summary>
