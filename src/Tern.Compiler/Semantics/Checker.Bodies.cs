@@ -446,27 +446,11 @@ public sealed partial class Checker
     }
 
     /// <summary>True if the code calls a function that may change <paramref name="reg"/>: any function except a routine that keeps it.</summary>
-    private bool ContainsCall(Node node, Register reg) => node switch
-    {
-        // A name that is not declared is not counted: checking the body reports it (review code-quality-semantics 11).
-        CallExpr c => (c.Name is not ("addr" or "len" or "sizeof" or "offset") && Lookup(c.Name) is { } called && !(called is FunctionSymbol f && f.Keeps.Contains(reg)))
-            || c.Args.Any(a => ContainsCall(a, reg)),
-        BlockStmt b => b.Statements.Any(x => ContainsCall(x, reg)),
-        IfStmt i => ContainsCall(i.Condition, reg) || ContainsCall(i.Then, reg) || (i.Else is not null && ContainsCall(i.Else, reg)),
-        WhileStmt w => ContainsCall(w.Condition, reg) || ContainsCall(w.Body, reg),
-        ForStmt f => ContainsCall(f.From, reg) || ContainsCall(f.To, reg) || (f.Step is not null && ContainsCall(f.Step, reg)) || ContainsCall(f.Body, reg),
-        MatchStmt m => ContainsCall(m.Subject, reg) || m.Arms.Any(a => ContainsCall(a.Body, reg)),
-        ReturnStmt r => r.Value is not null && ContainsCall(r.Value, reg),
-        AssignStmt a => ContainsCall(a.Target, reg) || ContainsCall(a.Value, reg),
-        ExprStmt e => ContainsCall(e.Expr, reg),
-        VarDecl v => v.Init is not null && ContainsCall(v.Init, reg),
-        UnaryExpr u => ContainsCall(u.Operand, reg),
-        BinaryExpr b => ContainsCall(b.Left, reg) || ContainsCall(b.Right, reg),
-        IndexExpr ix => ContainsCall(ix.Target, reg) || ContainsCall(ix.Index, reg),
-        MemberExpr m => ContainsCall(m.Target, reg),
-        CastExpr c => ContainsCall(c.Operand, reg),
-        _ => false,
-    };
+    private bool ContainsCall(Node node, Register reg) =>
+        // Not inside assembly (its jsr is checked with the block) or a local const (computed at compile time).
+        node.Descendants(enter: n => n is not (AsmStmt or ConstDecl)).Any(n => n is CallExpr c
+            // A name that is not declared is not counted: checking the body reports it (review code-quality-semantics 11).
+            && c.Name is not ("addr" or "len" or "sizeof" or "offset") && Lookup(c.Name) is { } called && !(called is FunctionSymbol f && f.Keeps.Contains(reg)));
 
     private static bool AlwaysReturns(Stmt stmt) => stmt switch
     {

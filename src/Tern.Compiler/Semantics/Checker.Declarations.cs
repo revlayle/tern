@@ -326,19 +326,8 @@ public sealed partial class Checker
         throw new CompileError(a.Pos, a.Message);
     }
 
-    private static void CollectNames(Expr e, HashSet<string> names)
-    {
-        switch (e)
-        {
-            case NameExpr n: names.Add(n.Name); break;
-            case UnaryExpr u: CollectNames(u.Operand, names); break;
-            case BinaryExpr b: CollectNames(b.Left, names); CollectNames(b.Right, names); break;
-            case CallExpr c: foreach (var x in c.Args) CollectNames(x, names); break;
-            case CastExpr c: CollectNames(c.Operand, names); break;
-            case IndexExpr i: CollectNames(i.Target, names); CollectNames(i.Index, names); break;
-            case MemberExpr m: CollectNames(m.Target, names); break;
-        }
-    }
+    private static void CollectNames(Expr e, HashSet<string> names) =>
+        names.UnionWith(e.Descendants().OfType<NameExpr>().Select(n => n.Name));
 
     private void DeclareConst(ConstDecl decl)
     {
@@ -870,17 +859,7 @@ public sealed partial class Checker
     }
 
     /// <summary>Whether the expression has an <c>addr()</c> in it, before it is checked.</summary>
-    private static bool UsesAddr(Expr e) => e switch
-    {
-        CallExpr c => c.Name == "addr" || c.Args.Any(UsesAddr),
-        UnaryExpr u => UsesAddr(u.Operand),
-        BinaryExpr b => UsesAddr(b.Left) || UsesAddr(b.Right),
-        CastExpr c => UsesAddr(c.Operand),
-        MemberExpr m => UsesAddr(m.Target),
-        ArrayLiteralExpr a => a.Elements.Any(UsesAddr),
-        StructLiteralExpr s => s.Fields.Any(f => UsesAddr(f.Value)),
-        _ => false,
-    };
+    private static bool UsesAddr(Expr e) => e.Descendants().Any(n => n is CallExpr { Name: "addr" });
 
     /// <param name="layOut">False for the target of a pointer, which may be a struct still being laid out (<c>next: ptr Enemy</c>).</param>
     private TernType ResolveType(TypeSyntax syntax, bool layOut = true)

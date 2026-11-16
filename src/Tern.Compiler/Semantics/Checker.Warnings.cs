@@ -147,36 +147,41 @@ public sealed partial class Checker
             if (newScope) _scopes.RemoveAt(_scopes.Count - 1);
         }
 
+        /// <summary>Any node: what it reads, by its kind; the nodes inside it otherwise.</summary>
+        private void Visit(Node node)
+        {
+            switch (node)
+            {
+                case Stmt s: Stmt(s); break;
+                case Expr e: Read(e); break;
+                case TypeSyntax t: Type(t); break;
+                case AsmLine l: Children(l); break;
+                default: throw new InvalidOperationException($"No reads known for a {node.GetType().Name}");
+            }
+        }
+
+        private void Children(Node node)
+        {
+            foreach (var child in node.Children) Visit(child);
+        }
+
         private void Stmt(Stmt s)
         {
             switch (s)
             {
                 case VarDecl v:
-                    if (v.TypeSyntax is not null) Type(v.TypeSyntax);
-                    if (v.Init is not null) Read(v.Init);
-                    if (v.Placement.Address is { } at) Read(at);
+                    Children(v);
                     Add(v.Name, v.Pos, warned: true, symbol: v.Symbol);
                     break;
                 case ConstDecl c:
-                    if (c.TypeSyntax is not null) Type(c.TypeSyntax);
-                    Read(c.Value);
+                    Children(c);
                     Add(c.Name, c.Pos, warned: true);
                     break;
                 case AssignStmt a:
                     Write(a.Target);
                     Read(a.Value);
                     break;
-                case ExprStmt e: Read(e.Expr); break;
                 case BlockStmt b: Block(b); break;
-                case IfStmt i:
-                    Read(i.Condition);
-                    Block(i.Then);
-                    if (i.Else is not null) Stmt(i.Else);
-                    break;
-                case WhileStmt w:
-                    Read(w.Condition);
-                    Block(w.Body);
-                    break;
                 case ForStmt f:
                     Read(f.From);
                     Read(f.To);
@@ -186,53 +191,23 @@ public sealed partial class Checker
                     Block(f.Body);
                     _scopes.RemoveAt(_scopes.Count - 1);
                     break;
-                case MatchStmt m:
-                    Read(m.Subject);
-                    foreach (var arm in m.Arms)
+                case AsmStmt a:
+                    // The var lines of an asm fn are its locals (spec 9).
+                    foreach (var local in a.Locals)
                     {
-                        foreach (var p in arm.Patterns)
-                        {
-                            Read(p.Low);
-                            if (p.High is not null) Read(p.High);
-                        }
-                        Block(arm.Body);
+                        if (local.TypeSyntax is not null) Type(local.TypeSyntax);
+                        Add(local.Name, local.Pos, warned: true, symbol: local.Symbol);
                     }
+                    foreach (var line in a.Lines) Visit(line);
                     break;
-                case AsmStmt a: Asm(a); break;
-                case EmitStmt e: Asm(e.Fragment); break;
-                case AssertStmt a: Read(a.Condition); break;
-                case ReturnStmt r:
-                    if (r.Value is not null) Read(r.Value);
-                    break;
-            }
-        }
-
-        private void Asm(AsmStmt a)
-        {
-            // The var lines of an asm fn are its locals (spec 9).
-            foreach (var local in a.Locals)
-            {
-                if (local.TypeSyntax is not null) Type(local.TypeSyntax);
-                Add(local.Name, local.Pos, warned: true, symbol: local.Symbol);
-            }
-            foreach (var line in a.Lines)
-            {
-                if (line is AsmInstruction { Operand: { } operand }) Read(operand);
-                else if (line is AsmGeneratorCall g) Read(g.Call);
+                default: Children(s); break;   // if, while, match (each block a scope), emit, return, ...
             }
         }
 
         private void Type(TypeSyntax t)
         {
-            switch (t)
-            {
-                case NamedTypeSyntax n: Name(n.Name); break;
-                case PointerTypeSyntax p: Type(p.Target); break;
-                case ArrayTypeSyntax a:
-                    Type(a.Element);
-                    if (a.Length is not null) Read(a.Length);
-                    break;
-            }
+            if (t is NamedTypeSyntax n) Name(n.Name);
+            else Children(t);
         }
 
         private void Name(string name)
@@ -272,28 +247,11 @@ public sealed partial class Checker
                 case StringExpr { Encoding: { } prefix }: outer?.Invoke(prefix); break;
                 case CallExpr c:
                     Name(c.Name);
-                    foreach (var arg in c.Args) Read(arg);
-                    break;
-                case UnaryExpr u: Read(u.Operand); break;
-                case BinaryExpr b:
-                    Read(b.Left);
-                    Read(b.Right);
-                    break;
-                case IndexExpr ix:
-                    Read(ix.Target);
-                    Read(ix.Index);
-                    break;
-                case MemberExpr m: Read(m.Target); break;
-                case CastExpr c:
-                    Read(c.Operand);
-                    Type(c.Target);
-                    break;
-                case ArrayLiteralExpr a:
-                    foreach (var element in a.Elements) Read(element);
+                    Children(c);
                     break;
                 case StructLiteralExpr s:
                     Name(s.StructName);
-                    foreach (var field in s.Fields) Read(field.Value);
+                    Children(s);
                     break;
                 case ListForExpr l:
                     Read(l.From);
@@ -304,6 +262,7 @@ public sealed partial class Checker
                     Read(l.Element);
                     _scopes.RemoveAt(_scopes.Count - 1);
                     break;
+                default: Children(e); break;
             }
         }
     }
