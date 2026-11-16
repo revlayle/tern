@@ -74,7 +74,20 @@ public static class Allocator
 
         foreach (var g in program.Globals)
             if (g.FixedAddress is int a) g.Address = a;
+        CheckZeroPageRequests(program);
+        var inZp = ChooseZeroPage(program, callers);
+        var plan = new RamPlan();
+        PlaceZeroPage(program, callers, inZp, plan);
+        PlaceRegions(program, plan);
+        int offset = PlaceRamBlock(program, byPage, indexed, inZp, plan);
+        PlaceFrames(functions, callers, inZp, offset, plan);
+        plan.ZeroPageMap = DescribeZeroPage(program, functions, inZp);
+        return plan;
+    }
 
+    /// <summary>Variables that must be in zero page but cannot be: an overlay's (set by loading its file), or one aligned with '@ align'.</summary>
+    private static void CheckZeroPageRequests(CheckedProgram program)
+    {
         // An overlay's variables are part of its file, in the area with its code; loading the file sets them.
         // A zero-page variable cannot be set that way.
         foreach (var g in program.Globals.Where(g => g.IsOverlayImage))
@@ -86,7 +99,16 @@ public static class Allocator
         foreach (var g in program.Globals.Where(g => g.Alignment > 1 && g.ForcedZeroPage && !g.RequireZeroPage))
             throw new CompileError(g.Pos,
                 $"'{g.Name}' must be in zero page, since it is {(g.Dereferenced ? "dereferenced as a pointer" : "a zero-page operand of assembly code")}, so it cannot be placed with '@ align({g.Alignment})'. Remove '@ align({g.Alignment})'");
+    }
 
+    /// <summary>
+    /// The variables that go in zero page: those the program requires there ('@ zp', dereferenced pointers,
+    /// zero-page operands of assembly), then the most used small ones while there is room.
+    /// </summary>
+    private static HashSet<VariableSymbol> ChooseZeroPage(CheckedProgram program, Dictionary<FunctionSymbol, List<FunctionSymbol>> callers)
+    {
+        var layout = program.Layout;
+        var functions = program.Functions;
         var placeable = program.Globals.Where(g => g.FixedAddress is null && g.Region is null && !g.IsOverlayImage)
             .Concat(functions.SelectMany(f => f.FrameVariables))
             .ToList();
@@ -127,9 +149,16 @@ public static class Allocator
             inZp.Add(v);
             if (ZpNeeded() > zpCapacity) inZp.Remove(v);
         }
+        return inZp;
+    }
 
-        var plan = new RamPlan();
-
+    /// <summary>The zero-page addresses of the variables chosen for it, globals first, then the overlaid frames.</summary>
+    private static void PlaceZeroPage(CheckedProgram program, Dictionary<FunctionSymbol, List<FunctionSymbol>> callers, HashSet<VariableSymbol> inZp, RamPlan plan)
+    {
+        var layout = program.Layout;
+        var functions = program.Functions;
+        // The free zero-page bytes in the order they are filled; a variable must lie in consecutive ones.
+        var zeroPage = layout.ZeroPage.SelectMany(r => Enumerable.Range(r.First, r.Size)).ToList();
         // Zero-page addresses: globals first, then the overlaid frames. A variable the compiler chose
         // (step 2) that would cross the end of a range goes to RAM instead, and the rest are placed again.
         // A variable the program requires there that would cross makes room the same way: the least used
@@ -183,7 +212,12 @@ public static class Allocator
             inZp.Remove(leave);
             leave.Address = -1;     // not placed yet: the assembler must not size its instructions for zero page
         }
+    }
 
+    /// <summary>The variables and data placed in each region and chr area.</summary>
+    private static void PlaceRegions(CheckedProgram program, RamPlan plan)
+    {
+        var layout = program.Layout;
         // Variables and data placed in a region, in the order they are declared: zeroed variables first
         // (one block to clear at startup), then noinit ones, then data. One placed at an offset
         // ('@ region + offset') is at that offset, and may not overlap the others (spec 4). A chr area
@@ -237,7 +271,12 @@ public static class Allocator
         }
         plan.FixedImageGlobals.AddRange(program.Globals.Where(g => g.FixedAddress is not null && g.IsData));
         plan.OverlayGlobals.AddRange(program.Globals.Where(g => g.IsOverlayImage));
+    }
 
+    /// <summary>The globals in the variables' block after the program (or in RAM on a cartridge); returns where the frames start in it.</summary>
+    private static int PlaceRamBlock(CheckedProgram program, bool byPage, IReadOnlyDictionary<VariableSymbol, List<int>>? indexed, HashSet<VariableSymbol> inZp, RamPlan plan)
+    {
+        var layout = program.Layout;
         // RAM after the program: aligned noinit globals, zeroed globals, the other noinit globals, then
         // the overlaid frames, so that the block starts with the aligned ones and has no gap. Arrays read
         // through an index register are placed so that no such read crosses a page, and aligned
@@ -287,7 +326,12 @@ public static class Allocator
             plan.StartModulus = modulus;
             plan.StartResidue = globals.Count == 0 ? 0 : globals.Min(e => e.Offset) % modulus;
         }
+        return offset;
+    }
 
+    /// <summary>The frames not in zero page, overlaid after <paramref name="offset"/> in the block: a frame after its callers' frames.</summary>
+    private static void PlaceFrames(List<FunctionSymbol> functions, Dictionary<FunctionSymbol, List<FunctionSymbol>> callers, HashSet<VariableSymbol> inZp, int offset, RamPlan plan)
+    {
         var ramOffsets = FrameOffsets(functions, callers, f => f.FrameVariables.Where(v => !inZp.Contains(v)).Sum(v => v.Type.Size));
         int framesEnd = offset;
         foreach (var f in functions)
@@ -301,8 +345,6 @@ public static class Allocator
             framesEnd = Math.Max(framesEnd, at);
         }
         plan.TotalSize = framesEnd;
-        plan.ZeroPageMap = DescribeZeroPage(program, functions, inZp);
-        return plan;
     }
 
     /// <summary>
