@@ -111,9 +111,10 @@ public static partial class Optimizer
         {
             into.Union(after);
             if (code[k] is not Instr i) return;
-            if (i.Mnemonic == Brk) { into.All = true; return; }
+            var flow = Instructions.Of(i.Mnemonic).Flow;
+            if (flow == Flow.Break) { into.All = true; return; }
             // Other code may read the globals: a callee, the caller, or memory reached through a pointer or at a number.
-            if (i.Mnemonic is Jsr or Rts or Rti || (i.Mode is IndirectIndexed or IndexedIndirect or Indirect && i.Mnemonic != Sta)
+            if (flow is Flow.Call or Flow.Return or Flow.ReturnFromInterrupt || (i.Mode is IndirectIndexed or IndexedIndirect or Indirect && i.Mnemonic != Sta)
                 || (i.Operand is AddrOperand && Instructions.ReadsMemory(i.Mnemonic, i.Mode)))
                 into.ReadGlobals();
             if (i.Operand is ImmVarByte { Variable: var a } && Tracked(a, function)) into.Whole.Add(a.Storage);
@@ -143,19 +144,15 @@ public static partial class Optimizer
         Live After(int k)
         {
             var after = new Live();
-            var item = code[k];
-            if (item is Instr i)
-            {
-                if (i.Mnemonic is Rts || (i.Mnemonic == Mnemonic.Jmp && i.Mode == Indirect))
-                    foreach (int u in unknown) after.Union(liveIn[u]);
-                if (Target(i) is { } t && positions.TryGetValue(t, out int tp)) after.Union(liveIn[tp]);
-                // A jump out of the code leaves the function: its globals may be read there.
-                else if (IsBranch(i.Mnemonic) || i.Mnemonic == Mnemonic.Jmp) after.ReadGlobals();
-            }
+            var exits = ExitsOf(code, k, positions);
+            if (exits.Entries) foreach (int u in unknown) after.Union(liveIn[u]);
+            if (exits.Inside is int tp) after.Union(liveIn[tp]);
+            // A jump out of the code leaves the function: its globals may be read there.
+            if (exits.Elsewhere) after.ReadGlobals();
             // liveIn keeps the indexes from before any removal below; items before a removal do not move.
-            if (FallsThrough(item) && k + 1 < liveIn.Length) after.Union(liveIn[k + 1]);
+            if (exits.Next && k + 1 < liveIn.Length) after.Union(liveIn[k + 1]);
             // The end of the code: the function's exit (an interrupt handler's register restore).
-            else if (FallsThrough(item)) after.ReadGlobals();
+            else if (exits.Next) after.ReadGlobals();
             return after;
         }
 
@@ -221,8 +218,8 @@ public static partial class Optimizer
                         followed = false;
                         break;
                     case Instr i:
-                        followed = i.Mnemonic is not (Jsr or Brk or Rts or Rti)
-                            && !((IsBranch(i.Mnemonic) || i.Mnemonic == Mnemonic.Jmp) && (Target(i) is not { } t || !positions.ContainsKey(t)));
+                        var exits = ExitsOf(code, k, positions);
+                        followed = Instructions.Of(i.Mnemonic).Flow != Flow.Call && !exits.Elsewhere && !exits.Entries && !exits.Returns;
                         readsAnywhere |= (i.Mode is IndirectIndexed or IndexedIndirect && i.Mnemonic != Sta)
                             || (i.Operand is AddrOperand && Instructions.ReadsMemory(i.Mnemonic, i.Mode));
                         break;
@@ -312,9 +309,19 @@ public static partial class Optimizer
 
     /// <summary>Assembly that calls a subroutine of its own block (<c>jsr .sub</c>): its <c>rts</c> returns into this code.</summary>
     private static bool CallsOwnSubroutine(List<AsmItem> code, Dictionary<Label, int> positions) =>
-        code.Any(item => item is Instr { Mnemonic: Jsr, Operand: LabelOperand { Label: var l } } && positions.ContainsKey(l));
+        code.Any(item => item is Instr { Operand: LabelOperand { Label: var l } } i && Instructions.Of(i.Mnemonic).Flow == Flow.Call && positions.ContainsKey(l));
 
     private static CpuState Flag(Reg r) => r switch { Reg.A => CpuState.A, Reg.X => CpuState.X, _ => CpuState.Y };
+
+    /// <summary>The registers (A, X, Y) that hold the function's return value, which its <c>rts</c> reads.</summary>
+    private static CpuState Returned(FunctionSymbol function)
+    {
+        var returned = CpuState.None;
+        foreach (var r in new[] { Reg.A, Reg.X, Reg.Y })
+            if (function.ReturnRegister is { } ret && ret.Uses(r switch { Reg.A => Register.A, Reg.X => Register.X, _ => Register.Y }))
+                returned |= Flag(r);
+        return returned;
+    }
 
     /// <summary>
     /// The registers (A, X, Y) that may be read before they are written, before each item. A call
@@ -325,10 +332,7 @@ public static partial class Optimizer
     {
         const CpuState all = CpuState.A | CpuState.X | CpuState.Y;
         var unknown = UnknownEntries(code).Where(positions.ContainsKey).Select(l => positions[l]).ToList();
-        var returned = CpuState.None;
-        foreach (var r in new[] { Reg.A, Reg.X, Reg.Y })
-            if (function.ReturnRegister is { } ret && ret.Uses(r switch { Reg.A => Register.A, Reg.X => Register.X, _ => Register.Y }))
-                returned |= Flag(r);
+        var returned = Returned(function);
         var live = new CpuState[code.Count + 1];
         for (bool changed = true; changed;)
         {
@@ -337,14 +341,16 @@ public static partial class Optimizer
             {
                 var item = code[k];
                 CpuState after = CpuState.None, result;
-                if (FallsThrough(item)) after |= live[k + 1];
+                var exits = ExitsOf(code, k, positions);
+                if (exits.Next) after |= live[k + 1];
                 if (item is Instr i)
                 {
-                    if (Target(i) is { } t) after |= positions.TryGetValue(t, out int tp) ? live[tp] : all;
-                    if (i.Mnemonic == Rts) { after |= returned; foreach (int u in unknown) after |= live[u]; }
-                    if (i.Mnemonic is Brk or Rti || (i.Mnemonic == Mnemonic.Jmp && Target(i) is null)) after = all;
+                    if (exits.Inside is int tp) after |= live[tp];
+                    if (exits.Returns) after |= returned;
+                    if (exits.Entries) foreach (int u in unknown) after |= live[u];
+                    if (exits.Elsewhere) after = all;
                     var (reads, writes) = Instructions.Effects(i.Mnemonic, i.Mode);
-                    result = i.Mnemonic == Jsr ? all : ((after & ~writes) | reads) & all;
+                    result = Instructions.Of(i.Mnemonic).Flow == Flow.Call ? all : ((after & ~writes) | reads) & all;
                 }
                 else result = after;
                 if (result != live[k]) { live[k] = result; changed = true; }
@@ -376,8 +382,9 @@ public static partial class Optimizer
             int k = work.Pop();
             if (k >= code.Count) continue;
             bool after = makes(k) || (before[k] == true && !ends(k));
-            if (code[k] is Instr i && Target(i) is { } t && positions.TryGetValue(t, out int tp)) Join(tp, after);
-            if (FallsThrough(code[k])) Join(k + 1, after);
+            var exits = ExitsOf(code, k, positions);
+            if (exits.Inside is int tp) Join(tp, after);
+            if (exits.Next) Join(k + 1, after);
         }
         return before.Select(b => b == true).ToArray();
     }
@@ -392,8 +399,9 @@ public static partial class Optimizer
         var work = new Stack<int>();
         void Next(int j)
         {
-            if (code[j] is Instr i && Target(i) is { } t && positions.TryGetValue(t, out int tp)) work.Push(tp);
-            if (FallsThrough(code[j]) && j + 1 < code.Count) work.Push(j + 1);
+            var exits = ExitsOf(code, j, positions);
+            if (exits.Inside is int tp) work.Push(tp);
+            if (exits.Next && j + 1 < code.Count) work.Push(j + 1);
         }
         Next(from);
         while (work.Count > 0)
@@ -451,7 +459,7 @@ public static partial class Optimizer
             bool Ends(int k)
             {
                 if (code[k] is not Instr i) return false;
-                if (i.Mnemonic is Jsr or Brk) return true;
+                if (ChangesAnything(i)) return true;
                 if (index is Reg r && Instructions.Effects(i.Mnemonic, i.Mode).Writes.HasFlag(Flag(r))) return true;
                 if (i.Mode == Accumulator || !(Instructions.WritesMemory(i.Mnemonic, i.Mode) || Stored(i.Mnemonic) is not null)) return false;
                 if (i.Mode is IndirectIndexed or IndexedIndirect or Indirect || i.Operand is not VarOperand { Variable: var w }) return true;
@@ -499,7 +507,7 @@ public static partial class Optimizer
                 var regFlag = Flag(held);
                 var loadSet = loads.ToHashSet();
                 var holds = HoldsBefore(code, positions, k => loadSet.Contains(k) && !EndsHold(k), EndsHold);
-                bool EndsHold(int k) => k == s || (code[k] is Instr i && (i.Mnemonic is Jsr or Brk || Instructions.Effects(i.Mnemonic, i.Mode).Writes.HasFlag(regFlag)));
+                bool EndsHold(int k) => k == s || (code[k] is Instr i && (ChangesAnything(i) || Instructions.Effects(i.Mnemonic, i.Mode).Writes.HasFlag(regFlag)));
                 if (!fromRegister.All(r => holds[r])) continue;
             }
 
@@ -539,7 +547,7 @@ public static partial class Optimizer
         for (int k = first; k < code.Count; k++)
         {
             if (code[k] is Comment or SourceLine) continue;
-            if (code[k] is not Instr { AsmPos: null } i || i.Mnemonic is Jsr or Brk or Rts or Rti or Mnemonic.Jmp || IsBranch(i.Mnemonic)) break;
+            if (code[k] is not Instr { AsmPos: null } i || !Straight(i)) break;
             if (Stored(i.Mnemonic) is Reg st && i.Mode is Absolute or ZeroPage && i.Operand is VarOperand target)
             {
                 if (known[(int)st] is Imm { Value: 0 } && ClearedAtStartup(target.Variable) && !written.Contains(target)
@@ -572,7 +580,7 @@ public static partial class Optimizer
     private static bool RemoveDeadLoads(List<AsmItem> code, FunctionSymbol function)
     {
         bool removed = false;
-        bool dispatches = Dispatches(code);
+        bool entries = UnknownEntries(code).Count > 0;
         // From the end, so each decision sees the code after it as it will be.
         for (int k = code.Count - 1; k >= 0; k--)
         {
@@ -586,12 +594,10 @@ public static partial class Optimizer
             {
                 if (code[j] is Comment or SourceLine or LabelDef) continue;
                 if (code[j] is not Instr n || FromAsm(n)) break;
-                // rts reads only the return value's registers (N and Z for a bool in a flag), unless
-                // it may be an indexed match's dispatch, which enters an arm.
-                bool deadAtReturn = n.Mnemonic == Rts && !dispatches
-                    && function.ReturnRegister is not (Register.Zero or Register.Negative)
-                    && !(function.ReturnRegister is { } ret && ret.Uses(register));
-                if (!deadAtReturn && (n.Mnemonic is Jsr or Rts or Rti or Brk or Mnemonic.Jmp || IsBranch(n.Mnemonic))) break;
+                // rts reads the return value's registers (N and Z for a bool in a flag), and, if it may
+                // be an indexed match's dispatch, what the arms it enters read.
+                bool deadAtReturn = Instructions.Of(n.Mnemonic).Flow == Flow.Return && DeadAtReturn(code, j, reg, function, entries);
+                if (!deadAtReturn && !Straight(n)) break;
                 var (reads, writes) = Instructions.Effects(n.Mnemonic, n.Mode);
                 if ((reads & (reg | CpuState.N | CpuState.Z)) != 0) break;
                 if (deadAtReturn || (writes.HasFlag(reg) && writes.HasFlag(CpuState.N) && writes.HasFlag(CpuState.Z)))
@@ -604,6 +610,21 @@ public static partial class Optimizer
         }
         return removed;
     }
+
+    /// <summary>
+    /// True if neither <paramref name="reg"/> nor N and Z are read after the compiler's <c>rts</c> at
+    /// <paramref name="j"/>: by the caller (the return value), or by the labels a jump table's
+    /// dispatch may enter (<see cref="RegistersLive"/>, the same liveness as the other analyses).
+    /// </summary>
+    private static bool DeadAtReturn(List<AsmItem> code, int j, CpuState reg, FunctionSymbol function, bool entries)
+    {
+        var positions = Positions(code);
+        var live = entries ? RegistersLive(code, function, positions)[j] : Returned(function);
+        return !live.HasFlag(reg) && !NzLiveAfter(code, j - 1, function, positions);
+    }
+
+    /// <summary>A call or <c>brk</c>: may change any register and any ordinary memory.</summary>
+    private static bool ChangesAnything(Instr i) => Instructions.Of(i.Mnemonic).Flow is Flow.Call or Flow.Break;
 
     /// <summary>
     /// A run of <c>lda #c</c> / <c>sta v</c> pairs into different bytes of ordinary memory stores each
@@ -734,25 +755,49 @@ public static partial class Optimizer
         }
     }
 
-    private static bool IsBranch(Mnemonic m) => m is Bcc or Bcs or Beq or Bne or Bmi or Bpl or Bvc or Bvs;
-
-    /// <summary>A jump or branch to a label in this code: the only way into a label the analysis can follow.</summary>
+    /// <summary>A jump or branch to a label: the only way into a label the analysis can follow.</summary>
     private static Label? Target(Instr i) =>
-        (IsBranch(i.Mnemonic) || (i.Mnemonic == Mnemonic.Jmp && i.Mode == Absolute)) && i.Operand is LabelOperand { Label: var l, Offset: 0 } ? l : null;
+        Instructions.Of(i.Mnemonic).Flow is Flow.Branch or Flow.Jump && i.Mode != Indirect && i.Operand is LabelOperand { Label: var l, Offset: 0 } ? l : null;
 
     /// <summary>True if execution can go on to the next item.</summary>
     private static bool FallsThrough(AsmItem item) => item switch
     {
-        Instr i => i.Mnemonic is not (Mnemonic.Jmp or Rts or Rti),
+        Instr i => Instructions.FallsThrough(i.Mnemonic),
         LabelTable or DataBytes or AddressByte => false,
         _ => true,
     };
 
     /// <summary>
-    /// True if the code has a jump table, so a compiler <c>rts</c> in it may be an <c>indexed match</c>'s
-    /// dispatch (<c>pha / pha / rts</c>) into an arm rather than the function's return.
+    /// Where control may go after an item (review backend 9): the one description of control flow
+    /// that every analysis of the optimizer follows.
     /// </summary>
-    private static bool Dispatches(List<AsmItem> code) => code.Exists(item => item is LabelTable);
+    /// <param name="Inside">The position of the label a jump or branch goes to, in this code.</param>
+    /// <param name="Next">Goes on to the next item (at the last item: the end of the code).</param>
+    /// <param name="Elsewhere">
+    /// May go where the analysis cannot follow: a jump or branch to an address or to a label outside
+    /// this code, <c>jmp (v)</c>, <c>brk</c>, <c>rti</c>.
+    /// </param>
+    /// <param name="Entries">
+    /// May go to the labels entered from where the analysis cannot see (<see cref="UnknownEntries"/>):
+    /// an <c>rts</c> may be a jump table's dispatch, a <c>jmp (v)</c> may jump to one.
+    /// </param>
+    /// <param name="Returns"><c>rts</c>: may return to the caller.</param>
+    private readonly record struct Exits(int? Inside, bool Next, bool Elsewhere, bool Entries, bool Returns);
+
+    private static Exits ExitsOf(List<AsmItem> code, int k, Dictionary<Label, int> positions)
+    {
+        if (code[k] is not Instr i) return new(null, FallsThrough(code[k]), false, false, false);
+        var flow = Instructions.Of(i.Mnemonic).Flow;
+        int? inside = Target(i) is { } t && positions.TryGetValue(t, out int p) ? p : null;
+        bool indirect = flow == Flow.Jump && i.Mode == Indirect;
+        return new(inside, FallsThrough(i),
+            Elsewhere: (flow is Flow.Branch or Flow.Jump && inside is null) || flow is Flow.Break or Flow.ReturnFromInterrupt,
+            Entries: flow == Flow.Return || indirect,
+            Returns: flow == Flow.Return);
+    }
+
+    /// <summary>True if control goes on only to the next instruction: not a jump, branch, call, return or brk.</summary>
+    private static bool Straight(Instr i) => Instructions.Of(i.Mnemonic).Flow == Flow.Next;
 
     /// <summary>
     /// Labels that may be entered from somewhere the analysis cannot see: named other than by a jump
@@ -789,8 +834,9 @@ public static partial class Optimizer
             int k = work.Pop();
             if (k >= code.Count || reached[k]) continue;
             reached[k] = true;
-            if (code[k] is Instr i && Target(i) is { } target && positions.TryGetValue(target, out int t)) work.Push(t);
-            if (FallsThrough(code[k])) work.Push(k + 1);
+            var exits = ExitsOf(code, k, positions);
+            if (exits.Inside is int t) work.Push(t);
+            if (exits.Next) work.Push(k + 1);
         }
         for (int k = code.Count - 1; k >= 0; k--)
             if (!reached[k] && code[k] is Instr i && !FromAsm(i)) code.RemoveAt(k);

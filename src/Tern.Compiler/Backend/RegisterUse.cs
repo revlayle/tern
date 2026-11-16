@@ -1,6 +1,5 @@
 using Tern.Compiler.Semantics;
 using Tern.Cpu;
-using static Tern.Cpu.Mnemonic;
 
 namespace Tern.Compiler.Backend;
 
@@ -26,7 +25,7 @@ public sealed class RegisterUse(CodeGen gen, IEnumerable<FunctionSymbol> functio
         foreach (var item in gen.FunctionItems[f])
         {
             if (item is not Instr i) continue;
-            if (i.Mnemonic is Jsr or Jmp)
+            if (Instructions.Of(i.Mnemonic).Flow is Flow.Call or Flow.Jump)
             {
                 changed |= Target(i, f);
                 continue;

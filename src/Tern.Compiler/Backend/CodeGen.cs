@@ -151,9 +151,10 @@ public sealed partial class CodeGen
     /// <summary>True if the last instruction left N and Z matching the value in A.</summary>
     private bool FlagsMatchA()
     {
-        if (_out.Count == 0 || _out[^1] is not Instr i) return false;
-        return i.Mnemonic is Lda or And or Ora or Eor or Adc or Sbc or Txa or Tya or Pla
-            || (i.Mnemonic is Asl or Lsr or Rol or Ror && i.Mode == Accumulator);
+        if (_out.Count == 0 || _out[^1] is not Instr i || Instructions.Of(i.Mnemonic).Flow != Flow.Next) return false;
+        // An instruction that writes A sets N and Z from it (lda, adc, txa, pla, asl a, ...).
+        var writes = Instructions.Effects(i.Mnemonic, i.Mode).Writes;
+        return writes.HasFlag(CpuState.A) && writes.HasFlag(CpuState.N) && writes.HasFlag(CpuState.Z);
     }
 
     private bool EndsWithJump() => _out.Count > 0 && _out[^1] is Instr { Mnemonic: Rts or Mnemonic.Jmp };

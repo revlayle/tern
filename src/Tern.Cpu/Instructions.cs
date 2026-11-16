@@ -36,8 +36,10 @@ public enum Flow
     Jump,
     /// <summary>To a subroutine, which comes back to the next instruction (<c>jsr</c>).</summary>
     Call,
-    /// <summary>To an address taken from the stack (<c>rts</c>, <c>rti</c>).</summary>
+    /// <summary>To the address taken from the stack, plus one (<c>rts</c>).</summary>
     Return,
+    /// <summary>To the address and flags taken from the stack (<c>rti</c>).</summary>
+    ReturnFromInterrupt,
     /// <summary>Through the IRQ vector (<c>brk</c>).</summary>
     Break,
 }
@@ -120,7 +122,7 @@ public static class Instructions
         // A call may change every register and flag but D and I (the callee's own business).
         new(Mnemonic.Jsr, CpuState.None, A | X | Y | C | V | NZ, No, Flow.Call),
         new(Mnemonic.Rts, CpuState.None, CpuState.None, No, Flow.Return),
-        new(Mnemonic.Rti, CpuState.None, CpuState.Flags, No, Flow.Return),
+        new(Mnemonic.Rti, CpuState.None, CpuState.Flags, No, Flow.ReturnFromInterrupt),
         new(Mnemonic.Brk, CpuState.Flags, CpuState.I, No, Flow.Break),
     ]);
 
@@ -202,8 +204,11 @@ public static class Instructions
         return Table.Single(r => r.Flow == Flow.Branch && r.Condition == row.Condition && r.WhenSet != row.WhenSet).Mnemonic;
     }
 
-    /// <summary>True if control may go on to the next instruction after <paramref name="m"/>.</summary>
-    public static bool FallsThrough(Mnemonic m) => Of(m).Flow is Flow.Next or Flow.Branch or Flow.Call;
+    /// <summary>
+    /// True if control may go on to the next instruction after <paramref name="m"/>: also after
+    /// <c>brk</c>, whose handler may return past its padding byte.
+    /// </summary>
+    public static bool FallsThrough(Mnemonic m) => Of(m).Flow is not (Flow.Jump or Flow.Return or Flow.ReturnFromInterrupt);
 
     public static string Describe(CpuState s) =>
         s == CpuState.None ? "nothing"
