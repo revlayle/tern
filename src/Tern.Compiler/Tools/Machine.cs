@@ -78,6 +78,8 @@ internal sealed class C64Machine(IReadOnlyList<OverlayFile> overlays) : Machine
         ram.Bytes.AsSpan(ScreenAddress, Columns * Rows).Fill(32);
         ram.Bytes.AsSpan(0xD800, Columns * Rows).Fill(14);
         ram.Bytes[TextColor] = 14;     // the KERNAL's light blue
+        ram.Bytes[0xD6] = 0;           // the cursor's row and column
+        ram.Bytes[0xD3] = 0;
     }
 
     /// <summary>The color CHROUT writes into color RAM (COLOR, $0286).</summary>

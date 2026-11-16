@@ -403,6 +403,7 @@ public static class Cli
         string text =
             "tern run <file.tern> compiles the program and runs it in the built-in emulator until main returns, then prints the cycles taken and the registers. " +
             "Memory is plain RAM (no VIC-II, SID or CIA; no ANTIC, GTIA, POKEY or PIA); a few ROM routines have stand-ins, which take no cycles, and other ROM calls stop the run. " +
+            "Memory the program does not load starts with fixed pseudo-random bytes and A, X and Y are not zero, as on a machine after its ROM ran, so a read of memory the program never wrote shows; the text screen starts blank. " +
             $"On the C64: {StandIns(Platform.C64)}; LOAD loads the program's own overlay files (\"LEVEL1\" is level1.prg). " +
             $"On the Atari: {StandIns(Platform.Atari)}. On the Apple II: {StandIns(Platform.Apple2)}. " +
             "On the NES: PPU memory and sprite memory (not pixels); the vblank flag, set at the start of vblank and cleared by a read of $2002 or at the end of vblank; " +

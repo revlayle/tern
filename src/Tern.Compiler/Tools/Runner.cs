@@ -70,7 +70,8 @@ public sealed record RunResult(
 /// Runs a compiled program in the built-in emulator, from its start until main returns or a cycle
 /// limit: <c>tern run</c> and <c>tern bench</c>. Memory is plain RAM: the chips (the C64's VIC-II, SID
 /// and CIAs, the Atari's ANTIC, GTIA, POKEY and PIA) are not emulated, so their registers read back
-/// what was written. A few ROM routines have stand-ins that take no cycles (<see cref="C64Machine"/>,
+/// what was written. Memory and registers start as <see cref="StartState"/> sets them, not zero; the
+/// text screen starts blank. A few ROM routines have stand-ins that take no cycles (<see cref="C64Machine"/>,
 /// <see cref="AtariMachine"/>); text they print goes to the screen and to <see cref="RunResult.Output"/>.
 /// Reaching any other ROM address stops the run. Array indexes and <c>indexed match</c> values are
 /// checked (<see cref="IndexChecker"/>); a match value outside its span stops the run, since its jump
@@ -85,6 +86,7 @@ public static class Runner
             throw new InvalidOperationException("A binary without main cannot be run on its own: run the program that loads and calls it");
         var machine = Machine.For(program.Platform, program);
         var ram = new Ram();
+        StartState.Fill(ram);
         machine.Start(ram);
         // An Apple II system file is one block at $2000, which its startup code moves into place.
         NesBus? nes = null;
@@ -93,6 +95,7 @@ public static class Runner
         else ram.Load((ushort)program.LoadAddress, program.Image);
         foreach (var set in options.Sets) ram.Bytes[set.Address] = set.Value;
         var cpu = new Cpu6502(nes is null ? ram : nes, program.Platform.Cpu) { PC = (ushort)program.Entry, SP = 0xFF, I = true };
+        StartState.Set(cpu);
         if (nes is not null) nes.Cpu = cpu;
 
         var inProgram = program.Sections.Select(s => (s.Address, End: s.Address + s.Size)).ToList();

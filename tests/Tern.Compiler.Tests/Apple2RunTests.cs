@@ -147,7 +147,7 @@ public class Apple2RunTests
         var run = RunApple2(MliCall(0x65));
         Assert.False(run.Returned);
         Assert.Equal("the program quit (MLI QUIT)", run.Stop);
-        Assert.Equal(0, run.Ram.Bytes[0x0310]);
+        Assert.Equal(Seeded.At(0x0310), run.Ram.Bytes[0x0310]);
     }
 
     [Fact]

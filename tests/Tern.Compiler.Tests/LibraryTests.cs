@@ -1,3 +1,4 @@
+using Tern.Compiler.Tools;
 using Tern.Cpu;
 
 namespace Tern.Compiler.Tests;

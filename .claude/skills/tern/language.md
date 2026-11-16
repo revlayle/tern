@@ -82,7 +82,7 @@ fn main() {
 ```console
 $ tern run --target c64 arith.tern --dump offset --dump product --dump q --dump r --dump low
 Main returned: 606 cycles (554 in main)
-A=$1B X=$00 Y=$00 SP=$FF PC=$0831
+A=$1B X=$00 Y=$C3 SP=$FF PC=$0831
 offset $0007 u16 = 283 ($011B)
 product $0009 u16 = 21 ($0015)
 q $000B u8 = 28 ($1C)
@@ -168,7 +168,7 @@ fn main() {
 ```console
 $ tern run --target c64 ring.tern --dump 'buf:2' --dump total --dump speeds
 Main returned: 3217 cycles (472 in main)
-A=$1C X=$08 Y=$00 SP=$FF PC=$082D
+A=$1C X=$08 Y=$C3 SP=$FF PC=$082D
 buf $0910 [u8; 256] (2 bytes):
   $0910  2A 00
 total $0003 u16 = 7168 ($1C00)
@@ -264,7 +264,7 @@ fn main() {
 ```console
 $ tern run --target c64 lines.tern --dump cols --dump lines
 Main returned: 67 cycles (54 in main)
-A=$22 X=$02 Y=$00 SP=$FF PC=$0815
+A=$22 X=$02 Y=$C3 SP=$FF PC=$0815
 cols $0002 u8 = 34 ($22)
 lines $0837 [Line; 2] (8 bytes):
   $0837  01 03 0E 00 2E 33 08 08
@@ -309,7 +309,7 @@ $C000 (4 bytes):
 $C1FC (4 bytes):
   $C1FC  AA AA AA AA
 $C200 (1 bytes):
-  $C200  00
+  $C200  20
 ```
 
 ## 7. Control flow
@@ -418,7 +418,7 @@ fn main() {
 ```console
 $ tern run --target c64 calls.tern --dump r
 Main returned: 2110 cycles (94 in main)
-A=$54 X=$2A Y=$00 SP=$FF PC=$081F
+A=$54 X=$2A Y=$C3 SP=$FF PC=$081F
 r $0002 u8 = 84 ($54)
 ```
 
@@ -491,7 +491,7 @@ fn main() {
 ```console
 $ tern run --target c64 flags.tern --dump count
 Main returned: 95 cycles (77 in main)
-A=$6F X=$00 Y=$00 SP=$FF PC=$0819
+A=$6F X=$5A Y=$C3 SP=$FF PC=$0819
 count $0002 u8 = 111 ($6F)
 ```
 
@@ -542,7 +542,7 @@ fn main() {
 ```console
 $ tern run --target c64 asm.tern --dump score --dump 'buffer:2'
 Main returned: 400 cycles (219 in main)
-A=$03 X=$03 Y=$00 SP=$FF PC=$0823
+A=$03 X=$03 Y=$C3 SP=$FF PC=$0823
 score $0002 u16 = 260 ($0104)
 buffer $0850 [u8; 16] (2 bytes):
   $0850  03 07
@@ -642,7 +642,7 @@ fn main() {
 ```console
 $ tern run --target c64 app.tern --dump a
 Main returned: 61 cycles (45 in main)
-A=$15 X=$00 Y=$00 SP=$FF PC=$0817
+A=$15 X=$5A Y=$C3 SP=$FF PC=$0817
 a $0003 u8 = 21 ($15)
 ```
 
@@ -729,7 +729,7 @@ fn main() {
 ```console
 $ tern run --target c64 wave.tern --dump out
 Main returned: 101 cycles (60 in main)
-A=$20 X=$00 Y=$00 SP=$FF PC=$081B
+A=$20 X=$00 Y=$C3 SP=$FF PC=$081B
 out $0974 [u8; 3] (3 bytes):
   $0974  FF 50 80
 ```

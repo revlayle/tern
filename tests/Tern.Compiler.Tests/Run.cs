@@ -1,3 +1,4 @@
+using Tern.Compiler.Tools;
 using Tern.Compiler;
 using Tern.Cpu;
 
@@ -136,6 +137,21 @@ public sealed class Run
 }
 
 /// <summary>Command lines for <see cref="Tools.Cli.Run"/>.</summary>
+/// <summary>The bytes memory starts with (<see cref="StartState"/>), for checking that a run left a byte as it was.</summary>
+public static class Seeded
+{
+    private static readonly byte[] Bytes = Fill();
+
+    private static byte[] Fill()
+    {
+        var ram = new Ram();
+        StartState.Fill(ram);
+        return ram.Bytes;
+    }
+
+    public static byte At(int address) => Bytes[address];
+}
+
 public static class Command
 {
     /// <summary>A tern command line built for the C64: <c>--target c64</c> after the subcommand (run, bench), or first.</summary>

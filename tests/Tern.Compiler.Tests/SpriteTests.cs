@@ -1,3 +1,4 @@
+using Tern.Compiler.Tools;
 using Tern.Compiler.Syntax;
 using Tern.Cpu;
 

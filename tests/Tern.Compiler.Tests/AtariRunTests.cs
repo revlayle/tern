@@ -246,7 +246,7 @@ public class AtariRunTests
         Assert.True(run.Returned, run.Stop);
         Assert.Equal(1, run.Ram.Bytes[program.Symbols["failed"]]);
         Assert.Equal(status, run.Ram.Bytes[program.Symbols["st"]]);
-        Assert.Equal(0, run.Ram.Bytes[0x6000]);
+        Assert.Equal(Seeded.At(0x6000), run.Ram.Bytes[0x6000]);
     }
 
     [Fact]
