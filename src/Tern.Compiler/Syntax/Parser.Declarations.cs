@@ -8,20 +8,56 @@ public sealed partial class Parser
 {
     // ---------- Declarations ----------
 
+    /// <summary>The declarations of one file, filed by kind as they are parsed.</summary>
+    private sealed class FileDeclarations
+    {
+        public ModuleHeader? Header;
+        public MemoryDecl? Memory;
+        public ExportTable? ExportTable;
+        public readonly List<ConstDecl> Consts = [];
+        public readonly List<VarDecl> Globals = [];
+        public readonly List<FnDecl> Functions = [];
+        public readonly List<ImportDecl> Imports = [];
+        public readonly List<StructDecl> Structs = [];
+        public readonly List<FnDecl> ConstFns = [];
+        public readonly List<EncodingDecl> Encodings = [];
+        public readonly List<DefaultEncoding> DefaultEncodings = [];
+        public readonly List<AssertDecl> Asserts = [];
+        public readonly List<ExportName> Exports = [];
+        public readonly HashSet<string> PrivateNames = [];
+        public readonly List<(string, SourcePos)> BrokenNames = [];
+
+        /// <summary>Files a declaration under its kind and returns its name ("" for one without a name).</summary>
+        public string Add(Node declaration)
+        {
+            switch (declaration)
+            {
+                case ConstDecl d: Consts.Add(d); return d.Name;
+                case VarDecl d: Globals.Add(d); return d.Name;
+                case FnDecl { IsConst: true } d: ConstFns.Add(d); return d.Name;
+                case FnDecl d: Functions.Add(d); return d.Name;
+                case StructDecl d: Structs.Add(d); return d.Name;
+                case EncodingDecl d: Encodings.Add(d); return d.Name;
+                case AssertDecl d: Asserts.Add(d); return "";
+                default: throw new InvalidOperationException($"No list for {declaration.GetType().Name}");
+            }
+        }
+
+        public ProgramSyntax Program(bool hasSyntaxErrors) => new(Consts, Globals, Functions)
+        {
+            Header = Header, Asserts = Asserts, Imports = Imports, Memory = Memory, Exports = Exports, ExportTable = ExportTable, Structs = Structs,
+            PrivateNames = PrivateNames, ConstFns = ConstFns, Encodings = Encodings, DefaultEncodings = DefaultEncodings, BrokenNames = BrokenNames,
+            HasSyntaxErrors = hasSyntaxErrors,
+        };
+    }
+
+    /// <summary>
+    /// A file: the module header, the imports, the constants, the memory block, then the other declarations (spec 2.2, 8.4).
+    /// After an error in a declaration, its name (if it got that far) is broken, and parsing goes on at the next one (spec 13).
+    /// </summary>
     private ProgramSyntax ParseProgram()
     {
-        var consts = new List<ConstDecl>();
-        var globals = new List<VarDecl>();
-        var functions = new List<FnDecl>();
-        var imports = new List<ImportDecl>();
-        var structs = new List<StructDecl>();
-        var constFns = new List<FnDecl>();
-        var encodings = new List<EncodingDecl>();
-        var defaultEncodings = new List<DefaultEncoding>();
-        var brokenNames = new List<(string, SourcePos)>();
-
-        // Parses one declaration. After an error, its name (if it got that far) is broken, and parsing
-        // goes on at the next declaration (spec 13).
+        var file = new FileDeclarations();
         void Recover(Action parse)
         {
             int from = _pos;
@@ -29,31 +65,16 @@ public sealed partial class Parser
             catch (Exception e) when (Recovers(e))
             {
                 Fail(e, from);
-                if (DeclaredName(from) is { } broken) brokenNames.Add(broken);
+                if (DeclaredName(from) is { } broken) file.BrokenNames.Add(broken);
                 SkipDeclaration(from);
             }
         }
 
-        var asserts = new List<AssertDecl>();
         SkipTerminators();
-        ModuleHeader? header = null;
+        // The header and an import are kept when only their line's end is wrong.
         if (At(TokenKind.Module)) Recover(() =>
         {
-            var kw = Advance();
-            var hname = Expect(TokenKind.Identifier, "the module name after 'module'");
-            var parameters = new List<ModuleParam>();
-            Expect(TokenKind.LParen, "'(' after the module name; a module without parameters needs no header");
-            while (!At(TokenKind.RParen))
-            {
-                var pname = Expect(TokenKind.Identifier, "a parameter name");
-                Expect(TokenKind.Colon, "':' and a type after the parameter name");
-                var ptype = ParseType();
-                Expect(TokenKind.Eq, "'= default value' (every module parameter has a default)");
-                parameters.Add(new ModuleParam(pname.Pos, pname.Text, ptype, ParseExpr()));
-                if (!Accept(TokenKind.Comma)) break;
-            }
-            Expect(TokenKind.RParen, "')'");
-            header = new ModuleHeader(kw.Pos, hname.Text, parameters);
+            file.Header = ParseModuleHeader();
             ExpectEndOfStatement();
         });
         SkipTerminators();
@@ -61,45 +82,7 @@ public sealed partial class Parser
         {
             Recover(() =>
             {
-                Advance();
-                var name = Expect(TokenKind.Identifier, "a module name after 'import'");
-                if (!_modules.Add(name.Text))
-                    throw new CompileError(name.Pos, $"'{name.Text}' is imported twice. Remove one of the imports");
-                var args = new List<ImportArg>();
-                if (Accept(TokenKind.LParen))
-                {
-                    while (!At(TokenKind.RParen))
-                    {
-                        var aname = Expect(TokenKind.Identifier, "a parameter name");
-                        Expect(TokenKind.Eq, "'= value' after the parameter name");
-                        args.Add(new ImportArg(aname.Pos, aname.Text, ParseExpr()));
-                        if (!Accept(TokenKind.Comma)) break;
-                    }
-                    Expect(TokenKind.RParen, "')'");
-                }
-                string? area = null;
-                var areaPos = default(SourcePos);
-                Expr? bank = null;
-                if (Accept(TokenKind.At))
-                {
-                    var areaName = Expect(TokenKind.Identifier, "the name of an overlay or bank area after '@'");
-                    area = areaName.Text;
-                    areaPos = areaName.Pos;
-                    // @ area[n]: bank n of a bank area (spec 8.5).
-                    if (Accept(TokenKind.LBracket))
-                    {
-                        bank = ParseExpr();
-                        Expect(TokenKind.RBracket, "']' after the bank's number");
-                    }
-                }
-                var implements = new List<(string, SourcePos)>();
-                if (Accept(TokenKind.Implements))
-                    do
-                    {
-                        var iname = Expect(TokenKind.Identifier, "the name of an interface module after 'implements'");
-                        implements.Add((iname.Text, iname.Pos));
-                    } while (Accept(TokenKind.Comma));
-                imports.Add(new ImportDecl(name.Pos, name.Text) { Args = args, Area = area, AreaPos = areaPos, Bank = bank, Implements = implements });
+                file.Imports.Add(ParseImport());
                 ExpectEndOfStatement();
             });
             SkipTerminators();
@@ -107,192 +90,259 @@ public sealed partial class Parser
         // Constants may come before the memory block, so its ranges can use them (spec 8.4).
         while (At(TokenKind.Const))
         {
-            Recover(() =>
-            {
-                if (PeekAt(1).Kind == TokenKind.Fn) constFns.Add(ParseConstFnWhole());
-                else consts.Add(ParseConst());
-            });
+            Recover(() => file.Add(PeekAt(1).Kind == TokenKind.Fn ? ParseConstFnWhole() : ParseConst()));
             SkipTerminators();
         }
-        MemoryDecl? memory = null;
         if (IsMemoryBlock())
         {
-            Recover(() => memory = ParseMemory());
+            Recover(() => file.Memory = ParseMemory());
             SkipTerminators();
         }
-        var exports = new List<ExportName>();
-        ExportTable? exportTable = null;
-        var privateNames = new HashSet<string>();
         while (!At(TokenKind.Eof))
         {
             Recover(() =>
             {
-                if (At(TokenKind.Private))
+                bool hidden = ParsePrivate();
+                if (ParseDeclaration(file) is { } declaration)
                 {
-                    var p = Advance();
-                    if (!(Current.Kind is TokenKind.Const or TokenKind.Var or TokenKind.Linear or TokenKind.Struct or TokenKind.Data or TokenKind.Fn
-                          or TokenKind.Interrupt or TokenKind.Noinit or TokenKind.Volatile or TokenKind.Inline || IsIndexedWord() || IsEncodingWord() || (At(TokenKind.Asm) && PeekAt(1).Kind == TokenKind.Fn)))
-                        throw new CompileError(p.Pos, $"'private' goes before a declaration (const, var, data, struct or fn); found {Describe(Current)}. Write it at the start of the declaration it hides");
-                    privateNames.Add(ParseDeclaration());
+                    string name = file.Add(declaration);
+                    if (hidden) file.PrivateNames.Add(name);
                 }
-                else
-                    ParseDeclaration();
             });
             SkipTerminators();
         }
-        return new ProgramSyntax(consts, globals, functions) { Header = header, Asserts = asserts, Imports = imports, Memory = memory, Exports = exports, ExportTable = exportTable, Structs = structs, PrivateNames = privateNames, ConstFns = constFns, Encodings = encodings, DefaultEncodings = defaultEncodings, BrokenNames = brokenNames, HasSyntaxErrors = _failures > 0 };
+        return file.Program(hasSyntaxErrors: _failures > 0);
+    }
 
-        // A const fn with an error in its body is dropped whole, since its body would run at compile time.
-        FnDecl ParseConstFnWhole()
+    /// <summary><c>module name(P: type = default, ...)</c>, the first line of a module with parameters, up to the end of its line.</summary>
+    private ModuleHeader ParseModuleHeader()
+    {
+        var kw = Advance();
+        var hname = Expect(TokenKind.Identifier, "the module name after 'module'");
+        var parameters = new List<ModuleParam>();
+        Expect(TokenKind.LParen, "'(' after the module name; a module without parameters needs no header");
+        while (!At(TokenKind.RParen))
         {
-            int failures = _failures;
-            var d = ParseConstFn();
-            if (_failures > failures) throw new FollowOnError();
-            return d;
+            var pname = Expect(TokenKind.Identifier, "a parameter name");
+            Expect(TokenKind.Colon, "':' and a type after the parameter name");
+            var ptype = ParseType();
+            Expect(TokenKind.Eq, "'= default value' (every module parameter has a default)");
+            parameters.Add(new ModuleParam(pname.Pos, pname.Text, ptype, ParseExpr()));
+            if (!Accept(TokenKind.Comma)) break;
         }
+        Expect(TokenKind.RParen, "')'");
+        return new ModuleHeader(kw.Pos, hname.Text, parameters);
+    }
 
-        // A modifier's error after the declaration it modifies was added: the declaration is dropped, so it
-        // is not checked too (spec 13: one error per declaration; review code-quality-syntax 18).
-        CompileError Dropped(SourcePos pos, string message)
+    /// <summary><c>import name(P = value) @ area[bank] implements a, b</c> (spec 2.2, 8.5), up to the end of its line.</summary>
+    private ImportDecl ParseImport()
+    {
+        Advance();
+        var name = Expect(TokenKind.Identifier, "a module name after 'import'");
+        if (!_modules.Add(name.Text))
+            throw new CompileError(name.Pos, $"'{name.Text}' is imported twice. Remove one of the imports");
+        var args = new List<ImportArg>();
+        if (Accept(TokenKind.LParen))
         {
-            globals.RemoveAt(globals.Count - 1);
-            return new CompileError(pos, message);
-        }
-
-        // Parses one top-level declaration and returns its name.
-        string ParseDeclaration()
-        {
-            switch (Current.Kind)
+            while (!At(TokenKind.RParen))
             {
-                case TokenKind.Import:
-                    throw new CompileError(Current.Pos, "'import' must be at the top of the file, before other declarations. Move it there");
-                case TokenKind.Module:
-                    throw new CompileError(Current.Pos, "'module' must be the first line of the file, before the imports. Move it there");
-                case TokenKind.Assert:
-                {
-                    var t = Advance();
-                    var cond = ParseExpr();
-                    Expect(TokenKind.Comma, "',' and a message string after the condition");
-                    var msg = Expect(TokenKind.String, "a message string");
-                    ExpectEndOfStatement();
-                    asserts.Add(new AssertDecl(t.Pos, cond, msg.Text));
-                    return "";
-                }
-                case TokenKind.Export:
-                {
-                    Advance();
-                    // export fn f() { } (Rust's pub fn, JavaScript's export function): export only lists names.
-                    if (At(TokenKind.Fn))
-                    {
-                        string name = PeekAt(1).Kind == TokenKind.Identifier ? PeekAt(1).Text : "f";
-                        throw new CompileError(Current.Pos,
-                            $"'export' lists functions declared elsewhere, so it is not followed by 'fn'. Remove 'fn' here and declare the function on its own: 'export {name}' and 'fn {name}() {{ }}'");
-                    }
-                    do
-                    {
-                        var f = Expect(TokenKind.Identifier, "a function name after 'export'");
-                        exports.Add(new ExportName(f.Pos, f.Text));
-                    } while (Accept(TokenKind.Comma));
-                    // export f, g @ $0900: a program with main puts its jump table there (spec 12.3).
-                    if (At(TokenKind.At))
-                    {
-                        var at = Advance();
-                        if (exportTable is not null)
-                            throw new CompileError(at.Pos, "A program has one export table. Write all its functions on the 'export' line with the '@'");
-                        exportTable = new ExportTable(at.Pos, ParseExpr());
-                    }
-                    ExpectEndOfStatement();
-                    return "";
-                }
-                case TokenKind.Identifier when IsMemoryBlock():
-                    throw new CompileError(Current.Pos, "The memory block goes after the imports and constants, before other declarations, and there is only one. Move it there, or join the two blocks");
-                case TokenKind.Identifier when IsIndexedWord():
-                { var d = ParseIndexedVar(); globals.Add(d); return d.Name; }
-                case TokenKind.Identifier when IsEncodingWord():
-                { var d = ParseEncoding(); encodings.Add(d); return d.Name; }
-                case TokenKind.Identifier when IsDefaultEncoding():
-                {
-                    var word = Advance();
-                    Advance();
-                    var (name, pos) = ParseEncodingName("the name of an encoding after 'default encoding'");
-                    defaultEncodings.Add(new DefaultEncoding(word.Pos, name, pos));
-                    ExpectEndOfStatement();
-                    return "";
-                }
-                case TokenKind.Const when PeekAt(1).Kind == TokenKind.Fn: { var d = ParseConstFnWhole(); constFns.Add(d); return d.Name; }
-                case TokenKind.Const: { var d = ParseConst(); consts.Add(d); return d.Name; }
-                case TokenKind.Var: { var d = ParseVar(); globals.Add(d); return d.Name; }
-                case TokenKind.Linear: { var d = ParseLinearVar(); globals.Add(d); return d.Name; }
-                case TokenKind.Struct: { var d = ParseStruct(); structs.Add(d); return d.Name; }
-                case TokenKind.Data: { var d = ParseData(); globals.Add(d); return d.Name; }
-                case TokenKind.Fn: { var d = ParseFn(); functions.Add(d); return d.Name; }
-                case TokenKind.Inline:
-                {
-                    var t = Advance();
-                    bool isAsm = At(TokenKind.Asm) && PeekAt(1).Kind == TokenKind.Fn;
-                    if (isAsm) Advance();
-                    if (!At(TokenKind.Fn))
-                        throw new CompileError(t.Pos, $"'inline' goes before 'fn', e.g. 'inline fn wait_frame() {{ ... }}'; found {Describe(Current)}. Write 'inline fn' or remove 'inline'");
-                    var d = ParseFn(isAsm);
-                    if (d.Address is not null)
-                        throw new CompileError(d.Pos, "An inline function needs a body; '@ $addr' declares a routine that is already there. Remove 'inline' or the address");
-                    d.IsInline = true;
-                    functions.Add(d);
-                    return d.Name;
-                }
-                case TokenKind.Noinit:
-                {
-                    var t = Advance();
-                    if (!(Current.Kind is TokenKind.Var or TokenKind.Linear or TokenKind.Volatile or TokenKind.Noinit || IsIndexedWord()))
-                        throw new CompileError(t.Pos, $"'noinit' goes before 'var', e.g. 'noinit var buffer: [u8; 256]'; found {Describe(Current)}. Write 'noinit var' or remove 'noinit'");
-                    var name = ParseDeclaration();
-                    var d = globals[^1];
-                    if (d.IsData) throw Dropped(t.Pos, "'noinit' is for variables; data is never zeroed. Remove 'noinit'");
-                    if (d.IsNoinit) throw Dropped(t.Pos, "'noinit' is written twice. Remove one");
-                    d.IsNoinit = true;
-                    return name;
-                }
-                case TokenKind.Volatile:
-                {
-                    var t = Advance();
-                    if (!(Current.Kind is TokenKind.Var or TokenKind.Linear or TokenKind.Noinit or TokenKind.Volatile || IsIndexedWord()))
-                        throw new CompileError(t.Pos, $"'volatile' goes before 'var', e.g. 'volatile var flags: u8 @ $C000'; found {Describe(Current)}. Write 'volatile var' or remove 'volatile'");
-                    var name = ParseDeclaration();
-                    var d = globals[^1];
-                    if (d.IsData) throw Dropped(t.Pos, "'volatile' is for variables; data is read-only, so nothing changes it. Remove 'volatile'");
-                    if (d.IsVolatile) throw Dropped(t.Pos, "'volatile' is written twice. Remove one");
-                    d.IsVolatile = true;
-                    return name;
-                }
-                case TokenKind.Interrupt:
-                {
-                    var t = Advance();
-                    if (!At(TokenKind.Fn))
-                        throw new CompileError(t.Pos, At(TokenKind.Asm)
-                            ? "An interrupt handler in assembly is an 'asm fn' that saves what it changes and ends with rti; 'interrupt' is for handlers in Tern. Remove 'interrupt'"
-                            : $"'interrupt' goes before 'fn', e.g. 'interrupt fn raster() {{ ... }}'; found {Describe(Current)}. Write 'interrupt fn' or remove 'interrupt'");
-                    var d = ParseFn();
-                    if (d.Address is not null)
-                        throw new CompileError(d.Pos, "An interrupt handler needs a body; '@ $addr' declares a routine that is already there. Remove 'interrupt' or the address");
-                    d.IsInterrupt = true;
-                    functions.Add(d);
-                    return d.Name;
-                }
-                case TokenKind.Asm when PeekAt(1).Kind == TokenKind.Fn:
-                {
-                    Advance();
-                    var d = ParseFn(isAsm: true);
-                    functions.Add(d);
-                    return d.Name;
-                }
-                case TokenKind.Asm:
-                    throw new CompileError(Current.Pos,
-                        "An asm block must be inside a function. Use 'asm fn name() { ... }' for a whole function in assembly");
-                default:
-                    if (LeadingOperator() is { } lead) throw lead;
-                    throw new CompileError(Current.Pos, $"Expected 'const', 'var', 'data', 'struct' or 'fn', found {Describe(Current)}. Check that statements are inside a function, and that each '{{' has its '}}'");
+                var aname = Expect(TokenKind.Identifier, "a parameter name");
+                Expect(TokenKind.Eq, "'= value' after the parameter name");
+                args.Add(new ImportArg(aname.Pos, aname.Text, ParseExpr()));
+                if (!Accept(TokenKind.Comma)) break;
+            }
+            Expect(TokenKind.RParen, "')'");
+        }
+        string? area = null;
+        var areaPos = default(SourcePos);
+        Expr? bank = null;
+        if (Accept(TokenKind.At))
+        {
+            var areaName = Expect(TokenKind.Identifier, "the name of an overlay or bank area after '@'");
+            area = areaName.Text;
+            areaPos = areaName.Pos;
+            // @ area[n]: bank n of a bank area (spec 8.5).
+            if (Accept(TokenKind.LBracket))
+            {
+                bank = ParseExpr();
+                Expect(TokenKind.RBracket, "']' after the bank's number");
             }
         }
+        var implements = new List<(string, SourcePos)>();
+        if (Accept(TokenKind.Implements))
+            do
+            {
+                var iname = Expect(TokenKind.Identifier, "the name of an interface module after 'implements'");
+                implements.Add((iname.Text, iname.Pos));
+            } while (Accept(TokenKind.Comma));
+        return new ImportDecl(name.Pos, name.Text) { Args = args, Area = area, AreaPos = areaPos, Bank = bank, Implements = implements };
+    }
+
+    /// <summary>Reads <c>private</c> before a declaration, if it is there (spec 2.2).</summary>
+    private bool ParsePrivate()
+    {
+        if (!At(TokenKind.Private)) return false;
+        var p = Advance();
+        if (!(Current.Kind is TokenKind.Const or TokenKind.Var or TokenKind.Linear or TokenKind.Struct or TokenKind.Data or TokenKind.Fn
+              or TokenKind.Interrupt or TokenKind.Noinit or TokenKind.Volatile or TokenKind.Inline || IsIndexedWord() || IsEncodingWord() || (At(TokenKind.Asm) && PeekAt(1).Kind == TokenKind.Fn)))
+            throw new CompileError(p.Pos, $"'private' goes before a declaration (const, var, data, struct or fn); found {Describe(Current)}. Write it at the start of the declaration it hides");
+        return true;
+    }
+
+    /// <summary>A const fn with an error in its body is dropped whole, since its body would run at compile time.</summary>
+    private FnDecl ParseConstFnWhole()
+    {
+        int failures = _failures;
+        var d = ParseConstFn();
+        if (_failures > failures) throw new FollowOnError();
+        return d;
+    }
+
+    /// <summary>
+    /// One top-level declaration after the memory block, with its modifiers. An <c>export</c> or
+    /// <c>default encoding</c> line is filed as it is read, so that what came before an error in it counts
+    /// (spec 13); for those it returns null.
+    /// </summary>
+    private Node? ParseDeclaration(FileDeclarations file)
+    {
+        switch (Current.Kind)
+        {
+            case TokenKind.Import:
+                throw new CompileError(Current.Pos, "'import' must be at the top of the file, before other declarations. Move it there");
+            case TokenKind.Module:
+                throw new CompileError(Current.Pos, "'module' must be the first line of the file, before the imports. Move it there");
+            case TokenKind.Assert:
+            {
+                var t = Advance();
+                var cond = ParseExpr();
+                Expect(TokenKind.Comma, "',' and a message string after the condition");
+                var msg = Expect(TokenKind.String, "a message string");
+                ExpectEndOfStatement();
+                return new AssertDecl(t.Pos, cond, msg.Text);
+            }
+            case TokenKind.Export:
+                ParseExport(file);
+                return null;
+            case TokenKind.Identifier when IsMemoryBlock():
+                throw new CompileError(Current.Pos, "The memory block goes after the imports and constants, before other declarations, and there is only one. Move it there, or join the two blocks");
+            case TokenKind.Identifier when IsIndexedWord(): return ParseIndexedVar();
+            case TokenKind.Identifier when IsEncodingWord(): return ParseEncoding();
+            case TokenKind.Identifier when IsDefaultEncoding():
+            {
+                var word = Advance();
+                Advance();
+                var (name, pos) = ParseEncodingName("the name of an encoding after 'default encoding'");
+                file.DefaultEncodings.Add(new DefaultEncoding(word.Pos, name, pos));
+                ExpectEndOfStatement();
+                return null;
+            }
+            case TokenKind.Const when PeekAt(1).Kind == TokenKind.Fn: return ParseConstFnWhole();
+            case TokenKind.Const: return ParseConst();
+            case TokenKind.Var: return ParseVar();
+            case TokenKind.Linear: return ParseLinearVar();
+            case TokenKind.Struct: return ParseStruct();
+            case TokenKind.Data: return ParseData();
+            case TokenKind.Fn: return ParseFn();
+            case TokenKind.Noinit or TokenKind.Volatile: return ParseModifiedVar();
+            case TokenKind.Inline:
+            {
+                var t = Advance();
+                bool isAsm = At(TokenKind.Asm) && PeekAt(1).Kind == TokenKind.Fn;
+                if (isAsm) Advance();
+                if (!At(TokenKind.Fn))
+                    throw new CompileError(t.Pos, $"'inline' goes before 'fn', e.g. 'inline fn wait_frame() {{ ... }}'; found {Describe(Current)}. Write 'inline fn' or remove 'inline'");
+                var d = ParseFn(isAsm);
+                if (d.Address is not null)
+                    throw new CompileError(d.Pos, "An inline function needs a body; '@ $addr' declares a routine that is already there. Remove 'inline' or the address");
+                d.IsInline = true;
+                return d;
+            }
+            case TokenKind.Interrupt:
+            {
+                var t = Advance();
+                if (!At(TokenKind.Fn))
+                    throw new CompileError(t.Pos, At(TokenKind.Asm)
+                        ? "An interrupt handler in assembly is an 'asm fn' that saves what it changes and ends with rti; 'interrupt' is for handlers in Tern. Remove 'interrupt'"
+                        : $"'interrupt' goes before 'fn', e.g. 'interrupt fn raster() {{ ... }}'; found {Describe(Current)}. Write 'interrupt fn' or remove 'interrupt'");
+                var d = ParseFn();
+                if (d.Address is not null)
+                    throw new CompileError(d.Pos, "An interrupt handler needs a body; '@ $addr' declares a routine that is already there. Remove 'interrupt' or the address");
+                d.IsInterrupt = true;
+                return d;
+            }
+            case TokenKind.Asm when PeekAt(1).Kind == TokenKind.Fn:
+                Advance();
+                return ParseFn(isAsm: true);
+            case TokenKind.Asm:
+                throw new CompileError(Current.Pos,
+                    "An asm block must be inside a function. Use 'asm fn name() { ... }' for a whole function in assembly");
+            default:
+                if (LeadingOperator() is { } lead) throw lead;
+                throw new CompileError(Current.Pos, $"Expected 'const', 'var', 'data', 'struct' or 'fn', found {Describe(Current)}. Check that statements are inside a function, and that each '{{' has its '}}'");
+        }
+    }
+
+    /// <summary>
+    /// <c>noinit</c> and <c>volatile</c> before a variable (spec 4), in any order: the words, then the
+    /// variable, then the words' checks, from the one next to the variable outwards.
+    /// </summary>
+    private VarDecl ParseModifiedVar()
+    {
+        var words = new List<Token>();
+        while (Current.Kind is TokenKind.Noinit or TokenKind.Volatile)
+        {
+            var t = Advance();
+            if (!(Current.Kind is TokenKind.Var or TokenKind.Linear or TokenKind.Noinit or TokenKind.Volatile || IsIndexedWord()))
+                throw new CompileError(t.Pos, t.Kind == TokenKind.Noinit
+                    ? $"'noinit' goes before 'var', e.g. 'noinit var buffer: [u8; 256]'; found {Describe(Current)}. Write 'noinit var' or remove 'noinit'"
+                    : $"'volatile' goes before 'var', e.g. 'volatile var flags: u8 @ $C000'; found {Describe(Current)}. Write 'volatile var' or remove 'volatile'");
+            words.Add(t);
+        }
+        var d = At(TokenKind.Var) ? ParseVar() : At(TokenKind.Linear) ? ParseLinearVar() : ParseIndexedVar();
+        // An error here drops the declaration, so it is not checked too (spec 13: one error per declaration; review code-quality-syntax 18).
+        foreach (var t in Enumerable.Reverse(words))
+        {
+            if (t.Kind == TokenKind.Noinit)
+            {
+                if (d.IsData) throw new CompileError(t.Pos, "'noinit' is for variables; data is never zeroed. Remove 'noinit'");
+                if (d.IsNoinit) throw new CompileError(t.Pos, "'noinit' is written twice. Remove one");
+                d.IsNoinit = true;
+            }
+            else
+            {
+                if (d.IsData) throw new CompileError(t.Pos, "'volatile' is for variables; data is read-only, so nothing changes it. Remove 'volatile'");
+                if (d.IsVolatile) throw new CompileError(t.Pos, "'volatile' is written twice. Remove one");
+                d.IsVolatile = true;
+            }
+        }
+        return d;
+    }
+
+    /// <summary><c>export f, g</c>, or <c>export f, g @ $0900</c> in a program with main (spec 12.3).</summary>
+    private void ParseExport(FileDeclarations file)
+    {
+        Advance();
+        // export fn f() { } (Rust's pub fn, JavaScript's export function): export only lists names.
+        if (At(TokenKind.Fn))
+        {
+            string name = PeekAt(1).Kind == TokenKind.Identifier ? PeekAt(1).Text : "f";
+            throw new CompileError(Current.Pos,
+                $"'export' lists functions declared elsewhere, so it is not followed by 'fn'. Remove 'fn' here and declare the function on its own: 'export {name}' and 'fn {name}() {{ }}'");
+        }
+        do
+        {
+            var f = Expect(TokenKind.Identifier, "a function name after 'export'");
+            file.Exports.Add(new ExportName(f.Pos, f.Text));
+        } while (Accept(TokenKind.Comma));
+        // export f, g @ $0900: a program with main puts its jump table there (spec 12.3).
+        if (At(TokenKind.At))
+        {
+            var at = Advance();
+            if (file.ExportTable is not null)
+                throw new CompileError(at.Pos, "A program has one export table. Write all its functions on the 'export' line with the '@'");
+            file.ExportTable = new ExportTable(at.Pos, ParseExpr());
+        }
+        ExpectEndOfStatement();
     }
 
     private bool IsMemoryBlock()
@@ -459,8 +509,9 @@ public sealed partial class Parser
             throw new CompileError(word.Pos, "'indexed' replaces 'linear': it stores records the same way. Write 'indexed var', not 'indexed linear var'");
         if (At(TokenKind.Data))
             throw new CompileError(word.Pos, "'indexed' is for arrays of structs, which cannot be data. Write 'indexed var list: [Enemy; 8]'");
-        var decl = ParseVar();
-        return new VarDecl(word.Pos, decl.Name, decl.TypeSyntax, decl.Placement, decl.Init) { IsIndexed = true };
+        var decl = ParseVar(word);
+        decl.IsIndexed = true;
+        return decl;
     }
 
     /// <summary><c>linear var name: [T; n]</c> or <c>linear data name: [T; n] = ...</c></summary>
@@ -471,8 +522,9 @@ public sealed partial class Parser
             throw new CompileError(Current.Pos, "'indexed' replaces 'linear': it stores records the same way. Write 'indexed var', not 'linear indexed var'");
         if (!At(TokenKind.Var) && !At(TokenKind.Data))
             throw new CompileError(Current.Pos, $"'linear' goes before 'var' or 'data', e.g. 'linear var list: [Enemy; 8]'; found {Describe(Current)}. Write 'linear var' or remove 'linear'");
-        var decl = At(TokenKind.Data) ? ParseData() : ParseVar();
-        return new VarDecl(linear.Pos, decl.Name, decl.TypeSyntax, decl.Placement, decl.Init) { IsLinear = true, IsData = decl.IsData };
+        var decl = At(TokenKind.Data) ? ParseData(linear) : ParseVar(linear);
+        decl.IsLinear = true;
+        return decl;
     }
 
     private ConstDecl ParseConst()
@@ -486,9 +538,11 @@ public sealed partial class Parser
         return new ConstDecl(start.Pos, name.Text, type, value);
     }
 
-    private VarDecl ParseVar()
+    /// <param name="first">The declaration's first word, when a word such as <c>linear</c> comes before <c>var</c>.</param>
+    private VarDecl ParseVar(Token? first = null)
     {
-        var start = Expect(TokenKind.Var, "'var'");
+        var start = first ?? Current;
+        Expect(TokenKind.Var, "'var'");
         var name = Expect(TokenKind.Identifier, "variable name");
         TypeSyntax? type = Accept(TokenKind.Colon) ? ParseType() : null;
 
@@ -533,9 +587,11 @@ public sealed partial class Parser
         return placement;
     }
 
-    private VarDecl ParseData()
+    /// <param name="first">The declaration's first word, when <c>linear</c> comes before <c>data</c>.</param>
+    private VarDecl ParseData(Token? first = null)
     {
-        var start = Expect(TokenKind.Data, "'data'");
+        var start = first ?? Current;
+        Expect(TokenKind.Data, "'data'");
         var name = Expect(TokenKind.Identifier, "data name");
         TypeSyntax? type = Accept(TokenKind.Colon) ? ParseType() : null;
         var placement = ParsePlacement(allowZeroPage: false);
@@ -555,20 +611,24 @@ public sealed partial class Parser
         _inConstFn = true;
         try
         {
-            var f = ParseFn();
+            var fn = Current.Pos;
+            var f = ParseFn(first: start);
             if (f.Address is not null)
-                throw new CompileError(f.Pos, "A const fn runs at compile time and has no address. Remove '@' and the address, and give it a body");
+                throw new CompileError(fn, "A const fn runs at compile time and has no address. Remove '@' and the address, and give it a body");
             // A generator is called from asm lines, where a mnemonic is read as the instruction (review code-quality-syntax 13).
             if (f.ReturnType is null && Enum.GetNames<Mnemonic>().Contains(f.Name, StringComparer.OrdinalIgnoreCase))
-                throw new CompileError(f.Pos, $"'{f.Name}' is a 6502 instruction, so an asm line cannot call a generator of that name. Use another name");
-            return new FnDecl(start.Pos, f.Name, f.Parameters, f.ReturnType, f.ReturnUsing, f.Body) { IsConst = true };
+                throw new CompileError(fn, $"'{f.Name}' is a 6502 instruction, so an asm line cannot call a generator of that name. Use another name");
+            f.IsConst = true;
+            return f;
         }
         finally { _inConstFn = false; }
     }
 
-    private FnDecl ParseFn(bool isAsm = false)
+    /// <param name="first">The declaration's first word, when <c>const</c> comes before <c>fn</c>.</param>
+    private FnDecl ParseFn(bool isAsm = false, Token? first = null)
     {
-        var start = Expect(TokenKind.Fn, "'fn'");
+        var start = first ?? Current;
+        Expect(TokenKind.Fn, "'fn'");
         var name = Expect(TokenKind.Identifier, "function name");
         Expect(TokenKind.LParen, "'('");
         var parameters = new List<ParamSyntax>();

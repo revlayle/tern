@@ -255,11 +255,11 @@ public sealed class VarDecl(SourcePos pos, string name, TypeSyntax? type, Placem
     public Placement Placement { get; } = placement;
     public Expr? Init { get; set; } = init;
     /// <summary>Declared with <c>data</c> instead of <c>var</c>.</summary>
-    public bool IsData { get; init; }
+    public bool IsData { get; set; }
     /// <summary>Declared <c>linear var</c>: an array of structs stored as whole records.</summary>
-    public bool IsLinear { get; init; }
+    public bool IsLinear { get; set; }
     /// <summary>Declared <c>indexed var</c>: an array of structs stored as whole records, with an offset table for variable indexes.</summary>
-    public bool IsIndexed { get; init; }
+    public bool IsIndexed { get; set; }
     /// <summary>Declared <c>noinit var</c>: a global that is not zeroed at startup.</summary>
     public bool IsNoinit { get; set; }
     /// <summary>Declared <c>volatile var</c>: memory that something else changes (spec 4).</summary>
@@ -516,7 +516,7 @@ public sealed class FnDecl(
     public Register? ReturnUsing { get; } = returnUsing;
     public BlockStmt Body { get; } = body;
     /// <summary>A <c>const fn</c> (spec 4.1): run only during compilation; it never becomes 6502 code.</summary>
-    public bool IsConst { get; init; }
+    public bool IsConst { get; set; }
     /// <summary>An <c>asm fn</c>: the body holds one <see cref="AsmStmt"/>.</summary>
     public bool IsAsm { get; init; }
     /// <summary>An <c>interrupt fn</c>: saves the registers it changes and ends with <c>rti</c>.</summary>
@@ -602,8 +602,12 @@ public sealed class EncodingDecl(SourcePos pos, string name, string? baseName, S
 /// <summary>One line of an encoding: <c>'c' = value</c>, or <c>'a'..='z' = value</c> with <paramref name="First"/> before <paramref name="Last"/>.</summary>
 public sealed record EncodingEntry(SourcePos Pos, char First, char Last, Expr Value);
 
-/// <summary><c>default encoding name</c> (spec 2.1), at <paramref name="Pos"/> (the word <c>default</c>); the name at <paramref name="NamePos"/>.</summary>
-public sealed record DefaultEncoding(SourcePos Pos, string Name, SourcePos NamePos);
+/// <summary><c>default encoding name</c> (spec 2.1), at the word <c>default</c>; the name at <see cref="NamePos"/>.</summary>
+public sealed class DefaultEncoding(SourcePos pos, string name, SourcePos namePos) : Node(pos)
+{
+    public string Name { get; } = name;
+    public SourcePos NamePos { get; } = namePos;
+}
 
 /// <summary>One source file: a program's main file or a module.</summary>
 public sealed class ProgramSyntax(List<ConstDecl> consts, List<VarDecl> globals, List<FnDecl> functions)
