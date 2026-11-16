@@ -174,7 +174,6 @@ public static class ModuleLoader
             $"Cannot find module '{import.Name}': there is no {file} in the library ({library}) or in {importer.Directory}. Check the spelling, or put {file} next to the importing file");
     }
 
-    /// <summary>Whether a folder is the library or one of its platform folders.</summary>
     /// <summary>Module files: a file open in an editor, else the file on disk.</summary>
     private sealed class SourceFiles(Func<string, string?>? openFile)
     {
@@ -183,6 +182,7 @@ public static class ModuleLoader
         public string Read(string path) => openFile?.Invoke(System.IO.Path.GetFullPath(path)) ?? File.ReadAllText(path);
     }
 
+    /// <summary>Whether a folder is the library or one of its platform folders.</summary>
     private static bool InLibrary(string folder, string library)
     {
         var lib = System.IO.Path.GetFullPath(library).TrimEnd(System.IO.Path.DirectorySeparatorChar);

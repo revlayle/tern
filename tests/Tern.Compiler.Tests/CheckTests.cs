@@ -88,6 +88,10 @@ public sealed class CheckTests : IDisposable
         const string source = "var first: u8 @ $0801\nfn main() { first = 1 }\n";
         Assert.True(TernCompiler.Check(source).Ok);
         Assert.Contains("overlaps the program", Assert.Throws<CompileError>(() => TernCompiler.Compile(source)).Message);
+        // Nor does it allocate (review R5, finding 2).
+        const string full = "var a: [u8; 200] @ zp\nfn main() { a[1] = a[0] }\n";
+        Assert.True(TernCompiler.Check(full).Ok);
+        Assert.Contains("Zero page is full", Assert.Throws<CompileError>(() => TernCompiler.Compile(full)).Message);
     }
 
     [Fact]

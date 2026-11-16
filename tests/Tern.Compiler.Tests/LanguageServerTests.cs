@@ -36,6 +36,16 @@ public class LanguageServerTests
         Assert.All(tokens.Skip(1), t => Assert.Null(t.Doc));
     }
 
+    [Fact]
+    public void An_error_token_runs_from_the_error_to_the_end_of_its_line()
+    {
+        const string source = "var x: u8\nvar y = 0x10 + 1\nvar z: u8\n";
+        var errors = new List<CompileError>();
+        var error = Lexer.Tokenize(source, report: errors.Add).Single(t => t.Kind == TokenKind.Error);
+        Assert.Equal("0x10 + 1", source[error.Start..error.End]);
+        Assert.Single(errors);
+    }
+
     // ---------- Spans ----------
 
     [Fact]

@@ -89,7 +89,7 @@ public sealed record CheckResult(IReadOnlyList<Module> Modules, CheckedProgram? 
 {
     public IReadOnlyList<CompileError> Errors => All.Where(e => !e.IsWarning).ToList();
     public IReadOnlyList<CompileError> Warnings => All.Where(e => e.IsWarning).ToList();
-    /// <summary>No errors: the program can be built.</summary>
+    /// <summary>The checks found no error. The build may still find one (allocation, code generation, layout): see <see cref="TernCompiler.Check"/>.</summary>
     public bool Ok => Program is not null;
 
     /// <summary>The errors and warnings as tools report them (<c>tern --json</c>); <paramref name="defaultFile"/> for source given without a path.</summary>
@@ -118,7 +118,9 @@ public static partial class TernCompiler
     /// <summary>
     /// Parses and checks a program without building it, and never throws a <see cref="CompileError"/>:
     /// the errors and warnings are in the result, with the files as far as they were understood (for a
-    /// language server, M28). The checks are those of <see cref="Compile"/>, which reports the same errors.
+    /// language server, M28). The checks are those of <see cref="Compile"/>, with the same errors. Errors that
+    /// only allocation, code generation and layout find (zero page full, an area too small, a fixed address
+    /// over the program) come from <see cref="Compile"/> only.
     /// </summary>
     /// <param name="openFile">
     /// The text of a module open in an editor, by its full path, used in place of the file on disk; null

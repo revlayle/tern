@@ -177,7 +177,6 @@ public sealed partial class Checker
                 Declaring(e.Name, e.Pos, () => Resolve(es, e.Pos));
         CheckDefaultEncodingLines(module);
         module.Declared = true;
-
     }
 
     /// <summary>The main file's memory block: a NES program needs one, and a region's name must not be another name of the file (spec 8.4).</summary>
@@ -232,7 +231,7 @@ public sealed partial class Checker
     }
 
     /// <summary>Where the program starts: its main, or the root of a binary's entries, and what it exports (spec 12.3).</summary>
-    /// <param name="Main">The program's main, or the root of a binary's entries; null after an error.</param>
+    /// <param name="Main">The program's main, or the root of a binary's entries; not set after an error, which the call graph's step never reaches.</param>
     private sealed record Entry(FunctionSymbol Main, List<FunctionSymbol> Exports, Dictionary<FunctionSymbol, FunctionSymbol> ExportedAs, int? ExportTable);
 
     /// <summary>The program's main, or a binary's entries, and its exports (spec 12.3).</summary>

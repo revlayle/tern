@@ -196,9 +196,11 @@ public static class Lexer
             catch (CompileError e) when (report is not null)
             {
                 report(e);
+                // The token starts where the error is (for a language server's error range), on this line.
+                int at = e.Pos.Line == line ? lineStart + e.Pos.Column - 1 : i;
                 while (i < source.Length && source[i] != '\n') i++;
                 // The parser drops the statement with this token, and its own errors there.
-                tokens.Add(new Token(TokenKind.Error, "", 0, e.Pos, Start: i, End: i));
+                tokens.Add(new Token(TokenKind.Error, "", 0, e.Pos, Start: at, End: i));
                 nesting = 0;
             }
         }
