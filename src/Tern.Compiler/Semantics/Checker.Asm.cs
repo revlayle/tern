@@ -243,7 +243,16 @@ public sealed partial class Checker
         var.AsmZeroPage = true;
     }
 
+    /// <summary>What an instruction adds to its block's summary: registers, calls, the functions and variables it names.</summary>
     private void AddEffects(AsmInstruction ins, AsmEffects effects)
+    {
+        AddRegisterEffects(ins, effects);
+        if (ins.Value?.Function is { } function) UseFunction(ins, function);
+        if (ins.Value?.Variable is { } variable) UseVariable(ins, variable, effects);
+    }
+
+    /// <summary>The registers and flags the instruction reads and changes; a register that holds a loop variable must survive the block.</summary>
+    private void AddRegisterEffects(AsmInstruction ins, AsmEffects effects)
     {
         var (reads, writes) = Instructions.Effects(ins.Mnemonic, ins.Mode);
         var routine = ins.Mnemonic == Mnemonic.Jsr && ins.Value?.Function is { FixedAddress: not null } r ? r : null;
@@ -267,9 +276,13 @@ public sealed partial class Checker
                 throw new CompileError(ins.Pos,
                     $"This changes {reg}, which holds the loop variable. Remove 'using {reg}' from the loop, or leave {reg} unchanged");
         }
+    }
 
-        var v = ins.Value;
-        if (v?.Function is { IsInterrupt: true } handler)
+    /// <summary>A function the instruction names: a call, its address taken, or a handler installed.</summary>
+    private void UseFunction(AsmInstruction ins, FunctionSymbol function)
+    {
+        var v = ins.Value!;
+        if (function is { IsInterrupt: true } handler)
         {
             if (ins.Mnemonic == Mnemonic.Jsr)
                 throw new CompileError(ins.Operand!.Pos,
@@ -277,10 +290,10 @@ public sealed partial class Checker
             // Naming a handler (to install it) keeps it in the program, as a root of its own.
             if (!_body.Dead) _body.Function!.UsedInterrupts.Add(handler);
         }
-        else if (v?.Function is { IsInline: true } inlined)
+        else if (function is { IsInline: true } inlined)
             throw new CompileError(ins.Operand!.Pos,
                 $"'{inlined.Name}' is inline: it is copied into each Tern caller and has no address of its own. Call it from Tern, or remove 'inline'");
-        else if (v?.Function is { FixedAddress: null } named && v.High is not null)
+        else if (function is { FixedAddress: null } named && v.High is not null)
         {
             // #f.lo / #f.hi takes the function's address, as addr(f) does (spec 6.5). Assembly may
             // take it even with memory parameters: it can set them itself before calling.
@@ -291,16 +304,21 @@ public sealed partial class Checker
                 _body.Function!.UsedAddresses.Add(named);
             }
         }
-        else if (v?.Function is { } f && (f != _body.Function || ins.Mnemonic == Mnemonic.Jsr))
-            AddCall(_body.Function!, f, ins.Operand!.Pos);
+        else if (function != _body.Function || ins.Mnemonic == Mnemonic.Jsr)
+            AddCall(_body.Function!, function, ins.Operand!.Pos);
         // Assembly cannot write a function's memory parameters (they are not names outside it).
-        if (v?.Function is { FixedAddress: null } callee && callee != _body.Function && v.High is null
+        if (function is { FixedAddress: null } callee && callee != _body.Function && v.High is null
             && ins.Mnemonic is Mnemonic.Jsr or Mnemonic.Jmp && ins.Mode == Absolute
             && callee.Parameters.FirstOrDefault(p => p.PassedIn is null) is { } memoryParam)
             throw new CompileError(ins.Operand!.Pos,
                 $"'{callee.Name}' takes '{memoryParam.Name}' in memory, which assembly cannot set. "
                 + $"Pass it in a register ({memoryParam.Name}: {memoryParam.Type} using A), or call {callee.Name} from Tern");
-        if (v?.Variable is not { } variable) return;
+    }
+
+    /// <summary>A variable the instruction names: its address taken, a jump vector, or memory read or written.</summary>
+    private void UseVariable(AsmInstruction ins, VariableSymbol variable, AsmEffects effects)
+    {
+        var v = ins.Value!;
         if (v.High is not null)
         {
             // #name.lo / #name.hi: the address is used, perhaps as a pointer.
