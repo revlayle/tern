@@ -205,9 +205,7 @@ public static partial class TernCompiler
         // Indexed reads only: a store or a read-modify-write takes the same cycles across a page.
         var indexed = new Dictionary<VariableSymbol, List<int>>();
         foreach (var i in functionCode.OfType<Instr>())
-            if (i.Mode is Tern.Cpu.AddressingMode.AbsoluteX or Tern.Cpu.AddressingMode.AbsoluteY or Tern.Cpu.AddressingMode.ZeroPageX or Tern.Cpu.AddressingMode.ZeroPageY
-                && Instructions.ReadsMemory(i.Mnemonic, i.Mode) && !Instructions.WritesMemory(i.Mnemonic, i.Mode)
-                && i.Operand is VarOperand { Variable: var v } o)
+            if (MemoryUse.Of(i) is { Target: MemoryTarget.Element, Reads: true, Writes: false, Operand: { Variable: var v } o })
                 (indexed.TryGetValue(v.Storage, out var list) ? list : indexed[v.Storage] = []).Add(v.AliasOffset + o.Offset);
         // NROM fills $C000-$FFFF first, so a small program is NROM-128; one that does not fit there is
         // laid out again in one area, $8000-$FFFF, so that a function or table may be larger than 16 KB

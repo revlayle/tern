@@ -114,25 +114,25 @@ public static partial class Optimizer
             var flow = Instructions.Of(i.Mnemonic).Flow;
             if (flow == Flow.Break) { into.All = true; return; }
             // Other code may read the globals: a callee, the caller, or memory reached through a pointer or at a number.
-            if (flow is Flow.Call or Flow.Return or Flow.ReturnFromInterrupt || (i.Mode is IndirectIndexed or IndexedIndirect or Indirect && i.Mnemonic != Sta)
-                || (i.Operand is AddrOperand && Instructions.ReadsMemory(i.Mnemonic, i.Mode)))
+            var use = MemoryUse.Of(i);
+            if (flow is Flow.Call or Flow.Return or Flow.ReturnFromInterrupt || (use.Reads && use.Target is MemoryTarget.Pointer or MemoryTarget.Number))
                 into.ReadGlobals();
             if (i.Operand is ImmVarByte { Variable: var a } && Tracked(a, function)) into.Whole.Add(a.Storage);
-            if (i.Operand is not VarOperand o || !Tracked(o.Variable, function)) return;
+            if (use.Operand is not { } o || !Tracked(o.Variable, function)) return;
             var b = Byte(o);
-            switch (i.Mode)
+            switch (use.Target)
             {
-                case Absolute or ZeroPage:
-                    if (Stored(i.Mnemonic) is not null) into.Written(b);
-                    else if (Instructions.ReadsMemory(i.Mnemonic, i.Mode)) into.Read(b);
+                case MemoryTarget.Byte:
+                    if (use.Reads) into.Read(b);
+                    else if (use.Writes) into.Written(b);
                     break;
-                case IndirectIndexed or Indirect:
+                case MemoryTarget.Pointer when i.Mode != IndexedIndirect:
                     into.Read(b);
                     into.Read((b.Item1, b.Item2 + 1));
                     break;
                 default:
-                    // Indexed: any byte of the variable. An indexed store overwrites no known byte.
-                    if (Instructions.ReadsMemory(i.Mnemonic, i.Mode) || i.Mode == IndexedIndirect) into.Whole.Add(b.Item1);
+                    // Indexed, or a pointer chosen by X: any byte of the variable. An indexed store overwrites no known byte.
+                    if (use.Reads || use.Target == MemoryTarget.Pointer) into.Whole.Add(b.Item1);
                     break;
             }
         }
@@ -220,8 +220,7 @@ public static partial class Optimizer
                     case Instr i:
                         var exits = ExitsOf(code, k, positions);
                         followed = Instructions.Of(i.Mnemonic).Flow != Flow.Call && !exits.Elsewhere && !exits.Entries && !exits.Returns;
-                        readsAnywhere |= (i.Mode is IndirectIndexed or IndexedIndirect && i.Mnemonic != Sta)
-                            || (i.Operand is AddrOperand && Instructions.ReadsMemory(i.Mnemonic, i.Mode));
+                        readsAnywhere |= MemoryUse.Of(i) is { Reads: true, Target: MemoryTarget.Pointer or MemoryTarget.Number };
                         break;
                 }
             }
@@ -449,8 +448,7 @@ public static partial class Optimizer
                 if (k == s || code[k] is not Instr i) continue;
                 bool names = (i.Operand is VarOperand w && w.Variable.Storage == v.Storage) || (i.Operand is ImmVarByte b && b.Variable.Storage == v.Storage);
                 if (!names) continue;
-                usable = !FromAsm(i) && i.Mode is Absolute or ZeroPage && i.Operand is VarOperand { Offset: 0 }
-                    && Stored(i.Mnemonic) is null && !Instructions.WritesMemory(i.Mnemonic, i.Mode);
+                usable = !FromAsm(i) && MemoryUse.Of(i) is { Target: MemoryTarget.Byte, Writes: false, Operand.Offset: 0 };
                 reads.Add(k);
             }
             if (!usable || reads.Count == 0) continue;
@@ -461,8 +459,10 @@ public static partial class Optimizer
                 if (code[k] is not Instr i) return false;
                 if (ChangesAnything(i)) return true;
                 if (index is Reg r && Instructions.Effects(i.Mnemonic, i.Mode).Writes.HasFlag(Flag(r))) return true;
-                if (i.Mode == Accumulator || !(Instructions.WritesMemory(i.Mnemonic, i.Mode) || Stored(i.Mnemonic) is not null)) return false;
-                if (i.Mode is IndirectIndexed or IndexedIndirect or Indirect || i.Operand is not VarOperand { Variable: var w }) return true;
+                var use = MemoryUse.Of(i);
+                if (!use.Writes) return false;
+                if (use.Target is not (MemoryTarget.Byte or MemoryTarget.Element)) return true;
+                var w = use.Operand!.Variable;
                 return w.Storage == source || w.Storage == v.Storage || w.Storage.InOverlayArea;
             }
             var same = HoldsBefore(code, positions, k => k == s, Ends);
@@ -491,8 +491,8 @@ public static partial class Optimizer
                     // Still needed: a read from the register can follow before the next store of v.
                     if (k == s || !same[k] || !Ends(k) || !Reaches(code, positions, k, needed.Contains, s)) continue;
                     // Only a store into the source memory, not a call or a change of the index.
-                    usable = code[k] is Instr { AsmPos: null } i && (Stored(i.Mnemonic) is not null || Instructions.WritesMemory(i.Mnemonic, i.Mode))
-                        && i.Operand is VarOperand { Variable: var w } && w.Storage == source && i.Mode is not (IndirectIndexed or IndexedIndirect or Indirect)
+                    usable = code[k] is Instr { AsmPos: null } i
+                        && MemoryUse.Of(i) is { Writes: true, Target: MemoryTarget.Byte or MemoryTarget.Element, Operand.Variable: var w } && w.Storage == source
                         && !(index is Reg r && Instructions.Effects(i.Mnemonic, i.Mode).Writes.HasFlag(Flag(r)));
                     loads.Add(k);
                 }
@@ -558,11 +558,13 @@ public static partial class Optimizer
                 continue;
             }
             // Anything else in straight-line code: note what it writes.
-            if (Instructions.WritesMemory(i.Mnemonic, i.Mode) || Stored(i.Mnemonic) is not null)
+            var use = MemoryUse.Of(i);
+            if (use.Writes)
             {
-                // Through a pointer, or at a number: anything may change.
-                if (i.Mode is IndirectIndexed or IndexedIndirect or Indirect || i.Operand is not VarOperand { Variable: var v }) break;
-                if (i.Mode is Absolute or ZeroPage) written.Add((VarOperand)i.Operand); else writtenWhole.Add(v);
+                // Through a pointer, at a number or into code: anything may change.
+                if (use.Target == MemoryTarget.Byte) written.Add(use.Operand!);
+                else if (use.Target == MemoryTarget.Element) writtenWhole.Add(use.Operand!.Variable);
+                else break;
             }
             var (_, writes) = Instructions.Effects(i.Mnemonic, i.Mode);
             foreach (var r in new[] { Reg.A, Reg.X, Reg.Y })

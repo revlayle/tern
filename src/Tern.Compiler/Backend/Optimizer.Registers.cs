@@ -162,24 +162,25 @@ public static partial class Optimizer
         }
 
         var (_, writes) = Instructions.Effects(m, i.Mode);
-        if (i.Mode != Accumulator && (Instructions.WritesMemory(m, i.Mode) || i.Mode is IndirectIndexed or IndexedIndirect))
+        var use = MemoryUse.Of(i);
+        if (use.Writes)
         {
-            if (i.Mode is Absolute or ZeroPage && i.Operand is VarOperand { Variable: var v, Offset: var at })
+            switch (use.Target)
             {
-                ForgetWrite(s, v, function, at);
-                if (Stored(m) is Reg st && Trackable(i)) s.Regs[(int)st].Add(i.Operand!);
-            }
-            else if (i.Mode is AbsoluteX or AbsoluteY or ZeroPageX or ZeroPageY && i.Operand is VarOperand { Variable: var array })
-            {
-                // An indexed write changes only the array (an index outside it is not supported,
-                // provisional); fixed-address arrays may overlap other fixed-address variables.
-                ForgetWrite(s, array, function);
-                if (Stored(m) is Reg st && ElementOf(i) is { } element) s.Regs[(int)st].Add(element);
-            }
-            else if (Instructions.WritesMemory(m, i.Mode) || Stored(m) is not null)
-            {
-                // Through a pointer, or at a fixed numeric address: any memory may change.
-                s.Forget(op => op is VarOperand or Element);
+                case MemoryTarget.Byte:
+                    ForgetWrite(s, use.Operand!.Variable, function, use.Operand.Offset);
+                    if (Stored(m) is Reg st && Trackable(i)) s.Regs[(int)st].Add(i.Operand!);
+                    break;
+                case MemoryTarget.Element:
+                    // An indexed write changes only the array (an index outside it is not supported,
+                    // provisional); fixed-address arrays may overlap other fixed-address variables.
+                    ForgetWrite(s, use.Operand!.Variable, function);
+                    if (Stored(m) is Reg st2 && ElementOf(i) is { } element) s.Regs[(int)st2].Add(element);
+                    break;
+                default:
+                    // Through a pointer, at a fixed numeric address, or into code: any memory may change.
+                    s.Forget(op => op is VarOperand or Element);
+                    break;
             }
         }
 
@@ -211,8 +212,7 @@ public static partial class Optimizer
 
     /// <summary>An asm instruction writes to a code label, so it changes the code itself (or another function patches this one).</summary>
     private static bool SelfModifying(List<AsmItem> code, FunctionSymbol function) =>
-        function.CodePatched || code.Any(item => item is Instr { AsmPos: not null, Operand: LabelOperand } w
-            && (Instructions.WritesMemory(w.Mnemonic, w.Mode) || Stored(w.Mnemonic) is not null));
+        function.CodePatched || code.Any(item => item is Instr { AsmPos: not null, Operand: LabelOperand } w && MemoryUse.Of(w).Writes);
 
     /// <summary>The state before each item, from the start of the function and every jump into a label.</summary>
     private static State?[] Analyse(List<AsmItem> code, FunctionSymbol function)

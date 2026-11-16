@@ -234,7 +234,7 @@ public sealed partial class CodeGen
         && _out.Skip(from).All(item => item is Comment or SourceLine
             || (item is Instr { AsmPos: null } i && i.Mnemonic is not (Jsr or Brk)
                 && (Instructions.Effects(i.Mnemonic, i.Mode).Writes & (p.PassedIn == Register.AX ? CpuState.A | CpuState.X : CpuState.A)) == 0
-                && !(i.Operand is VarOperand { Variable: var w } && w.Storage == p && Instructions.WritesMemory(i.Mnemonic, i.Mode))));
+                && !(MemoryUse.Of(i) is { Writes: true, Target: MemoryTarget.Byte or MemoryTarget.Element, Operand.Variable: var w } && w.Storage == p)));
 
     /// <summary>Functions already decided by <see cref="KeptRegister"/>, with the register kept (or null).</summary>
     private readonly Dictionary<FunctionSymbol, Register?> _keptRegisters = new();
