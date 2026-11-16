@@ -158,7 +158,7 @@ public sealed partial class CodeGen
     {
         ContinueStmt => true,
         WhileStmt or ForStmt => false,
-        _ => Children(node).Any(ContinuesLoop),
+        _ => node.Children.Any(ContinuesLoop),
     };
 
     /// <summary>

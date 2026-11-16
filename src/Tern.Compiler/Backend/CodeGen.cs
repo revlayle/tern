@@ -269,36 +269,8 @@ public sealed partial class CodeGen
     /// True if the code leaves X and Y alone apart from its own use of them: it calls nothing and has
     /// no asm block or loop held in a register. A parameter or counter may then stay in X or Y.
     /// </summary>
-    private static bool KeepsIndexRegistersFree(Node node) => !Descendants(node).Any(n => n
+    private static bool KeepsIndexRegistersFree(Node node) => !node.Descendants().Any(n => n
         is CallExpr { Function: not null } or AsmStmt or ForStmt { UsingRegister: not null });
-
-    /// <summary>The nodes directly inside a statement or expression.</summary>
-    private static IEnumerable<Node> Children(Node node)
-    {
-        switch (node)
-        {
-            case BlockStmt b: return b.Statements;
-            case IfStmt i: return i.Else is null ? [i.Condition, i.Then] : [i.Condition, i.Then, i.Else];
-            case WhileStmt w: return [w.Condition, w.Body];
-            case ForStmt f: return f.Step is null ? [f.From, f.To, f.Body] : [f.From, f.To, f.Step, f.Body];
-            case MatchStmt m: return m.Arms.Select(a => (Node)a.Body).Prepend(m.Subject);
-            case ReturnStmt { Value: { } v }: return [v];
-            case AssignStmt a: return [a.Target, a.Value];
-            case ExprStmt e: return [e.Expr];
-            case VarDecl { Init: { } init }: return [init];
-            case UnaryExpr u: return [u.Operand];
-            case BinaryExpr b: return [b.Left, b.Right];
-            case IndexExpr ix: return [ix.Target, ix.Index];
-            case MemberExpr m: return [m.Target];
-            case CastExpr c: return [c.Operand];
-            case CallExpr c: return c.Args;
-            case ArrayLiteralExpr l: return l.Elements;
-            default: return [];
-        }
-    }
-
-    /// <summary>A node and everything inside it.</summary>
-    private static IEnumerable<Node> Descendants(Node node) => Children(node).SelectMany(Descendants).Prepend(node);
 
     /// <summary>
     /// Pointer accesses in the code: those that are exactly <c>p[v]</c> (Y = v, no ldy needed) and
@@ -306,7 +278,7 @@ public sealed partial class CodeGen
     /// </summary>
     private static (int Plain, int Other) PointerIndexes(Node node, VariableSymbol v)
     {
-        var accesses = Descendants(node).OfType<IndexExpr>().Where(IsPointerIndex).ToList();
+        var accesses = node.Descendants().OfType<IndexExpr>().Where(IsPointerIndex).ToList();
         int plain = accesses.Count(ix => PlainPointerIndex(ix) && ix.Index is NameExpr { Symbol: var s } && s == v);
         return (plain, accesses.Count - plain);
     }
@@ -472,34 +444,19 @@ public sealed partial class CodeGen
         _interruptExit = null;
     }
 
-    // ---------- Tree queries ----------
+    // ---------- Tree queries: over Node.Descendants, so no expression kind is skipped (review code-quality-semantics 14) ----------
 
-    private static bool ContainsCall(Expr e) => e switch
-    {
-        CallExpr call => call.Function is not null,
-        UnaryExpr u => ContainsCall(u.Operand),
-        BinaryExpr b => ContainsCall(b.Left) || ContainsCall(b.Right),
-        IndexExpr ix => ContainsCall(ix.Target) || ContainsCall(ix.Index),
-        MemberExpr m => ContainsCall(m.Target),
-        CastExpr c => ContainsCall(c.Operand),
-        _ => false,
-    };
+    /// <summary>True if <paramref name="e"/> calls a function (a built-in such as <c>addr</c> is not a call).</summary>
+    private static bool ContainsCall(Expr e) => e.Descendants().Any(n => n is CallExpr { Function: not null });
 
     /// <summary>
     /// True if <paramref name="e"/> calls a function or reads <c>volatile</c> memory: the parts whose
     /// order can be seen, which run left to right (spec 5).
     /// </summary>
-    private static bool HasEffect(Expr e) => e.ConstValue is null && e switch
-    {
-        CallExpr call => call.Function is not null,
-        NameExpr { Symbol: { } v } => v.IsVolatile,
-        UnaryExpr u => HasEffect(u.Operand),
-        BinaryExpr b => HasEffect(b.Left) || HasEffect(b.Right),
-        IndexExpr ix => HasEffect(ix.Target) || HasEffect(ix.Index),
-        MemberExpr m => HasEffect(m.Target),
-        CastExpr c => HasEffect(c.Operand),
-        _ => false,
-    };
+    private static bool HasEffect(Expr e) =>
+        // A constant part is computed at compile time; a call's arguments run as part of the call.
+        e.Descendants(enter: n => n is not (Expr { ConstValue: not null } or CallExpr))
+            .Any(n => n is Expr { ConstValue: null } and (CallExpr { Function: not null } or NameExpr { Symbol.IsVolatile: true }));
 
     /// <summary>
     /// Spec 5: when <paramref name="first"/> and a part after it, <paramref name="later"/>, both call a
@@ -522,17 +479,7 @@ public sealed partial class CodeGen
     }
 
     /// <summary>True if <paramref name="e"/> reads any byte of <paramref name="v"/>'s memory.</summary>
-    private static bool ReadsVar(Expr e, VariableSymbol v) => e switch
-    {
-        NameExpr { Symbol: { } s } => Overlap(s, v),
-        UnaryExpr u => ReadsVar(u.Operand, v),
-        BinaryExpr b => ReadsVar(b.Left, v) || ReadsVar(b.Right, v),
-        IndexExpr ix => ReadsVar(ix.Target, v) || ReadsVar(ix.Index, v),
-        MemberExpr m => ReadsVar(m.Target, v),
-        CastExpr c => ReadsVar(c.Operand, v),
-        CallExpr call => call.Args.Any(a => ReadsVar(a, v)),
-        _ => false,
-    };
+    private static bool ReadsVar(Expr e, VariableSymbol v) => e.Descendants().Any(n => n is NameExpr { Symbol: { } s } && Overlap(s, v));
 
     /// <summary>True if two variables share a byte. Different fields of one struct (views) do not.</summary>
     private static bool Overlap(VariableSymbol a, VariableSymbol b)

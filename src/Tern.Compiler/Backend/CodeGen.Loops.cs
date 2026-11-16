@@ -229,21 +229,21 @@ public sealed partial class CodeGen
     private void ChooseCounterRegister(ForStmt f, VariableSymbol c)
     {
         if (c.Type.Size != 1 || Math.Abs(f.StepValue) != 1 || c.AddressTaken
-            || Descendants(f.Body).Any(n => n is ForStmt or WhileStmt) || !KeepsIndexRegistersFree(f.Body)) return;
+            || f.Body.Descendants().Any(n => n is ForStmt or WhileStmt) || !KeepsIndexRegistersFree(f.Body)) return;
         Register reg;
         if (_reserved.Count == 0)
         {
             var (plain, other) = PointerIndexes(f.Body, c);
             reg = plain > 0 && other == 0 ? Register.Y : Register.X;
         }
-        else if (_reserved.Count == 1 && IndexesHeld(f.Body, c, null, null) && !Descendants(f.Body).Any(n => n is MatchStmt || (n is IndexExpr ix && IsPointerIndex(ix))))
+        else if (_reserved.Count == 1 && IndexesHeld(f.Body, c, null, null) && !f.Body.Descendants().Any(n => n is MatchStmt || (n is IndexExpr ix && IsPointerIndex(ix))))
         {
             // M18 F13: beside a register already held (an outer counter in Y), the other one, when
             // every index in the body is this counter or already in a register.
             reg = _reserved.Contains(Register.X) ? Register.Y : Register.X;
         }
         else return;
-        if (_fn.ReturnRegister is { } ret && ret.Uses(reg) && Descendants(f.Body).Any(n => n is ReturnStmt { Value: not null })) return;
+        if (_fn.ReturnRegister is { } ret && ret.Uses(reg) && f.Body.Descendants().Any(n => n is ReturnStmt { Value: not null })) return;
         c.Register = reg;
         _fn.FrameVariables.Remove(c);
     }
@@ -256,7 +256,7 @@ public sealed partial class CodeGen
     private bool IndexesHeld(Node body, VariableSymbol c, VariableSymbol? outer, Register? outerReg)
     {
         Register? RegisterOf(Expr e) => e is NameExpr { Symbol: { } s } ? s == outer ? outerReg : s.Register : null;
-        foreach (var ix in Descendants(body).OfType<IndexExpr>())
+        foreach (var ix in body.Descendants().OfType<IndexExpr>())
         {
             if (ix.Index.ConstValue is not null) continue;
             if (IsPointerIndex(ix))
@@ -282,12 +282,12 @@ public sealed partial class CodeGen
     private void ChooseOuterCounterRegister(ForStmt f, VariableSymbol c)
     {
         if (c.Type.Size != 1 || Math.Abs(f.StepValue) != 1 || c.AddressTaken || _reserved.Count > 0 || f.VariableStep) return;
-        var nodes = Descendants(f.Body).ToList();
+        var nodes = f.Body.Descendants().ToList();
         var inner = nodes.OfType<ForStmt>().ToList();
         if (inner.Count == 0 || nodes.Any(n => n is WhileStmt or ReturnStmt or AsmStmt or CallExpr { Function: not null })
-            || inner.Any(l => Descendants(l.Body).Any(n => n is ForStmt or WhileStmt))) return;
+            || inner.Any(l => l.Body.Descendants().Any(n => n is ForStmt or WhileStmt))) return;
         var parents = new Dictionary<Node, Node>();
-        foreach (var n in nodes) foreach (var child in Children(n)) parents[child] = n;
+        foreach (var n in nodes) foreach (var child in n.Children) parents[child] = n;
         if (nodes.OfType<NameExpr>().Any(n => n.Symbol == c && !Served(n, parents.GetValueOrDefault(n)))) return;
 
         bool pointersNeedY = nodes.OfType<IndexExpr>().Any(ix => IsPointerIndex(ix) && !(PlainPointerIndex(ix) && ix.Index is NameExpr { Symbol: var s } && s == c));
@@ -316,7 +316,7 @@ public sealed partial class CodeGen
     /// </summary>
     private VariableSymbol? HoldInRegister(Node body, Expr? condition, VariableSymbol? counter)
     {
-        var nodes = Descendants(body).Concat(condition is null ? [] : Descendants(condition)).ToList();
+        var nodes = body.Descendants().Concat(condition is null ? [] : condition.Descendants()).ToList();
         if (nodes.Skip(1).Any(n => n is ForStmt or WhileStmt or ReturnStmt or CallExpr { Function: not null } or AsmStmt)) return null;
         var heldCounter = counter?.Register is not null ? counter : null;
         if (heldCounter is null ? _reserved.Count > 0 : _reserved.Count != 1 || !_reserved.Contains(heldCounter.Register!.Value)) return null;
@@ -330,7 +330,7 @@ public sealed partial class CodeGen
 
         // Each use of a candidate, with the node it is part of.
         var parents = new Dictionary<Node, Node>();
-        foreach (var n in nodes) foreach (var c in Children(n)) parents[c] = n;
+        foreach (var n in nodes) foreach (var c in n.Children) parents[c] = n;
         // Per candidate: uses where the register saves a load or an inc (an index, v += 1 or 2), and all uses.
         var uses = new Dictionary<VariableSymbol, (int Strong, int All)>();
         var bad = new HashSet<VariableSymbol>();

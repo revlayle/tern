@@ -75,16 +75,7 @@ public sealed partial class CodeGen
     }
 
     /// <summary>True if evaluating e reads volatile memory.</summary>
-    private static bool ReadsVolatile(Expr e) => e switch
-    {
-        NameExpr { Symbol: VariableSymbol v } => v.IsVolatile,
-        UnaryExpr u => ReadsVolatile(u.Operand),
-        BinaryExpr b => ReadsVolatile(b.Left) || ReadsVolatile(b.Right),
-        IndexExpr ix => ReadsVolatile(ix.Target) || ReadsVolatile(ix.Index),
-        MemberExpr m => ReadsVolatile(m.Target),
-        CastExpr c => ReadsVolatile(c.Operand),
-        _ => false,
-    };
+    private static bool ReadsVolatile(Expr e) => e.Descendants().Any(n => n is NameExpr { Symbol: VariableSymbol { IsVolatile: true } });
 
     /// <summary>Loading this index into X or Y does not change A.</summary>
     private bool IndexIsCheap(Expr index) =>

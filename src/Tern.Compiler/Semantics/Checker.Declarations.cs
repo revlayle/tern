@@ -829,7 +829,7 @@ public sealed partial class Checker
         var (otherModule, name) = function is not null ? (function.Module, function.Name) : (variable!.Module, variable.QualifiedName);
         if (function is not null ? NotPresentWith(function, target.OverlayArea, target.OverlayUnit) : NotPresentWith(variable!, target.OverlayArea, target.OverlayUnit))
             throw new CompileError(init.Pos,
-                $"'{name}' is in {otherModule!.Name}, which is {NeverTogether(otherModule, target.Module)} as {target.Module!.Name}. They are never loaded together, so the address would point at the wrong memory. " +
+                $"'{name}' is in {otherModule!.Name}, which is {NeverTogether(otherModule, target.Module!)} as {target.Module!.Name}. They are never loaded together, so the address would point at the wrong memory. " +
                 "Take the address in resident code, or put one of them in another area");
         var (fillVariable, fillOffset) = (variable?.AliasOf ?? variable, (int)offset + (variable?.AliasOffset ?? 0));
         if (part == AddressPart.Word && highAt is { } h && h != at + 1)
