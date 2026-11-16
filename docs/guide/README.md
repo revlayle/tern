@@ -1,5 +1,7 @@
 # Tern user guide
 
+<img src="../logo.svg" alt="Tern logo: a bird made of five purple triangles" width="120">
+
 A guide to the Tern language and compiler as built for the first release (through milestone M27): the Commodore 64, the Atari 8-bit, the Apple II and the NES. The full rules are in [`docs/spec-v0.md`](../spec-v0.md); this guide shows how to use them. Every example here compiles with the current compiler.
 
 ## What Tern is
