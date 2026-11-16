@@ -12,7 +12,7 @@ The work is in the roadmap's four steps, committed after each. A session that co
 |---|---|
 | 1. Ranked bugs 1-15, demonstration programs run again | done |
 | 2. Other correctness findings marked fixed | done |
-| 3. Rows marked "partly" | not started |
+| 3. Rows marked "partly" | done |
 | 4. Construction searches (R4, R5) | not started |
 
 ## Step 1: the ranked bugs
@@ -74,6 +74,63 @@ Demonstration programs run again where the area file has one; otherwise the fix'
 | tests 3 | fixed | `BusLog` counts the CPU's reads and writes; `VolatileAccessTests` covers 16-bit volatile targets. |
 | tests 8 | fixed | `Run.CompareWithPlain` runs a program without the optimizer and compares. |
 
+## Step 3: the rows marked "partly", and what the tables hand on
+
+What is left of each finding and who has it, from the tables in `docs/status.md`. The done part was checked only where a row says so. "No owner" means no milestone's scope in the roadmap and no decision covers the rest; these are collected under "Must fix" below, as items that need an owner or a decision, not as bugs.
+
+### Partly fixed
+
+| Finding | Done | Left | Who has it |
+|---|---|---|---|
+| syntax 7 | `TernCompiler.Check` returns its errors and never throws a `CompileError` (R5). | `CompileError` still carries the other errors and the warnings (`All`, `WithWarnings`) when `Compile` throws it. | R6 (messages as data: "no exception changed after it is thrown"). |
+| syntax 11 | The "(called from " text test is gone (syntax 2). | `WithNote` still places the note by the first `". "` of the message; `ReadOnly` as text; `CountsUp` builds an error to take its text (`Interpreter.cs:233`). | R6. The finding's last part, the interpreter's unchecked casts and `!` with no statement of what the checker guarantees, is named in no table: no owner. |
+| syntax 13 | An error at the declaration of a generator named like a mnemonic (run in step 2). | The mnemonic set is the enum's, for every variant; a mnemonic the target lacks would get "has no ... mode". | M29, where a second variant first exists. |
+| syntax 19 | The three messages (run in step 2). | Any other `name {` at the start of a statement. | R6. |
+| tools 1 | The stand-in registry (R4). | The run model as one description per platform. | R6. |
+| tools 7 | `CheckResult.Diagnostics` without a `catch` (R5). | The JSON shapes as records; `Diagnostic` with an end, a code and a severity; the suggestion cut out by `FixVerbs`; two copies of the conversion. | R6. |
+| tools 18 | The four output bugs: "(1 byte)", `file::`, the empty line table, the MLI's return address across `$01FF` (their tests failed before; `--dump '$C000:1'` run here). | Bare opcodes in `Runner`; `InvalidOperationException` for a binary in `Cli`; `seen.At` by address in `IndexChecker`; types in the wrong files; an unknown mapper run as NROM; `SP = $FD` at construction. | No owner. |
+| tests 6 | Every `Cpu6502` in the tests takes the platform's variant (R4). | The default target in the helpers, a shape-test trait, named scratch addresses. | R6. |
+| tests 7 | One `Listing` reader and `Count` (R1). | A shared `TempFolder` and `Cli.Tern`. | R6. |
+| tests 10 | Conversions of constants (`as`, `.lo`/`.hi`) have tests (`ConstantExpressionTests`, R2). | A precedence theory (spec 3.6) and the runtime conversion table (3.5): no `PrecedenceTests` or `ConversionTests` file exists. | No owner. |
+| tests 12 | `Run.Program(standIns: true)` runs with the platform's `Machine`; the traps that copied a stand-in are gone (R4). | The three fake ROMs (`FakeKernal`, `FakeCio`, `FakeMli`); the real-emulator runs. | Question 174 in `docs/status.md`, open for the spec session. |
+
+### Fixed, with a part handed on
+
+| Finding | Left | Who has it |
+|---|---|---|
+| backend 7 | The unconditional `cld` in an `interrupt fn` on the 2A03. | Left by decision 2026-11-16, until M29. |
+| backend 7 | The unused `platform` parameter of `Allocator.Allocate`. | No owner (one line). |
+| tools 4 | A cycle count per variant. | M29. |
+| syntax 1 | The platform branches in the builder; the retry's `catch` on any `CompileError`. | R6 (with syntax 6 and backend 15). |
+| syntax 8 | `MatchArm`, `MatchPattern` and `FieldValue` are not nodes; parameters, fields and asm lines have no span. | M28, which is the user of the spans; not written in a table. |
+| syntax 20 | The loosened statement end after an error lasts to the end of the file, not one statement. | Depends on syntax 9, which has no owner. |
+| semantics 5 | A function no program reaches that calls itself is not reported. | No owner; no wrong code comes of it, since such a function is not compiled. |
+| semantics 12 | The fallback "Expected X, found Y. Use a X here" for types with no conversion. | R6. |
+| tests 8 | Programs with `addr(` or `noinit` and pointer variables are not compared. | By design: their addresses differ between the two builds. |
+
+### Handed to R5 by the R2 and R3 tables, and taken by no milestone
+
+The tables of R2 and R3 mark these "not fixed: R5". R5's roadmap scope does not list them, R5's table has no row for them, and R6's scope (platforms and messages as data, the rest of test theme 7) does not cover them. All are construction findings; none describes wrong behavior. They were not read again here.
+
+| Finding | What it is |
+|---|---|
+| backend 11 | Backend state kept in checker symbols and the AST (`Ast.cs` depends on `Semantics`). |
+| backend 16 | Small leftovers. |
+| backend 17 | Unnamed limits, repeated work. |
+| semantics 21 | The call graph built as a side effect of checking, in three files. |
+| semantics 22 | Small things. |
+| syntax 9 | Statement ends decided in the lexer and patched in the parser (syntax 15, its one demonstrated bug, is fixed). |
+| syntax 22 | Small things. |
+| tests 13 | `Run.Program` does everything in its constructor ("R5 or R6" in R1's table; with tools 1 it fits R6's run model, but R6's scope does not name it). |
+
 ## Must fix
 
-None from steps 1 and 2.
+No finding that R1-R5 marked fixed is not fixed or broken again: steps 1 to 3 found no bug.
+
+What is open is ownership (step 3): findings and parts the tables handed on that no milestone or decision has. Each needs one of: a line in R6's scope, a later milestone, or a decision to leave it, recorded in `docs/decisions.md`. Most useful first:
+
+1. **tests 10, the rest:** no precedence tests (spec 3.6) and no runtime conversion table (3.5). R3 and R5 changed the parser (the nesting count, the mode scopes, `ParseProgram`) with no test of this kind to guard it, and R6 does not add one. A coverage item for `r7-fixes`, small.
+2. **tools 18, the rest:** an unknown mapper run as NROM without a word and `Cli` reading any `InvalidOperationException` as "a binary without main" are the two with a user-visible effect; the other four are tidying.
+3. **syntax 9** (with the part of syntax 20 that waits for it): statement ends in the lexer. A design change in the lexer and parser; a decision to leave it until M28 needs it is reasonable.
+4. **backend 11, semantics 21, tests 13:** structure findings R5 did not take.
+5. **backend 16 and 17, semantics 22, syntax 22**, the unused `platform` parameter of `Allocator.Allocate` (backend 7), the interpreter's unstated guarantees (syntax 11), and the unreached self-recursive function (semantics 5): small things.
