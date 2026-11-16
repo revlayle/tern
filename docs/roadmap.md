@@ -667,9 +667,9 @@ Done when: an example scrolls a background and moves sprites in a NES emulator (
 
 ## Before the first release: fixes and cleanup
 
-Decisions 2026-11-15: the code-quality review (`docs/reviews/code-quality.md`, with one file per area) was done so the release ships without its known bugs and with a well-built codebase. Its 93 findings and five spec questions are split into six milestones, each with its own branch, review and merge, so a session reads only the review files of its area. Order: the tests that find bugs first; then the bugs, each with a test that fails before its fix; then the construction cleanup, which those tests guard. The cleanup changes no behavior: no benchmark moves and no `tern run` output changes, except where a cleanup milestone below says so.
+Decisions 2026-11-15: the code-quality review (`docs/reviews/code-quality.md`, with one file per area) was done so the release ships without its known bugs and with a well-built codebase. Its 93 findings and five spec questions are split into six milestones (R1-R6), each with its own branch, review and merge, so a session reads only the review files of its area. Order: the tests that find bugs first; then the bugs, each with a test that fails before its fix; then the construction cleanup, which those tests guard. The cleanup changes no behavior: no benchmark moves and no `tern run` output changes, except where a cleanup milestone below says so.
 
-Each of R1-R6 keeps a table in `docs/status.md`, one row per review finding it handles: the area and number (`backend 3`), the commit, the test that guards it, or "not fixed" with the reason. R7 reviews from that table. Each milestone also gets the usual review before its merge.
+Each of R1-R6 keeps a table in `docs/status.md`, one row per review finding it handles: the area and number (`backend 3`), the commit, the test that guards it, or "not fixed" with the reason. R7 reviews from the R1-R5 tables, and R6's review from its own. Each milestone also gets the usual review before its merge.
 
 ### R1: Tests that find bugs where features meet
 
@@ -723,7 +723,26 @@ Review themes 4 and 6.
 
 Done when: methods follow the method-length convention (`CLAUDE.md`: about 100 lines, over 300 only for a single `switch` or lookup, never over 500), with each one longer than 100 lines listed in `docs/status.md` and in the session's report to the developer, the check-only entry has tests, and the benchmarks and `SkillTests` are unchanged.
 
+### R7: Follow-up review of the fixes
+
+Decision 2026-11-15, moved before R6 on 2026-11-16. After R5 is merged and before R6 starts, one review session, on Claude Fable (the developer picks the model), checks that the code-quality review's findings handled by R1-R5 were fixed. Its scope is smaller than the first review's, for cost: it checks the earlier findings, it does not look for new ones. Started with `/review R7`, on `main`.
+
+- **Input:** the five area files and the summary (`docs/reviews/code-quality*.md`), the R1-R5 finding tables in `docs/status.md`, and the R1-R5 review files. The code read is each fix's diff and the code its finding names, not the whole codebase.
+- **Each of the 93 findings gets a verdict:** fixed, partly fixed, not fixed, left by a decision (with the decision's date), or left for R6. Not fixed includes a finding the table marks fixed when the fix does not cover the case the finding describes. A finding, or the part of one, that R6 owns (themes 3 and 5, the rest of theme 7, and what the R1-R5 tables leave for R6) is marked "left for R6" without being read; R6's own review checks it.
+- **Order, most valuable first**, so that a session cut short has done the most important part:
+  1. The ranked bugs (1-15): each demonstration program from the area file is compiled and run again on `main` and must now behave as the finding says it should.
+  2. The other correctness findings the tables mark fixed, demonstration programs run again where the area file has one.
+  3. The rows marked "partly": what is left is named in the table and given to R6, a later milestone or a decision.
+  4. The construction themes of R4 and R5, checked by searching for what should be gone (a second list of instruction effects, a tree walk with its own node switch, methods over 300 lines not listed in `docs/status.md`), not by reading every file.
+- **Committed after each step**, with the verdicts so far in the output file, so a session that stops early loses nothing and the next session (on any model) continues from the file.
+- **Out of scope:** code no fix touched, new kinds of finding, style, R6's findings, and what the R1-R5 reviews already checked (the suite passing, the spec changes against the spec). A bug found inside a fix's own diff is reported.
+- **Output:** `docs/reviews/code-quality-followup.md`: a table of the 93 verdicts, then must-fix items (findings not fixed or broken again with no decision to leave them), most serious first.
+
+Done when: every finding has a verdict, and each must-fix item is fixed (by a coding session on a branch `r7-fixes`, reviewed as usual, before or after R6) or the developer accepts it for after the release, recorded in `docs/decisions.md`.
+
 ### R6: Platforms as data, messages as data
+
+After R7 (decision 2026-11-16). Its review also checks the code-quality findings it handles, as R7 does for R1-R5: a verdict per finding, the demonstration programs run again.
 
 Review themes 3 and 5, and the rest of theme 7.
 
@@ -732,19 +751,6 @@ Review themes 3 and 5, and the rest of theme 7.
 - Tests check error positions and whole messages, not fragments; the feature suite runs on every platform.
 
 Done when: adding a platform needs no change outside its description and its library, the feature suite passes on all four platforms, and the benchmarks and `SkillTests` are unchanged.
-
-### R7: Follow-up review of the fixes
-
-Decision 2026-11-15. After R6 is merged, one review session, on Claude Fable (the developer picks the model), checks that the code-quality review's findings were fixed. Its scope is smaller than the first review's, for cost: it checks the earlier findings, it does not look for new ones. Started with `/review R7`, on `main`.
-
-- **Input:** the five area files and the summary (`docs/reviews/code-quality*.md`), the finding table in `docs/status.md`, and the R1-R6 review files. The code read is each fix's diff and the code its finding names, not the whole codebase.
-- **Each of the 93 findings gets a verdict:** fixed, partly fixed, not fixed, or left by a decision (with the decision's date). Not fixed includes a finding the table marks fixed when the fix does not cover the case the finding describes.
-- **The demonstrated findings:** each finding's demonstration program from the area file is compiled and run again on `main` and must now behave as the finding says it should. This is the main check, and it is cheap: the programs are in the review files.
-- **The construction themes:** R4-R6's "done when" items are checked by searching for what should be gone (a second list of instruction effects, a tree walk with its own node switch, a test on a platform's name, control flow on error text, methods over 300 lines not listed in `docs/status.md`), not by reading every file.
-- **Out of scope:** code no fix touched, new kinds of finding, style, and what the R1-R6 reviews already checked (the suite passing, the five spec changes against the spec). A bug found inside a fix's own diff is reported.
-- **Output:** `docs/reviews/code-quality-followup.md`: a table of the 93 verdicts, then must-fix items (findings not fixed or broken again with no decision to leave them), most serious first.
-
-Done when: every finding has a verdict, and each must-fix item is fixed (by a coding session on a branch `r7-fixes`, reviewed as usual) or the developer accepts it for after the release, recorded in `docs/decisions.md`.
 
 ## First release (after R7)
 
