@@ -22,7 +22,7 @@ public sealed partial class Checker
         // Copied into the caller, an rts or rti would end the caller too.
         if (decl is { IsAsm: true, IsInline: true })
             foreach (var ins in ((AsmStmt)decl.Body.Statements[0]).Lines.OfType<AsmInstruction>())
-                if (ins.Mnemonic is Tern.Cpu.Mnemonic.Rts or Tern.Cpu.Mnemonic.Rti)
+                if (Tern.Cpu.Instructions.Returns(ins.Mnemonic))
                     throw new CompileError(ins.Pos,
                         $"'{ins.Mnemonic.ToString().ToLowerInvariant()}' in an inline asm fn would end the function that calls it, since the code is copied there. Remove it: the code simply runs on after the copy");
 

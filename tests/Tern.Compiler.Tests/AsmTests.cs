@@ -142,6 +142,24 @@ public class AsmTests
         Assert.Equal(0, Listing.Count(Listing.Instructions(r, "ends_with_jmp"), "rts"));
     }
 
+    // Review R4, suggestion 2: a body that ends in an instruction that does not fall through (the table's
+    // FallsThrough) gets no rts after it. The hand list left out rti; the optimizer removed that rts anyway.
+    [Fact]
+    public void A_function_ending_in_rti_or_an_indirect_jmp_gets_no_rts()
+    {
+        var result = TernCompiler.Compile("""
+            var vec: u16
+            fn ends_with_rti() { asm { rti } }
+            fn ends_with_jmp() { asm { jmp (vec) } }
+            fn main() {
+                ends_with_rti()
+                ends_with_jmp()
+            }
+            """);
+        Assert.Equal("rti", Listing.Code(result, "ends_with_rti"));
+        Assert.Equal("jmp (vec)", Listing.Code(result, "ends_with_jmp"));
+    }
+
     [Fact]
     public void Constants_chars_and_addresses_as_operands()
     {

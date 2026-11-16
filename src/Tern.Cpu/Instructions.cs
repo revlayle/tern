@@ -210,6 +210,15 @@ public static class Instructions
     /// </summary>
     public static bool FallsThrough(Mnemonic m) => Of(m).Flow is not (Flow.Jump or Flow.Return or Flow.ReturnFromInterrupt);
 
+    /// <summary>True if <paramref name="m"/> returns from the code it is in (<c>rts</c>, <c>rti</c>).</summary>
+    public static bool Returns(Mnemonic m) => Of(m).Flow is Flow.Return or Flow.ReturnFromInterrupt;
+
+    /// <summary>
+    /// True if <paramref name="m"/> runs code the analysis does not see (<c>jsr</c>, <c>brk</c>), which may
+    /// change any register, flag or memory.
+    /// </summary>
+    public static bool ChangesAnything(Mnemonic m) => Of(m).Flow is Flow.Call or Flow.Break;
+
     public static string Describe(CpuState s) =>
         s == CpuState.None ? "nothing"
         : string.Join(" ", Enum.GetValues<CpuState>().Where(f => f is not (CpuState.None or CpuState.Flags or CpuState.Registers) && s.HasFlag(f)));

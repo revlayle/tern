@@ -626,7 +626,7 @@ public static partial class Optimizer
     }
 
     /// <summary>A call or <c>brk</c>: may change any register and any ordinary memory.</summary>
-    private static bool ChangesAnything(Instr i) => Instructions.Of(i.Mnemonic).Flow is Flow.Call or Flow.Break;
+    private static bool ChangesAnything(Instr i) => Instructions.ChangesAnything(i.Mnemonic);
 
     /// <summary>
     /// A run of <c>lda #c</c> / <c>sta v</c> pairs into different bytes of ordinary memory stores each

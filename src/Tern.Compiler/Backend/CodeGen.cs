@@ -157,7 +157,7 @@ public sealed partial class CodeGen
         return writes.HasFlag(CpuState.A) && writes.HasFlag(CpuState.N) && writes.HasFlag(CpuState.Z);
     }
 
-    private bool EndsWithJump() => _out.Count > 0 && _out[^1] is Instr { Mnemonic: Rts or Mnemonic.Jmp };
+    private bool EndsWithJump() => _out.Count > 0 && _out[^1] is Instr i && !Instructions.FallsThrough(i.Mnemonic);
 
     private void Source(Node node) => Source(node.Pos);
 
@@ -195,7 +195,7 @@ public sealed partial class CodeGen
         {
             var block = (AsmStmt)f.Declaration.Body.Statements[0];
             GenAsm(block);
-            if (block.Lines.LastOrDefault() is not AsmInstruction { Mnemonic: Rts or Rti or Mnemonic.Jmp }) Emit(Rts);
+            if (block.Lines.LastOrDefault() is not AsmInstruction last || Instructions.FallsThrough(last.Mnemonic)) Emit(Rts);
             return;
         }
 
@@ -234,7 +234,7 @@ public sealed partial class CodeGen
     private bool AHolds(Expr e) =>
         _aParameter is var (p, from) && e is NameExpr { Symbol: VariableSymbol v } && v == p
         && _out.Skip(from).All(item => item is Comment or SourceLine
-            || (item is Instr { AsmPos: null } i && i.Mnemonic is not (Jsr or Brk)
+            || (item is Instr { AsmPos: null } i && !Instructions.ChangesAnything(i.Mnemonic)
                 && (Instructions.Effects(i.Mnemonic, i.Mode).Writes & (p.PassedIn == Register.AX ? CpuState.A | CpuState.X : CpuState.A)) == 0
                 && !(MemoryUse.Of(i) is { Writes: true, Target: MemoryTarget.Byte or MemoryTarget.Element, Operand.Variable: var w } && w.Storage == p)));
 
@@ -431,8 +431,10 @@ public sealed partial class CodeGen
         if (x) { save.Add(new Instr(Txa)); save.Add(new Instr(Pha)); }
         if (y) { save.Add(new Instr(Tya)); save.Add(new Instr(Pha)); }
         if (save.Count > 0) save.Insert(0, new Comment($"save {string.Join(", ", new[] { a ? "A" : null, x ? "X" : null, y ? "Y" : null }.OfType<string>())}"));
-        // Main may be in decimal mode when the interrupt arrives, and only adc and sbc care (spec 6.3).
-        if (_out.Skip(start).OfType<Instr>().Any(i => i.Mnemonic is Mnemonic.Adc or Mnemonic.Sbc or Mnemonic.Jsr))
+        // Main may be in decimal mode when the interrupt arrives, and only what reads D cares (adc and sbc,
+        // spec 6.3), or a routine it calls.
+        if (_out.Skip(start).OfType<Instr>().Any(i => Instructions.Effects(i.Mnemonic, i.Mode).Reads.HasFlag(CpuState.D)
+                || Instructions.Of(i.Mnemonic).Flow == Flow.Call))
             save.Insert(0, new Instr(Mnemonic.Cld));
         _out.InsertRange(start, save);
 
