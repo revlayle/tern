@@ -23,10 +23,8 @@ public sealed partial class Parser
 
     private Expr ParseHeaderExpr()
     {
-        bool saved = _inHeader;
-        _inHeader = true;
-        try { return ParseExpr(); }
-        finally { _inHeader = saved; }
+        using var mode = new Mode<bool>(ref _inHeader, true);
+        return ParseExpr();
     }
 
     private void SkipNewlines()
@@ -41,28 +39,23 @@ public sealed partial class Parser
     private StructLiteralExpr ParseStructLiteral(SourcePos pos, string name)
     {
         var open = Expect(TokenKind.LBrace, "'{'");
-        bool saved = _inHeader;
-        _inHeader = false;
-        try
+        using var mode = new Mode<bool>(ref _inHeader, false);
+        var fields = new List<FieldValue>();
+        SkipNewlines();
+        while (!Accept(TokenKind.RBrace))
         {
-            var fields = new List<FieldValue>();
+            if (At(TokenKind.Eof)) throw new CompileError(open.Pos, $"The struct literal '{name} {{' is not closed with '}}'. Add '}}' after its last field");
+            var field = Expect(TokenKind.Identifier, "field name");
+            if (At(TokenKind.Colon))
+                throw new CompileError(Current.Pos,
+                    $"A struct literal gives a field its value with '=', since ':' means \"has type\". Write '{field.Text} = ...'");
+            Expect(TokenKind.Eq, $"'=' and the value of '{field.Text}'");
+            fields.Add(new FieldValue(field.Pos, field.Text, ParseExpr()));
+            if (!Accept(TokenKind.Comma) && !At(TokenKind.Newline) && !At(TokenKind.RBrace))
+                throw new CompileError(Current.Pos, $"Expected ',' or '}}' after the value of '{field.Text}', found {Describe(Current)}. Separate the fields with ',' or a line break");
             SkipNewlines();
-            while (!Accept(TokenKind.RBrace))
-            {
-                if (At(TokenKind.Eof)) throw new CompileError(open.Pos, $"The struct literal '{name} {{' is not closed with '}}'. Add '}}' after its last field");
-                var field = Expect(TokenKind.Identifier, "field name");
-                if (At(TokenKind.Colon))
-                    throw new CompileError(Current.Pos,
-                        $"A struct literal gives a field its value with '=', since ':' means \"has type\". Write '{field.Text} = ...'");
-                Expect(TokenKind.Eq, $"'=' and the value of '{field.Text}'");
-                fields.Add(new FieldValue(field.Pos, field.Text, ParseExpr()));
-                if (!Accept(TokenKind.Comma) && !At(TokenKind.Newline) && !At(TokenKind.RBrace))
-                    throw new CompileError(Current.Pos, $"Expected ',' or '}}' after the value of '{field.Text}', found {Describe(Current)}. Separate the fields with ',' or a line break");
-                SkipNewlines();
-            }
-            return new StructLiteralExpr(pos, name, fields);
         }
-        finally { _inHeader = saved; }
+        return new StructLiteralExpr(pos, name, fields);
     }
 
     private Expr ParseOr() => ParseLeftAssoc(ParseAnd, TokenKind.PipePipe);

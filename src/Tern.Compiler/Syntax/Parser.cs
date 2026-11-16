@@ -51,6 +51,27 @@ public sealed partial class Parser
         _depth++;
     }
 
+    // ---------- Modes ----------
+
+    /// <summary>
+    /// Sets a mode of the parse (<see cref="_inAsm"/>, <see cref="_inHeader"/>, ...) until the end of a
+    /// <c>using</c> scope, and then puts back the value it had, also when the scope ends by an error.
+    /// </summary>
+    private ref struct Mode<T>
+    {
+        private readonly ref T _field;
+        private readonly T _saved;
+
+        public Mode(ref T field, T value)
+        {
+            _field = ref field;
+            _saved = field;
+            field = value;
+        }
+
+        public readonly void Dispose() => _field = _saved;
+    }
+
     // ---------- Going on after an error (spec 13) ----------
 
     /// <summary>Statements and declarations dropped for an error, also one that was not reported.</summary>
@@ -68,7 +89,6 @@ public sealed partial class Parser
     private void Fail(Exception e, int from)
     {
         _failures++;
-        _inAsm = false;
         if (At(TokenKind.Eof)) _unclosedReported = true;
         for (int k = from; k <= Math.Min(_pos, _tokens.Count - 1); k++)
             if (_tokens[k].Kind == TokenKind.Error) return;

@@ -608,20 +608,16 @@ public sealed partial class Parser
     private FnDecl ParseConstFn()
     {
         var start = Expect(TokenKind.Const, "'const'");
-        _inConstFn = true;
-        try
-        {
-            var fn = Current.Pos;
-            var f = ParseFn(first: start);
-            if (f.Address is not null)
-                throw new CompileError(fn, "A const fn runs at compile time and has no address. Remove '@' and the address, and give it a body");
-            // A generator is called from asm lines, where a mnemonic is read as the instruction (review code-quality-syntax 13).
-            if (f.ReturnType is null && Enum.GetNames<Mnemonic>().Contains(f.Name, StringComparer.OrdinalIgnoreCase))
-                throw new CompileError(fn, $"'{f.Name}' is a 6502 instruction, so an asm line cannot call a generator of that name. Use another name");
-            f.IsConst = true;
-            return f;
-        }
-        finally { _inConstFn = false; }
+        using var mode = new Mode<bool>(ref _inConstFn, true);
+        var fn = Current.Pos;
+        var f = ParseFn(first: start);
+        if (f.Address is not null)
+            throw new CompileError(fn, "A const fn runs at compile time and has no address. Remove '@' and the address, and give it a body");
+        // A generator is called from asm lines, where a mnemonic is read as the instruction (review code-quality-syntax 13).
+        if (f.ReturnType is null && Enum.GetNames<Mnemonic>().Contains(f.Name, StringComparer.OrdinalIgnoreCase))
+            throw new CompileError(fn, $"'{f.Name}' is a 6502 instruction, so an asm line cannot call a generator of that name. Use another name");
+        f.IsConst = true;
+        return f;
     }
 
     /// <param name="first">The declaration's first word, when <c>const</c> comes before <c>fn</c>.</param>
