@@ -321,6 +321,10 @@ public sealed partial class Checker
                 case MatchStmt m:
                     foreach (var arm in m.Arms) Check(arm.Body, warn);
                     break;
+                case VarDecl or ConstDecl or AssignStmt or ExprStmt or ReturnStmt or BreakStmt or ContinueStmt
+                    or AsmStmt or EmitStmt or AssertStmt or ErrorStmt:
+                    break;
+                default: throw new InvalidOperationException($"No inner blocks known for a {s.GetType().Name}");
             }
         }
 

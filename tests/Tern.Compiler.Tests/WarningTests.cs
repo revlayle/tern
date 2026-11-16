@@ -500,6 +500,52 @@ public sealed class WarningTests : IDisposable
             """));
     }
 
+    /// <summary>
+    /// Every kind of statement inside a block that the unreachable-statement walk enters: the walk throws on a
+    /// kind it does not know (review code-quality-semantics 14, R7), so a new one fails here until it is listed.
+    /// </summary>
+    [Fact]
+    public void The_unreachable_walk_knows_every_kind_of_statement()
+    {
+        const string source = """
+            var n: u8
+            const fn gen(k: int) {
+                if k > 0 {
+                    assert k < 10, "too many"
+                    emit { nop }
+                }
+            }
+            fn main() {
+                if n == 0 {
+                    var a: u8 = 1
+                    const B = 2
+                    n = a + B
+                } else if n == 1 {
+                    asm { gen(1) }
+                } else {
+                    while n < 9 {
+                        n += 1
+                        if n == 5 { continue }
+                        if n == 7 { break }
+                    }
+                }
+                for i in 0..3 {
+                    match i {
+                        0 => { side() }
+                        _ => { return }
+                    }
+                }
+            }
+            fn side() { n = 3 }
+            """;
+        var check = TernCompiler.Check(source, sourcePath: MainPath);
+        Assert.Empty(check.All);
+        var fns = check.Modules[0].Syntax.Functions.Concat(check.Modules[0].Syntax.ConstFns);
+        var used = fns.SelectMany(f => f.Body.Descendants()).OfType<Stmt>().Select(s => s.GetType()).ToHashSet();
+        var kinds = typeof(Stmt).Assembly.GetTypes().Where(t => t.IsSubclassOf(typeof(Stmt)) && !t.IsAbstract && t != typeof(ErrorStmt));
+        Assert.Empty(kinds.Except(used).Select(t => t.Name));
+    }
+
     // ---------- The report's functions with memory reachable from two roots ----------
 
     [Fact]
