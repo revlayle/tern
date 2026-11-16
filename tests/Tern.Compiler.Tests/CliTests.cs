@@ -99,6 +99,35 @@ public sealed class CliTests : IDisposable
         Assert.Contains("error: A binary without main cannot be run on its own. Measure the function in a program that loads and calls it", output);
     }
 
+    /// <summary>Throws on its first write, then works: a bug inside a command that the last catch must report.</summary>
+    private sealed class FailsOnce : StringWriter
+    {
+        private bool _failed;
+        public override void Write(char value) { Fail(); base.Write(value); }
+        public override void Write(string? value) { Fail(); base.Write(value); }
+        public override void WriteLine(string? value) { Fail(); base.WriteLine(value); }
+        private void Fail()
+        {
+            if (_failed) return;
+            _failed = true;
+            throw new InvalidOperationException("broken writer");
+        }
+    }
+
+    // Review R3, suggestion 3: an exception nothing expected is a message and exit code 4, as JSON with --json.
+    [Fact]
+    public void An_internal_error_is_a_message_and_exit_code_4()
+    {
+        string a = Write("a.tern");
+        var (output, error) = (new FailsOnce(), new StringWriter());
+        Assert.Equal(Cli.InternalError, Cli.Run(["--target", "c64", a], output, error));
+        Assert.Equal("Internal error (InvalidOperationException): broken writer. Report it with the program that caused it", error.ToString().Trim());
+
+        var json = new FailsOnce();
+        Assert.Equal(4, Cli.Run(["--target", "c64", "--json", a], json, new StringWriter()));
+        Assert.StartsWith("Internal error (InvalidOperationException)", OnlyDiagnostic(json.ToString()).GetProperty("message").GetString());
+    }
+
     // ---------- Outputs (tools 3) ----------
 
     [Fact]

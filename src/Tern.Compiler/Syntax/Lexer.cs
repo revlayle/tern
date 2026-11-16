@@ -348,7 +348,7 @@ public static class Lexer
         }
 
         CompileError NotAscii(int at) =>
-            new(Pos(at), $"'{source[at]}' cannot be in a name: names use A-Z, a-z, 0-9 and '_'. Write the name with these");
+            new(Pos(at), $"'{source[at]}' (U+{(int)source[at]:X4}) cannot be in a name: names use A-Z, a-z, 0-9 and '_'. Write the name with these");
     }
 
     /// <summary>Reads a quoted char or string literal starting at the quote, and decodes its escapes.</summary>
