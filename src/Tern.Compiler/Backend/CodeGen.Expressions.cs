@@ -593,22 +593,9 @@ public sealed partial class CodeGen
             return;
         }
 
-        // Widening a one-byte value.
         if (e.Type.Size == 1)
         {
-            GenA(e);
-            Op(Sta, d.Lo);
-            if (e.Type.IsSigned)
-            {
-                var positive = NewLabel("sx");
-                Op(Ora, Byte(0x7F));
-                Branch(Bmi, positive);
-                Op(Lda, Byte(0));
-                Place(positive);
-            }
-            else
-                Op(Lda, Byte(0));
-            Op(Sta, d.Hi);
+            Widen16(e, d);
             return;
         }
 
@@ -626,21 +613,8 @@ public sealed partial class CodeGen
                 return;
 
             case IndexExpr ix:
-            {
-                var arr = ArrayOf(ix);
-                if (ix.Index.ConstValue is long ci)
-                {
-                    Op(Lda, Var(arr, (int)ci)); Op(Sta, d.Lo);
-                    Op(Lda, Var(arr, HighTable(arr) + (int)ci)); Op(Sta, d.Hi);
-                    return;
-                }
-                var (index, shift) = FoldIndexOffset(ix.Index, arr);
-                var reg = LoadIndex(index);
-                var mode = reg == Register.X ? AbsoluteX : AbsoluteY;
-                Emit(Lda, mode, Indexed(arr, 0, shift, index)); Op(Sta, d.Lo);
-                Emit(Lda, mode, Indexed(arr, HighTable(arr), shift, index)); Op(Sta, d.Hi);
+                ElementWord(ix, d);
                 return;
-            }
 
             case CallExpr { AddressOf: not null } or CallExpr { FunctionAddress: not null }:
             {
@@ -665,17 +639,7 @@ public sealed partial class CodeGen
                 return;
 
             case UnaryExpr u:
-                Gen16(u.Operand, d);
-                if (u.Op == TokenKind.Minus)
-                {
-                    Op(Lda, Byte(0)); Emit(Sec); Op(Sbc, d.Lo); Op(Sta, d.Lo);
-                    Op(Lda, Byte(0)); Op(Sbc, d.Hi); Op(Sta, d.Hi);
-                }
-                else if (u.Op == TokenKind.Tilde)
-                {
-                    Op(Lda, d.Lo); Op(Eor, Byte(0xFF)); Op(Sta, d.Lo);
-                    Op(Lda, d.Hi); Op(Eor, Byte(0xFF)); Op(Sta, d.Hi);
-                }
+                Unary16(u, d);
                 return;
 
             case BinaryExpr b when b.Op is TokenKind.Shl or TokenKind.Shr && b.Right.ConstValue >= 8:
@@ -693,29 +657,8 @@ public sealed partial class CodeGen
                 return;
 
             case BinaryExpr b when b.Op is TokenKind.Plus or TokenKind.Minus && AddsByteTo(b, d) is { } small:
-            {
-                // w += b as u16: lda b / clc / adc w / sta w / bcc + / inc w+1 (spec 11);
-                // w -= b as u16: lda w / sec / sbc b / sta w / bcs + / dec w+1.
-                var done = NewLabel("c");
-                if (b.Op == TokenKind.Plus)
-                {
-                    GenA(small);
-                    Emit(Clc); Op(Adc, d.Lo); Op(Sta, d.Lo);
-                    Branch(Bcc, done);
-                    Op(Inc, d.Hi);
-                }
-                else
-                {
-                    Op(Lda, d.Lo); Emit(Sec);
-                    if (Simple1(small) is { } op) Op(Sbc, op);
-                    else IndexedOperand(small)!(Sbc, 0);
-                    Op(Sta, d.Lo);
-                    Branch(Bcs, done);
-                    Op(Dec, d.Hi);
-                }
-                Place(done);
+                AddByte16(b, small, d);
                 return;
-            }
 
             case BinaryExpr b when b.Op == TokenKind.Plus && ByteAddend(b, d) is var (wide, small):
             {
@@ -728,51 +671,131 @@ public sealed partial class CodeGen
             }
 
             case BinaryExpr b:
-            {
-                if (ShiftedOperand16(b, d)) return;
-                var right = Simple2(b.Right);
-                // An element on either side: lda a,x / adc b,x / sta d. Not for w + (u8 operand), which adds with bcc / inc.
-                if (d.Offset == 0 && !(b.Op == TokenKind.Plus && right is { Hi: Imm { Value: 0 } })
-                    && (right is null || Simple2(b.Left) is null)
-                    && Binary16InPlace(b, (m, k) => Op(m, k == 0 ? d.Lo : d.Hi), d.Var))
-                    return;
-                if (right is not null && ReadsVar(b.Right, d.Var)) right = null;
-                VariableSymbol? temp = null;
-                if (right is null && b.Op != TokenKind.Minus && Simple2(b.Left) is { } left && !ReadsVar(b.Left, d.Var))
-                {
-                    // x + f(): the right side into the destination, then x as the operand, with no temporary.
-                    Gen16(b.Right, d);
-                    right = left;
-                }
-                else
-                {
-                    if (right is null)
-                    {
-                        temp = AcquireTemp(2);
-                        Gen16(b.Right, new Loc(temp));
-                        right = (Var(temp), Var(temp, 1));
-                    }
-                    Gen16(b.Left, d);
-                }
-
-                var m = ArithMnemonic(b.Op);
-                CarryFor(b.Op);
-                Op(Lda, d.Lo); Op(m, right.Value.Lo); Op(Sta, d.Lo);
-                if (b.Op == TokenKind.Plus && right.Value.Hi is Imm { Value: 0 })
-                {
-                    var done = NewLabel("c");
-                    Branch(Bcc, done);
-                    Op(Inc, d.Hi);
-                    Place(done);
-                }
-                else
-                {
-                    Op(Lda, d.Hi); Op(m, right.Value.Hi); Op(Sta, d.Hi);
-                }
-                if (temp is not null) Release(temp);
+                Arith16(b, d);
                 return;
-            }
         }
         throw new InvalidOperationException(e.GetType().Name);
+    }
+
+    /// <summary>A one-byte value widened to 16 bits: the high byte is 0, or the sign's for a signed value.</summary>
+    private void Widen16(Expr e, Loc d)
+    {
+        GenA(e);
+        Op(Sta, d.Lo);
+        if (e.Type.IsSigned)
+        {
+            var positive = NewLabel("sx");
+            Op(Ora, Byte(0x7F));
+            Branch(Bmi, positive);
+            Op(Lda, Byte(0));
+            Place(positive);
+        }
+        else
+            Op(Lda, Byte(0));
+        Op(Sta, d.Hi);
+    }
+
+    /// <summary>A 16-bit element of an array: the low byte from the first table, the high byte from the second.</summary>
+    private void ElementWord(IndexExpr ix, Loc d)
+    {
+        var arr = ArrayOf(ix);
+        if (ix.Index.ConstValue is long ci)
+        {
+            Op(Lda, Var(arr, (int)ci)); Op(Sta, d.Lo);
+            Op(Lda, Var(arr, HighTable(arr) + (int)ci)); Op(Sta, d.Hi);
+            return;
+        }
+        var (index, shift) = FoldIndexOffset(ix.Index, arr);
+        var reg = LoadIndex(index);
+        var mode = reg == Register.X ? AbsoluteX : AbsoluteY;
+        Emit(Lda, mode, Indexed(arr, 0, shift, index)); Op(Sta, d.Lo);
+        Emit(Lda, mode, Indexed(arr, HighTable(arr), shift, index)); Op(Sta, d.Hi);
+    }
+
+    /// <summary><c>-x</c>, <c>~x</c> or <c>+x</c> of a 16-bit value.</summary>
+    private void Unary16(UnaryExpr u, Loc d)
+    {
+        Gen16(u.Operand, d);
+        if (u.Op == TokenKind.Minus)
+        {
+            Op(Lda, Byte(0)); Emit(Sec); Op(Sbc, d.Lo); Op(Sta, d.Lo);
+            Op(Lda, Byte(0)); Op(Sbc, d.Hi); Op(Sta, d.Hi);
+        }
+        else if (u.Op == TokenKind.Tilde)
+        {
+            Op(Lda, d.Lo); Op(Eor, Byte(0xFF)); Op(Sta, d.Lo);
+            Op(Lda, d.Hi); Op(Eor, Byte(0xFF)); Op(Sta, d.Hi);
+        }
+    }
+
+    /// <summary><c>w = w + b</c> or <c>w - b</c> with an unsigned byte <paramref name="small"/>: the carry goes to the high byte with <c>inc</c> or <c>dec</c>.</summary>
+    private void AddByte16(BinaryExpr b, Expr small, Loc d)
+    {
+        // w += b as u16: lda b / clc / adc w / sta w / bcc + / inc w+1 (spec 11);
+        // w -= b as u16: lda w / sec / sbc b / sta w / bcs + / dec w+1.
+        var done = NewLabel("c");
+        if (b.Op == TokenKind.Plus)
+        {
+            GenA(small);
+            Emit(Clc); Op(Adc, d.Lo); Op(Sta, d.Lo);
+            Branch(Bcc, done);
+            Op(Inc, d.Hi);
+        }
+        else
+        {
+            Op(Lda, d.Lo); Emit(Sec);
+            if (Simple1(small) is { } op) Op(Sbc, op);
+            else IndexedOperand(small)!(Sbc, 0);
+            Op(Sta, d.Lo);
+            Branch(Bcs, done);
+            Op(Dec, d.Hi);
+        }
+        Place(done);
+    }
+
+    /// <summary>Any other 16-bit <c>+</c>, <c>-</c>, <c>&amp;</c>, <c>|</c> or <c>^</c>: an element in place, or the left side into the destination and the right side as the operand.</summary>
+    private void Arith16(BinaryExpr b, Loc d)
+    {
+        if (ShiftedOperand16(b, d)) return;
+        var right = Simple2(b.Right);
+        // An element on either side: lda a,x / adc b,x / sta d. Not for w + (u8 operand), which adds with bcc / inc.
+        if (d.Offset == 0 && !(b.Op == TokenKind.Plus && right is { Hi: Imm { Value: 0 } })
+            && (right is null || Simple2(b.Left) is null)
+            && Binary16InPlace(b, (m, k) => Op(m, k == 0 ? d.Lo : d.Hi), d.Var))
+            return;
+        if (right is not null && ReadsVar(b.Right, d.Var)) right = null;
+        VariableSymbol? temp = null;
+        if (right is null && b.Op != TokenKind.Minus && Simple2(b.Left) is { } left && !ReadsVar(b.Left, d.Var))
+        {
+            // x + f(): the right side into the destination, then x as the operand, with no temporary.
+            Gen16(b.Right, d);
+            right = left;
+        }
+        else
+        {
+            if (right is null)
+            {
+                temp = AcquireTemp(2);
+                Gen16(b.Right, new Loc(temp));
+                right = (Var(temp), Var(temp, 1));
+            }
+            Gen16(b.Left, d);
+        }
+
+        var m = ArithMnemonic(b.Op);
+        CarryFor(b.Op);
+        Op(Lda, d.Lo); Op(m, right.Value.Lo); Op(Sta, d.Lo);
+        if (b.Op == TokenKind.Plus && right.Value.Hi is Imm { Value: 0 })
+        {
+            var done = NewLabel("c");
+            Branch(Bcc, done);
+            Op(Inc, d.Hi);
+            Place(done);
+        }
+        else
+        {
+            Op(Lda, d.Hi); Op(m, right.Value.Hi); Op(Sta, d.Hi);
+        }
+        if (temp is not null) Release(temp);
     }
 }
