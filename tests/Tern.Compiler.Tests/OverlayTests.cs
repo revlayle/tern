@@ -980,4 +980,23 @@ public class OverlayTests
         var modules = new Dictionary<string, string>(Modules) { ["level1"] = "import level2" + Environment.NewLine + Level1 + Environment.NewLine + line + Environment.NewLine };
         Assert.Contains(expected, Message(Header + Environment.NewLine + "fn main() { load(1) }", modules));
     }
+
+    // Review code-quality-semantics 20: data a sibling places in a region is outside the area, so always there,
+    // for an address in data as for a read (one rule, NotPresentWith; the address check left out the region).
+    [Fact]
+    public void An_overlay_may_hold_the_address_of_a_siblings_data_in_a_region()
+    {
+        var modules = new Dictionary<string, string>(Modules)
+        {
+            ["level1"] = "import level2\ndata other: [ptr u8; 1] = [addr(level2.SHARED)]\nfn peek() -> u8 using A {\n var p: ptr u8 = other[0]\n return p[1]\n}\n",
+            ["level2"] = Level2 + "\ndata SHARED: [u8; 2] @ tables = [5, 6]\n",
+        };
+        string main = Header.Replace("$6000..=$6FFF  overlay levels", "$6000..=$6FFF  overlay levels\n    $7000..=$70FF  region tables") +
+            "\nvar got: u8\nfn main() {\n load(1)\n got = level1.peek()\n}\n";
+        var result = With(modules, path => TernCompiler.Compile(main, sourcePath: path));
+        Assert.Equal(0x7000, result.Symbols["level2.SHARED"]);
+        var level1 = result.Overlays.Single(o => o.Name == "level1");
+        int other = result.Symbols["level1.other"] - level1.LoadAddress;
+        Assert.Equal(new byte[] { 0x00, 0x70 }, level1.Image[other..(other + 2)]);
+    }
 }

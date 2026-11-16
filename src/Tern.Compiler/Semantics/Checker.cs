@@ -35,6 +35,9 @@ public sealed class CheckedProgram(
 /// </summary>
 public sealed partial class Checker
 {
+    /// <summary>The built-in functions (spec 6.5, 6.6), which no declaration may be named: one list for every check (review code-quality-semantics 20).</summary>
+    internal static readonly IReadOnlySet<string> BuiltinNames = new HashSet<string> { "addr", "len", "sizeof", "offset", "include_bytes" };
+
     private readonly List<Dictionary<string, Symbol>> _scopes = [];
     private readonly List<VariableSymbol> _globals = [];
     /// <summary>The file being checked.</summary>

@@ -751,7 +751,7 @@ public sealed partial class Interpreter
         var interpreter = new Interpreter(host, call.Pos) { _output = [], _emits = numbers, _labels = numbers, _blockLabels = blockLabels };
         var fn = host.ConstFn(null, call.Name, call.Pos);
         if (fn is null)
-            throw new CompileError(call.Pos, Builtins.Contains(call.Name) || call.Name is "len" or "sizeof" or "offset" or "addr"
+            throw new CompileError(call.Pos, Builtins.Contains(call.Name) || Checker.BuiltinNames.Contains(call.Name)
                 ? $"{call.Name}() is not a generator. Name a const fn that emits assembly on this line, or use the value in an operand"
                 : $"'{call.Name}' is not declared. Check the spelling, or declare it as a const fn");
         if (fn.ReturnType is not null)

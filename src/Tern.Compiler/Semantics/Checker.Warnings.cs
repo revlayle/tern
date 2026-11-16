@@ -280,7 +280,8 @@ public sealed partial class Checker
             for (int i = 0; i < statements.Count; i++)
             {
                 Inner(statements[i], warn);
-                if (Ends(statements[i]) is not { } why) continue;
+                if (NeverFinishes(statements[i], constantConditions: false) is not { } end) continue;
+                string why = Why(end);
                 if (i + 1 < statements.Count)
                     warn(Start(statements[i + 1]), $"This statement is never reached, since {why}. Remove it");
                 return;
@@ -323,30 +324,16 @@ public sealed partial class Checker
             }
         }
 
-        /// <summary>Why the statement never finishes, for the message; null if it may.</summary>
-        private static string? Ends(Stmt s) => s switch
+        /// <summary>Why <paramref name="end"/>, a statement <see cref="NeverFinishes"/> found, never finishes, for the message.</summary>
+        private static string Why(Stmt end) => end switch
         {
-            ReturnStmt => $"the 'return' on line {s.Pos.Line} ends the function",
-            BreakStmt => $"the 'break' on line {s.Pos.Line} leaves the loop",
-            ContinueStmt => $"the 'continue' on line {s.Pos.Line} goes on with the next pass of the loop",
-            BlockStmt b => b.Statements.Select(Ends).FirstOrDefault(why => why is not null),
-            WhileStmt { Condition: BoolExpr { Value: true } } w when !Breaks(w.Body) =>
-                $"the 'while true' loop on line {s.Pos.Line} has no 'break', so it never ends",
-            IfStmt { Else: not null } i when Ends(i.Then) is not null && Ends(i.Else) is not null =>
-                $"no branch of the 'if' on line {s.Pos.Line} finishes",
-            MatchStmt m when m.Arms.Any(a => a.IsDefault) && m.Arms.All(a => Ends(a.Body) is not null) =>
-                $"no arm of the 'match' on line {s.Pos.Line} finishes",
-            _ => null,
-        };
-
-        /// <summary>A <c>break</c> of this loop: one not inside an inner loop.</summary>
-        private static bool Breaks(Stmt s) => s switch
-        {
-            BreakStmt => true,
-            BlockStmt b => b.Statements.Any(Breaks),
-            IfStmt i => Breaks(i.Then) || i.Else is not null && Breaks(i.Else),
-            MatchStmt m => m.Arms.Any(a => Breaks(a.Body)),
-            _ => false,
+            ReturnStmt => $"the 'return' on line {end.Pos.Line} ends the function",
+            BreakStmt => $"the 'break' on line {end.Pos.Line} leaves the loop",
+            ContinueStmt => $"the 'continue' on line {end.Pos.Line} goes on with the next pass of the loop",
+            WhileStmt => $"the 'while true' loop on line {end.Pos.Line} has no 'break', so it never ends",
+            IfStmt => $"no branch of the 'if' on line {end.Pos.Line} finishes",
+            MatchStmt => $"no arm of the 'match' on line {end.Pos.Line} finishes",
+            _ => $"the statement on line {end.Pos.Line} has an error",
         };
     }
 }
