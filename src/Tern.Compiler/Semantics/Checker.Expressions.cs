@@ -7,7 +7,7 @@ public sealed partial class Checker
 {
     // ---------- Expressions ----------
 
-    private long Weight() => (long)Math.Pow(8, Math.Min(_loopDepth, 5));
+    private long Weight() => (long)Math.Pow(8, Math.Min(_body.LoopDepth, 5));
 
     private void CheckExpr(Expr e)
     {
@@ -446,9 +446,9 @@ public sealed partial class Checker
     /// <summary>An overlay may not take the address of a function of another overlay in its area (spec 8.5).</summary>
     private void CheckSiblingAddress(FunctionSymbol f, SourcePos pos)
     {
-        if (_function is not null && NotPresentWith(f, _function.OverlayArea, _function.OverlayUnit))
+        if (_body.Function is not null && NotPresentWith(f, _body.Function.OverlayArea, _body.Function.OverlayUnit))
             throw new CompileError(pos,
-                $"addr({f.Name}) is in {f.Module!.Name}, which is {NeverTogether(f.Module, _function.Module!)} as {_function.Module!.Name}. They are never loaded together, so the address would point at the wrong code. " +
+                $"addr({f.Name}) is in {f.Module!.Name}, which is {NeverTogether(f.Module, _body.Function.Module!)} as {_body.Function.Module!.Name}. They are never loaded together, so the address would point at the wrong code. " +
                 "Take the address in resident code, or put one of them in another area");
     }
 
@@ -461,10 +461,10 @@ public sealed partial class Checker
                 $"'{f.Name}' takes '{memoryParam.Name}' in memory, which a call through an address cannot set. " +
                 $"Pass it in a register ({memoryParam.Name}: {memoryParam.Type} using A)");
         CheckSiblingAddress(f, pos);
-        if (!_dead) f.AddressTaken = true;
+        if (!_body.Dead) f.AddressTaken = true;
         c.FunctionAddress = f;
         c.Type = TernType.U16;
-        if (!_dead) _function?.UsedAddresses.Add(f);
+        if (!_body.Dead) _body.Function?.UsedAddresses.Add(f);
     }
 
     /// <summary><c>addr(player.name)</c>: a field of a struct variable or of a struct at a fixed address.</summary>
@@ -549,7 +549,7 @@ public sealed partial class Checker
                         // Its PPU address, a u16: not a pointer, since the CPU cannot read there (spec 12.2).
                         name.Symbol = tiles;
                         name.Type = tiles.Type;
-                        if (!_dead) _function?.UsedGlobals.Add(tiles);
+                        if (!_body.Dead) _body.Function?.UsedGlobals.Add(tiles);
                         c.AddressOf = tiles;
                         c.Type = TernType.U16;
                         return;
@@ -591,7 +591,7 @@ public sealed partial class Checker
             throw new CompileError(c.Pos, symbol is null ? $"'{c.Name}' is not a function. Check the spelling, or declare it" : $"'{c.Name}' is not a function. Remove the ()");
         if (fn.IsInterrupt)
         {
-            if (_function is not { IsInterrupt: true })
+            if (_body.Function is not { IsInterrupt: true })
                 throw new CompileError(c.Pos,
                     $"'{c.Name}' is an interrupt fn, which only the CPU or another interrupt fn calls. Install its address in the interrupt vector, or call it from an interrupt fn");
         }
@@ -603,15 +603,15 @@ public sealed partial class Checker
             Coerce(c.Args[i], fn.Parameters[i].Type);
         }
         foreach (var p in fn.Parameters)
-            foreach (var held in _loopRegisters)
+            foreach (var held in _body.LoopRegisters)
                 if (p.PassedIn is { } pr && pr.Uses(held))
                     throw new CompileError(c.Pos, $"'{fn.Name}' takes '{p.Name}' in {held}, which holds the loop variable. Remove 'using {held}' from the loop");
         foreach (var (reg, _) in fn.FixedInputs)
-            if (_loopRegisters.Contains(reg))
+            if (_body.LoopRegisters.Contains(reg))
                 throw new CompileError(c.Pos, $"'{fn.Name}' takes a fixed input in {reg}, which holds the loop variable. Remove 'using {reg}' from the loop");
         c.Function = fn;
         c.Type = fn.ReturnType;
-        if (_function is not null) AddCall(_function, fn, c.Pos);
+        if (_body.Function is not null) AddCall(_body.Function, fn, c.Pos);
     }
 
     /// <summary>Calls from an overlay's function to an inline function of another module, for <see cref="CheckInlineCallsBetweenOverlays"/>.</summary>
@@ -657,8 +657,8 @@ public sealed partial class Checker
     /// </summary>
     private void AddCall(FunctionSymbol caller, FunctionSymbol callee, SourcePos pos)
     {
-        if (!_dead) caller.Callees.Add(callee);
-        if (!_dead && callee.IsInline && caller.OverlayArea is not null && callee.OverlayUnit != caller.OverlayUnit) _inlineCalls.Add((caller, callee, pos));
+        if (!_body.Dead) caller.Callees.Add(callee);
+        if (!_body.Dead && callee.IsInline && caller.OverlayArea is not null && callee.OverlayUnit != caller.OverlayUnit) _inlineCalls.Add((caller, callee, pos));
         if (NotPresentWith(callee, caller.OverlayArea, caller.OverlayUnit) && !callee.IsInline)
             throw new CompileError(pos, caller.Module!.InBank
                 ? $"'{caller.Name}' calls '{callee.Name}', but the modules {caller.Module.Name} and {callee.Module!.Name} are {NeverTogether(caller.Module, callee.Module)}, and only one bank is selected at a time. " +

@@ -42,13 +42,24 @@ public sealed partial class Checker
     private readonly List<VariableSymbol> _globals = [];
     /// <summary>The file being checked.</summary>
     private Module _module = null!;
-    private FunctionSymbol? _function;
-    private int _loopDepth;
-    /// <summary>Inside a branch that a constant condition never takes: nothing in it keeps a function or variable in the program.</summary>
-    private bool _dead;
-    private readonly HashSet<Register> _loopRegisters = [];
-    /// <summary>The largest value of each enclosing loop counter whose bounds are constants (for index checks).</summary>
-    private readonly Dictionary<VariableSymbol, long> _loopMax = [];
+
+    /// <summary>Where the checker is inside a function body (review code-quality-semantics 18). <see cref="Recover"/> copies it whole.</summary>
+    private sealed class BodyContext
+    {
+        /// <summary>The function whose body is checked; null for a top-level declaration.</summary>
+        public FunctionSymbol? Function;
+        public int LoopDepth;
+        /// <summary>Inside a branch that a constant condition never takes: nothing in it keeps a function or variable in the program.</summary>
+        public bool Dead;
+        /// <summary>The registers that enclosing <c>for ... using</c> loops hold.</summary>
+        public HashSet<Register> LoopRegisters = [];
+        /// <summary>The largest value of each enclosing loop counter whose bounds are constants (for index checks).</summary>
+        public Dictionary<VariableSymbol, long> LoopMax = [];
+
+        public BodyContext Copy() => new() { Function = Function, LoopDepth = LoopDepth, Dead = Dead, LoopRegisters = [.. LoopRegisters], LoopMax = new(LoopMax) };
+    }
+
+    private BodyContext _body = new();
     private int _hiddenCounter;
     private readonly Platform _platform;
     /// <summary>The target CPU's instructions: the modes assembly may use, and the indirect jump's page wrap.</summary>
@@ -459,9 +470,7 @@ public sealed partial class Checker
             check();
             return true;
         }
-        var (module, function, loopDepth, dead, scopes, longBytes, listLength) = (_module, _function, _loopDepth, _dead, _scopes.Count, _allowLongBytes, _listLength);
-        var registers = _loopRegisters.ToList();
-        var loopMax = _loopMax.ToList();
+        var (module, body, scopes) = (_module, _body.Copy(), _scopes.Count);
         try
         {
             check();
@@ -472,12 +481,8 @@ public sealed partial class Checker
             _errors.Add(e);
         }
         catch (FollowOnError) { }
-        (_module, _function, _loopDepth, _dead, _allowLongBytes, _listLength) = (module, function, loopDepth, dead, longBytes, listLength);
+        (_module, _body) = (module, body);
         if (_scopes.Count > scopes) _scopes.RemoveRange(scopes, _scopes.Count - scopes);
-        _loopRegisters.Clear();
-        _loopRegisters.UnionWith(registers);
-        _loopMax.Clear();
-        foreach (var (v, max) in loopMax) _loopMax[v] = max;
         return false;
     }
 

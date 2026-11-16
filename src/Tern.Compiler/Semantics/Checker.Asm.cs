@@ -258,7 +258,7 @@ public sealed partial class Checker
             patched.CodePatched = true;
 
         // A register that holds a loop variable must survive the block.
-        foreach (var reg in _loopRegisters)
+        foreach (var reg in _body.LoopRegisters)
         {
             if (ins.Mnemonic == Mnemonic.Jsr && routine?.Keeps.Contains(reg) != true)
                 throw new CompileError(ins.Pos,
@@ -275,7 +275,7 @@ public sealed partial class Checker
                 throw new CompileError(ins.Operand!.Pos,
                     $"'{handler.Name}' is an interrupt handler: it ends with rti, so jsr cannot call it. Install its address instead: lda #{handler.Name}.lo");
             // Naming a handler (to install it) keeps it in the program, as a root of its own.
-            if (!_dead) _function!.UsedInterrupts.Add(handler);
+            if (!_body.Dead) _body.Function!.UsedInterrupts.Add(handler);
         }
         else if (v?.Function is { IsInline: true } inlined)
             throw new CompileError(ins.Operand!.Pos,
@@ -285,16 +285,16 @@ public sealed partial class Checker
             // #f.lo / #f.hi takes the function's address, as addr(f) does (spec 6.5). Assembly may
             // take it even with memory parameters: it can set them itself before calling.
             CheckSiblingAddress(named, ins.Operand!.Pos);
-            if (!_dead)
+            if (!_body.Dead)
             {
                 named.AddressTaken = true;
-                _function!.UsedAddresses.Add(named);
+                _body.Function!.UsedAddresses.Add(named);
             }
         }
-        else if (v?.Function is { } f && (f != _function || ins.Mnemonic == Mnemonic.Jsr))
-            AddCall(_function!, f, ins.Operand!.Pos);
+        else if (v?.Function is { } f && (f != _body.Function || ins.Mnemonic == Mnemonic.Jsr))
+            AddCall(_body.Function!, f, ins.Operand!.Pos);
         // Assembly cannot write a function's memory parameters (they are not names outside it).
-        if (v?.Function is { FixedAddress: null } callee && callee != _function && v.High is null
+        if (v?.Function is { FixedAddress: null } callee && callee != _body.Function && v.High is null
             && ins.Mnemonic is Mnemonic.Jsr or Mnemonic.Jmp && ins.Mode == Absolute
             && callee.Parameters.FirstOrDefault(p => p.PassedIn is null) is { } memoryParam)
             throw new CompileError(ins.Operand!.Pos,

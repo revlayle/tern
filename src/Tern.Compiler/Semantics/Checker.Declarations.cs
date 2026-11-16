@@ -112,14 +112,14 @@ public sealed partial class Checker
     /// <summary>Runs <paramref name="work"/> as a top-level declaration of <paramref name="module"/>, then restores the state.</summary>
     private void InModule(Module module, Action work)
     {
-        var (saved, function, longBytes, listLength) = (_module, _function, _allowLongBytes, _listLength);
+        var (saved, body) = (_module, _body);
         var scopes = _scopes.ToList();
         _scopes.Clear();
-        (_module, _function, _allowLongBytes, _listLength) = (module, null, false, null);
+        (_module, _body) = (module, new BodyContext());
         try { work(); }
         finally
         {
-            (_module, _function, _allowLongBytes, _listLength) = (saved, function, longBytes, listLength);
+            (_module, _body) = (saved, body);
             _scopes.Clear();
             _scopes.AddRange(scopes);
         }
@@ -197,17 +197,17 @@ public sealed partial class Checker
         if (v.InChr)
             throw new CompileError(pos,
                 $"'{v.Name}' is tile data in the chr area '{v.Region}', in the PPU's memory, which the CPU cannot read. Use addr({v.Name}) for its PPU address, or len({v.Name})");
-        if (v.Kind != VariableKind.Global || _function is null) return;
+        if (v.Kind != VariableKind.Global || _body.Function is null) return;
         // Overlays in one area share their memory: another one's variables are not there while this one runs.
         // A bank's variables are resident, in RAM; its data is in the bank.
-        if (NotPresentWith(v, _function.OverlayArea, _function.OverlayUnit))
+        if (NotPresentWith(v, _body.Function.OverlayArea, _body.Function.OverlayUnit))
             throw new CompileError(pos,
-                $"'{v.Name}' belongs to {v.Module!.Name}, which is {NeverTogether(v.Module, _function.Module!)} as {_function.Module!.Name}. They are never loaded together and share their memory. " +
+                $"'{v.Name}' belongs to {v.Module!.Name}, which is {NeverTogether(v.Module, _body.Function.Module!)} as {_body.Function.Module!.Name}. They are never loaded together and share their memory. " +
                 "Keep shared state in a resident module or the main file");
-        if (_dead) return;
-        _function.UsedGlobals.Add(v);
+        if (_body.Dead) return;
+        _body.Function.UsedGlobals.Add(v);
         // A table of function addresses keeps those functions in the program, also through a table it names.
-        foreach (var f in GlobalsNamedBy(v.Storage).SelectMany(g => g.FunctionAddresses)) _function.UsedAddresses.Add(f);
+        foreach (var f in GlobalsNamedBy(v.Storage).SelectMany(g => g.FunctionAddresses)) _body.Function.UsedAddresses.Add(f);
     }
 
     /// <summary>The main file with the constants it can declare without any import, for evaluating module parameter values.</summary>
@@ -495,10 +495,6 @@ public sealed partial class Checker
         if (!ok) throw new CompileError(pos, $"A {type} value cannot be passed using {reg}. Use {(type.Size == 2 ? "AX, AY or XY" : "A, X or Y")}");
     }
 
-    /// <summary>Set while a global's type is resolved: a byte array there may be longer than 256 (spec 3.2).</summary>
-    private bool _allowLongBytes;
-    /// <summary>Set while a global's type is resolved: the length of its list initial value, for <c>[T; _]</c> (spec 4).</summary>
-    private int? _listLength;
     /// <summary>Globals of the file being declared whose initial values hold addresses (spec 4), worked out after its last global.</summary>
     private readonly List<(VarDecl Decl, VariableSymbol Variable, Module Module)> _addressInits = [];
 
@@ -518,18 +514,16 @@ public sealed partial class Checker
     {
         // A string or include_bytes() gives a [u8; N] array, which may be longer than 256 bytes.
         var bytes = decl.Init is null ? null : ByteSource(decl.Init);
-        _allowLongBytes = !decl.IsLinear && !decl.IsIndexed;
+        bool longBytes = !decl.IsLinear && !decl.IsIndexed;
         // [T; _] takes its length from a list or a string (spec 4).
-        _listLength = decl is { TypeSyntax: ArrayTypeSyntax { Length: null } } ? decl.Init switch
+        int? listLength = decl is { TypeSyntax: ArrayTypeSyntax { Length: null } } ? decl.Init switch
         {
             ArrayLiteralExpr list => list.Elements.Count,
             StringExpr => bytes!.Length,
             { } other when IsCompileTimeArray(other) => CompileTimeArray(other).Items.Length,
             _ => null,
         } : null;
-        TernType type;
-        try { type = bytes is not null && decl.TypeSyntax is null ? TernType.ArrayOf(TernType.U8, bytes.Length) : DeclaredType(decl); }
-        finally { _allowLongBytes = false; _listLength = null; }
+        var type = bytes is not null && decl.TypeSyntax is null ? TernType.ArrayOf(TernType.U8, bytes.Length) : DeclaredType(decl, longBytes, listLength);
         if (!decl.IsData && decl.TypeSyntax is not null && decl.Init is not null && type.IsArray && type.Length > 256)
             throw new CompileError(decl.Init.Pos,
                 $"'{decl.Name}' is a long byte array ({type.Length} bytes), which is zeroed at startup and has no initial value. Fill it at run time, or declare it with 'data'");
@@ -618,11 +612,13 @@ public sealed partial class Checker
     }
 
     /// <summary>The variable's type: written out, or taken from the initializer.</summary>
-    private TernType DeclaredType(VarDecl decl)
+    /// <param name="longBytes">A global's byte array may be longer than 256 (spec 3.2).</param>
+    /// <param name="listLength">The length of a global's list initial value, for <c>[T; _]</c> (spec 4).</param>
+    private TernType DeclaredType(VarDecl decl, bool longBytes = false, int? listLength = null)
     {
         if (decl.IsIndexed)
         {
-            var t = decl.TypeSyntax is null ? null : ResolveType(decl.TypeSyntax);
+            var t = decl.TypeSyntax is null ? null : ResolveType(decl.TypeSyntax, listLength: listLength);
             if (t is null || !t.IsStructArray)
                 throw new CompileError(decl.Pos,
                     "'indexed' is for arrays of structs, e.g. 'indexed var list: [Enemy; 20]'. Arrays of numbers are indexed directly. Remove 'indexed'");
@@ -634,7 +630,7 @@ public sealed partial class Checker
         }
         if (decl.IsLinear)
         {
-            var t = decl.TypeSyntax is null ? null : ResolveType(decl.TypeSyntax);
+            var t = decl.TypeSyntax is null ? null : ResolveType(decl.TypeSyntax, listLength: listLength);
             if (t is null || !t.IsArray)
                 throw new CompileError(decl.Pos,
                     "'linear' is for arrays of 16-bit values or structs, e.g. 'linear var pts: [u16; 32]' or 'linear var list: [Enemy; 8]'. Remove 'linear'");
@@ -645,7 +641,7 @@ public sealed partial class Checker
                     $"A linear array of 16-bit values has at most 128 elements, so that the doubled index fits in a register; '{decl.Name}' has {t.Length}. Leave out 'linear' to store it split");
             return TernType.ArrayOf(t.Element, t.Length, linear: true);
         }
-        if (decl.TypeSyntax is not null) return ResolveType(decl.TypeSyntax);
+        if (decl.TypeSyntax is not null) return ResolveType(decl.TypeSyntax, longBytes: longBytes, listLength: listLength);
         if (decl.Init is null) throw new CompileError(decl.Pos, $"'{decl.Name}' needs a type or an initial value. Write one: var {decl.Name}: u8");
         if (decl.Init is ArrayLiteralExpr || IsCompileTimeArray(decl.Init))
             throw new CompileError(decl.Pos, decl.IsData
@@ -860,16 +856,13 @@ public sealed partial class Checker
     private static bool UsesAddr(Expr e) => e.Descendants().Any(n => n is CallExpr { Name: "addr" });
 
     /// <param name="layOut">False for the target of a pointer, which may be a struct still being laid out (<c>next: ptr Enemy</c>).</param>
-    private TernType ResolveType(TypeSyntax syntax, bool layOut = true)
-    {
-        // A global's long byte array and '_' length are for its own type only, not for a struct laid
-        // out or a constant declared while it is resolved (review code-quality-semantics 9).
-        var (longBytes, listLength) = (_allowLongBytes, _listLength);
-        (_allowLongBytes, _listLength) = (false, null);
-        return ResolveType(syntax, layOut, longBytes, listLength);
-    }
-
-    private TernType ResolveType(TypeSyntax syntax, bool layOut, bool longBytes, int? listLength)
+    /// <param name="longBytes">
+    /// A global's type: a byte array may be longer than 256 (spec 3.2). Like <paramref name="listLength"/>, it is
+    /// for the outer type only, not for an element, a struct laid out or a constant declared while it is resolved
+    /// (review code-quality-semantics 9).
+    /// </param>
+    /// <param name="listLength">The length of a global's list initial value, for <c>[T; _]</c> (spec 4).</param>
+    private TernType ResolveType(TypeSyntax syntax, bool layOut = true, bool longBytes = false, int? listLength = null)
     {
         switch (syntax)
         {

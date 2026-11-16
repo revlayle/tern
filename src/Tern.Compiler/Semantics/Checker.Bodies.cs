@@ -9,9 +9,9 @@ public sealed partial class Checker
 
     private void CheckFunctionBody(FnDecl decl)
     {
-        _function = decl.Symbol!;
+        _body = new BodyContext { Function = decl.Symbol! };
         _scopes.Add(new Dictionary<string, Symbol>());
-        foreach (var p in _function.Parameters) Declare(p);
+        foreach (var p in _body.Function.Parameters) Declare(p);
 
         // The var lines of an asm fn: locals in its frame, or in each caller's for an inline asm fn (spec 9).
         if (decl.IsAsm && ((AsmStmt)decl.Body.Statements[0]).Locals is { Count: > 0 } asmLocals)
@@ -26,11 +26,11 @@ public sealed partial class Checker
                     throw new CompileError(ins.Pos,
                         $"'{ins.Mnemonic.ToString().ToLowerInvariant()}' in an inline asm fn would end the function that calls it, since the code is copied there. Remove it: the code simply runs on after the copy");
 
-        if (_function.ReturnType.Kind != TypeKind.Void && !decl.IsAsm && NeverFinishes(decl.Body, constantConditions: true) is null)
+        if (_body.Function.ReturnType.Kind != TypeKind.Void && !decl.IsAsm && NeverFinishes(decl.Body, constantConditions: true) is null)
             throw new CompileError(decl.Pos, $"'{decl.Name}' can reach its end without returning a value. Add a 'return' at the end");
 
         _scopes.Clear();
-        _function = null;
+        _body = new BodyContext();
     }
 
     private void CheckBlock(BlockStmt block, bool newScope = true)
@@ -70,40 +70,40 @@ public sealed partial class Checker
                 // other one are checked but not recorded, so what only it uses is left out of the program (spec 2.2).
                 // After an error in the condition, the branches are still checked (spec 13).
                 Recover(() => CheckCondition(i.Condition));
-                bool wasDead = _dead;
-                _dead = wasDead || i.Condition.ConstValue == 0;
+                bool wasDead = _body.Dead;
+                _body.Dead = wasDead || i.Condition.ConstValue == 0;
                 CheckBlock(i.Then);
-                _dead = wasDead || i.Condition.ConstValue is not null and not 0;
+                _body.Dead = wasDead || i.Condition.ConstValue is not null and not 0;
                 if (i.Else is not null) CheckStmt(i.Else);
-                _dead = wasDead;
+                _body.Dead = wasDead;
                 break;
             }
             case WhileStmt w:
             {
                 Recover(() => CheckCondition(w.Condition));
-                bool wasDead = _dead;
-                _dead = wasDead || w.Condition.ConstValue == 0;
-                _loopDepth++;
+                bool wasDead = _body.Dead;
+                _body.Dead = wasDead || w.Condition.ConstValue == 0;
+                _body.LoopDepth++;
                 CheckBlock(w.Body);
-                _loopDepth--;
-                _dead = wasDead;
+                _body.LoopDepth--;
+                _body.Dead = wasDead;
                 break;
             }
             case ForStmt f: CheckFor(f); break;
             case MatchStmt m: CheckMatch(m); break;
             case AsmStmt a: CheckAsm(a); break;
             case BreakStmt or ContinueStmt:
-                if (_loopDepth == 0) throw new CompileError(stmt.Pos, "'break' and 'continue' must be inside a loop. Use 'return' to leave the function");
+                if (_body.LoopDepth == 0) throw new CompileError(stmt.Pos, "'break' and 'continue' must be inside a loop. Use 'return' to leave the function");
                 break;
             case ReturnStmt r:
-                var ret = _function!.ReturnType;
+                var ret = _body.Function!.ReturnType;
                 if (ret.Kind == TypeKind.Void)
                 {
-                    if (r.Value is not null) throw new CompileError(r.Pos, $"'{_function.Name}' does not return a value. Remove the value, or give the function a return type");
+                    if (r.Value is not null) throw new CompileError(r.Pos, $"'{_body.Function.Name}' does not return a value. Remove the value, or give the function a return type");
                 }
                 else
                 {
-                    if (r.Value is null) throw new CompileError(r.Pos, $"'{_function.Name}' must return a {ret} value. Write the value after 'return'");
+                    if (r.Value is null) throw new CompileError(r.Pos, $"'{_body.Function.Name}' must return a {ret} value. Write the value after 'return'");
                     CheckExpr(r.Value);
                     Coerce(r.Value, ret);
                 }
@@ -116,7 +116,7 @@ public sealed partial class Checker
     private void CheckLocal(VarDecl decl, bool inAsmFn = false)
     {
         var type = DeclaredType(decl);
-        var v = new VariableSymbol(decl.Name, decl.Pos, type, VariableKind.Local, _function) { IsIndexed = decl.IsIndexed };
+        var v = new VariableSymbol(decl.Name, decl.Pos, type, VariableKind.Local, _body.Function) { IsIndexed = decl.IsIndexed };
         decl.Symbol = v;
         ApplyPlacement(decl, v, allowAddress: false);
 
@@ -147,12 +147,12 @@ public sealed partial class Checker
             if (Lookup(decl.Name, demand: false) is null or ErrorSymbol)
             {
                 Declare(v);
-                _function!.FrameVariables.Add(v);
+                _body.Function!.FrameVariables.Add(v);
             }
             throw;
         }
         Declare(v);
-        _function!.FrameVariables.Add(v);
+        _body.Function!.FrameVariables.Add(v);
     }
 
     private void CheckAssign(AssignStmt a)
@@ -305,34 +305,34 @@ public sealed partial class Checker
             if (type.Size != 1)
                 throw new CompileError(f.Pos,
                     $"{(type.IsSigned ? "An" : "A")} {type} loop variable does not fit in {reg}. Remove 'using {reg}', or use bounds that fit in {(type.IsSigned ? "an i8" : "a u8")}");
-            if (!_loopRegisters.Add(reg))
+            if (!_body.LoopRegisters.Add(reg))
                 throw new CompileError(f.Pos, $"{reg} is already used by an enclosing loop. Use the other index register, or leave out 'using'");
             if (ContainsCall(f.Body, reg))
                 throw new CompileError(f.Pos,
                     $"The loop body calls a function, which can change {reg}. Remove 'using {reg}', or call only routines that keep {reg}");
         }
 
-        var counter = new VariableSymbol(f.Variable ?? $"_loop{_hiddenCounter++}", f.Pos, type, VariableKind.Local, _function)
+        var counter = new VariableSymbol(f.Variable ?? $"_loop{_hiddenCounter++}", f.Pos, type, VariableKind.Local, _body.Function)
         {
             ReadOnly = true,
             Register = f.UsingRegister,
             IsLoopCounter = true,
         };
         f.Symbol = counter;
-        if (counter.InMemory) _function!.FrameVariables.Add(counter);
+        if (counter.InMemory) _body.Function!.FrameVariables.Add(counter);
 
         _scopes.Add(new Dictionary<string, Symbol>());
         if (f.Variable is not null) Declare(counter);
-        _loopDepth++;
+        _body.LoopDepth++;
         counter.Weight += Weight() * 3;   // load, step and compare on every pass
         if (from is not null && to is not null && LargestLoopValue(from.Value, to.Value, f.Inclusive, f.StepValue) is long largest)
-            _loopMax[counter] = largest;
+            _body.LoopMax[counter] = largest;
         CheckBlock(f.Body, newScope: false);
-        _loopMax.Remove(counter);
-        _loopDepth--;
+        _body.LoopMax.Remove(counter);
+        _body.LoopDepth--;
         _scopes.RemoveAt(_scopes.Count - 1);
 
-        if (f.UsingRegister is { } r) _loopRegisters.Remove(r);
+        if (f.UsingRegister is { } r) _body.LoopRegisters.Remove(r);
     }
 
     /// <summary>
@@ -366,7 +366,7 @@ public sealed partial class Checker
     /// <summary>An index that is the counter of a constant-bounds loop must stay inside the array (spec 3.2).</summary>
     private void CheckLoopIndex(Expr index, string name, int length)
     {
-        if (Unwrap(index) is NameExpr { Symbol: VariableSymbol counter } && _loopMax.TryGetValue(counter, out var last) && last >= length)
+        if (Unwrap(index) is NameExpr { Symbol: VariableSymbol counter } && _body.LoopMax.TryGetValue(counter, out var last) && last >= length)
             throw new CompileError(index.Pos,
                 $"The loop reaches {last}, past the end of '{name}' (length {length}). Make the loop stop before {length}");
     }
