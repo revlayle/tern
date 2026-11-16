@@ -7,16 +7,8 @@ namespace Tern.Compiler.Tests;
 /// <summary>lib/atari (spec 12.2): text through CIO, interrupts, display lists.</summary>
 public class AtariLibraryTests
 {
-    private static Run RunAtari(string source, Action<Ram>? setup = null) => Run.Program(source, setup: setup, platform: Platform.Atari,
-        traps: new Dictionary<int, Action<Run>> { [0xE45C] = Setvbv });
-
-    /// <summary>SETVBV, as the OS does it for A = 6 (immediate) and 7 (deferred): Y low, X high.</summary>
-    private static void Setvbv(Run r)
-    {
-        int vector = r.Cpu.A == 6 ? 0x0222 : 0x0224;
-        r.Ram.Bytes[vector] = r.Cpu.Y;
-        r.Ram.Bytes[vector + 1] = r.Cpu.X;
-    }
+    /// <summary>Runs with tern run's stand-ins, for SETVBV (review code-quality-tests 12).</summary>
+    private static Run RunAtari(string source, Action<Ram>? setup = null) => Run.Program(source, setup: setup, platform: Platform.Atari, standIns: true);
 
     /// <summary>
     /// Raises an NMI after main returned, through a stand-in for the OS's entry placed at $E000, and runs
@@ -322,13 +314,7 @@ public class AtariLibraryTests
     public void Dli_example_sets_up_its_screen_and_changes_the_color_on_each_row()
     {
         var path = AsmTests.FindExample("dli.tern", "atari");
-        var r = Run.Program(File.ReadAllText(path), sourcePath: path, platform: Platform.Atari,
-            traps: new Dictionary<int, Action<Run>>
-            {
-                [0xE45C] = Setvbv,
-                // CIO: the text goes to the screen at SAVMSC; only its length matters here.
-                [0xE456] = run => run.Cpu.Y = 1,
-            });
+        var r = Run.Program(File.ReadAllText(path), sourcePath: path, platform: Platform.Atari, standIns: true);
         Assert.Equal(0x4000, r.Ram.Bytes[0x58] | r.Ram.Bytes[0x59] << 8);
         Assert.Equal(0x3C00, r.Ram.Bytes[0x0230] | r.Ram.Bytes[0x0231] << 8);
         byte[] list = [0x70, 0x70, 0x70, 0xC2, 0x00, 0x40, .. Enumerable.Repeat((byte)0x82, 22), 0x02, 0x41, 0x00, 0x3C];
