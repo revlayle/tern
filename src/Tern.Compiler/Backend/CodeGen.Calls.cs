@@ -93,7 +93,9 @@ public sealed partial class CodeGen
             Op(Sta, Var(saved));
         }
         var (p, temp) = PointerBase(ix.Target);
+        int start = _out.Count;
         LoadPointerIndex(ix, byteIndex);
+        if (m == Sta && saved is null) CheckUnchanged(start, CpuState.A, "loading Y for a pointer element keeps A (PointerIndexIsCheap)");
         if (saved is not null)
         {
             Op(Lda, Var(saved));
@@ -124,7 +126,9 @@ public sealed partial class CodeGen
             // Y holds the index now: the value's code must pick X for its own indexes
             // (an indexed record array would use Y for its offset table).
             bool reserved = _reserved.Add(Register.Y);
+            int start = _out.Count;
             GenA(value);
+            CheckUnchanged(start, CpuState.Y, "the value's code keeps Y (UsesY)");
             if (reserved) _reserved.Remove(Register.Y);
         }
         Emit(Sta, IndirectIndexed, p);

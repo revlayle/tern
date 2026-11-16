@@ -211,7 +211,9 @@ public sealed partial class CodeGen
         if (kept is { } k) _reserved.Add(k);
         var inA = f.Parameters.FirstOrDefault(p => p.InMemory && p.PassedIn is Register.A or Register.AX);
         _aParameter = inA is null ? null : (inA, _out.Count);
+        int bodyStart = _out.Count;
         GenBlock(f.Declaration!.Body);
+        CheckHeld(bodyStart, _out.Count, kept is null ? null : f.Parameters.First(p => p.Register == kept), f.Declaration!.Body);
         _aParameter = null;
         if (kept is { } r) _reserved.Remove(r);
         if (!EndsWithJump())

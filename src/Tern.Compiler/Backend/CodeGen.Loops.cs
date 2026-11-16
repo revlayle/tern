@@ -194,7 +194,10 @@ public sealed partial class CodeGen
         Place(top);
         _loops.Add((end, cont));
         _loopDepth++;
+        int bodyStart = _out.Count;
         GenBlock(f.Body);
+        CheckHeld(bodyStart, _out.Count, f.UsingRegister is null ? c : null, f.Body);
+        CheckHeld(bodyStart, _out.Count, inRegister, f.Body);
         _loopDepth--;
         _loops.RemoveAt(_loops.Count - 1);
         Place(cont);
@@ -393,7 +396,10 @@ public sealed partial class CodeGen
             Place(top);
             _loops.Add((end, cont));
             _loopDepth++;
+            int bodyStart = _out.Count;
             GenBlock(f.Body);
+            CheckHeld(bodyStart, _out.Count, f.UsingRegister is null ? c : null, f.Body);
+            CheckHeld(bodyStart, _out.Count, inRegister, f.Body);
             _loopDepth--;
             _loops.RemoveAt(_loops.Count - 1);
             Place(cont);

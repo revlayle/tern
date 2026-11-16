@@ -111,7 +111,9 @@ public sealed partial class CodeGen
             if (w.Body.Code.FirstOrDefault() is ForStmt first && NonEmptyInside(w.Condition, first)) _nonEmpty.Add(first);
             Place(top);
             _loops.Add((end, test));
+            int bodyStart = _out.Count;
             GenBlock(w.Body);
+            CheckHeld(bodyStart, _out.Count, held, w.Body);
             _loops.RemoveAt(_loops.Count - 1);
             // The decrement must be the body's last instruction: dec v, or dex / dey for a held v.
             bool zFromDecrement = decremented is { } d && _out.Count > 0 && _out[^1] switch
@@ -511,7 +513,8 @@ public sealed partial class CodeGen
             && FoldIndexOffset(incx.Index, ArrayOf(incx)) is var (incIndex, incShift) && IndexIsCheap(incIndex)
             && (incIndex is NameExpr { Symbol.Register: Register.X } || (incIndex is not NameExpr { Symbol.Register: not null } && !_reserved.Contains(Register.X))))
         {
-            LoadIndex(incIndex);   // X, by the condition above
+            var incReg = LoadIndex(incIndex);
+            CheckRegister(incReg, Register.X, "the index of inc a,x loads into X");
             Emit(a.Op == TokenKind.PlusEq ? Inc : Dec, AbsoluteX, Indexed(ArrayOf(incx), 0, incShift, incIndex));
             return;
         }
@@ -714,12 +717,14 @@ public sealed partial class CodeGen
             saved = AcquireTemp(1);
             Op(Sta, Var(saved));
         }
+        int start = _out.Count;
         var reg = LoadIndex(index);
         if (saved is not null)
         {
             Op(Lda, Var(saved));
             Release(saved);
         }
+        else CheckUnchanged(start, CpuState.A, "loading the index keeps A (IndexIsCheap)");
         Emit(Sta, reg == Register.X ? AbsoluteX : AbsoluteY, Indexed(arr, table, shift, index));
     }
 }
