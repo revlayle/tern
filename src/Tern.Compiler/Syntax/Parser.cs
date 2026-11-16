@@ -51,6 +51,22 @@ public sealed partial class Parser
         _depth++;
     }
 
+    // ---------- Spans ----------
+
+    /// <summary>
+    /// Sets <paramref name="node"/>'s span: from token <paramref name="first"/> to the last token read, leaving
+    /// out line breaks before it and the line break or ';' that ended it (for a language server, M28).
+    /// </summary>
+    private T Finish<T>(T node, int first) where T : Node
+    {
+        int last = _pos - 1;
+        while (first < last && _tokens[first].Kind == TokenKind.Newline) first++;
+        while (last > first && _tokens[last].Kind is TokenKind.Newline or TokenKind.Semicolon) last--;
+        int start = _tokens[first].Start;
+        node.Span = new SourceSpan(start, last < first ? start : Math.Max(start, _tokens[last].End));
+        return node;
+    }
+
     // ---------- Modes ----------
 
     /// <summary>

@@ -26,19 +26,30 @@ public sealed partial class Parser
         public readonly List<ExportName> Exports = [];
         public readonly HashSet<string> PrivateNames = [];
         public readonly List<(string, SourcePos)> BrokenNames = [];
+        /// <summary>Every declaration, in source order.</summary>
+        public readonly List<Node> All = [];
 
-        /// <summary>Files a declaration under its kind and returns its name ("" for one without a name).</summary>
-        public string Add(Node declaration)
+        /// <summary>
+        /// Files a declaration under its kind, with the <c>///</c> comment before it, and returns its name ("" for one without a name).
+        /// </summary>
+        public string Add(Node declaration, string? doc = null)
         {
+            All.Add(declaration);
             switch (declaration)
             {
-                case ConstDecl d: Consts.Add(d); return d.Name;
-                case VarDecl d: Globals.Add(d); return d.Name;
-                case FnDecl { IsConst: true } d: ConstFns.Add(d); return d.Name;
-                case FnDecl d: Functions.Add(d); return d.Name;
-                case StructDecl d: Structs.Add(d); return d.Name;
+                case ConstDecl d: Consts.Add(d); d.Doc = doc; return d.Name;
+                case VarDecl d: Globals.Add(d); d.Doc = doc; return d.Name;
+                case FnDecl { IsConst: true } d: ConstFns.Add(d); d.Doc = doc; return d.Name;
+                case FnDecl d: Functions.Add(d); d.Doc = doc; return d.Name;
+                case StructDecl d: Structs.Add(d); d.Doc = doc; return d.Name;
                 case EncodingDecl d: Encodings.Add(d); return d.Name;
                 case AssertDecl d: Asserts.Add(d); return "";
+                case ModuleHeader d: Header = d; return "";
+                case ImportDecl d: Imports.Add(d); return "";
+                case MemoryDecl d: Memory = d; return "";
+                case DefaultEncoding d: DefaultEncodings.Add(d); return "";
+                case ExportName d: Exports.Add(d); return "";
+                case ExportTable d: ExportTable = d; return "";
                 default: throw new InvalidOperationException($"No list for {declaration.GetType().Name}");
             }
         }
@@ -47,7 +58,7 @@ public sealed partial class Parser
         {
             Header = Header, Asserts = Asserts, Imports = Imports, Memory = Memory, Exports = Exports, ExportTable = ExportTable, Structs = Structs,
             PrivateNames = PrivateNames, ConstFns = ConstFns, Encodings = Encodings, DefaultEncodings = DefaultEncodings, BrokenNames = BrokenNames,
-            HasSyntaxErrors = hasSyntaxErrors,
+            HasSyntaxErrors = hasSyntaxErrors, Declarations = All,
         };
     }
 
@@ -74,7 +85,8 @@ public sealed partial class Parser
         // The header and an import are kept when only their line's end is wrong.
         if (At(TokenKind.Module)) Recover(() =>
         {
-            file.Header = ParseModuleHeader();
+            int from = _pos;
+            file.Add(Finish(ParseModuleHeader(), from));
             ExpectEndOfStatement();
         });
         SkipTerminators();
@@ -82,7 +94,8 @@ public sealed partial class Parser
         {
             Recover(() =>
             {
-                file.Imports.Add(ParseImport());
+                int from = _pos;
+                file.Add(Finish(ParseImport(), from));
                 ExpectEndOfStatement();
             });
             SkipTerminators();
@@ -90,22 +103,31 @@ public sealed partial class Parser
         // Constants may come before the memory block, so its ranges can use them (spec 8.4).
         while (At(TokenKind.Const))
         {
-            Recover(() => file.Add(PeekAt(1).Kind == TokenKind.Fn ? ParseConstFnWhole() : ParseConst()));
+            Recover(() =>
+            {
+                var (from, doc) = (_pos, Current.Doc);
+                file.Add(Finish<Node>(PeekAt(1).Kind == TokenKind.Fn ? ParseConstFnWhole() : ParseConst(), from), doc);
+            });
             SkipTerminators();
         }
         if (IsMemoryBlock())
         {
-            Recover(() => file.Memory = ParseMemory());
+            Recover(() =>
+            {
+                int from = _pos;
+                file.Add(Finish(ParseMemory(), from));
+            });
             SkipTerminators();
         }
         while (!At(TokenKind.Eof))
         {
             Recover(() =>
             {
+                var (from, doc) = (_pos, Current.Doc);
                 bool hidden = ParsePrivate();
                 if (ParseDeclaration(file) is { } declaration)
                 {
-                    string name = file.Add(declaration);
+                    string name = file.Add(Finish(declaration, from), doc);
                     if (hidden) file.PrivateNames.Add(name);
                 }
             });
@@ -229,10 +251,11 @@ public sealed partial class Parser
             case TokenKind.Identifier when IsEncodingWord(): return ParseEncoding();
             case TokenKind.Identifier when IsDefaultEncoding():
             {
+                int from = _pos;
                 var word = Advance();
                 Advance();
                 var (name, pos) = ParseEncodingName("the name of an encoding after 'default encoding'");
-                file.DefaultEncodings.Add(new DefaultEncoding(word.Pos, name, pos));
+                file.Add(Finish(new DefaultEncoding(word.Pos, name, pos), from));
                 ExpectEndOfStatement();
                 return null;
             }
@@ -331,16 +354,18 @@ public sealed partial class Parser
         }
         do
         {
+            int from = _pos;
             var f = Expect(TokenKind.Identifier, "a function name after 'export'");
-            file.Exports.Add(new ExportName(f.Pos, f.Text));
+            file.Add(Finish(new ExportName(f.Pos, f.Text), from));
         } while (Accept(TokenKind.Comma));
         // export f, g @ $0900: a program with main puts its jump table there (spec 12.3).
         if (At(TokenKind.At))
         {
+            int from = _pos;
             var at = Advance();
             if (file.ExportTable is not null)
                 throw new CompileError(at.Pos, "A program has one export table. Write all its functions on the 'export' line with the '@'");
-            file.ExportTable = new ExportTable(at.Pos, ParseExpr());
+            file.Add(Finish(new ExportTable(at.Pos, ParseExpr()), from));
         }
         ExpectEndOfStatement();
     }
@@ -697,7 +722,8 @@ public sealed partial class Parser
     private TypeSyntax ParseType()
     {
         Enter();
-        try { return ParseTypeBody(); }
+        int from = _pos;
+        try { return Finish(ParseTypeBody(), from); }
         finally { _depth--; }
     }
 

@@ -3,9 +3,22 @@ using Tern.Cpu;
 
 namespace Tern.Compiler.Syntax;
 
+/// <summary>Where a node is in its file's source text: offsets, from its first character to after its last.</summary>
+public readonly record struct SourceSpan(int Start, int End)
+{
+    public int Length => End - Start;
+}
+
 public abstract class Node(SourcePos pos)
 {
     public SourcePos Pos { get; } = pos;
+
+    /// <summary>
+    /// The source text of the node, from its first token to its last, without the line break or ';' after it
+    /// (for a language server, M28). Set by the parser for expressions, statements, blocks, types and
+    /// top-level declarations; empty for a node the compiler made and for the parts of those (a parameter, a field).
+    /// </summary>
+    public SourceSpan Span { get; set; }
 
     /// <summary>
     /// The nodes directly inside this one, in source order (review code-quality-semantics 14). Every
@@ -264,6 +277,8 @@ public sealed class VarDecl(SourcePos pos, string name, TypeSyntax? type, Placem
     public bool IsNoinit { get; set; }
     /// <summary>Declared <c>volatile var</c>: memory that something else changes (spec 4).</summary>
     public bool IsVolatile { get; set; }
+    /// <summary>The <c>///</c> comment before a top-level declaration, or null.</summary>
+    public string? Doc { get; set; }
     public VariableSymbol? Symbol { get; set; }
 }
 public sealed class AssignStmt(SourcePos pos, Expr target, TokenKind op, Expr value) : Stmt(pos)
@@ -495,6 +510,8 @@ public sealed class ConstDecl(SourcePos pos, string name, TypeSyntax? type, Expr
     public string Name { get; } = name;
     public TypeSyntax? TypeSyntax { get; } = type;
     public Expr Value { get; set; } = value;
+    /// <summary>The <c>///</c> comment before a top-level declaration, or null.</summary>
+    public string? Doc { get; set; }
 }
 
 public sealed class ParamSyntax(SourcePos pos, string name, TypeSyntax type, Register? usingRegister) : Node(pos)
@@ -527,6 +544,8 @@ public sealed class FnDecl(
     public Expr? Address { get; init; }
     /// <summary>Registers named after <c>keeps</c>, with their positions.</summary>
     public List<(Register Register, SourcePos Pos)> Keeps { get; init; } = [];
+    /// <summary>The <c>///</c> comment before the declaration, or null.</summary>
+    public string? Doc { get; set; }
     public FunctionSymbol? Symbol { get; set; }
 }
 
@@ -587,6 +606,8 @@ public sealed class StructDecl(SourcePos pos, string name, List<FieldSyntax> fie
 {
     public string Name { get; } = name;
     public List<FieldSyntax> Fields { get; } = fields;
+    /// <summary>The <c>///</c> comment before the declaration, or null.</summary>
+    public string? Doc { get; set; }
 }
 
 /// <summary><c>encoding name: base { 'c' = $NN, 'a'..='z' = $NN }</c> (spec 2.1).</summary>
@@ -639,6 +660,11 @@ public sealed class ProgramSyntax(List<ConstDecl> consts, List<VarDecl> globals,
     public List<(string Name, SourcePos Pos)> BrokenNames { get; init; } = [];
     /// <summary>The parser dropped a statement or declaration for an error (spec 13): a missing declaration may be in it.</summary>
     public bool HasSyntaxErrors { get; init; }
+    /// <summary>
+    /// Every declaration of the file in source order, of all kinds (the header, imports, the memory block,
+    /// export names and the export table too), for an outline (M28). A declaration with a syntax error is not in it.
+    /// </summary>
+    public List<Node> Declarations { get; init; } = [];
 }
 
 /// <summary>The <c>memory { ... }</c> block of the main file.</summary>

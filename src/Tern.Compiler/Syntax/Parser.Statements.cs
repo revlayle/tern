@@ -11,7 +11,8 @@ public sealed partial class Parser
     private BlockStmt ParseBlock()
     {
         Enter();
-        try { return ParseBlockBody(); }
+        int from = _pos;
+        try { return Finish(ParseBlockBody(), from); }
         finally { _depth--; }
     }
 
@@ -48,6 +49,12 @@ public sealed partial class Parser
     }
 
     private Stmt ParseStatement()
+    {
+        int from = _pos;
+        return Finish(ParseStatementBody(), from);
+    }
+
+    private Stmt ParseStatementBody()
     {
         switch (Current.Kind)
         {

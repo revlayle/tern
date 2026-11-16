@@ -63,6 +63,7 @@ public sealed partial class Parser
 
     private Expr ParseComparison()
     {
+        int from = _pos;
         var left = ParseBitOr();
         if (Current.Kind is TokenKind.EqEq or TokenKind.NotEq or TokenKind.Less or TokenKind.LessEq
             or TokenKind.Greater or TokenKind.GreaterEq)
@@ -72,7 +73,7 @@ public sealed partial class Parser
             if (Current.Kind is TokenKind.EqEq or TokenKind.NotEq or TokenKind.Less or TokenKind.LessEq
                 or TokenKind.Greater or TokenKind.GreaterEq)
                 throw new CompileError(Current.Pos, "Comparisons cannot be chained; use '&&'");
-            return new BinaryExpr(op.Pos, op.Kind, left, right);
+            return Finish(new BinaryExpr(op.Pos, op.Kind, left, right), from);
         }
         return left;
     }
@@ -86,6 +87,7 @@ public sealed partial class Parser
 
     private Expr ParseLeftAssoc(Func<Expr> next, params TokenKind[] ops)
     {
+        int from = _pos;
         var left = next();
         // Each operator in a row is one level deeper in the tree: a + b + c is (a + b) + c.
         int chain = 0;
@@ -97,7 +99,7 @@ public sealed partial class Parser
                 chain++;
                 var op = Advance();
                 var right = next();
-                left = new BinaryExpr(op.Pos, op.Kind, left, right);
+                left = Finish(new BinaryExpr(op.Pos, op.Kind, left, right), from);
             }
             return left;
         }
@@ -108,9 +110,10 @@ public sealed partial class Parser
     {
         if (Current.Kind is TokenKind.Minus or TokenKind.Plus or TokenKind.Tilde or TokenKind.Bang)
         {
+            int from = _pos;
             var op = Advance();
             Enter();
-            try { return new UnaryExpr(op.Pos, op.Kind, ParseUnary()); }
+            try { return Finish(new UnaryExpr(op.Pos, op.Kind, ParseUnary()), from); }
             finally { _depth--; }
         }
         return ParsePostfix();
@@ -118,6 +121,7 @@ public sealed partial class Parser
 
     private Expr ParsePostfix()
     {
+        int from = _pos;
         var expr = ParsePrimary();
         // Each [i], .name and 'as' is one level deeper in the tree.
         int chain = 0;
@@ -131,18 +135,18 @@ public sealed partial class Parser
                     var t = Advance();
                     var index = ParseExpr();
                     Expect(TokenKind.RBracket, "']'");
-                    expr = new IndexExpr(t.Pos, expr, index);
+                    expr = Finish(new IndexExpr(t.Pos, expr, index), from);
                 }
                 else if (At(TokenKind.Dot))
                 {
                     var t = Advance();
                     var member = Expect(TokenKind.Identifier, "member name");
-                    expr = new MemberExpr(t.Pos, expr, member.Text);
+                    expr = Finish(new MemberExpr(t.Pos, expr, member.Text), from);
                 }
                 else if (At(TokenKind.As))
                 {
                     var t = Advance();
-                    expr = new CastExpr(t.Pos, expr, ParseType());
+                    expr = Finish(new CastExpr(t.Pos, expr, ParseType()), from);
                 }
                 else return expr;
             }
@@ -179,6 +183,12 @@ public sealed partial class Parser
     }
 
     private Expr ParsePrimary()
+    {
+        int from = _pos;
+        return Finish(ParsePrimaryBody(), from);
+    }
+
+    private Expr ParsePrimaryBody()
     {
         var t = Current;
         switch (t.Kind)
