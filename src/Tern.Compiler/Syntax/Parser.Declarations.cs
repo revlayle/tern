@@ -205,8 +205,9 @@ public sealed partial class Parser
     {
         if (!At(TokenKind.Private)) return false;
         var p = Advance();
-        if (!(Current.Kind is TokenKind.Const or TokenKind.Var or TokenKind.Linear or TokenKind.Struct or TokenKind.Data or TokenKind.Fn
-              or TokenKind.Interrupt or TokenKind.Noinit or TokenKind.Volatile or TokenKind.Inline || IsIndexedWord() || IsEncodingWord() || (At(TokenKind.Asm) && PeekAt(1).Kind == TokenKind.Fn)))
+        // Any declaration that has a name, with its modifiers; not 'private' again, and 'asm' only of 'asm fn'.
+        if (!(IsDeclarationKeyword(Current.Kind) || Current.Kind is TokenKind.Linear or TokenKind.Interrupt or TokenKind.Noinit or TokenKind.Volatile or TokenKind.Inline
+              || IsIndexedWord() || IsEncodingWord() || (At(TokenKind.Asm) && PeekAt(1).Kind == TokenKind.Fn)))
             throw new CompileError(p.Pos, $"'private' goes before a declaration (const, var, data, struct or fn); found {Describe(Current)}. Write it at the start of the declaration it hides");
         return true;
     }
