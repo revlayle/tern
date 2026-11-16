@@ -39,9 +39,13 @@ public sealed partial class CodeGen
     /// <summary>False when the program is compiled without the optimizer (<see cref="TernCompiler.Compile"/>).</summary>
     private readonly bool _optimize;
 
-    public CodeGen(CheckedProgram program, bool optimize = true)
+    /// <summary>The target CPU's instructions, for the optimizer.</summary>
+    private readonly InstructionSet _instructions;
+
+    public CodeGen(CheckedProgram program, InstructionSet instructions, bool optimize = true)
     {
         _program = program;
+        _instructions = instructions;
         _optimize = optimize;
         foreach (var m in program.Modules)
             _sourceLines[m.Path ?? ""] = m.Source.Split('\n');
@@ -69,7 +73,7 @@ public sealed partial class CodeGen
             // An interrupt handler's body is optimized before its saving code is added.
             // main runs once, right after the startup code has cleared memory.
             bool startsProgram = f == _program.Main && !_program.IsBinary && !f.AddressTaken;
-            if (_optimize && !f.Declaration!.IsAsm && !(f.IsInterrupt && !f.IsPart)) Optimizer.Run(_out, f, startsProgram);
+            if (_optimize && !f.Declaration!.IsAsm && !(f.IsInterrupt && !f.IsPart)) Optimizer.Run(_out, f, _instructions, startsProgram);
             FunctionItems[f] = _out.ToList();
             all.AddRange(_out);
         }
@@ -228,8 +232,8 @@ public sealed partial class CodeGen
         _aParameter is var (p, from) && e is NameExpr { Symbol: VariableSymbol v } && v == p
         && _out.Skip(from).All(item => item is Comment or SourceLine
             || (item is Instr { AsmPos: null } i && i.Mnemonic is not (Jsr or Brk)
-                && (AsmEffects.Of(i.Mnemonic, i.Mode).Writes & (p.PassedIn == Register.AX ? CpuState.A | CpuState.X : CpuState.A)) == 0
-                && !(i.Operand is VarOperand { Variable: var w } && w.Storage == p && AsmEffects.WritesMemory(i.Mnemonic, i.Mode))));
+                && (Instructions.Effects(i.Mnemonic, i.Mode).Writes & (p.PassedIn == Register.AX ? CpuState.A | CpuState.X : CpuState.A)) == 0
+                && !(i.Operand is VarOperand { Variable: var w } && w.Storage == p && Instructions.WritesMemory(i.Mnemonic, i.Mode))));
 
     /// <summary>Functions already decided by <see cref="KeptRegister"/>, with the register kept (or null).</summary>
     private readonly Dictionary<FunctionSymbol, Register?> _keptRegisters = new();
@@ -437,13 +441,13 @@ public sealed partial class CodeGen
         if (_out[^1] is Instr { Mnemonic: Mnemonic.Jmp, Operand: LabelOperand { Label: var l } } && l == _interruptExit)
             _out.RemoveAt(_out.Count - 1);
         var body = _out.GetRange(start, _out.Count - start);
-        if (_optimize) Optimizer.Run(body, f);
+        if (_optimize) Optimizer.Run(body, f, _instructions);
         _out.RemoveRange(start, _out.Count - start);
         _out.AddRange(body);
 
         var changed = CpuState.None;
         foreach (var i in _out.Skip(start).OfType<Instr>())
-            changed |= AsmEffects.Of(i.Mnemonic, i.Mode).Writes;
+            changed |= Instructions.Effects(i.Mnemonic, i.Mode).Writes;
         bool x = changed.HasFlag(CpuState.X), y = changed.HasFlag(CpuState.Y);
         bool a = x || y || changed.HasFlag(CpuState.A);
 

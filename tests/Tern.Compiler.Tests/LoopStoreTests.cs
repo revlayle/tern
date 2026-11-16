@@ -209,7 +209,7 @@ public class LoopStoreTests
     private static string Optimize(params AsmItem[] code)
     {
         var list = code.ToList();
-        Optimizer.Run(list, F);
+        Optimizer.Run(list, F, InstructionSet.Nmos6502);
         return string.Join("|", list.Select(i => i switch
         {
             Instr n => $"{n.Mnemonic.ToString().ToLowerInvariant()} {n.Operand}".Trim(),

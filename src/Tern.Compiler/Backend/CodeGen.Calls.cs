@@ -322,7 +322,7 @@ public sealed partial class CodeGen
     {
         var fx = block.Effects!;
         string Names(IEnumerable<VariableSymbol> vs) => string.Join(" ", vs.Select(v => v.QualifiedName).Order(StringComparer.Ordinal));
-        var summary = $"asm: reads {AsmEffects.Describe(fx.Reads)}, changes {AsmEffects.Describe(fx.Writes)}";
+        var summary = $"asm: reads {Instructions.Describe(fx.Reads)}, changes {Instructions.Describe(fx.Writes)}";
         if (fx.VariablesRead.Count > 0) summary += $", reads {Names(fx.VariablesRead)}";
         if (fx.VariablesWritten.Count > 0) summary += $", writes {Names(fx.VariablesWritten)}";
         if (fx.Calls) summary += ", calls subroutines";

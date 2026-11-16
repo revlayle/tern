@@ -1,4 +1,5 @@
 using Tern.Compiler.Syntax;
+using Tern.Cpu;
 
 namespace Tern.Compiler.Semantics;
 
@@ -47,12 +48,15 @@ public sealed partial class Checker
     private readonly Dictionary<VariableSymbol, long> _loopMax = [];
     private int _hiddenCounter;
     private readonly Platform _platform;
+    /// <summary>The target CPU's instructions: the modes assembly may use, and the indirect jump's page wrap.</summary>
+    private readonly InstructionSet _instructions;
 
     private MemoryLayout _layout;
 
     private Checker(Platform platform, ErrorList? errors)
     {
         _platform = platform;
+        _instructions = platform.InstructionSet;
         _errors = errors;
         _layout = MemoryLayout.Default(platform);
     }

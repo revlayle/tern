@@ -9,9 +9,9 @@ public static class Encoder
     /// address and <paramref name="pc"/> is the address of the branch instruction itself.
     /// </summary>
     /// <returns>The number of bytes written.</returns>
-    public static int Encode(Mnemonic mnemonic, AddressingMode mode, int operand, int pc, List<byte> output)
+    public static int Encode(InstructionSet set, Mnemonic mnemonic, AddressingMode mode, int operand, int pc, List<byte> output)
     {
-        if (!InstructionSet.TryGet(mnemonic, mode, out var info))
+        if (!set.TryGet(mnemonic, mode, out var info))
             throw new EncodingException($"{mnemonic} has no {mode} addressing mode");
 
         output.Add(info.Opcode);

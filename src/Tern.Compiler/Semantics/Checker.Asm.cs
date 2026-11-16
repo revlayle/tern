@@ -153,11 +153,11 @@ public sealed partial class Checker
     /// Picks the addressing mode from how the operand is written. Memory operands get the absolute
     /// modes; the assembler uses the zero-page form when the address turns out to be below $100.
     /// </summary>
-    private static AddressingMode AsmMode(AsmInstruction ins, AsmValue? v)
+    private AddressingMode AsmMode(AsmInstruction ins, AsmValue? v)
     {
         var m = ins.Mnemonic;
         string name = m.ToString().ToLowerInvariant();
-        bool Has(AddressingMode mode) => InstructionSet.TryGet(m, mode, out _);
+        bool Has(AddressingMode mode) => _instructions.TryGet(m, mode, out _);
         // The code generator keeps the offset in an int. The assembler checks the address itself.
         if (v is { IsNumber: false, Number: < -0xFFFF or > 0xFFFF })
             throw new CompileError(ins.Operand!.Pos, $"Offset {v.Number} from an address is outside memory. Use a smaller offset");
@@ -245,7 +245,7 @@ public sealed partial class Checker
 
     private void AddEffects(AsmInstruction ins, AsmEffects effects)
     {
-        var (reads, writes) = AsmEffects.Of(ins.Mnemonic, ins.Mode);
+        var (reads, writes) = Instructions.Effects(ins.Mnemonic, ins.Mode);
         var routine = ins.Mnemonic == Mnemonic.Jsr && ins.Value?.Function is { FixedAddress: not null } r ? r : null;
         if (routine is not null)
             foreach (var kept in routine.Keeps)
@@ -254,7 +254,7 @@ public sealed partial class Checker
         effects.Writes |= writes;
         if (ins.Mnemonic == Mnemonic.Jsr) effects.Calls = true;
         // sta g+1: the assembly patches the code of g, so the optimizer cannot trust g's own instructions.
-        if (ins.Value?.Function is { } patched && (AsmEffects.WritesMemory(ins.Mnemonic, ins.Mode) || ins.Mnemonic is Mnemonic.Sta or Mnemonic.Stx or Mnemonic.Sty))
+        if (ins.Value?.Function is { } patched && (Instructions.WritesMemory(ins.Mnemonic, ins.Mode) || Instructions.Stored(ins.Mnemonic) is not null))
             patched.CodePatched = true;
 
         // A register that holds a loop variable must survive the block.
@@ -307,7 +307,7 @@ public sealed partial class Checker
             variable.AddressTaken = true;
             return;
         }
-        if (ins.Mode == Indirect)
+        if (ins.Mode == Indirect && _instructions.IndirectJumpWrapsInPage)
         {
             // jmp ($xxFF) reads the high byte from $xx00 on the NMOS 6502.
             if (variable.FixedAddress is int fixedAt && ((fixedAt + v.Number) & 0xFF) == 0xFF)
@@ -315,8 +315,8 @@ public sealed partial class Checker
                     $"jmp (...) at ${fixedAt + v.Number:X4} reads its high byte from ${(fixedAt + v.Number) & 0xFF00:X4} on the 6502, since the address ends in $FF. Move '{variable.Name}'");
             variable.JumpVectorOffsets.Add((int)v.Number);
         }
-        if (AsmEffects.ReadsMemory(ins.Mnemonic, ins.Mode)) effects.VariablesRead.Add(variable);
-        if (AsmEffects.WritesMemory(ins.Mnemonic, ins.Mode))
+        if (Instructions.ReadsMemory(ins.Mnemonic, ins.Mode)) effects.VariablesRead.Add(variable);
+        if (Instructions.WritesMemory(ins.Mnemonic, ins.Mode))
         {
             // On a cartridge, data is ROM: a store leaves it as it is and reaches the board's latch, as
             // uxrom.select's bus-conflict table needs (provisional, question 159).

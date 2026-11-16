@@ -44,14 +44,62 @@ public readonly record struct OpcodeInfo(
     public int Size => InstructionSet.OperandSize(Mode) + 1;
 }
 
-public static class InstructionSet
+/// <summary>
+/// The instructions of one CPU variant (spec 12.1): opcodes, addressing modes and cycles, and how the
+/// variant behaves where variants differ. What each instruction does is in <see cref="Instructions"/>.
+/// The build passes the target's set to the checker, the backend and the emulator; the 65C02's set
+/// is the NMOS list with its changes.
+/// </summary>
+public sealed class InstructionSet
 {
-    private static readonly OpcodeInfo?[] ByOpcode = new OpcodeInfo?[256];
-    private static readonly Dictionary<(Mnemonic, AddressingMode), OpcodeInfo> ByMnemonicMode = new();
+    public static InstructionSet Nmos6502 { get; } = new(CpuVariant.Nmos6502, Nmos(), decimalMode: true, indirectJumpWrapsInPage: true);
+    /// <summary>The NES's CPU: the NMOS instructions, with no decimal mode.</summary>
+    public static InstructionSet Ricoh2A03 { get; } = new(CpuVariant.Ricoh2A03, Nmos(), decimalMode: false, indirectJumpWrapsInPage: true);
 
-    public static IReadOnlyList<OpcodeInfo> All { get; }
+    public static InstructionSet For(CpuVariant variant) => variant switch
+    {
+        CpuVariant.Nmos6502 => Nmos6502,
+        CpuVariant.Ricoh2A03 => Ricoh2A03,
+        _ => throw new ArgumentOutOfRangeException(nameof(variant), variant, "No instruction set for this CPU variant"),
+    };
 
-    static InstructionSet()
+    private readonly OpcodeInfo?[] _byOpcode = new OpcodeInfo?[256];
+    private readonly Dictionary<(Mnemonic, AddressingMode), OpcodeInfo> _byMnemonicMode = [];
+    private readonly HashSet<Mnemonic> _mnemonics = [];
+
+    public CpuVariant Variant { get; }
+    public IReadOnlyList<OpcodeInfo> All { get; }
+    /// <summary>With the D flag set, <c>adc</c> and <c>sbc</c> work in decimal (not on the 2A03).</summary>
+    public bool DecimalMode { get; }
+    /// <summary><c>jmp ($xxFF)</c> reads the high byte from $xx00, not the next page (the NMOS bug).</summary>
+    public bool IndirectJumpWrapsInPage { get; }
+
+    private InstructionSet(CpuVariant variant, List<OpcodeInfo> list, bool decimalMode, bool indirectJumpWrapsInPage)
+    {
+        Variant = variant;
+        DecimalMode = decimalMode;
+        IndirectJumpWrapsInPage = indirectJumpWrapsInPage;
+        foreach (var info in list)
+        {
+            if (_byOpcode[info.Opcode] is not null)
+                throw new InvalidOperationException($"Duplicate opcode ${info.Opcode:X2}");
+            _byOpcode[info.Opcode] = info;
+            _byMnemonicMode.Add((info.Mnemonic, info.Mode), info);
+            _mnemonics.Add(info.Mnemonic);
+        }
+        All = list;
+    }
+
+    public OpcodeInfo? Decode(byte opcode) => _byOpcode[opcode];
+
+    public bool TryGet(Mnemonic mnemonic, AddressingMode mode, out OpcodeInfo info) =>
+        _byMnemonicMode.TryGetValue((mnemonic, mode), out info);
+
+    /// <summary>True if the variant has <paramref name="mnemonic"/> in some mode.</summary>
+    public bool Has(Mnemonic mnemonic) => _mnemonics.Contains(mnemonic);
+
+    /// <summary>The 151 documented opcodes of the NMOS 6502.</summary>
+    private static List<OpcodeInfo> Nmos()
     {
         var list = new List<OpcodeInfo>();
         void Op(int opcode, Mnemonic m, AddressingMode mode, int cycles, bool pageCross = false) =>
@@ -179,21 +227,8 @@ public static class InstructionSet
         Op(0x9A, Mnemonic.Txs, AddressingMode.Implied, 2);
         Op(0x98, Mnemonic.Tya, AddressingMode.Implied, 2);
         Op(0xEA, Mnemonic.Nop, AddressingMode.Implied, 2);
-
-        foreach (var info in list)
-        {
-            if (ByOpcode[info.Opcode] is not null)
-                throw new InvalidOperationException($"Duplicate opcode ${info.Opcode:X2}");
-            ByOpcode[info.Opcode] = info;
-            ByMnemonicMode.Add((info.Mnemonic, info.Mode), info);
-        }
-        All = list;
+        return list;
     }
-
-    public static OpcodeInfo? Decode(byte opcode) => ByOpcode[opcode];
-
-    public static bool TryGet(Mnemonic mnemonic, AddressingMode mode, out OpcodeInfo info) =>
-        ByMnemonicMode.TryGetValue((mnemonic, mode), out info);
 
     public static int OperandSize(AddressingMode mode) => mode switch
     {

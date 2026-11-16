@@ -114,7 +114,7 @@ public static partial class Optimizer
             if (i.Mnemonic == Brk) { into.All = true; return; }
             // Other code may read the globals: a callee, the caller, or memory reached through a pointer or at a number.
             if (i.Mnemonic is Jsr or Rts or Rti || (i.Mode is IndirectIndexed or IndexedIndirect or Indirect && i.Mnemonic != Sta)
-                || (i.Operand is AddrOperand && AsmEffects.ReadsMemory(i.Mnemonic, i.Mode)))
+                || (i.Operand is AddrOperand && Instructions.ReadsMemory(i.Mnemonic, i.Mode)))
                 into.ReadGlobals();
             if (i.Operand is ImmVarByte { Variable: var a } && Tracked(a, function)) into.Whole.Add(a.Storage);
             if (i.Operand is not VarOperand o || !Tracked(o.Variable, function)) return;
@@ -123,7 +123,7 @@ public static partial class Optimizer
             {
                 case Absolute or ZeroPage:
                     if (Stored(i.Mnemonic) is not null) into.Written(b);
-                    else if (AsmEffects.ReadsMemory(i.Mnemonic, i.Mode)) into.Read(b);
+                    else if (Instructions.ReadsMemory(i.Mnemonic, i.Mode)) into.Read(b);
                     break;
                 case IndirectIndexed or Indirect:
                     into.Read(b);
@@ -131,7 +131,7 @@ public static partial class Optimizer
                     break;
                 default:
                     // Indexed: any byte of the variable. An indexed store overwrites no known byte.
-                    if (AsmEffects.ReadsMemory(i.Mnemonic, i.Mode) || i.Mode == IndexedIndirect) into.Whole.Add(b.Item1);
+                    if (Instructions.ReadsMemory(i.Mnemonic, i.Mode) || i.Mode == IndexedIndirect) into.Whole.Add(b.Item1);
                     break;
             }
         }
@@ -224,7 +224,7 @@ public static partial class Optimizer
                         followed = i.Mnemonic is not (Jsr or Brk or Rts or Rti)
                             && !((IsBranch(i.Mnemonic) || i.Mnemonic == Mnemonic.Jmp) && (Target(i) is not { } t || !positions.ContainsKey(t)));
                         readsAnywhere |= (i.Mode is IndirectIndexed or IndexedIndirect && i.Mnemonic != Sta)
-                            || (i.Operand is AddrOperand && AsmEffects.ReadsMemory(i.Mnemonic, i.Mode));
+                            || (i.Operand is AddrOperand && Instructions.ReadsMemory(i.Mnemonic, i.Mode));
                         break;
                 }
             }
@@ -343,7 +343,7 @@ public static partial class Optimizer
                     if (Target(i) is { } t) after |= positions.TryGetValue(t, out int tp) ? live[tp] : all;
                     if (i.Mnemonic == Rts) { after |= returned; foreach (int u in unknown) after |= live[u]; }
                     if (i.Mnemonic is Brk or Rti || (i.Mnemonic == Mnemonic.Jmp && Target(i) is null)) after = all;
-                    var (reads, writes) = AsmEffects.Of(i.Mnemonic, i.Mode);
+                    var (reads, writes) = Instructions.Effects(i.Mnemonic, i.Mode);
                     result = i.Mnemonic == Jsr ? all : ((after & ~writes) | reads) & all;
                 }
                 else result = after;
@@ -416,7 +416,7 @@ public static partial class Optimizer
     /// takes no more bytes, and no read moved to the other memory runs more often than the store.
     /// Returns true if a copy was changed.
     /// </summary>
-    private static bool ReadCopiesFromSource(List<AsmItem> code, FunctionSymbol function)
+    private static bool ReadCopiesFromSource(List<AsmItem> code, FunctionSymbol function, InstructionSet instructions)
     {
         var positions = Positions(code);
         if (SelfModifying(code, function) || CallsOwnSubroutine(code, positions)) return false;
@@ -442,7 +442,7 @@ public static partial class Optimizer
                 bool names = (i.Operand is VarOperand w && w.Variable.Storage == v.Storage) || (i.Operand is ImmVarByte b && b.Variable.Storage == v.Storage);
                 if (!names) continue;
                 usable = !FromAsm(i) && i.Mode is Absolute or ZeroPage && i.Operand is VarOperand { Offset: 0 }
-                    && Stored(i.Mnemonic) is null && !AsmEffects.WritesMemory(i.Mnemonic, i.Mode);
+                    && Stored(i.Mnemonic) is null && !Instructions.WritesMemory(i.Mnemonic, i.Mode);
                 reads.Add(k);
             }
             if (!usable || reads.Count == 0) continue;
@@ -452,8 +452,8 @@ public static partial class Optimizer
             {
                 if (code[k] is not Instr i) return false;
                 if (i.Mnemonic is Jsr or Brk) return true;
-                if (index is Reg r && AsmEffects.Of(i.Mnemonic, i.Mode).Writes.HasFlag(Flag(r))) return true;
-                if (i.Mode == Accumulator || !(AsmEffects.WritesMemory(i.Mnemonic, i.Mode) || Stored(i.Mnemonic) is not null)) return false;
+                if (index is Reg r && Instructions.Effects(i.Mnemonic, i.Mode).Writes.HasFlag(Flag(r))) return true;
+                if (i.Mode == Accumulator || !(Instructions.WritesMemory(i.Mnemonic, i.Mode) || Stored(i.Mnemonic) is not null)) return false;
                 if (i.Mode is IndirectIndexed or IndexedIndirect or Indirect || i.Operand is not VarOperand { Variable: var w }) return true;
                 return w.Storage == source || w.Storage == v.Storage || w.Storage.InOverlayArea;
             }
@@ -464,7 +464,7 @@ public static partial class Optimizer
             foreach (int r in reads)
             {
                 var i = (Instr)code[r];
-                if (same[r] && InstructionSet.TryGet(i.Mnemonic, load.Mode, out _)) fromSource.Add(r);
+                if (same[r] && instructions.TryGet(i.Mnemonic, load.Mode, out _)) fromSource.Add(r);
                 else if (i.Mnemonic == Lda) fromRegister.Add(r);
                 else { usable = false; break; }
             }
@@ -483,15 +483,15 @@ public static partial class Optimizer
                     // Still needed: a read from the register can follow before the next store of v.
                     if (k == s || !same[k] || !Ends(k) || !Reaches(code, positions, k, needed.Contains, s)) continue;
                     // Only a store into the source memory, not a call or a change of the index.
-                    usable = code[k] is Instr { AsmPos: null } i && (Stored(i.Mnemonic) is not null || AsmEffects.WritesMemory(i.Mnemonic, i.Mode))
+                    usable = code[k] is Instr { AsmPos: null } i && (Stored(i.Mnemonic) is not null || Instructions.WritesMemory(i.Mnemonic, i.Mode))
                         && i.Operand is VarOperand { Variable: var w } && w.Storage == source && i.Mode is not (IndirectIndexed or IndexedIndirect or Indirect)
-                        && !(index is Reg r && AsmEffects.Of(i.Mnemonic, i.Mode).Writes.HasFlag(Flag(r)));
+                        && !(index is Reg r && Instructions.Effects(i.Mnemonic, i.Mode).Writes.HasFlag(Flag(r)));
                     loads.Add(k);
                 }
                 if (!usable) continue;
                 live ??= RegistersLive(code, function, positions);
                 var choices = new[] { Reg.Y, Reg.X }.Where(r => r != index
-                    && InstructionSet.TryGet(r == Reg.Y ? Ldy : Ldx, load.Mode, out _)
+                    && instructions.TryGet(r == Reg.Y ? Ldy : Ldx, load.Mode, out _)
                     && loads.All(k => (live[k] & Flag(r)) == 0 && !NzLiveAfter(code, k - 1, function, positions))).ToList();
                 if (choices.Count == 0) continue;
                 held = choices[0];
@@ -499,7 +499,7 @@ public static partial class Optimizer
                 var regFlag = Flag(held);
                 var loadSet = loads.ToHashSet();
                 var holds = HoldsBefore(code, positions, k => loadSet.Contains(k) && !EndsHold(k), EndsHold);
-                bool EndsHold(int k) => k == s || (code[k] is Instr i && (i.Mnemonic is Jsr or Brk || AsmEffects.Of(i.Mnemonic, i.Mode).Writes.HasFlag(regFlag)));
+                bool EndsHold(int k) => k == s || (code[k] is Instr i && (i.Mnemonic is Jsr or Brk || Instructions.Effects(i.Mnemonic, i.Mode).Writes.HasFlag(regFlag)));
                 if (!fromRegister.All(r => holds[r])) continue;
             }
 
@@ -550,13 +550,13 @@ public static partial class Optimizer
                 continue;
             }
             // Anything else in straight-line code: note what it writes.
-            if (AsmEffects.WritesMemory(i.Mnemonic, i.Mode) || Stored(i.Mnemonic) is not null)
+            if (Instructions.WritesMemory(i.Mnemonic, i.Mode) || Stored(i.Mnemonic) is not null)
             {
                 // Through a pointer, or at a number: anything may change.
                 if (i.Mode is IndirectIndexed or IndexedIndirect or Indirect || i.Operand is not VarOperand { Variable: var v }) break;
                 if (i.Mode is Absolute or ZeroPage) written.Add((VarOperand)i.Operand); else writtenWhole.Add(v);
             }
-            var (_, writes) = AsmEffects.Of(i.Mnemonic, i.Mode);
+            var (_, writes) = Instructions.Effects(i.Mnemonic, i.Mode);
             foreach (var r in new[] { Reg.A, Reg.X, Reg.Y })
                 if (writes.HasFlag(r switch { Reg.A => CpuState.A, Reg.X => CpuState.X, _ => CpuState.Y })) known[(int)r] = null;
             if (Loaded(i.Mnemonic) is Reg load && i.Mode == Immediate) known[(int)load] = i.Operand;
@@ -592,7 +592,7 @@ public static partial class Optimizer
                     && function.ReturnRegister is not (Register.Zero or Register.Negative)
                     && !(function.ReturnRegister is { } ret && ret.Uses(register));
                 if (!deadAtReturn && (n.Mnemonic is Jsr or Rts or Rti or Brk or Mnemonic.Jmp || IsBranch(n.Mnemonic))) break;
-                var (reads, writes) = AsmEffects.Of(n.Mnemonic, n.Mode);
+                var (reads, writes) = Instructions.Effects(n.Mnemonic, n.Mode);
                 if ((reads & (reg | CpuState.N | CpuState.Z)) != 0) break;
                 if (deadAtReturn || (writes.HasFlag(reg) && writes.HasFlag(CpuState.N) && writes.HasFlag(CpuState.Z)))
                 {

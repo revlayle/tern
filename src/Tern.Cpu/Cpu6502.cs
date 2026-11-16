@@ -44,6 +44,9 @@ public sealed class Cpu6502(IBus bus, CpuVariant variant = CpuVariant.Nmos6502)
 
     public CpuVariant Variant { get; } = variant;
 
+    /// <summary>The variant's instructions and behavior (decimal mode, the indirect jump's page wrap).</summary>
+    public InstructionSet Instructions { get; } = InstructionSet.For(variant);
+
     /// <summary>Status register. Bit 5 always reads as 1; the B flag only exists on the stack.</summary>
     public byte P
     {
@@ -91,7 +94,7 @@ public sealed class Cpu6502(IBus bus, CpuVariant variant = CpuVariant.Nmos6502)
     {
         ushort start = PC;
         byte opcode = bus.Read(PC++);
-        var info = InstructionSet.Decode(opcode) ?? throw new IllegalOpcodeException(opcode, start);
+        var info = Instructions.Decode(opcode) ?? throw new IllegalOpcodeException(opcode, start);
         int cycles = info.Cycles;
         ushort addr = 0;
 
@@ -126,7 +129,7 @@ public sealed class Cpu6502(IBus bus, CpuVariant variant = CpuVariant.Nmos6502)
                 ushort ptr = ReadWord(PC);
                 PC += 2;
                 // NMOS bug: the high byte is read from the same page, e.g. jmp ($10FF) reads $10FF and $1000.
-                ushort hiAddr = (ushort)((ptr & 0xFF00) | ((ptr + 1) & 0x00FF));
+                ushort hiAddr = Instructions.IndirectJumpWrapsInPage ? (ushort)((ptr & 0xFF00) | ((ptr + 1) & 0x00FF)) : (ushort)(ptr + 1);
                 addr = (ushort)(bus.Read(ptr) | (bus.Read(hiAddr) << 8));
                 break;
             }
@@ -149,6 +152,10 @@ public sealed class Cpu6502(IBus bus, CpuVariant variant = CpuVariant.Nmos6502)
                 addr = (ushort)(PC + offset);
                 break;
             }
+            case AddressingMode.Implied or AddressingMode.Accumulator:
+                break;
+            default:
+                throw new InvalidOperationException($"No address for {info.Mode} (${opcode:X2} at ${start:X4})");
         }
 
         bool accumulator = info.Mode == AddressingMode.Accumulator;
@@ -170,12 +177,9 @@ public sealed class Cpu6502(IBus bus, CpuVariant variant = CpuVariant.Nmos6502)
                 break;
             }
 
-            case Mnemonic.Asl: Modify(addr, accumulator, v => { C = (v & 0x80) != 0; return (byte)(v << 1); }); break;
-            case Mnemonic.Lsr: Modify(addr, accumulator, v => { C = (v & 0x01) != 0; return (byte)(v >> 1); }); break;
-            case Mnemonic.Rol: Modify(addr, accumulator, v => { int r = (v << 1) | (C ? 1 : 0); C = (v & 0x80) != 0; return (byte)r; }); break;
-            case Mnemonic.Ror: Modify(addr, accumulator, v => { int r = (v >> 1) | (C ? 0x80 : 0); C = (v & 0x01) != 0; return (byte)r; }); break;
-            case Mnemonic.Inc: Modify(addr, false, v => (byte)(v + 1)); break;
-            case Mnemonic.Dec: Modify(addr, false, v => (byte)(v - 1)); break;
+            case Mnemonic.Asl or Mnemonic.Lsr or Mnemonic.Rol or Mnemonic.Ror or Mnemonic.Inc or Mnemonic.Dec:
+                Modify(info.Mnemonic, addr, accumulator);
+                break;
 
             case Mnemonic.Lda: A = bus.Read(addr); SetNZ(A); break;
             case Mnemonic.Ldx: X = bus.Read(addr); SetNZ(X); break;
@@ -237,6 +241,8 @@ public sealed class Cpu6502(IBus bus, CpuVariant variant = CpuVariant.Nmos6502)
                 break;
 
             case Mnemonic.Nop: break;
+            default:
+                throw new InvalidOperationException($"{info.Mnemonic} is in the instruction set but the emulator does not run it (${opcode:X2} at ${start:X4})");
         }
 
         Cycles += cycles;
@@ -261,18 +267,23 @@ public sealed class Cpu6502(IBus bus, CpuVariant variant = CpuVariant.Nmos6502)
     }
 
     /// <summary>Read-modify-write. Like the real NMOS chip, the old value is written back before the new one.</summary>
-    private void Modify(ushort addr, bool accumulator, Func<byte, byte> op)
+    private void Modify(Mnemonic m, ushort addr, bool accumulator)
     {
-        if (accumulator)
+        byte old = accumulator ? A : bus.Read(addr);
+        if (!accumulator) bus.Write(addr, old);
+        byte result;
+        switch (m)
         {
-            A = op(A);
-            SetNZ(A);
-            return;
+            case Mnemonic.Asl: result = (byte)(old << 1); C = (old & 0x80) != 0; break;
+            case Mnemonic.Lsr: result = (byte)(old >> 1); C = (old & 0x01) != 0; break;
+            case Mnemonic.Rol: result = (byte)((old << 1) | (C ? 1 : 0)); C = (old & 0x80) != 0; break;
+            case Mnemonic.Ror: result = (byte)((old >> 1) | (C ? 0x80 : 0)); C = (old & 0x01) != 0; break;
+            case Mnemonic.Inc: result = (byte)(old + 1); break;
+            case Mnemonic.Dec: result = (byte)(old - 1); break;
+            default: throw new InvalidOperationException($"{m} is not a read-modify-write instruction");
         }
-        byte old = bus.Read(addr);
-        bus.Write(addr, old);
-        byte result = op(old);
-        bus.Write(addr, result);
+        if (accumulator) A = result;
+        else bus.Write(addr, result);
         SetNZ(result);
     }
 
@@ -281,7 +292,7 @@ public sealed class Cpu6502(IBus bus, CpuVariant variant = CpuVariant.Nmos6502)
         int carry = C ? 1 : 0;
         int sum = A + m + carry;
 
-        if (!D || Variant == CpuVariant.Ricoh2A03)
+        if (!D || !Instructions.DecimalMode)
         {
             V = (~(A ^ m) & (A ^ sum) & 0x80) != 0;
             C = sum > 0xFF;
@@ -315,7 +326,7 @@ public sealed class Cpu6502(IBus bus, CpuVariant variant = CpuVariant.Nmos6502)
         C = diff >= 0;
         SetNZ(binary);
 
-        if (!D || Variant == CpuVariant.Ricoh2A03)
+        if (!D || !Instructions.DecimalMode)
         {
             A = binary;
             return;

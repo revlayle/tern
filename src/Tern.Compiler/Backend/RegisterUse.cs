@@ -31,7 +31,7 @@ public sealed class RegisterUse(CodeGen gen, IEnumerable<FunctionSymbol> functio
                 changed |= Target(i, f);
                 continue;
             }
-            changed |= AsmEffects.Of(i.Mnemonic, i.Mode).Writes & Registers;
+            changed |= Instructions.Effects(i.Mnemonic, i.Mode).Writes & Registers;
         }
         return _known[f] = changed;
     }

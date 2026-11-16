@@ -159,8 +159,8 @@ public static partial class Optimizer
             return;
         }
 
-        var (_, writes) = AsmEffects.Of(m, i.Mode);
-        if (i.Mode != Accumulator && (AsmEffects.WritesMemory(m, i.Mode) || i.Mode is IndirectIndexed or IndexedIndirect))
+        var (_, writes) = Instructions.Effects(m, i.Mode);
+        if (i.Mode != Accumulator && (Instructions.WritesMemory(m, i.Mode) || i.Mode is IndirectIndexed or IndexedIndirect))
         {
             if (i.Mode is Absolute or ZeroPage && i.Operand is VarOperand { Variable: var v, Offset: var at })
             {
@@ -174,7 +174,7 @@ public static partial class Optimizer
                 ForgetWrite(s, array, function);
                 if (Stored(m) is Reg st && ElementOf(i) is { } element) s.Regs[(int)st].Add(element);
             }
-            else if (AsmEffects.WritesMemory(m, i.Mode) || Stored(m) is not null)
+            else if (Instructions.WritesMemory(m, i.Mode) || Stored(m) is not null)
             {
                 // Through a pointer, or at a fixed numeric address: any memory may change.
                 s.Forget(op => op is VarOperand or Element);
@@ -212,7 +212,7 @@ public static partial class Optimizer
     /// <summary>An asm instruction writes to a code label, so it changes the code itself (or another function patches this one).</summary>
     private static bool SelfModifying(List<AsmItem> code, FunctionSymbol function) =>
         function.CodePatched || code.Any(item => item is Instr { AsmPos: not null, Operand: LabelOperand } w
-            && (AsmEffects.WritesMemory(w.Mnemonic, w.Mode) || Stored(w.Mnemonic) is not null));
+            && (Instructions.WritesMemory(w.Mnemonic, w.Mode) || Stored(w.Mnemonic) is not null));
 
     /// <summary>The state before each item, from the start of the function and every jump into a label.</summary>
     private static State?[] Analyse(List<AsmItem> code, FunctionSymbol function)
@@ -276,7 +276,7 @@ public static partial class Optimizer
                     if (FromAsm(i) || returnsInNz || Dispatches(code)) return true;
                     break;
                 }
-                var (reads, writes) = AsmEffects.Of(i.Mnemonic, i.Mode);
+                var (reads, writes) = Instructions.Effects(i.Mnemonic, i.Mode);
                 if ((reads & (CpuState.N | CpuState.Z)) != 0) return true;
                 if (writes.HasFlag(CpuState.N) && writes.HasFlag(CpuState.Z)) break;
                 if (IsBranch(i.Mnemonic) || i.Mnemonic == Mnemonic.Jmp)

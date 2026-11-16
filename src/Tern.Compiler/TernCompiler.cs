@@ -2,6 +2,7 @@ using System.Text;
 using Tern.Compiler.Backend;
 using Tern.Compiler.Semantics;
 using Tern.Compiler.Syntax;
+using Tern.Cpu;
 using static Tern.Cpu.AddressingMode;
 using static Tern.Cpu.Mnemonic;
 
@@ -170,7 +171,7 @@ public static partial class TernCompiler
     /// <summary>Allocation, code generation and layout, for a program whose checks found no error.</summary>
     private static CompileResult Build(CheckedProgram program, Platform platform, string? sourcePath, bool optimize)
     {
-        var gen = new CodeGen(program, optimize);
+        var gen = new CodeGen(program, platform.InstructionSet, optimize);
         var functionCode = gen.GenerateFunctions();
         // Indexed arrays placed so that they do not cross a page, with the variables starting on one;
         // if the program areas have no room for that, the variables are placed one after another (F12).
@@ -205,7 +206,7 @@ public static partial class TernCompiler
         var indexed = new Dictionary<VariableSymbol, List<int>>();
         foreach (var i in functionCode.OfType<Instr>())
             if (i.Mode is Tern.Cpu.AddressingMode.AbsoluteX or Tern.Cpu.AddressingMode.AbsoluteY or Tern.Cpu.AddressingMode.ZeroPageX or Tern.Cpu.AddressingMode.ZeroPageY
-                && AsmEffects.ReadsMemory(i.Mnemonic, i.Mode) && !AsmEffects.WritesMemory(i.Mnemonic, i.Mode)
+                && Instructions.ReadsMemory(i.Mnemonic, i.Mode) && !Instructions.WritesMemory(i.Mnemonic, i.Mode)
                 && i.Operand is VarOperand { Variable: var v } o)
                 (indexed.TryGetValue(v.Storage, out var list) ? list : indexed[v.Storage] = []).Add(v.AliasOffset + o.Offset);
         // NROM fills $C000-$FFFF first, so a small program is NROM-128; one that does not fit there is
@@ -342,7 +343,7 @@ public static partial class TernCompiler
             // any error as before.
             try
             {
-                code = Assembler.Assemble(items, codeAreas, () =>
+                code = Assembler.Assemble(items, codeAreas, platform.InstructionSet, () =>
                 {
                     foreach (var (g, label) in imageLabels) g.Address = label.Address;
                     foreach (var (v, offset) in plan.ZeroedGlobals.Concat(plan.NoinitGlobals).Concat(plan.CopiedGlobals)) v.Address = bss.Address + offset;
@@ -421,7 +422,7 @@ public static partial class TernCompiler
             var use = new RegisterUse(gen, program.Functions);
             var setupChange = items.SkipWhile(i => i is not LabelDef { Label: var l } || l != setup).OfType<Instr>()
                 .TakeWhile(i => i.Mnemonic != Rts)
-                .Aggregate(CpuState.None, (acc, i) => acc | (AsmEffects.Of(i.Mnemonic, i.Mode).Writes & (CpuState.A | CpuState.X | CpuState.Y)));
+                .Aggregate(CpuState.None, (acc, i) => acc | (Instructions.Effects(i.Mnemonic, i.Mode).Writes & (CpuState.A | CpuState.X | CpuState.Y)));
             var table = new List<(string Name, FunctionSymbol? Function, int Address, CpuState Changed)> { ("setup", null, start.Address, setupChange) };
             for (int i = 0; i < program.Exports.Count; i++)
             {
