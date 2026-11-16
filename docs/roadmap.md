@@ -710,6 +710,7 @@ Review themes 1 and 2.
 - One syntax-tree visitor used by every walk, so a new node is never skipped silently.
 - One registry of `tern run` stand-ins per machine.
 - One CLI option table that the parsers and the help text are made from.
+- Backend 10 (the generator predicts its own output) by debug-build checks of each prediction against the emitted code, not by reserving registers (decision 2026-11-16); a check that fails in the suite is a bug, fixed with a test as in R2.
 
 Done when: no list of instruction effects, tree walk over every node kind, stand-in or CLI option exists twice, and the benchmarks and `SkillTests` are unchanged.
 
@@ -775,6 +776,7 @@ Decision 2026-11-12. Before the X16 platform and its library, a spec session che
 ### M29: 65C02 and Commander X16
 
 - The 65C02 CPU variant (spec 12.1): new instructions in the CPU table, emulator and code generator (`stz`, `bra`, `phx`/`phy`, `inc a`, `(zp)` addressing); code shapes per variant
+- An `interrupt fn` emits `cld` only when the variant has decimal mode (not on the NES's 2A03; decision 2026-11-16)
 - X16 platform: memory map, banked RAM, VERA register structs, KERNAL routines
 
 Done when: the benchmarks compile for the 65C02 and use the new instructions where shorter (listing tests), and an X16 example runs in its emulator.
