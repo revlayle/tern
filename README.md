@@ -2,7 +2,7 @@
 
 <img src="docs/logo.svg" alt="Tern logo: a bird made of five purple triangles" width="120">
 
-Tern is a small, readable programming language for 6502 processors that compiles to compact, predictable machine code. It comes close to carefully hand-written assembly and makes it easy to drop into assembly where a routine needs it. The compiler is written in C# and has its own assembler and cycle-exact 6502 emulator. It builds programs for the Commodore 64, the Atari 8-bit computers, the Apple II and the NES.
+Tern is a small, readable programming language for 6502 processors that compiles to compact, predictable machine code. It comes close to carefully hand-written assembly and makes it easy to drop into assembly where a routine needs it. The compiler is written in C# and has its own assembler and cycle-exact 6502 emulator. It builds programs for the Commodore 64, the Atari 8-bit computers, the Apple II and the NES. It was built by one developer working with Claude as a coding agent ([How Tern was made](#how-tern-was-made)).
 
 *Tern is a working name.*
 
