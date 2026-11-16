@@ -30,6 +30,9 @@ public static class Lowering
                 foreach (var arm in m.Arms) Apply(arm.Body);
                 break;
             case ReturnStmt r: if (r.Value is not null) r.Value = Lower(r.Value); break;
+            // Nothing to lower: compile-time code, assembly, and statements with no expression.
+            case BreakStmt or ContinueStmt or ErrorStmt or ConstDecl or AsmStmt or EmitStmt or AssertStmt: break;
+            default: throw new InvalidOperationException($"Lowering does not know a {stmt.GetType().Name}");
         }
     }
 
@@ -46,6 +49,10 @@ public static class Lowering
             case IndexExpr ix: ix.Target = Lower(ix.Target); ix.Index = Lower(ix.Index); break;
             case MemberExpr m: m.Target = Lower(m.Target); break;
             case CastExpr c: c.Operand = Lower(c.Operand); break;
+            // Leaves, and values the checker has already made constant.
+            case NumberExpr or RealExpr or CharExpr or StringExpr or BoolExpr or NameExpr or AsmLabelExpr
+                or ArrayLiteralExpr or StructLiteralExpr or ListForExpr: break;
+            default: throw new InvalidOperationException($"Lowering does not know a {e.GetType().Name}");
         }
         return e;
     }
