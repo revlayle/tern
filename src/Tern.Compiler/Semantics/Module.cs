@@ -45,8 +45,14 @@ public static class ModuleLoader
 {
     /// <returns>All files, each module before the files that import it; the main file is last.</returns>
     /// <param name="errors">Takes every error, and the loader goes on without a module it cannot load (spec 13). Null: the first error is thrown.</param>
-    public static List<Module> Load(string source, string? sourcePath, Platform platform, string libraryDirectory, ErrorList? errors = null)
+    /// <param name="openFile">
+    /// The text of a module open in an editor, by its full path, which is used in place of the file on disk;
+    /// null for a file that is not open (a language server's unsaved buffers, M28). Null: every module is read from disk.
+    /// </param>
+    public static List<Module> Load(string source, string? sourcePath, Platform platform, string libraryDirectory, ErrorList? errors = null,
+        Func<string, string?>? openFile = null)
     {
+        var files = new SourceFiles(openFile);
         errors?.AddFile(sourcePath);
         var main = new Module
         {
@@ -93,13 +99,13 @@ public static class ModuleLoader
                         ? $"'{import.Name}' is this file, the program's main file, which cannot be imported. Remove this import"
                         : $"'{import.Name}' is the program's main file, which cannot be imported. Move what {m.Name} needs from it into a module that both import");
                     string path;
-                    try { path = Find(import, m, platform, libraryDirectory, IsMainFile); }
+                    try { path = Find(import, m, platform, libraryDirectory, IsMainFile, files); }
                     catch (CompileError) when (IsMainFile(System.IO.Path.GetFullPath(System.IO.Path.Combine(m.Directory, import.Name + ".tern"))))
                     {
                         throw MainImported();   // the main file has not been saved yet
                     }
                     if (IsMainFile(path)) throw MainImported();
-                    var text = File.ReadAllText(path);
+                    var text = files.Read(path);
                     errors?.AddFile(path);
                     module = new Module
                     {
@@ -127,7 +133,7 @@ public static class ModuleLoader
     /// The file for <c>import name</c>: the library's folder for the target platform, the library,
     /// then the importing file's folder. A module in another platform's folder is an error.
     /// </summary>
-    private static string Find(ImportDecl import, Module importer, Platform platform, string library, Func<string, bool> isMainFile)
+    private static string Find(ImportDecl import, Module importer, Platform platform, string library, Func<string, bool> isMainFile, SourceFiles files)
     {
         string file = import.Name + ".tern";
         string[] candidates =
@@ -139,11 +145,11 @@ public static class ModuleLoader
         for (int i = 0; i < candidates.Length; i++)
         {
             var path = candidates[i];
-            if (!File.Exists(path)) continue;
+            if (!files.Exists(path)) continue;
             // File names ignore case on Windows. The module name must match the file exactly, so that
             // a module is loaded once and the program also compiles where case matters.
             var dir = System.IO.Path.GetDirectoryName(path)!;
-            var actual = System.IO.Path.GetFileName(System.IO.Directory.GetFiles(dir, file).Single());
+            var actual = files.IsOpen(path) ? file : System.IO.Path.GetFileName(System.IO.Directory.GetFiles(dir, file).Single());
             if (actual != file)
                 throw new CompileError(import.Pos,
                     $"The module file is named {actual}; write 'import {System.IO.Path.GetFileNameWithoutExtension(actual)}'");
@@ -151,7 +157,7 @@ public static class ModuleLoader
             // A program's own module may not have a library module's name (spec 2.2), so the library
             // never silently hides it. A main file of that name is never imported, and is allowed.
             var own = System.IO.Path.GetFullPath(candidates[^1]);
-            if (i < candidates.Length - 1 && File.Exists(own) && !isMainFile(own) && !InLibrary(importer.Directory, library)
+            if (i < candidates.Length - 1 && files.Exists(own) && !isMainFile(own) && !InLibrary(importer.Directory, library)
                 && !string.Equals(own, full, StringComparison.OrdinalIgnoreCase))
                 throw new CompileError(import.Pos,
                     $"'{import.Name}' is both a library module ({full}) and your file {own}. Rename your file, e.g. to my_{file}, and import it by its new name");
@@ -160,7 +166,7 @@ public static class ModuleLoader
 
         if (System.IO.Directory.Exists(library))
             foreach (var dir in System.IO.Directory.GetDirectories(library))
-                if (File.Exists(System.IO.Path.Combine(dir, file)))
+                if (files.Exists(System.IO.Path.Combine(dir, file)))
                     throw new CompileError(import.Pos,
                         $"'{import.Name}' is a module for the {System.IO.Path.GetFileName(dir)} platform; this program is compiled for {platform.Name}. Remove the import, or use a module for {platform.Name}");
 
@@ -169,6 +175,14 @@ public static class ModuleLoader
     }
 
     /// <summary>Whether a folder is the library or one of its platform folders.</summary>
+    /// <summary>Module files: a file open in an editor, else the file on disk.</summary>
+    private sealed class SourceFiles(Func<string, string?>? openFile)
+    {
+        public bool IsOpen(string path) => openFile?.Invoke(System.IO.Path.GetFullPath(path)) is not null;
+        public bool Exists(string path) => IsOpen(path) || File.Exists(path);
+        public string Read(string path) => openFile?.Invoke(System.IO.Path.GetFullPath(path)) ?? File.ReadAllText(path);
+    }
+
     private static bool InLibrary(string folder, string library)
     {
         var lib = System.IO.Path.GetFullPath(library).TrimEnd(System.IO.Path.DirectorySeparatorChar);

@@ -77,6 +77,25 @@ public sealed class CompileResult
 /// <summary>What the compiler does with warnings (spec 13).</summary>
 public enum WarningMode { Report, Off, AsErrors }
 
+/// <summary>
+/// What the checks found (<see cref="TernCompiler.Check"/>), without building: the files as parsed and
+/// declared, also when they have errors, and every error and warning.
+/// </summary>
+/// <param name="Modules">The main file (last) and the modules it imports, with their syntax trees and scopes; empty if the main file could not be loaded.</param>
+/// <param name="Program">The checked program, or null when there are errors.</param>
+/// <param name="All">The errors and warnings, sorted by place (spec 13).</param>
+/// <param name="MoreNotReported"><c>--max-errors</c> stopped the checks: more errors were not reported.</param>
+public sealed record CheckResult(IReadOnlyList<Module> Modules, CheckedProgram? Program, IReadOnlyList<CompileError> All, bool MoreNotReported)
+{
+    public IReadOnlyList<CompileError> Errors => All.Where(e => !e.IsWarning).ToList();
+    public IReadOnlyList<CompileError> Warnings => All.Where(e => e.IsWarning).ToList();
+    /// <summary>No errors: the program can be built.</summary>
+    public bool Ok => Program is not null;
+
+    /// <summary>The errors and warnings as tools report them (<c>tern --json</c>); <paramref name="defaultFile"/> for source given without a path.</summary>
+    public IReadOnlyList<Tools.Diagnostic> Diagnostics(string defaultFile) => All.Select(e => Tools.Diagnostic.From(e, defaultFile)).ToList();
+}
+
 public static partial class TernCompiler
 {
     /// <summary>The standard library: the <c>lib</c> folder next to the compiler.</summary>
@@ -95,6 +114,31 @@ public static partial class TernCompiler
     public static CompileResult Compile(string source, Platform? platform = null, string? sourcePath = null, string? libraryDirectory = null, int? maxErrors = null,
         WarningMode warnings = WarningMode.Report, bool warnLibrary = false, bool optimize = true) =>
         OnLargeStack(() => CompileHere(source, platform, sourcePath, libraryDirectory, maxErrors, warnings, warnLibrary, optimize));
+
+    /// <summary>
+    /// Parses and checks a program without building it, and never throws a <see cref="CompileError"/>:
+    /// the errors and warnings are in the result, with the files as far as they were understood (for a
+    /// language server, M28). The checks are those of <see cref="Compile"/>, which reports the same errors.
+    /// </summary>
+    /// <param name="openFile">
+    /// The text of a module open in an editor, by its full path, used in place of the file on disk; null
+    /// for a file that is not open. The main file's text is <paramref name="source"/>.
+    /// </param>
+    public static CheckResult Check(string source, Platform? platform = null, string? sourcePath = null, string? libraryDirectory = null, int? maxErrors = null,
+        WarningMode warnings = WarningMode.Report, Func<string, string?>? openFile = null) =>
+        OnLargeStack(() =>
+        {
+            var checking = new Checking(platform ?? Platform.C64, maxErrors, warnings);
+            try
+            {
+                var program = checking.Run(source, sourcePath, libraryDirectory, warnLibrary: false, openFile);
+                return new CheckResult(checking.Modules, program, checking.Warnings, false);
+            }
+            catch (CompileError e)
+            {
+                return new CheckResult(checking.Modules, null, e.WithWarnings, e.MoreNotReported);
+            }
+        });
 
     /// <summary>
     /// The stack a compile runs on. The passes walk the syntax tree by recursion, up to
@@ -127,43 +171,65 @@ public static partial class TernCompiler
         WarningMode warnings, bool warnLibrary, bool optimize)
     {
         platform ??= Platform.C64;
-
-        var errors = new ErrorList(maxErrors);
-        var found = warnings == WarningMode.Off ? null : new List<CompileError>();
-        var modules = ModuleLoader.Load(source, sourcePath, platform, libraryDirectory ?? DefaultLibraryDirectory, errors);
-        CheckedProgram program;
-        // Warnings are found only when the checks found no error; a later error (the call graph's, allocation,
-        // layout) is reported with them, sorted by place (spec 13).
-        try { program = Checker.Check(modules, platform, errors, found, warnLibrary); }
-        catch (CompileError e) when (found is { Count: > 0 })
-        {
-            AddWarnings(e);
-            throw;
-        }
-        if (warnings == WarningMode.AsErrors && found!.Count > 0) ThrowWarningsAsErrors();
+        var checking = new Checking(platform, maxErrors, warnings);
+        var program = checking.Run(source, sourcePath, libraryDirectory, warnLibrary, openFile: null);
         try
         {
             var result = Build(program, platform, sourcePath, optimize);
-            result.Warnings = found is null ? [] : errors.Sort(found);
+            result.Warnings = checking.Warnings;
             return result;
         }
-        catch (CompileError e) when (found is { Count: > 0 })
+        catch (CompileError e) when (checking.HasWarnings)
         {
-            AddWarnings(e);
+            checking.AddWarnings(e);
             throw;
         }
+    }
 
-        void AddWarnings(CompileError e)
+    /// <summary>
+    /// The first half of a compile, shared by <see cref="Compile"/> and <see cref="Check"/>: loading, parsing
+    /// and the checks, with every error and warning they find (spec 13).
+    /// </summary>
+    private sealed class Checking(Platform platform, int? maxErrors, WarningMode warnings)
+    {
+        private readonly ErrorList _errors = new(maxErrors);
+        private readonly List<CompileError>? _found = warnings == WarningMode.Off ? null : [];
+
+        /// <summary>The files loaded, as far as they were (see <see cref="CheckResult.Modules"/>).</summary>
+        public List<Module> Modules { get; private set; } = [];
+        public bool HasWarnings => _found is { Count: > 0 };
+        /// <summary>The warnings, sorted by place.</summary>
+        public IReadOnlyList<CompileError> Warnings => _found is null ? [] : _errors.Sort(_found);
+
+        /// <exception cref="CompileError">The first error, carrying all of them and the warnings.</exception>
+        public CheckedProgram Run(string source, string? sourcePath, string? libraryDirectory, bool warnLibrary, Func<string, string?>? openFile)
+        {
+            Modules = ModuleLoader.Load(source, sourcePath, platform, libraryDirectory ?? DefaultLibraryDirectory, _errors, openFile);
+            CheckedProgram program;
+            // Warnings are found only when the checks found no error; a later error (the call graph's, allocation,
+            // layout) is reported with them, sorted by place (spec 13).
+            try { program = Checker.Check(Modules, platform, _errors, _found, warnLibrary); }
+            catch (CompileError e) when (HasWarnings)
+            {
+                AddWarnings(e);
+                throw;
+            }
+            if (warnings == WarningMode.AsErrors && HasWarnings) ThrowWarningsAsErrors();
+            return program;
+        }
+
+        /// <summary>Gives a later error the warnings found before it; with <c>--warnings-as-errors</c>, they are errors instead.</summary>
+        public void AddWarnings(CompileError e)
         {
             if (warnings == WarningMode.AsErrors) ThrowWarningsAsErrors();
-            e.WithWarnings = errors.Sort(e.All.Concat(found!));
+            e.WithWarnings = _errors.Sort(e.All.Concat(_found!));
         }
 
         // --warnings-as-errors: each warning is an error, and the build stops (spec 13).
-        void ThrowWarningsAsErrors()
+        private void ThrowWarningsAsErrors()
         {
-            foreach (var w in found!) errors.Add(new CompileError(w.Pos, w.Description));
-            errors.ThrowIfAny();
+            foreach (var w in _found!) _errors.Add(new CompileError(w.Pos, w.Description));
+            _errors.ThrowIfAny();
         }
     }
 
