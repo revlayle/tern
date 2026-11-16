@@ -64,8 +64,10 @@ public sealed class NesBus : IBus
     /// then B, Select, Start, Up, Down, Left, bit 0 Right. Null: no buttons.
     /// </summary>
     public Func<long, int, byte>? Buttons { get; set; }
-    /// <summary>The CPU, for the cycles an OAM DMA takes.</summary>
-    public Cpu6502? Cpu { get; set; }
+    /// <summary>The CPU on the bus, for its clock and the cycles an OAM DMA takes; null until one is made with this bus.</summary>
+    public Cpu6502? Cpu { get; private set; }
+
+    public void Attach(Cpu6502 cpu) => Cpu = cpu;
 
     /// <param name="image">The .nes file: the iNES header, PRG ROM, CHR ROM.</param>
     public NesBus(Ram ram, byte[] image)
@@ -174,7 +176,8 @@ public sealed class NesBus : IBus
         {
             for (int i = 0; i < 256; i++) Oam[(byte)(_oamAddress + i)] = Read((ushort)(value << 8 | i));
             Dmas++;
-            if (Cpu is not null) Cpu.Cycles += 513 + (Cpu.Cycles & 1);
+            // 513 cycles, and one more on an odd cycle (counted from the start of the instruction).
+            Cpu?.Stall(513 + (int)(Cpu.Cycles & 1));
             return;
         }
         if (address == 0x4016)

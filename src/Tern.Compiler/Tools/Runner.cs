@@ -96,7 +96,6 @@ public static class Runner
         foreach (var set in options.Sets) ram.Bytes[set.Address] = set.Value;
         var cpu = new Cpu6502(nes is null ? ram : nes, program.Platform.Cpu) { PC = (ushort)program.Entry, SP = 0xFF, I = true };
         StartState.Set(cpu);
-        if (nes is not null) nes.Cpu = cpu;
 
         var inProgram = program.Sections.Select(s => (s.Address, End: s.Address + s.Size)).ToList();
         bool InProgram(int pc) => inProgram.Any(s => pc >= s.Address && pc < s.End);
