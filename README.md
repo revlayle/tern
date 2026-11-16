@@ -79,7 +79,7 @@ The compiler is complete through milestone M27, the four platforms of the first 
 
 ## How Tern was made
 
-Tern started on 2026-11-01 with a question: how close can a readable language get to hand-written 6502 assembly if it is designed around the processor instead of around C? The first commit holds the specification's first draft and the 6502 CPU library; the first working compiler followed the same day. The four platforms of the first release were done two weeks later, in about 800 commits.
+Tern started on 2026-11-01 with a question: how close can a readable language get to hand-written 6502 assembly if it is designed around the processor instead of around C? The first commit holds the specification's first draft and the 6502 CPU library; the first working compiler followed the same day. The four platforms of the first release were done two weeks later, in about 800 commits, by the developer directing Claude as a coding agent.
 
 **Agentic development.** Tern was built with Claude, Anthropic's AI model, working in [Claude Code](https://claude.com/claude-code). The developer set the goals and the design rules, settled every language decision, chose what to build next, and tested the results on real emulators; Claude drafted the specification text, wrote the compiler, the tests, the library and the documentation, and reviewed each milestone. The work runs in three kinds of sessions, each starting with no memory of the others (`docs/workflow.md`):
 
