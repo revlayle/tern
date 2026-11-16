@@ -264,7 +264,11 @@ public sealed partial class Checker
             if (v < 0 && other.Type.IsInteger && !other.Type.IsSigned)
                 throw new CompileError(literal.Pos,
                     $"A loop from a negative bound counts with a signed variable, but the other bound is {other.Type}. Convert it with 'as {(v >= -128 && other.Type.Size == 1 ? "i8" : "i16")}'");
-            type = other.Type.IsSigned && other.Type.Size == 1 && (v < -128 || v > 127) ? TernType.I16 : Unify(f.From, f.To, f.Pos);
+            // A u8 start with an exclusive end of 256 counts with a u8 to the end of the page (decision 2026-11-15, question 172).
+            if (literal == f.To && v == 256 && !f.Inclusive && other.Type.Kind == TypeKind.U8 && f.Step is null or { ConstValue: > 0 })
+                type = TernType.U8;
+            else
+                type = other.Type.IsSigned && other.Type.Size == 1 && (v < -128 || v > 127) ? TernType.I16 : Unify(f.From, f.To, f.Pos);
         }
         else
             type = Unify(f.From, f.To, f.Pos);

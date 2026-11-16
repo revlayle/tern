@@ -144,7 +144,8 @@ public sealed partial class CodeGen
         // Skip the loop if the range is empty, unless the bounds prove it is not.
         long max = type.MaxValue;
         bool provablyNonEmpty = (from is not null && to is not null)
-            || (inclusive && up && to == max) || (inclusive && !up && to == type.MinValue) || _nonEmpty.Contains(f);
+            || (inclusive && up && to == max) || (inclusive && !up && to == type.MinValue) || _nonEmpty.Contains(f)
+            || (!inclusive && up && to == max + 1);   // start..256 with a u8 start: every start is below the end
 
         // A down-count to 0 tests only the start's zero (and sign), which a plain ldx n has set: test it
         // before a variable is loaded into the other index register (spec 11).
