@@ -84,33 +84,18 @@ public static class Runner
         options ??= new RunOptions();
         if (program.HaltAddress < 0)
             throw new InvalidOperationException("A binary without main cannot be run on its own: run the program that loads and calls it");
-        var machine = Machine.For(program.Platform, program);
-        var ram = new Ram();
-        StartState.Fill(ram);
-        machine.Start(ram);
-        // An Apple II system file is one block at $2000, which its startup code moves into place.
-        NesBus? nes = null;
-        if (program.Platform.Format == OutputFormat.System) ram.Load((ushort)program.Platform.LoadAddress, program.File);
-        else if (program.Platform.Format == OutputFormat.Nes) nes = new NesBus(ram, program.File) { Buttons = options.Buttons };
-        else ram.Load((ushort)program.LoadAddress, program.Image);
-        foreach (var set in options.Sets) ram.Bytes[set.Address] = set.Value;
-        var cpu = new Cpu6502(nes is null ? ram : nes, program.Platform.Cpu) { PC = (ushort)program.Entry, SP = 0xFF, I = true };
-        StartState.Set(cpu);
+        var (machine, ram, nes, cpu) = Start(program, options);
 
         var inProgram = program.Sections.Select(s => (s.Address, End: s.Address + s.Size)).ToList();
         bool InProgram(int pc) => inProgram.Any(s => pc >= s.Address && pc < s.End);
         bool InRom(int pc) => program.Platform.Rom.Any(r => pc >= r.First && pc <= r.Last);
         // By place: code in two banks may share an address (spec 8.5).
         int PlaceOf(int pc) => nes is null ? pc : program.PlaceOf(pc, nes.SelectedBank);
-        var functions = program.Sections
-            .Where(p => program.Symbols.TryGetValue(p.Name, out int at) && at == p.Address)
-            .GroupBy(p => CodePlace.Of(p.Address, CodePlace.BankOf(p.Overlay))).ToDictionary(g => g.Key, g => g.First().Name);
         int main = program.Symbols.GetValueOrDefault("main", -1);
 
         var profile = new Profile();
         var output = new StringBuilder();
-        var calls = new Dictionary<string, (long Calls, long Cycles)>();
-        var active = new Stack<(string Name, int Sp, long Start)>();
+        var calls = new CallTimes(program, cpu, PlaceOf);
         long? mainStart = null;
         long nextIrq = options.IrqEvery;
         int interrupts = 0;
@@ -128,7 +113,7 @@ public static class Runner
                 interrupts++;
                 profile.InterruptCycles += cpu.Cycles - beforeIrq;
                 nextIrq = cpu.Cycles + options.IrqEvery;
-                Entered(cpu.PC);
+                calls.Entered(cpu.PC);
             }
             int pc = cpu.PC;
             if (InRom(pc) && !InProgram(pc))
@@ -140,7 +125,7 @@ public static class Runner
                     ushort low = ram.Bytes[0x100 + (byte)(cpu.SP + 1)], high = ram.Bytes[0x100 + (byte)(cpu.SP + 2)];
                     cpu.SP += 2;
                     cpu.PC = (ushort)((high << 8 | low) + 1);
-                    Left();
+                    calls.Left();
                     continue;
                 }
                 stop = $"reached ${pc:X4} in ROM, which the emulator does not have (stand-ins: {machine.StandIns})";
@@ -169,38 +154,80 @@ public static class Runner
                 long beforeNmi = cpu.Cycles;
                 nes.Tick(cpu);
                 profile.InterruptCycles += cpu.Cycles - beforeNmi;
-                if (nes.Nmis > nmis) { interrupts++; Entered(cpu.PC); }
+                if (nes.Nmis > nmis) { interrupts++; calls.Entered(cpu.PC); }
             }
-            if (opcode is 0x20 or 0x00) Entered(cpu.PC);   // jsr, or brk into the IRQ handler
-            Left();
+            if (opcode is 0x20 or 0x00) calls.Entered(cpu.PC);   // jsr, or brk into the IRQ handler
+            calls.Left();
         }
-        while (active.Count > 0) Close(active.Pop());
 
         // Up to halt: main's rts included, the jmp halt after it not run.
         long? mainCycles = cpu.Cycles - mainStart;
-        var times = calls.Select(c => new FunctionTime(c.Key, c.Value.Calls, c.Value.Cycles)).OrderByDescending(t => t.Cycles).ToList();
-        return new RunResult(returned, stop, cpu.Cycles, mainCycles, interrupts, ram, cpu, output.ToString(), profile, times, checker.Errors)
+        return new RunResult(returned, stop, cpu.Cycles, mainCycles, interrupts, ram, cpu, output.ToString(), profile, calls.Times(), checker.Errors)
         {
             Platform = program.Platform,
             Nes = nes,
             TextEncoding = program.TextEncoding,
         };
+    }
 
-        void Entered(int at)
+    /// <summary>The machine at the program's start: its stand-ins and memory, the program loaded, the CPU at the entry.</summary>
+    private static (Machine Machine, Ram Ram, NesBus? Nes, Cpu6502 Cpu) Start(CompileResult program, RunOptions options)
+    {
+        var machine = Machine.For(program.Platform, program);
+        var ram = new Ram();
+        StartState.Fill(ram);
+        machine.Start(ram);
+        // An Apple II system file is one block at $2000, which its startup code moves into place.
+        NesBus? nes = null;
+        if (program.Platform.Format == OutputFormat.System) ram.Load((ushort)program.Platform.LoadAddress, program.File);
+        else if (program.Platform.Format == OutputFormat.Nes) nes = new NesBus(ram, program.File) { Buttons = options.Buttons };
+        else ram.Load((ushort)program.LoadAddress, program.Image);
+        foreach (var set in options.Sets) ram.Bytes[set.Address] = set.Value;
+        var cpu = new Cpu6502(nes is null ? ram : nes, program.Platform.Cpu) { PC = (ushort)program.Entry, SP = 0xFF, I = true };
+        StartState.Set(cpu);
+        return (machine, ram, nes, cpu);
+    }
+
+    /// <summary>The calls of each function and the cycles spent in them, from where it is entered until its frame ends.</summary>
+    private sealed class CallTimes
+    {
+        private readonly Cpu6502 _cpu;
+        private readonly Func<int, int> _placeOf;
+        /// <summary>The functions by the place of their first instruction (code in two banks may share an address).</summary>
+        private readonly Dictionary<int, string> _functions;
+        private readonly Dictionary<string, (long Calls, long Cycles)> _calls = [];
+        private readonly Stack<(string Name, int Sp, long Start)> _active = new();
+
+        public CallTimes(CompileResult program, Cpu6502 cpu, Func<int, int> placeOf)
         {
-            if (functions.TryGetValue(PlaceOf(at), out var name)) active.Push((name, cpu.SP, cpu.Cycles));
+            (_cpu, _placeOf) = (cpu, placeOf);
+            _functions = program.Sections
+                .Where(p => program.Symbols.TryGetValue(p.Name, out int at) && at == p.Address)
+                .GroupBy(p => CodePlace.Of(p.Address, CodePlace.BankOf(p.Overlay))).ToDictionary(g => g.Key, g => g.First().Name);
         }
 
-        // A function's frame ends when the stack pointer rises above where it was on entry (rts, rti).
-        void Left()
+        public void Entered(int at)
         {
-            while (active.Count > 0 && cpu.SP > active.Peek().Sp) Close(active.Pop());
+            if (_functions.TryGetValue(_placeOf(at), out var name)) _active.Push((name, _cpu.SP, _cpu.Cycles));
         }
 
-        void Close((string Name, int Sp, long Start) f)
+        /// <summary>A function's frame ends when the stack pointer rises above where it was on entry (rts, rti).</summary>
+        public void Left()
         {
-            var (n, c) = calls.GetValueOrDefault(f.Name);
-            calls[f.Name] = (n + 1, c + cpu.Cycles - f.Start);
+            while (_active.Count > 0 && _cpu.SP > _active.Peek().Sp) Close(_active.Pop());
+        }
+
+        /// <summary>The functions' times, most cycles first; the functions still running end now.</summary>
+        public List<FunctionTime> Times()
+        {
+            while (_active.Count > 0) Close(_active.Pop());
+            return _calls.Select(c => new FunctionTime(c.Key, c.Value.Calls, c.Value.Cycles)).OrderByDescending(t => t.Cycles).ToList();
+        }
+
+        private void Close((string Name, int Sp, long Start) f)
+        {
+            var (n, c) = _calls.GetValueOrDefault(f.Name);
+            _calls[f.Name] = (n + 1, c + _cpu.Cycles - f.Start);
         }
     }
 
