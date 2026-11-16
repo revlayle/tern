@@ -14,14 +14,38 @@ public class RunModelTests
     /// <summary>A NES bus for an NROM image with no code, and a CPU on it.</summary>
     private static (NesBus Bus, Cpu6502 Cpu) Nes()
     {
+        var bus = new NesBus(new Ram(), Image(0));
+        var cpu = new Cpu6502(bus, Platform.Nes.Cpu);
+        return (bus, cpu);
+    }
+
+    /// <summary>An iNES image with one PRG bank and one CHR bank, no code, vertical mirroring and the given mapper.</summary>
+    private static byte[] Image(int mapper)
+    {
         var image = new byte[16 + 0x4000 + 0x2000];
         "NES\x1A"u8.CopyTo(image);
         image[4] = 1;
         image[5] = 1;
-        image[6] = 1;
-        var bus = new NesBus(new Ram(), image);
-        var cpu = new Cpu6502(bus, Platform.Nes.Cpu);
-        return (bus, cpu);
+        image[6] = (byte)((mapper & 0x0F) << 4 | 1);
+        image[7] = (byte)(mapper & 0xF0);
+        return image;
+    }
+
+    // ---------- Mappers (tools 18, R7) ----------
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(2)]
+    public void The_modelled_mappers_run(int mapper) => Assert.NotNull(new NesBus(new Ram(), Image(mapper)));
+
+    [Theory]
+    [InlineData(1)]
+    [InlineData(4)]
+    [InlineData(18)]
+    public void Another_mapper_is_an_error_not_a_run_as_nrom(int mapper)
+    {
+        var e = Assert.Throws<RunError>(() => new NesBus(new Ram(), Image(mapper)));
+        Assert.Equal($"The cartridge has mapper {mapper}, which tern run does not model: it runs mappers 0 (NROM) and 2 (UxROM). Run the program in an emulator such as Mesen", e.Message);
     }
 
     // ---------- OAM DMA through the bus (tools 15) ----------

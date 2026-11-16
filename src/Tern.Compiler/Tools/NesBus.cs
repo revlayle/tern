@@ -70,6 +70,7 @@ public sealed class NesBus : IBus
     public void Attach(Cpu6502 cpu) => Cpu = cpu;
 
     /// <param name="image">The .nes file: the iNES header, PRG ROM, CHR ROM.</param>
+    /// <exception cref="RunError">A mapper other than 0 (NROM) or 2 (UxROM), which the model does not have.</exception>
     public NesBus(Ram ram, byte[] image)
     {
         _ram = ram;
@@ -78,6 +79,8 @@ public sealed class NesBus : IBus
         _chrRam = chrSize == 0;
         _vertical = (image[6] & 1) != 0;
         _mapper = image[6] >> 4 | (image[7] & 0xF0);
+        if (_mapper is not (0 or 2))
+            throw new RunError($"The cartridge has mapper {_mapper}, which tern run does not model: it runs mappers 0 (NROM) and 2 (UxROM). Run the program in an emulator such as Mesen");
         image.AsSpan(16 + prgSize, chrSize).CopyTo(Ppu);
         // NROM-128 is seen twice; otherwise the first bank at $8000 and the last at $C000.
         _prg.AsSpan(0, Bank).CopyTo(ram.Bytes.AsSpan(0x8000));
