@@ -11,7 +11,7 @@ The work is in the roadmap's four steps, committed after each. A session that co
 | Step | State |
 |---|---|
 | 1. Ranked bugs 1-15, demonstration programs run again | done |
-| 2. Other correctness findings marked fixed | not started |
+| 2. Other correctness findings marked fixed | done |
 | 3. Rows marked "partly" | not started |
 | 4. Construction searches (R4, R5) | not started |
 
@@ -37,6 +37,43 @@ Each demonstration program of the area file was compiled and run again with `ter
 | 14 | syntax 2 | fixed | Both errors carry the note: "(called from y2.tern:7)" and "(called from y2.tern:8)". |
 | 15 | syntax 5, 17 | fixed | The label file has `NesChrRom:0000:bg` and `NesInternalRam:0000:out`; `tern run --dump bg` says the data is in the PPU's memory. The 169 padding bytes before `@ align(256)` data in the `.nes` file are `$FF`. |
 
+## Step 2: the other correctness findings marked fixed
+
+Demonstration programs run again where the area file has one; otherwise the fix's diff or its test was read or run, as the row says.
+
+| Finding | Verdict | What was run, and the result |
+|---|---|---|
+| backend 5 | fixed | `a[a[0].lo] = b[k] + c[k]` gives `out = $0102` (was `$0002`). |
+| backend 6 | fixed | Not reachable from source, so nothing to run; the diff (`9208e14`) adds the label's offset to the grown branch's `jmp`, as the finding asks. |
+| semantics 3 | fixed (decision 2026-11-15) | The module's `noinit var buf: [u8; 16] @ buffers` compiles and the program prints `out = 7`. |
+| semantics 7 | fixed | `70000 as u16` is `$1170`, `70000 as u8` is `$70`, `-70000 as u16` is `$EE90`. |
+| semantics 8 | fixed | With `const BASE = $C0`: `BASE.hi` is 0 and `BASE.lo` is `$C0`. A typed `u8` constant's `.hi` is still the error, as intended. |
+| semantics 9 | fixed | The program is now the error "An array of u8 has at most 256 elements" with the `const` line too, so the order of declarations no longer matters. |
+| semantics 10 | fixed | "'lda (address),y' needs a pointer in zero page, but 'msg' is data, not a pointer. Declare one, ...". |
+| semantics 11 | fixed | "'helpr' is not a function. Check the spelling, or declare it". |
+| semantics 12 | fixed | All five messages now end in a fix sentence, and the pointer one compiles as written ("Convert with 'as u16' first, then 'as ptr u8'"); the two planned features say "is not supported yet". The fallback for types with no conversion is R6's, as the table says. |
+| semantics 13 | fixed (decision 2026-11-15) | `for i in 0..256 using X` and `for i in 0..len(buf) using Y` over a 256-byte array compile and fill the array; a plain `0..256` loop runs 256 times. |
+| syntax 12 | fixed (decision 2026-11-15) | `café`, `αβ` and a name with an Arabic-Indic digit each give "'é' (U+00E9) cannot be in a name: names use A-Z, a-z, 0-9 and '_'". |
+| syntax 13 | partly | The program now has an error at the declaration: "'dec' is a 6502 instruction, so an asm line cannot call a generator of that name. Use another name". Left: the mnemonic set per CPU variant, for M29 (see step 3). |
+| syntax 14 | fixed | "'a' is declared with 4 elements, but its value has 2 (called from y14.tern:5). Write [int; _], or give 4 values". |
+| syntax 15 | fixed | The two statements compile; `a = 1`, `b = 2`. |
+| syntax 16 | fixed | "The character U+E042 has no code in any encoding. Write the byte it stands for as \$NN". |
+| syntax 18 | fixed | One error ("'noinit' is for variables; data is never zeroed. Remove 'noinit'"). |
+| syntax 19 | partly | The three named messages are fixed (`ascii` "is not supported yet", `emit {` outside a const fn, "Tern has no '0x'"). Left: any other `name {` at the start of a statement (`foo { lda #1 }`) still gets "Expected '=' and the value of 'lda', found '#'", with no fix sentence; the table gives it to R6. |
+| tools 8 | fixed | `tern bench --json --cycles 1000 --code "while true { }"` gives `"ok": false` and exit code 1; `--dump nosuch` gives exit code 1. |
+| tools 9 | fixed (decision 2026-11-15) | The program gives `early = 0`, `stale = 0`, `late = 0`. The NMI at once and the `$2006` second write are covered by `RunModelTests` (run: 19 pass). |
+| tools 10 | fixed | "; total 6492 cycles, and 84 taking 12 interrupts" under a run of 6576 cycles. |
+| tools 11 | fixed | `$D800` holds `00 01`, `err = 4`, `flag = 1`. The two smaller ones (Apple II storage type, Atari cursor) by their tests in `RunModelTests`. |
+| tools 12 | fixed (decision 2026-11-15) | On the NES, a program with `data irq_vector: u16 @ $FFFE = addr(on_brk)` runs its handler for both `brk`s (`breaks = 2`) and returns; on the C64 a `brk` stops the run with exit code 2. |
+| tools 13 | fixed | "--cycles needs a whole number above 0, found 'abc'"; "--max-errors needs a whole number from 1 to 2147483647, found '0'"; `--json --target` answers in JSON. |
+| tools 14 | fixed | The help names the Atari's overlay reads on IOCBs 1-7 and the MLI's calls, and says "a few ROM routines have stand-ins, which take no cycles". |
+| tools 16 | fixed | Not run by hand; `RunModelTests.A_load_past_ffff_stops_the_run` and `The_atari_screen_scrolls_and_wraps_at_ffff` pass, and the CLI's last catch (tools 2) covers the rest. |
+| tools 17 | fixed | The finding's fix was a table test of the cycle counts and the limits written down: `InstructionSetTests.Every_opcode_has_the_datasheets_cycles` checks all 256 opcodes, and `Cpu6502`'s comment and the help name the limits. The parts not modelled (invalid BCD flags, the `cli`/`sei` delay, dummy reads) stay not modelled, now stated. |
+| tests 1 | fixed | `OperandMatrixTests` puts each operand form (field, element, indexed element, pointer target, call) in each place (loop start, end, step, match value, index, argument, return, into the carry), with `OperandMatrix16Tests` for `u16`. Ranked bugs 1, 2, 4, 5 and 6 are in it. |
+| tests 2 | fixed | `Run` and `Library` start from `StartState` (seeded memory, registers not zero); no test asks for a zero start (`zeroStart: true` is used nowhere), and `tern run` starts the same way (question 171). |
+| tests 3 | fixed | `BusLog` counts the CPU's reads and writes; `VolatileAccessTests` covers 16-bit volatile targets. |
+| tests 8 | fixed | `Run.CompareWithPlain` runs a program without the optimizer and compares. |
+
 ## Must fix
 
-None from step 1.
+None from steps 1 and 2.
