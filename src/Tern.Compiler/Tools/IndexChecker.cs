@@ -12,7 +12,7 @@ public sealed record IndexError(string File, int? Line, string Source, string Me
     public int Count { get; set; } = 1;
 
     public override string ToString() =>
-        $"{File}:{Line}: {Message}" + (Count > 1 ? $" ({Count} times)" : "") + (Source.Length > 0 ? $"\n    {Source}" : "");
+        $"{File}:{(Line is null ? "" : $"{Line}:")} {Message}" + (Count > 1 ? $" ({Count} times)" : "") + (Source.Length > 0 ? $"\n    {Source}" : "");
 }
 
 /// <summary>

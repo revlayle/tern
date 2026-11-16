@@ -11,7 +11,8 @@ public sealed partial class Parser
     private BlockStmt ParseBlock()
     {
         Enter();
-        try { return ParseBlockBody(); }
+        int from = _pos;
+        try { return Finish(ParseBlockBody(), from); }
         finally { _depth--; }
     }
 
@@ -20,7 +21,7 @@ public sealed partial class Parser
         SkipBreaksBeforeBrace();
         var start = Expect(TokenKind.LBrace, "'{'");
         var statements = new List<Stmt>();
-        int outerColumn = _statementColumn;
+        using var column = new Mode<int>(ref _statementColumn, _statementColumn);
         SkipTerminators();
         while (!At(TokenKind.RBrace))
         {
@@ -43,12 +44,17 @@ public sealed partial class Parser
             }
             SkipTerminators();
         }
-        _statementColumn = outerColumn;
         Advance();
         return new BlockStmt(start.Pos, statements);
     }
 
     private Stmt ParseStatement()
+    {
+        int from = _pos;
+        return Finish(ParseStatementBody(), from);
+    }
+
+    private Stmt ParseStatementBody()
     {
         switch (Current.Kind)
         {
@@ -260,7 +266,7 @@ public sealed partial class Parser
         var start = Expect(TokenKind.LBrace, emit ? "'{' after 'emit'" : "'{' after 'asm'");
         var lines = new List<AsmLine>();
         var locals = new List<VarDecl>();
-        _inAsm = true;
+        using var mode = new Mode<bool>(ref _inAsm, true);
         while (true)
         {
             while (Accept(TokenKind.Newline)) { }
@@ -315,7 +321,6 @@ public sealed partial class Parser
             throw new CompileError(Current.Pos, $"Expected the end of the line after the instruction, found {Describe(Current)}. Put each instruction on its own line");
         }
         Advance();
-        _inAsm = false;
         var block = new AsmStmt(start.Pos, lines);
         block.Locals.AddRange(locals);
         return block;

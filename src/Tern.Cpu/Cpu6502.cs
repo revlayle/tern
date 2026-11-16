@@ -5,6 +5,12 @@ public interface IBus
 {
     byte Read(ushort address);
     void Write(ushort address, byte value);
+
+    /// <summary>
+    /// The CPU on this bus, which it gives when it is made: a bus that needs the CPU's clock, or takes
+    /// cycles from it (<see cref="Cpu6502.Stall"/>), keeps it. A bus that wraps another passes it on.
+    /// </summary>
+    void Attach(Cpu6502 cpu) { }
 }
 
 /// <summary>Flat 64 KB of RAM.</summary>
@@ -33,8 +39,18 @@ public sealed class IllegalOpcodeException(byte opcode, ushort address)
 /// instructions, so a register with read side effects is not touched by them (the double write of
 /// read-modify-write is modelled); an NMI during brk, and interrupts in the middle of an instruction.
 /// </summary>
-public sealed class Cpu6502(IBus bus, CpuVariant variant = CpuVariant.Nmos6502)
+public sealed class Cpu6502
 {
+    private readonly IBus bus;
+
+    public Cpu6502(IBus bus, CpuVariant variant = CpuVariant.Nmos6502)
+    {
+        this.bus = bus;
+        Variant = variant;
+        Instructions = InstructionSet.For(variant);
+        bus.Attach(this);
+    }
+
     public byte A, X, Y, SP = 0xFD;
     public ushort PC;
     public bool C, Z, I, D, V, N;
@@ -42,10 +58,19 @@ public sealed class Cpu6502(IBus bus, CpuVariant variant = CpuVariant.Nmos6502)
     /// <summary>Total cycles executed.</summary>
     public long Cycles;
 
-    public CpuVariant Variant { get; } = variant;
+    public CpuVariant Variant { get; }
 
     /// <summary>The variant's instructions and behavior (decimal mode, the indirect jump's page wrap).</summary>
-    public InstructionSet Instructions { get; } = InstructionSet.For(variant);
+    public InstructionSet Instructions { get; }
+
+    /// <summary>Cycles the bus took during the current instruction (<see cref="Stall"/>).</summary>
+    private int _stall;
+
+    /// <summary>
+    /// The bus takes <paramref name="cycles"/> from the CPU during the current instruction (the NES's
+    /// OAM DMA): they are added to <see cref="Cycles"/> and to what <see cref="Step"/> returns, after it.
+    /// </summary>
+    public void Stall(int cycles) => _stall += cycles;
 
     /// <summary>Status register. Bit 5 always reads as 1; the B flag only exists on the stack.</summary>
     public byte P
@@ -245,6 +270,8 @@ public sealed class Cpu6502(IBus bus, CpuVariant variant = CpuVariant.Nmos6502)
                 throw new InvalidOperationException($"{info.Mnemonic} is in the instruction set but the emulator does not run it (${opcode:X2} at ${start:X4})");
         }
 
+        cycles += _stall;
+        _stall = 0;
         Cycles += cycles;
         return cycles;
     }

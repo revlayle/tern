@@ -7,7 +7,7 @@ public sealed partial class Checker
 {
     // ---------- Expressions ----------
 
-    private long Weight() => (long)Math.Pow(8, Math.Min(_loopDepth, 5));
+    private long Weight() => (long)Math.Pow(8, Math.Min(_body.LoopDepth, 5));
 
     private void CheckExpr(Expr e)
     {
@@ -45,144 +45,13 @@ public sealed partial class Checker
                 throw new CompileError(e.Pos, "A string can only be the value of data or a global array. "
                     + "Declare it as data, e.g. 'data HI = \"HI\"', and pass addr(HI), len(HI)");
 
-            case NameExpr n:
-                switch (Named(n.Bound, n.Name) ?? Lookup(n.Name))
-                {
-                    case null when n.Name is "PI" or "TAU":
-                        EvaluateConstant(e);
-                        break;
-                    case null: throw NotDeclared(n.Name, n.Pos);
-                    case ConstFnSymbol:
-                        throw new CompileError(n.Pos, $"'{n.Name}' is a const fn; call it with ()");
-                    case ConstSymbol { Real: not null }:
-                        if (InRuntimeCode) throw InRuntime(e);
-                        EvaluateConstant(e);
-                        break;
-                    case ConstSymbol c:
-                        // An integer constant, typed or not, is computed exactly in constant expressions (spec 3.1).
-                        e.ConstValue = c.Value;
-                        if (c.Type.IsInteger) { e.Type = TernType.IntLiteral; e.ConstType = c.Type; e.ConstTypeFrom = c.Name; }
-                        else { e.Type = c.Type; e.IsBitPattern = c.IsBitPattern; }
-                        break;
-                    case VariableSymbol v:
-                        n.Symbol = v;
-                        UseGlobal(v, n.Pos);
-                        e.Type = v.Type;
-                        v.Weight += Weight();
-                        if (v.Type.IsStruct) e.Place = new StructPlace(PlaceKind.Memory, 0, Base: v);
-                        break;
-                    case FunctionSymbol:
-                        throw new CompileError(n.Pos, $"'{n.Name}' is a function; call it with ()");
-                    case StructSymbol:
-                        throw new CompileError(n.Pos, $"'{n.Name}' is a struct type, not a value. Use sizeof({n.Name}) for its size, or a variable of the type");
-                }
-                break;
-
+            case NameExpr n: CheckName(n); break;
             case UnaryExpr u: CheckUnary(u); break;
             case BinaryExpr b: CheckBinary(b); break;
             case CallExpr c: CheckCall(c); break;
-
-            case IndexExpr ix:
-            {
-                CheckExpr(ix.Target);
-                CheckExpr(ix.Index);
-                Coerce(ix.Index, TernType.U8);
-                if (CheckArrayFieldIndex(ix)) break;
-                var indexed = Unwrap(ix.Target);
-                if (ix.Target.Type.IsPointer)
-                {
-                    var element = ix.Target.Type.Element!;
-                    if (element.IsStruct)
-                        throw new CompileError(ix.Pos,
-                            $"A pointer to a struct cannot be indexed: p[i] would need a multiply by the struct size. Move the pointer instead: p = p + sizeof({element})");
-                    if (element.Size == 2 && ix.Index.ConstValue is > 127)
-                        throw new CompileError(ix.Index.Pos,
-                            $"Index {ix.Index.ConstValue} is too large: p[i] reaches 256 bytes, which is 128 {element} values. Move the pointer forward first: p + 256");
-                    if (indexed is NameExpr { Symbol: { AliasOf: null } pv }) pv.Dereferenced = true;
-                    e.Type = element;
-                    break;
-                }
-                if (indexed is not NameExpr { Symbol: VariableSymbol arr } || !arr.Type.IsArray)
-                    throw new CompileError(ix.Pos, "Only arrays and pointers can be indexed. Use .lo or .hi for a byte of a 16-bit value");
-                if (arr.Type.IsStructArray)
-                {
-                    CheckRecordIndex(ix, arr);
-                    break;
-                }
-                if (arr.Type.Length > 256)
-                    throw new CompileError(ix.Pos,
-                        $"'{arr.Name}' has {arr.Type.Length} elements, too many for a u8 index. Read it through a pointer: addr({arr.Name})");
-                if (ix.Index.ConstValue is long idx && idx >= arr.Type.Length)
-                    throw new CompileError(ix.Index.Pos, $"Index {idx} is past the end of '{arr.Name}' (length {arr.Type.Length}). Use an index below {arr.Type.Length}");
-                CheckLoopIndex(ix.Index, arr.Name, arr.Type.Length);
-                e.Type = arr.Type.Element!;
-                if (arr.Type.Linear) ix.Lowered = LinearIndex(ix);
-                break;
-            }
-
-            case MemberExpr m:
-                // addr(x).lo / .hi are the bytes of the address, even for a struct with a field named lo (spec 3.4).
-                if (m.Member is "lo" or "hi" && m.Target is CallExpr { Name: "addr" } address)
-                    m.Target = new CastExpr(address.Pos, address, new NamedTypeSyntax(address.Pos, "u16"));
-                CheckMemberTarget(m);
-                CheckExpr(m.Target);
-                // So are those of addr(x) plus or minus a constant, the forms an initial value allows (question 84).
-                if (m.Member is "lo" or "hi" && m.Target is BinaryExpr { Type.IsPointer: true } && Placed(m.Target) is not null)
-                    m.Target = new CastExpr(m.Target.Pos, m.Target, new NamedTypeSyntax(m.Target.Pos, "u16")) { Type = TernType.U16 };
-                if (m.Target.Type.IsStruct || m.Target.Type is { IsPointer: true, Element.IsStruct: true })
-                {
-                    CheckField(m);
-                    break;
-                }
-                if (m.Member is not ("lo" or "hi"))
-                    throw new CompileError(m.Pos, $"Unknown member '.{m.Member}'. Use .lo or .hi, or a field of a struct");
-                // A typed 16-bit constant keeps its size (LINE.hi with LINE: u16 = 250 is 0), and so does an
-                // untyped one, whatever its value (BASE.hi with BASE = $C0 is 0); a typed u8 or i8 is one byte.
-                if (m.Target.Type.Kind == TypeKind.IntLiteral)
-                    Coerce(m.Target, m.Target.ConstType switch
-                    {
-                        { Size: 2 } wide => wide,
-                        null => m.Target.ConstValue < 0 ? TernType.I16 : TernType.U16,
-                        _ => LiteralType(m.Target),
-                    });
-                if (m.Target.Type.IsPointer)
-                    throw new CompileError(m.Pos, $".{m.Member} needs a number; convert the pointer first: (p as u16).{m.Member}");
-                if (m.Target.Type.Size != 2 || !m.Target.Type.IsInteger)
-                    throw new CompileError(m.Pos, $".{m.Member} needs a 16-bit value, not {m.Target.Type}. Remove '.{m.Member}': a {m.Target.Type} is one byte already");
-                e.Type = TernType.U8;
-                if (m.Target.ConstValue is long mv)
-                    e.ConstValue = m.Member == "lo" ? mv & 0xFF : (mv >> 8) & 0xFF;
-                break;
-
-            case CastExpr c:
-                CheckExpr(c.Operand);
-                var target = ResolveType(c.Target);
-                var source = c.Operand.Type;
-                if (!target.IsScalar) throw new CompileError(c.Pos, $"Cannot convert to {target}. Convert to a number, bool or pointer type");
-                if (target.Kind == TypeKind.Bool)
-                    throw new CompileError(c.Pos, "Numbers cannot be converted to bool; compare instead, e.g. 'x != 0'");
-                if (target.IsPointer || source.IsPointer)
-                {
-                    // Pointers convert to other pointers and to and from u16, with no code.
-                    if (source.Kind == TypeKind.IntLiteral) Coerce(c.Operand, TernType.U16);
-                    else if (!(source.IsPointer || source.Kind == TypeKind.U16))
-                        throw new CompileError(c.Pos, $"Cannot convert {source} to {target}; only u16 and pointers convert to a pointer. Convert to u16 first");
-                    if (!(target.IsPointer || target.Kind == TypeKind.U16))
-                        throw new CompileError(c.Pos, $"Cannot convert {source} to {target}; a pointer converts only to u16 or another pointer. Convert to u16 first, then take .lo or .hi");
-                }
-                else if (source.Kind == TypeKind.IntLiteral && c.Operand.ConstValue is long big && (big < -32768 || big > 65535))
-                {
-                    // 'as' never checks a value: it keeps the low bits, of a constant of any size too (spec 3.5).
-                    c.Operand.ConstValue = Normalize(big, target);
-                    c.Operand.Type = target;
-                }
-                else if (source.Kind == TypeKind.IntLiteral)
-                    Coerce(c.Operand, c.Operand.IsBitPattern && c.Operand.ConstValue < 0 ? target : LiteralType(c.Operand));
-                else if (!source.IsScalar)
-                    throw new CompileError(c.Pos, $"Cannot convert {source} to {target}. Convert one element or field of it instead");
-                e.Type = target;
-                if (c.Operand.ConstValue is long cv) e.ConstValue = Normalize(cv, target);
-                break;
+            case IndexExpr ix: CheckIndex(ix); break;
+            case MemberExpr m: CheckMember(m); break;
+            case CastExpr c: CheckCast(c); break;
 
             case ArrayLiteralExpr:
                 throw new CompileError(e.Pos, "An array literal can only be used to initialize a global array. Declare the list as data, and read it from there");
@@ -190,6 +59,147 @@ public sealed partial class Checker
             default:
                 throw new InvalidOperationException(e.GetType().Name);
         }
+    }
+
+    /// <summary>A name: a constant, a variable, or an error for a function or type used as a value.</summary>
+    private void CheckName(NameExpr n)
+    {
+        switch (Named(n.Bound, n.Name) ?? Lookup(n.Name))
+        {
+            case null when n.Name is "PI" or "TAU":
+                EvaluateConstant(n);
+                break;
+            case null: throw NotDeclared(n.Name, n.Pos);
+            case ConstFnSymbol:
+                throw new CompileError(n.Pos, $"'{n.Name}' is a const fn; call it with ()");
+            case ConstSymbol { Real: not null }:
+                if (InRuntimeCode) throw InRuntime(n);
+                EvaluateConstant(n);
+                break;
+            case ConstSymbol c:
+                // An integer constant, typed or not, is computed exactly in constant expressions (spec 3.1).
+                n.ConstValue = c.Value;
+                if (c.Type.IsInteger) { n.Type = TernType.IntLiteral; n.ConstType = c.Type; n.ConstTypeFrom = c.Name; }
+                else { n.Type = c.Type; n.IsBitPattern = c.IsBitPattern; }
+                break;
+            case VariableSymbol v:
+                n.Symbol = v;
+                UseGlobal(v, n.Pos);
+                n.Type = v.Type;
+                v.Weight += Weight();
+                if (v.Type.IsStruct) n.Place = new StructPlace(PlaceKind.Memory, 0, Base: v);
+                break;
+            case FunctionSymbol:
+                throw new CompileError(n.Pos, $"'{n.Name}' is a function; call it with ()");
+            case StructSymbol:
+                throw new CompileError(n.Pos, $"'{n.Name}' is a struct type, not a value. Use sizeof({n.Name}) for its size, or a variable of the type");
+        }
+    }
+
+    /// <summary><c>a[i]</c>: an element of an array, or the target of a pointer.</summary>
+    private void CheckIndex(IndexExpr ix)
+    {
+        CheckExpr(ix.Target);
+        CheckExpr(ix.Index);
+        Coerce(ix.Index, TernType.U8);
+        if (CheckArrayFieldIndex(ix)) return;
+        var indexed = Unwrap(ix.Target);
+        if (ix.Target.Type.IsPointer)
+        {
+            var element = ix.Target.Type.Element!;
+            if (element.IsStruct)
+                throw new CompileError(ix.Pos,
+                    $"A pointer to a struct cannot be indexed: p[i] would need a multiply by the struct size. Move the pointer instead: p = p + sizeof({element})");
+            if (element.Size == 2 && ix.Index.ConstValue is > 127)
+                throw new CompileError(ix.Index.Pos,
+                    $"Index {ix.Index.ConstValue} is too large: p[i] reaches 256 bytes, which is 128 {element} values. Move the pointer forward first: p + 256");
+            if (indexed is NameExpr { Symbol: { AliasOf: null } pv }) pv.Dereferenced = true;
+            ix.Type = element;
+            return;
+        }
+        if (indexed is not NameExpr { Symbol: VariableSymbol arr } || !arr.Type.IsArray)
+            throw new CompileError(ix.Pos, "Only arrays and pointers can be indexed. Use .lo or .hi for a byte of a 16-bit value");
+        if (arr.Type.IsStructArray)
+        {
+            CheckRecordIndex(ix, arr);
+            return;
+        }
+        if (arr.Type.Length > 256)
+            throw new CompileError(ix.Pos,
+                $"'{arr.Name}' has {arr.Type.Length} elements, too many for a u8 index. Read it through a pointer: addr({arr.Name})");
+        if (ix.Index.ConstValue is long idx && idx >= arr.Type.Length)
+            throw new CompileError(ix.Index.Pos, $"Index {idx} is past the end of '{arr.Name}' (length {arr.Type.Length}). Use an index below {arr.Type.Length}");
+        CheckLoopIndex(ix.Index, arr.Name, arr.Type.Length);
+        ix.Type = arr.Type.Element!;
+        if (arr.Type.Linear) ix.Lowered = LinearIndex(ix);
+    }
+
+    /// <summary><c>.lo</c>, <c>.hi</c>, or a field of a struct.</summary>
+    private void CheckMember(MemberExpr m)
+    {
+        // addr(x).lo / .hi are the bytes of the address, even for a struct with a field named lo (spec 3.4).
+        if (m.Member is "lo" or "hi" && m.Target is CallExpr { Name: "addr" } address)
+            m.Target = new CastExpr(address.Pos, address, new NamedTypeSyntax(address.Pos, "u16"));
+        CheckMemberTarget(m);
+        CheckExpr(m.Target);
+        // So are those of addr(x) plus or minus a constant, the forms an initial value allows (question 84).
+        if (m.Member is "lo" or "hi" && m.Target is BinaryExpr { Type.IsPointer: true } && Placed(m.Target) is not null)
+            m.Target = new CastExpr(m.Target.Pos, m.Target, new NamedTypeSyntax(m.Target.Pos, "u16")) { Type = TernType.U16 };
+        if (m.Target.Type.IsStruct || m.Target.Type is { IsPointer: true, Element.IsStruct: true })
+        {
+            CheckField(m);
+            return;
+        }
+        if (m.Member is not ("lo" or "hi"))
+            throw new CompileError(m.Pos, $"Unknown member '.{m.Member}'. Use .lo or .hi, or a field of a struct");
+        // A typed 16-bit constant keeps its size (LINE.hi with LINE: u16 = 250 is 0), and so does an
+        // untyped one, whatever its value (BASE.hi with BASE = $C0 is 0); a typed u8 or i8 is one byte.
+        if (m.Target.Type.Kind == TypeKind.IntLiteral)
+            Coerce(m.Target, m.Target.ConstType switch
+            {
+                { Size: 2 } wide => wide,
+                null => m.Target.ConstValue < 0 ? TernType.I16 : TernType.U16,
+                _ => LiteralType(m.Target),
+            });
+        if (m.Target.Type.IsPointer)
+            throw new CompileError(m.Pos, $".{m.Member} needs a number; convert the pointer first: (p as u16).{m.Member}");
+        if (m.Target.Type.Size != 2 || !m.Target.Type.IsInteger)
+            throw new CompileError(m.Pos, $".{m.Member} needs a 16-bit value, not {m.Target.Type}. Remove '.{m.Member}': a {m.Target.Type} is one byte already");
+        m.Type = TernType.U8;
+        if (m.Target.ConstValue is long mv)
+            m.ConstValue = m.Member == "lo" ? mv & 0xFF : (mv >> 8) & 0xFF;
+    }
+
+    /// <summary><c>x as T</c> (spec 3.5).</summary>
+    private void CheckCast(CastExpr c)
+    {
+        CheckExpr(c.Operand);
+        var target = ResolveType(c.Target);
+        var source = c.Operand.Type;
+        if (!target.IsScalar) throw new CompileError(c.Pos, $"Cannot convert to {target}. Convert to a number, bool or pointer type");
+        if (target.Kind == TypeKind.Bool)
+            throw new CompileError(c.Pos, "Numbers cannot be converted to bool; compare instead, c.g. 'x != 0'");
+        if (target.IsPointer || source.IsPointer)
+        {
+            // Pointers convert to other pointers and to and from u16, with no code.
+            if (source.Kind == TypeKind.IntLiteral) Coerce(c.Operand, TernType.U16);
+            else if (!(source.IsPointer || source.Kind == TypeKind.U16))
+                throw new CompileError(c.Pos, $"Cannot convert {source} to {target}; only u16 and pointers convert to a pointer. Convert to u16 first");
+            if (!(target.IsPointer || target.Kind == TypeKind.U16))
+                throw new CompileError(c.Pos, $"Cannot convert {source} to {target}; a pointer converts only to u16 or another pointer. Convert to u16 first, then take .lo or .hi");
+        }
+        else if (source.Kind == TypeKind.IntLiteral && c.Operand.ConstValue is long big && (big < -32768 || big > 65535))
+        {
+            // 'as' never checks a value: it keeps the low bits, of a constant of any size too (spec 3.5).
+            c.Operand.ConstValue = Normalize(big, target);
+            c.Operand.Type = target;
+        }
+        else if (source.Kind == TypeKind.IntLiteral)
+            Coerce(c.Operand, c.Operand.IsBitPattern && c.Operand.ConstValue < 0 ? target : LiteralType(c.Operand));
+        else if (!source.IsScalar)
+            throw new CompileError(c.Pos, $"Cannot convert {source} to {target}. Convert one element or field of it instead");
+        c.Type = target;
+        if (c.Operand.ConstValue is long cv) c.ConstValue = Normalize(cv, target);
     }
 
     private void CheckUnary(UnaryExpr u)
@@ -446,9 +456,9 @@ public sealed partial class Checker
     /// <summary>An overlay may not take the address of a function of another overlay in its area (spec 8.5).</summary>
     private void CheckSiblingAddress(FunctionSymbol f, SourcePos pos)
     {
-        if (_function is not null && NotPresentWith(f, _function.OverlayArea, _function.OverlayUnit))
+        if (_body.Function is not null && NotPresentWith(f, _body.Function.OverlayArea, _body.Function.OverlayUnit))
             throw new CompileError(pos,
-                $"addr({f.Name}) is in {f.Module!.Name}, which is {NeverTogether(f.Module, _function.Module!)} as {_function.Module!.Name}. They are never loaded together, so the address would point at the wrong code. " +
+                $"addr({f.Name}) is in {f.Module!.Name}, which is {NeverTogether(f.Module, _body.Function.Module!)} as {_body.Function.Module!.Name}. They are never loaded together, so the address would point at the wrong code. " +
                 "Take the address in resident code, or put one of them in another area");
     }
 
@@ -461,10 +471,10 @@ public sealed partial class Checker
                 $"'{f.Name}' takes '{memoryParam.Name}' in memory, which a call through an address cannot set. " +
                 $"Pass it in a register ({memoryParam.Name}: {memoryParam.Type} using A)");
         CheckSiblingAddress(f, pos);
-        if (!_dead) f.AddressTaken = true;
+        if (!_body.Dead) f.AddressTaken = true;
         c.FunctionAddress = f;
         c.Type = TernType.U16;
-        if (!_dead) _function?.UsedAddresses.Add(f);
+        if (!_body.Dead) _body.Function?.UsedAddresses.Add(f);
     }
 
     /// <summary><c>addr(player.name)</c>: a field of a struct variable or of a struct at a fixed address.</summary>
@@ -549,7 +559,7 @@ public sealed partial class Checker
                         // Its PPU address, a u16: not a pointer, since the CPU cannot read there (spec 12.2).
                         name.Symbol = tiles;
                         name.Type = tiles.Type;
-                        if (!_dead) _function?.UsedGlobals.Add(tiles);
+                        if (!_body.Dead) _body.Function?.UsedGlobals.Add(tiles);
                         c.AddressOf = tiles;
                         c.Type = TernType.U16;
                         return;
@@ -591,7 +601,7 @@ public sealed partial class Checker
             throw new CompileError(c.Pos, symbol is null ? $"'{c.Name}' is not a function. Check the spelling, or declare it" : $"'{c.Name}' is not a function. Remove the ()");
         if (fn.IsInterrupt)
         {
-            if (_function is not { IsInterrupt: true })
+            if (_body.Function is not { IsInterrupt: true })
                 throw new CompileError(c.Pos,
                     $"'{c.Name}' is an interrupt fn, which only the CPU or another interrupt fn calls. Install its address in the interrupt vector, or call it from an interrupt fn");
         }
@@ -603,15 +613,15 @@ public sealed partial class Checker
             Coerce(c.Args[i], fn.Parameters[i].Type);
         }
         foreach (var p in fn.Parameters)
-            foreach (var held in _loopRegisters)
+            foreach (var held in _body.LoopRegisters)
                 if (p.PassedIn is { } pr && pr.Uses(held))
                     throw new CompileError(c.Pos, $"'{fn.Name}' takes '{p.Name}' in {held}, which holds the loop variable. Remove 'using {held}' from the loop");
         foreach (var (reg, _) in fn.FixedInputs)
-            if (_loopRegisters.Contains(reg))
+            if (_body.LoopRegisters.Contains(reg))
                 throw new CompileError(c.Pos, $"'{fn.Name}' takes a fixed input in {reg}, which holds the loop variable. Remove 'using {reg}' from the loop");
         c.Function = fn;
         c.Type = fn.ReturnType;
-        if (_function is not null) AddCall(_function, fn, c.Pos);
+        if (_body.Function is not null) AddCall(_body.Function, fn, c.Pos);
     }
 
     /// <summary>Calls from an overlay's function to an inline function of another module, for <see cref="CheckInlineCallsBetweenOverlays"/>.</summary>
@@ -657,8 +667,8 @@ public sealed partial class Checker
     /// </summary>
     private void AddCall(FunctionSymbol caller, FunctionSymbol callee, SourcePos pos)
     {
-        if (!_dead) caller.Callees.Add(callee);
-        if (!_dead && callee.IsInline && caller.OverlayArea is not null && callee.OverlayUnit != caller.OverlayUnit) _inlineCalls.Add((caller, callee, pos));
+        if (!_body.Dead) caller.Callees.Add(callee);
+        if (!_body.Dead && callee.IsInline && caller.OverlayArea is not null && callee.OverlayUnit != caller.OverlayUnit) _inlineCalls.Add((caller, callee, pos));
         if (NotPresentWith(callee, caller.OverlayArea, caller.OverlayUnit) && !callee.IsInline)
             throw new CompileError(pos, caller.Module!.InBank
                 ? $"'{caller.Name}' calls '{callee.Name}', but the modules {caller.Module.Name} and {callee.Module!.Name} are {NeverTogether(caller.Module, callee.Module)}, and only one bank is selected at a time. " +

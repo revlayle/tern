@@ -21,8 +21,31 @@ public class RunModelTests
         image[6] = 1;
         var bus = new NesBus(new Ram(), image);
         var cpu = new Cpu6502(bus, Platform.Nes.Cpu);
-        bus.Cpu = cpu;
         return (bus, cpu);
+    }
+
+    // ---------- OAM DMA through the bus (tools 15) ----------
+
+    [Theory]
+    [InlineData(0, 513)]
+    [InlineData(1, 514)]
+    public void Oam_dma_cycles_are_in_the_instructions_cycles(long start, int dma)
+    {
+        var (bus, cpu) = Nes();
+        Assert.Same(cpu, bus.Cpu);
+        bus.Write(0x0200, 0x8D); bus.Write(0x0201, 0x14); bus.Write(0x0202, 0x40);   // sta $4014
+        (cpu.PC, cpu.A, cpu.Cycles) = (0x0200, 0x02, start);
+        Assert.Equal(4 + dma, cpu.Step());
+        Assert.Equal(start + 4 + dma, cpu.Cycles);
+        Assert.Equal(1, bus.Dmas);
+    }
+
+    [Fact]
+    public void A_bus_that_wraps_the_nes_bus_passes_the_cpu_on()
+    {
+        var (bus, _) = Nes();
+        var cpu = new Cpu6502(new BusLog(bus, []), Platform.Nes.Cpu);
+        Assert.Same(cpu, bus.Cpu);
     }
 
     // ---------- The NES's vblank flag, NMI and $2006 (tools 9) ----------

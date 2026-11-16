@@ -33,6 +33,8 @@ public sealed class BusLog(IBus inner, IEnumerable<int> watched) : IBus
         inner.Write(address, value);
     }
 
+    public void Attach(Cpu6502 cpu) => inner.Attach(cpu);
+
     /// <summary>The number of reads of an address.</summary>
     public int Reads(int address) => _log.Count(a => a.Address == address && !a.IsWrite);
 

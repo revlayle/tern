@@ -51,6 +51,43 @@ public sealed partial class Parser
         _depth++;
     }
 
+    // ---------- Spans ----------
+
+    /// <summary>
+    /// Sets <paramref name="node"/>'s span: from token <paramref name="first"/> to the last token read, leaving
+    /// out line breaks before it and the line break or ';' that ended it (for a language server, M28).
+    /// </summary>
+    private T Finish<T>(T node, int first) where T : Node
+    {
+        int last = _pos - 1;
+        while (first < last && _tokens[first].Kind == TokenKind.Newline) first++;
+        while (last > first && _tokens[last].Kind is TokenKind.Newline or TokenKind.Semicolon) last--;
+        int start = _tokens[first].Start;
+        node.Span = new SourceSpan(start, last < first ? start : Math.Max(start, _tokens[last].End));
+        return node;
+    }
+
+    // ---------- Modes ----------
+
+    /// <summary>
+    /// Sets a mode of the parse (<see cref="_inAsm"/>, <see cref="_inHeader"/>, ...) until the end of a
+    /// <c>using</c> scope, and then puts back the value it had, also when the scope ends by an error.
+    /// </summary>
+    private ref struct Mode<T>
+    {
+        private readonly ref T _field;
+        private readonly T _saved;
+
+        public Mode(ref T field, T value)
+        {
+            _field = ref field;
+            _saved = field;
+            field = value;
+        }
+
+        public readonly void Dispose() => _field = _saved;
+    }
+
     // ---------- Going on after an error (spec 13) ----------
 
     /// <summary>Statements and declarations dropped for an error, also one that was not reported.</summary>
@@ -68,7 +105,6 @@ public sealed partial class Parser
     private void Fail(Exception e, int from)
     {
         _failures++;
-        _inAsm = false;
         if (At(TokenKind.Eof)) _unclosedReported = true;
         for (int k = from; k <= Math.Min(_pos, _tokens.Count - 1); k++)
             if (_tokens[k].Kind == TokenKind.Error) return;
@@ -142,17 +178,28 @@ public sealed partial class Parser
     /// <summary>The column of the statement being parsed in a block, for going on after an unclosed ( (spec 13).</summary>
     private int _statementColumn = 1;
 
+    /// <summary>The keywords of a named declaration (spec 2.2): <c>const</c>, <c>var</c>, <c>data</c>, <c>fn</c>, <c>struct</c>.</summary>
+    private static bool IsDeclarationKeyword(TokenKind kind) =>
+        kind is TokenKind.Const or TokenKind.Var or TokenKind.Data or TokenKind.Fn or TokenKind.Struct;
+
+    /// <summary>
+    /// The words that may come before a declaration's keyword: <c>private</c>, <c>noinit</c>, <c>volatile</c>,
+    /// <c>inline</c>, <c>interrupt</c>, <c>linear</c>, <c>indexed</c> and <c>asm</c> (of <c>asm fn</c>).
+    /// </summary>
+    private static bool IsDeclarationModifier(Token t) =>
+        t.Kind is TokenKind.Private or TokenKind.Noinit or TokenKind.Volatile or TokenKind.Inline or TokenKind.Interrupt
+            or TokenKind.Linear or TokenKind.Asm || Word.Is(t, Word.Indexed);
+
     /// <summary>Whether the current token starts a top-level declaration, also with a word from another language (pub fn, let x).</summary>
     private bool StartsCurrentDeclaration()
     {
         Token t = Current, next = PeekAt(1);
-        return t.Kind is TokenKind.Const or TokenKind.Var or TokenKind.Data or TokenKind.Fn
-            or TokenKind.Struct or TokenKind.Private or TokenKind.Interrupt or TokenKind.Inline or TokenKind.Noinit or TokenKind.Volatile
-            or TokenKind.Linear or TokenKind.Asm or TokenKind.Assert or TokenKind.Export or TokenKind.Import or TokenKind.Module
-            || Word.Is(t, Word.Indexed) || Word.Is(t, Word.Memory)
+        return IsDeclarationKeyword(t.Kind) || IsDeclarationModifier(t)
+            || t.Kind is TokenKind.Assert or TokenKind.Export or TokenKind.Import or TokenKind.Module
+            || Word.Is(t, Word.Memory)
             || Word.Is(t, Word.Encoding) && next.Kind == TokenKind.Identifier
             || Word.Is(t, Word.Default) && Word.Is(next, Word.Encoding)
-            || t.Kind == TokenKind.Identifier && next.Kind is TokenKind.Fn or TokenKind.Var or TokenKind.Const or TokenKind.Data or TokenKind.Struct
+            || t.Kind == TokenKind.Identifier && IsDeclarationKeyword(next.Kind)
             || t is { Kind: TokenKind.Identifier, Text: "let" } && next.Kind == TokenKind.Identifier;
     }
 
@@ -160,17 +207,15 @@ public sealed partial class Parser
     private (string Name, SourcePos Pos)? DeclaredName(int from)
     {
         int k = from;
-        while (_tokens[k].Kind is TokenKind.Private or TokenKind.Noinit or TokenKind.Volatile or TokenKind.Inline or TokenKind.Interrupt
-               or TokenKind.Linear or TokenKind.Asm || Word.Is(_tokens[k], Word.Indexed))
-            k++;
+        while (IsDeclarationModifier(_tokens[k])) k++;
         // A word from another language before the keyword (pub fn, async fn), or 'let name'.
-        if (_tokens[k].Kind == TokenKind.Identifier && _tokens[k + 1].Kind is TokenKind.Fn or TokenKind.Var or TokenKind.Const or TokenKind.Data or TokenKind.Struct)
+        if (_tokens[k].Kind == TokenKind.Identifier && IsDeclarationKeyword(_tokens[k + 1].Kind))
             k++;
         else if (_tokens[k] is { Kind: TokenKind.Identifier, Text: "let" } && _tokens[k + 1].Kind == TokenKind.Identifier)
             return (_tokens[k + 1].Text, _tokens[k + 1].Pos);
         if (Word.Is(_tokens[k], Word.Encoding) && _tokens[k + 1].Kind == TokenKind.Identifier)
             return (_tokens[k + 1].Text, _tokens[k + 1].Pos);
-        if (_tokens[k].Kind is not (TokenKind.Const or TokenKind.Var or TokenKind.Data or TokenKind.Fn or TokenKind.Struct or TokenKind.Import)) return null;
+        if (!IsDeclarationKeyword(_tokens[k].Kind) && _tokens[k].Kind != TokenKind.Import) return null;
         if (_tokens[k].Kind == TokenKind.Const && _tokens[k + 1].Kind == TokenKind.Fn) k++;
         var name = _tokens[k + 1];
         return name.Kind == TokenKind.Identifier ? (name.Text, name.Pos) : null;

@@ -17,7 +17,7 @@ public sealed partial class Checker : ICompileTimeHost
     private int _constValues;
 
     /// <summary>Code that runs on the 6502: a function body, except the values of its local constants.</summary>
-    private bool InRuntimeCode => _function is not null && _constValues == 0;
+    private bool InRuntimeCode => _body.Function is not null && _constValues == 0;
 
     private void DeclareConstFn(FnDecl decl)
     {

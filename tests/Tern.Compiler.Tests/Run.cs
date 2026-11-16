@@ -47,7 +47,6 @@ public sealed class Run
         if (watch is not null) bus = Log = new BusLog(bus, watch(Result));
         Cpu = new Cpu6502(bus, Result.Platform.Cpu) { PC = (ushort)Result.Entry, SP = 0xFF, I = true };
         if (!zeroStart) StartState.Set(Cpu);
-        if (Nes is not null) Nes.Cpu = Cpu;
         long nextIrq = irqEvery;
         var checker = new Tools.IndexChecker(Result, sourcePath is null ? "program.tern" : Path.GetFileName(sourcePath),
             Nes is null ? null : pc => Result.PlaceOf(pc, Nes.SelectedBank));

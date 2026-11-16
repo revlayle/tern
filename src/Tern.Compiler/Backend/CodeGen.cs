@@ -25,7 +25,27 @@ public sealed partial class CodeGen
     private readonly string? _mainFile;
     private readonly Dictionary<FunctionSymbol, Label> _functionLabels = new();
     private List<AsmItem> _out = [];
-    private FunctionSymbol _fn = null!;
+    private FunctionContext _ctx = null!;
+
+    /// <summary>
+    /// The function being generated (review code-quality-backend 14): a function, or the copy of an inline
+    /// function inside one, which <see cref="GenInline"/> gives a context of its own.
+    /// </summary>
+    /// <param name="Function">The function whose body is generated.</param>
+    /// <param name="FrameOwner">The function whose code is generated: the one whose frame holds the variables of the inline copies in it.</param>
+    private sealed class FunctionContext(FunctionSymbol Function, FunctionSymbol FrameOwner)
+    {
+        public FunctionSymbol Function { get; } = Function;
+        public FunctionSymbol FrameOwner { get; } = FrameOwner;
+        /// <summary>Free temporaries of this function's frame.</summary>
+        public List<VariableSymbol> FreeTemps { get; } = [];
+        /// <summary>Where a <c>return</c> in an interrupt handler goes: the code that restores the registers.</summary>
+        public Label? InterruptExit { get; set; }
+        /// <summary>Where a <c>return</c> goes in the copy of an inline function: its end.</summary>
+        public Label? InlineExit { get; set; }
+        /// <summary>The <c>using A</c> or <c>using AX</c> parameter, and where the body's code starts.</summary>
+        public (VariableSymbol Parameter, int From)? AParameter { get; set; }
+    }
     private int _labelCounter;
     private SourcePos _lastSource;
     private int _loopDepth;
@@ -33,7 +53,6 @@ public sealed partial class CodeGen
     private readonly HashSet<Register> _reserved = [];
     /// <summary>The largest value each enclosing <c>for</c> counter can have in the body, where its bounds prove one (spec 3.2).</summary>
     private readonly Dictionary<VariableSymbol, long> _counterMax = [];
-    private readonly List<VariableSymbol> _freeTemps = [];
     private int _tempCounter;
 
     /// <summary>False when the program is compiled without the optimizer (<see cref="TernCompiler.Compile"/>).</summary>
@@ -93,7 +112,7 @@ public sealed partial class CodeGen
     private void Place(Label l) => _out.Add(new LabelDef(l));
     private void Jmp(Label l) => Emit(Mnemonic.Jmp, Absolute, new LabelOperand(l));
     private void Branch(Mnemonic m, Label l) => Emit(m, Relative, new LabelOperand(l));
-    private Label NewLabel(string hint) => new($"{_fn.Name}.{hint}{_labelCounter++}");
+    private Label NewLabel(string hint) => new($"{_ctx.Function.Name}.{hint}{_labelCounter++}");
     /// <summary>A byte of a variable. A view (a struct field, a field table) is a byte of the variable it is part of.</summary>
     private static VarOperand Var(VariableSymbol v, int offset = 0) =>
         v.AliasOf is { } storage ? new(storage, v.AliasOffset + offset) : new(v, offset);
@@ -127,26 +146,26 @@ public sealed partial class CodeGen
     /// <param name="zeroPage">The temporary must be in zero page, e.g. to hold a pointer for (zp),y.</param>
     private VariableSymbol AcquireTemp(int size, bool zeroPage = false)
     {
-        int i = _freeTemps.FindIndex(t => t.Type.Size == size && t.Dereferenced == zeroPage);
+        int i = _ctx.FreeTemps.FindIndex(t => t.Type.Size == size && t.Dereferenced == zeroPage);
         VariableSymbol temp;
         if (i >= 0)
         {
-            temp = _freeTemps[i];
-            _freeTemps.RemoveAt(i);
+            temp = _ctx.FreeTemps[i];
+            _ctx.FreeTemps.RemoveAt(i);
         }
         else
         {
-            temp = new VariableSymbol($"_t{_tempCounter++}", _lastSource, size == 1 ? TernType.U8 : TernType.U16, VariableKind.Temp, _fn)
+            temp = new VariableSymbol($"_t{_tempCounter++}", _lastSource, size == 1 ? TernType.U8 : TernType.U16, VariableKind.Temp, _ctx.Function)
             {
                 Dereferenced = zeroPage,
             };
-            _fn.FrameVariables.Add(temp);
+            _ctx.Function.FrameVariables.Add(temp);
         }
         temp.Weight += 2 * (long)Math.Pow(8, Math.Min(_loopDepth, 5));
         return temp;
     }
 
-    private void Release(VariableSymbol temp) => _freeTemps.Add(temp);
+    private void Release(VariableSymbol temp) => _ctx.FreeTemps.Add(temp);
 
     /// <summary>True if the last instruction left N and Z matching the value in A.</summary>
     private bool FlagsMatchA()
@@ -180,10 +199,8 @@ public sealed partial class CodeGen
 
     private void GenFunction(FunctionSymbol f)
     {
-        _fn = f;
-        _frameOwner = f;
+        _ctx = new FunctionContext(f, f);
         _out = [];
-        _freeTemps.Clear();
         _lastSource = default;
 
         Source(f.Declaration!);
@@ -210,11 +227,11 @@ public sealed partial class CodeGen
         }
         if (kept is { } k) _reserved.Add(k);
         var inA = f.Parameters.FirstOrDefault(p => p.InMemory && p.PassedIn is Register.A or Register.AX);
-        _aParameter = inA is null ? null : (inA, _out.Count);
+        _ctx.AParameter = inA is null ? null : (inA, _out.Count);
         int bodyStart = _out.Count;
         GenBlock(f.Declaration!.Body);
         CheckHeld(bodyStart, _out.Count, kept is null ? null : f.Parameters.First(p => p.Register == kept), f.Declaration!.Body);
-        _aParameter = null;
+        _ctx.AParameter = null;
         if (kept is { } r) _reserved.Remove(r);
         if (!EndsWithJump())
         {
@@ -223,8 +240,6 @@ public sealed partial class CodeGen
         }
     }
 
-    /// <summary>The <c>using A</c> or <c>using AX</c> parameter of the function being generated, and where its body's code starts.</summary>
-    private (VariableSymbol Parameter, int From)? _aParameter;
 
     /// <summary>
     /// True if its registers (A, or A and X) hold <paramref name="e"/> here: it is the <c>using A</c>
@@ -232,7 +247,7 @@ public sealed partial class CodeGen
     /// changes neither those registers nor the parameter.
     /// </summary>
     private bool AHolds(Expr e) =>
-        _aParameter is var (p, from) && e is NameExpr { Symbol: VariableSymbol v } && v == p
+        _ctx.AParameter is var (p, from) && e is NameExpr { Symbol: VariableSymbol v } && v == p
         && _out.Skip(from).All(item => item is Comment or SourceLine
             || (item is Instr { AsmPos: null } i && !Instructions.ChangesAnything(i.Mnemonic)
                 && (Instructions.Effects(i.Mnemonic, i.Mode).Writes & (p.PassedIn == Register.AX ? CpuState.A | CpuState.X : CpuState.A)) == 0
@@ -303,14 +318,8 @@ public sealed partial class CodeGen
         }
     }
 
-    /// <summary>Where a <c>return</c> in an interrupt handler goes: the code that restores the registers.</summary>
-    private Label? _interruptExit;
-    /// <summary>Where a <c>return</c> goes in the copy of an inline function being generated: its end.</summary>
-    private Label? _inlineExit;
     /// <summary>Free temporaries of each inline function, kept between its copies, which never run at the same time.</summary>
     private readonly Dictionary<FunctionSymbol, List<VariableSymbol>> _inlineTemps = new();
-    /// <summary>The function whose code is being generated: the one whose frame holds the variables of the inline copies in it.</summary>
-    private FunctionSymbol _frameOwner = null!;
     /// <summary>The copy of an inline function's variable in a caller's frame (spec 6.2), for each caller.</summary>
     private readonly Dictionary<(FunctionSymbol Owner, VariableSymbol Original), VariableSymbol> _instances = new();
 
@@ -325,8 +334,8 @@ public sealed partial class CodeGen
     {
         VariableSymbol InstanceOf(VariableSymbol original)
         {
-            if (_instances.TryGetValue((_frameOwner, original), out var copy)) return copy;
-            copy = new VariableSymbol($"{f.Name}.{original.Name}", original.Pos, original.Type, original.Kind, _frameOwner)
+            if (_instances.TryGetValue((_ctx.FrameOwner, original), out var copy)) return copy;
+            copy = new VariableSymbol($"{f.Name}.{original.Name}", original.Pos, original.Type, original.Kind, _ctx.FrameOwner)
             {
                 InlineOf = f,
                 IsIndexed = original.IsIndexed,
@@ -339,8 +348,8 @@ public sealed partial class CodeGen
                 OffsetTable = original.OffsetTable,
             };
             copy.JumpVectorOffsets.UnionWith(original.JumpVectorOffsets);
-            _instances[(_frameOwner, original)] = copy;
-            _frameOwner.FrameVariables.Add(copy);
+            _instances[(_ctx.FrameOwner, original)] = copy;
+            _ctx.FrameOwner.FrameVariables.Add(copy);
             return copy;
         }
         for (int i = start; i < _out.Count; i++)
@@ -359,8 +368,8 @@ public sealed partial class CodeGen
     /// <summary>Leaves the function: <c>rts</c>, or a jump to the end of an inline copy or of an interrupt handler.</summary>
     private void ReturnJump()
     {
-        if (_inlineExit is { } end) Jmp(end);
-        else if (_interruptExit is { } exit) Jmp(exit);
+        if (_ctx.InlineExit is { } end) Jmp(end);
+        else if (_ctx.InterruptExit is { } exit) Jmp(exit);
         else Emit(Rts);
     }
 
@@ -372,14 +381,12 @@ public sealed partial class CodeGen
     /// </summary>
     private void GenInline(FunctionSymbol f)
     {
-        var (caller, callerExit, interruptExit, callerTemps) = (_fn, _inlineExit, _interruptExit, _freeTemps.ToList());
+        var caller = _ctx;
         var callerSource = _lastSource;
-        _fn = f;
-        _interruptExit = null;
-        _freeTemps.Clear();
-        if (_inlineTemps.TryGetValue(f, out var pool)) _freeTemps.AddRange(pool);
+        _ctx = new FunctionContext(f, caller.FrameOwner);
+        if (_inlineTemps.TryGetValue(f, out var pool)) _ctx.FreeTemps.AddRange(pool);
         var end = NewLabel("inline_end");
-        _inlineExit = end;
+        _ctx.InlineExit = end;
         _out.Add(new Comment($"inline {f.Name}"));
         // An inline asm fn keeps its register parameters where they arrive, as an asm fn does.
         bool isAsm = f.Declaration!.IsAsm;
@@ -391,10 +398,8 @@ public sealed partial class CodeGen
         if (_out[^1] is Instr { Mnemonic: Mnemonic.Jmp, Operand: LabelOperand { Label: var l } } && l == end)
             _out.RemoveAt(_out.Count - 1);
         Place(end);
-        (_fn, _inlineExit, _interruptExit) = (caller, callerExit, interruptExit);
-        _inlineTemps[f] = _freeTemps.ToList();
-        _freeTemps.Clear();
-        _freeTemps.AddRange(callerTemps);
+        _inlineTemps[f] = _ctx.FreeTemps.ToList();
+        _ctx = caller;
         // The rest of the caller's statement belongs to the caller's line again (source map).
         if (_lastSource != callerSource)
         {
@@ -411,9 +416,9 @@ public sealed partial class CodeGen
     private void GenInterrupt(FunctionSymbol f)
     {
         int start = _out.Count;
-        _interruptExit = NewLabel("exit");
+        _ctx.InterruptExit = NewLabel("exit");
         GenBlock(f.Declaration!.Body);
-        if (_out[^1] is Instr { Mnemonic: Mnemonic.Jmp, Operand: LabelOperand { Label: var l } } && l == _interruptExit)
+        if (_out[^1] is Instr { Mnemonic: Mnemonic.Jmp, Operand: LabelOperand { Label: var l } } && l == _ctx.InterruptExit)
             _out.RemoveAt(_out.Count - 1);
         var body = _out.GetRange(start, _out.Count - start);
         if (_optimize) Optimizer.Run(body, f, _instructions);
@@ -438,12 +443,12 @@ public sealed partial class CodeGen
             save.Insert(0, new Instr(Mnemonic.Cld));
         _out.InsertRange(start, save);
 
-        Place(_interruptExit);
+        Place(_ctx.InterruptExit);
         if (y) { Emit(Pla); Emit(Tay); }
         if (x) { Emit(Pla); Emit(Tax); }
         if (a) Emit(Pla);
         Emit(Rti);
-        _interruptExit = null;
+        _ctx.InterruptExit = null;
     }
 
     // ---------- Tree queries: over Node.Descendants, so no expression kind is skipped (review code-quality-semantics 14) ----------

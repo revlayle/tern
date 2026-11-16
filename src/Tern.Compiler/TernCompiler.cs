@@ -1,4 +1,3 @@
-using System.Text;
 using Tern.Compiler.Backend;
 using Tern.Compiler.Semantics;
 using Tern.Compiler.Syntax;
@@ -78,6 +77,25 @@ public sealed class CompileResult
 /// <summary>What the compiler does with warnings (spec 13).</summary>
 public enum WarningMode { Report, Off, AsErrors }
 
+/// <summary>
+/// What the checks found (<see cref="TernCompiler.Check"/>), without building: the files as parsed and
+/// declared, also when they have errors, and every error and warning.
+/// </summary>
+/// <param name="Modules">The main file (last) and the modules it imports, with their syntax trees and scopes; empty if the main file could not be loaded.</param>
+/// <param name="Program">The checked program, or null when there are errors.</param>
+/// <param name="All">The errors and warnings, sorted by place (spec 13).</param>
+/// <param name="MoreNotReported"><c>--max-errors</c> stopped the checks: more errors were not reported.</param>
+public sealed record CheckResult(IReadOnlyList<Module> Modules, CheckedProgram? Program, IReadOnlyList<CompileError> All, bool MoreNotReported)
+{
+    public IReadOnlyList<CompileError> Errors => All.Where(e => !e.IsWarning).ToList();
+    public IReadOnlyList<CompileError> Warnings => All.Where(e => e.IsWarning).ToList();
+    /// <summary>The checks found no error. The build may still find one (allocation, code generation, layout): see <see cref="TernCompiler.Check"/>.</summary>
+    public bool Ok => Program is not null;
+
+    /// <summary>The errors and warnings as tools report them (<c>tern --json</c>); <paramref name="defaultFile"/> for source given without a path.</summary>
+    public IReadOnlyList<Tools.Diagnostic> Diagnostics(string defaultFile) => All.Select(e => Tools.Diagnostic.From(e, defaultFile)).ToList();
+}
+
 public static partial class TernCompiler
 {
     /// <summary>The standard library: the <c>lib</c> folder next to the compiler.</summary>
@@ -96,6 +114,33 @@ public static partial class TernCompiler
     public static CompileResult Compile(string source, Platform? platform = null, string? sourcePath = null, string? libraryDirectory = null, int? maxErrors = null,
         WarningMode warnings = WarningMode.Report, bool warnLibrary = false, bool optimize = true) =>
         OnLargeStack(() => CompileHere(source, platform, sourcePath, libraryDirectory, maxErrors, warnings, warnLibrary, optimize));
+
+    /// <summary>
+    /// Parses and checks a program without building it, and never throws a <see cref="CompileError"/>:
+    /// the errors and warnings are in the result, with the files as far as they were understood (for a
+    /// language server, M28). The checks are those of <see cref="Compile"/>, with the same errors. Errors that
+    /// only allocation, code generation and layout find (zero page full, an area too small, a fixed address
+    /// over the program) come from <see cref="Compile"/> only.
+    /// </summary>
+    /// <param name="openFile">
+    /// The text of a module open in an editor, by its full path, used in place of the file on disk; null
+    /// for a file that is not open. The main file's text is <paramref name="source"/>.
+    /// </param>
+    public static CheckResult Check(string source, Platform? platform = null, string? sourcePath = null, string? libraryDirectory = null, int? maxErrors = null,
+        WarningMode warnings = WarningMode.Report, Func<string, string?>? openFile = null) =>
+        OnLargeStack(() =>
+        {
+            var checking = new Checking(platform ?? Platform.C64, maxErrors, warnings);
+            try
+            {
+                var program = checking.Run(source, sourcePath, libraryDirectory, warnLibrary: false, openFile);
+                return new CheckResult(checking.Modules, program, checking.Warnings, false);
+            }
+            catch (CompileError e)
+            {
+                return new CheckResult(checking.Modules, null, e.WithWarnings, e.MoreNotReported);
+            }
+        });
 
     /// <summary>
     /// The stack a compile runs on. The passes walk the syntax tree by recursion, up to
@@ -128,498 +173,66 @@ public static partial class TernCompiler
         WarningMode warnings, bool warnLibrary, bool optimize)
     {
         platform ??= Platform.C64;
-
-        var errors = new ErrorList(maxErrors);
-        var found = warnings == WarningMode.Off ? null : new List<CompileError>();
-        var modules = ModuleLoader.Load(source, sourcePath, platform, libraryDirectory ?? DefaultLibraryDirectory, errors);
-        CheckedProgram program;
-        // Warnings are found only when the checks found no error; a later error (the call graph's, allocation,
-        // layout) is reported with them, sorted by place (spec 13).
-        try { program = Checker.Check(modules, platform, errors, found, warnLibrary); }
-        catch (CompileError e) when (found is { Count: > 0 })
-        {
-            AddWarnings(e);
-            throw;
-        }
-        if (warnings == WarningMode.AsErrors && found!.Count > 0) ThrowWarningsAsErrors();
+        var checking = new Checking(platform, maxErrors, warnings);
+        var program = checking.Run(source, sourcePath, libraryDirectory, warnLibrary, openFile: null);
         try
         {
             var result = Build(program, platform, sourcePath, optimize);
-            result.Warnings = found is null ? [] : errors.Sort(found);
+            result.Warnings = checking.Warnings;
             return result;
         }
-        catch (CompileError e) when (found is { Count: > 0 })
+        catch (CompileError e) when (checking.HasWarnings)
         {
-            AddWarnings(e);
+            checking.AddWarnings(e);
             throw;
-        }
-
-        void AddWarnings(CompileError e)
-        {
-            if (warnings == WarningMode.AsErrors) ThrowWarningsAsErrors();
-            e.WithWarnings = errors.Sort(e.All.Concat(found!));
-        }
-
-        // --warnings-as-errors: each warning is an error, and the build stops (spec 13).
-        void ThrowWarningsAsErrors()
-        {
-            foreach (var w in found!) errors.Add(new CompileError(w.Pos, w.Description));
-            errors.ThrowIfAny();
         }
     }
 
-    /// <summary>Allocation, code generation and layout, for a program whose checks found no error.</summary>
-    private static CompileResult Build(CheckedProgram program, Platform platform, string? sourcePath, bool optimize)
+    /// <summary>
+    /// The first half of a compile, shared by <see cref="Compile"/> and <see cref="Check"/>: loading, parsing
+    /// and the checks, with every error and warning they find (spec 13).
+    /// </summary>
+    private sealed class Checking(Platform platform, int? maxErrors, WarningMode warnings)
     {
-        var gen = new CodeGen(program, platform.InstructionSet, optimize);
-        var functionCode = gen.GenerateFunctions();
-        // Indexed arrays placed so that they do not cross a page, with the variables starting on one;
-        // if the program areas have no room for that, the variables are placed one after another (F12).
-        RamPlan plan = null!;
-        List<AsmItem> items = null!;
-        AssembledCode code = null!;
-        Dictionary<VariableSymbol, Label> imageLabels = null!;
-        (bool Nmi, bool Irq) vectors = default;
-        var layout = program.Layout;
-        bool binary = program.IsBinary;
-        var start = new Label("start");
-        var halt = new Label("halt");
-        var bss = new Label("bss");
-        var setup = new Label("setup");
-        // Apple II: the copies the startup code makes (spec 12.2). They are known only once the program
-        // is assembled, and the copying code moves what follows it, so assembly repeats until they agree.
-        bool system = platform.Format == OutputFormat.System && !binary;
-        var moved = new Label("moved");
-        var quit = new Label("quit");
-        // The prefix code comes with io (question 150).
-        bool withIo = system && program.Modules.Any(m => m.IsLibrary && m.Name == "io");
-        var prefix = withIo ? new Label("prefix_parameters") : null;
-        List<AreaMove> moves = [];
-        byte[]? systemFile = null;
-        // A cartridge (the NES): code in ROM, variables in RAM, initial values copied from ROM (spec 12.2).
-        var cartridge = layout.Cartridge;
-        var initial = new Label("initial");
-        var rti = new Label("rti");
-        var bankZero = new Label("bank_zero");
-        int passes = 0;
-        // Indexed reads only: a store or a read-modify-write takes the same cycles across a page.
-        var indexed = new Dictionary<VariableSymbol, List<int>>();
-        foreach (var i in functionCode.OfType<Instr>())
-            if (MemoryUse.Of(i) is { Target: MemoryTarget.Element, Reads: true, Writes: false, Operand: { Variable: var v } o })
-                (indexed.TryGetValue(v.Storage, out var list) ? list : indexed[v.Storage] = []).Add(v.AliasOffset + o.Offset);
-        // NROM fills $C000-$FFFF first, so a small program is NROM-128; one that does not fit there is
-        // laid out again in one area, $8000-$FFFF, so that a function or table may be larger than 16 KB
-        // (review M27, finding 4).
-        var codeAreas = layout.Program;
-        bool CanJoin() => cartridge is { Board.BankArea: null } && Joined(codeAreas).Count < codeAreas.Count;
-        for (bool byPage = true; ;)
+        private readonly ErrorList _errors = new(maxErrors);
+        private readonly List<CompileError>? _found = warnings == WarningMode.Off ? null : [];
+
+        /// <summary>The files loaded, as far as they were (see <see cref="CheckResult.Modules"/>).</summary>
+        public List<Module> Modules { get; private set; } = [];
+        public bool HasWarnings => _found is { Count: > 0 };
+        /// <summary>The warnings, sorted by place.</summary>
+        public IReadOnlyList<CompileError> Warnings => _found is null ? [] : _errors.Sort(_found);
+
+        /// <exception cref="CompileError">The first error, carrying all of them and the warnings.</exception>
+        public CheckedProgram Run(string source, string? sourcePath, string? libraryDirectory, bool warnLibrary, Func<string, string?>? openFile)
         {
-            plan = Allocator.Allocate(program, platform, byPage, indexed);
-            foreach (var v in program.Globals.Concat(program.Functions.SelectMany(f => f.FrameVariables)))
-                if (v.Address is >= 0 and < 0x100 && v.FixedAddress is null)
-                    foreach (int o in v.JumpVectorOffsets)
-                        if (((v.Address + o) & 0xFF) == 0xFF)
-                            throw new CompileError(v.Pos, $"'{v.Name}' is used as jmp ({v.Name}{o:+0;-0;''}) and was placed so that the vector starts at $FF, where the 6502 reads it wrongly. Place it at a fixed address whose low byte is not $FF");
-
-            // The C64's BASIC line must be where the file loads; a .xex names its run address.
-            if (!binary && platform.Header.Length > 0 && layout.Program[0].First != platform.LoadAddress)
-                throw new CompileError(program.Main.Pos,
-                    $"A program with 'main' starts at ${platform.LoadAddress:X4}, where the {platform.Name.ToUpperInvariant()} BASIC line goes, but its first program area begins at ${layout.Program[0].First:X4}. " +
-                    (layout.ProgramReplaced ? $"Start the first 'program' line of the memory block at ${platform.LoadAddress:X4}" : "Move the 'reserved' or 'region' range that covers it"));
-            CheckFixedData(program, plan);
-            if (program.ExportTableAddress is int tableAt)
-                CheckExportTable(program, new AddressRange(tableAt, tableAt + 3 * program.Exports.Count - 1));
-
-            vectors = cartridge is null ? default : CheckVectors(plan);
-            if (!binary)
+            Modules = ModuleLoader.Load(source, sourcePath, platform, libraryDirectory ?? DefaultLibraryDirectory, _errors, openFile);
+            CheckedProgram program;
+            // Warnings are found only when the checks found no error; a later error (the call graph's, allocation,
+            // layout) is reported with them, sorted by place (spec 13).
+            try { program = Checker.Check(Modules, platform, _errors, _found, warnLibrary); }
+            catch (CompileError e) when (HasWarnings)
             {
-                items = [new SectionStart("startup"), new DataBytes(platform.Header), new LabelDef(start), new Comment("startup")];
-                if (cartridge is not null) items.Add(new Instr(Sei));
-                items.AddRange(Startup(plan, bss, gen.LabelOf,
-                    system ? Apple2Start(moves, moved, quit, prefix, exact: passes < 4) : cartridge is not null ? NesStart(cartridge.Board.BankArea is null ? null : bankZero) : [],
-                    ramCleared: cartridge is not null, initial));
-                items.Add(new Instr(Jsr, Absolute, new LabelOperand(gen.LabelOf(program.Main))));
-                items.Add(new LabelDef(halt));
-                items.Add(new Instr(Jmp, Absolute, new LabelOperand(halt)));
-                if (system) items.AddRange(Apple2Quit(quit, prefix));
-                if (cartridge is not null)
-                {
-                    items.Add(new Comment("an interrupt vector the program does not set"));
-                    items.Add(new LabelDef(rti));
-                    items.Add(new Instr(Rti));
-                    if (cartridge.Board.BankArea is not null)
-                    {
-                        // The latch also sees this byte (bus conflicts): writing 0 over a 0 selects bank 0.
-                        items.Add(new LabelDef(bankZero));
-                        items.Add(new DataBytes([0]));
-                    }
-                }
+                AddWarnings(e);
+                throw;
             }
-            else
-            {
-                // A binary starts with its jump table: setup, then the exports in the order they were listed,
-                // or at their routines' addresses in the interface module, with zeros between (spec 12.3).
-                items = [new SectionStart("jump table"), new LabelDef(start), new Instr(Jmp, Absolute, new LabelOperand(setup))];
-                int at = layout.Program[0].First + 3;
-                foreach (var export in program.Exports)
-                {
-                    if (program.ExportedAs.TryGetValue(export, out var routine))
-                    {
-                        if (routine.FixedAddress > at) items.Add(new DataBytes(new byte[routine.FixedAddress!.Value - at]));
-                        at = routine.FixedAddress!.Value;
-                    }
-                    items.Add(new Instr(Jmp, Absolute, new LabelOperand(gen.LabelOf(export))));
-                    at += 3;
-                }
-                items.Add(new SectionStart("setup"));
-                items.Add(new LabelDef(setup));
-                items.AddRange(Startup(plan, bss, gen.LabelOf, []));
-                items.Add(new Instr(Rts));
-            }
-            items.AddRange(functionCode);
-            if (cartridge is not null)
-            {
-                items.AddRange(NesVectors(start, rti, vectors));
-                if (plan.CopiedSize > 0) items.AddRange(InitialValues(plan, initial, gen.LabelOf));
-            }
-            // implements (spec 8.5): a jmp at each interface routine's address, in the overlay's file; its code goes around them.
-            foreach (var entry in program.Implementations)
-            {
-                items.Add(new SectionStart($"{entry.Interface.Name}.{entry.Name}", entry.Routine.FixedAddress, Overlay: entry.Module.Unit));
-                items.Add(new Instr(Jmp, Absolute, new LabelOperand(gen.LabelOf(entry.Function))));
-            }
-            if (program.ExportTableAddress is int table)
-            {
-                // A program's export table: one jmp per function, in the order listed (spec 12.3).
-                items.Add(new SectionStart("export table", table));
-                foreach (var export in program.Exports)
-                    items.Add(new Instr(Jmp, Absolute, new LabelOperand(gen.LabelOf(export))));
-            }
-
-            imageLabels = new Dictionary<VariableSymbol, Label>();
-            foreach (var g in plan.ImageGlobals)
-            {
-                var label = new Label(g.Name);
-                imageLabels[g] = label;
-                // A bank's data is in the bank, with its code (spec 8.5).
-                items.Add(new SectionStart(g.Name, Overlay: g.Module?.InBank == true ? g.OverlayUnit : null));
-                if (ImagePadding(g, cartridge is null ? (byte)0 : (byte)0xFF) is { } padding) items.Add(padding);
-                items.Add(new LabelDef(label));
-                items.AddRange(ImageBytes(g, gen.LabelOf));
-            }
-            foreach (var g in plan.FixedImageGlobals)
-            {
-                items.Add(new SectionStart(g.Name, g.Address, Overlay: g.OverlayUnit));
-                items.AddRange(ImageBytes(g, gen.LabelOf));
-            }
-            // Overlay modules: their variables are bytes of the file, zeros where there is no initial value.
-            foreach (var g in plan.OverlayGlobals)
-            {
-                var label = new Label(g.Name);
-                imageLabels[g] = label;
-                items.Add(new SectionStart(g.Name, Overlay: g.Module!.Name));
-                if (ImagePadding(g) is { } padding) items.Add(padding);
-                items.Add(new LabelDef(label));
-                items.AddRange(ImageBytes(g, gen.LabelOf));
-            }
-            // Variables after the program start at bss. Move them all, if needed, so that no jmp (...)
-            // vector among them starts at an address ending in $FF.
-            var ramVectors = plan.ZeroedGlobals.Concat(plan.NoinitGlobals).Concat(plan.CopiedGlobals).Concat(plan.FrameVariables)
-                .SelectMany(e => e.Var.JumpVectorOffsets.Select(o => e.Offset + o)).ToList();
-            string reason = string.Join(" and ", new[]
-            {
-                plan.PageArrays.Count > 0 ? "indexed reads of the variables do not cross a page" : null,
-                plan.ZeroedGlobals.Concat(plan.NoinitGlobals).Concat(plan.CopiedGlobals).Any(e => e.Var.Alignment > 1) ? "aligned variables start at a multiple of their alignment" : null,
-            }.OfType<string>());
-            items.Add(new Reserve(bss, plan.TotalSize, ramVectors, plan.StartModulus, plan.StartResidue, reason));
-
-            // Each overlay, and each bank (its modules together), is laid out from its area's start.
-            var overlayAreas = program.Modules.Where(m => m.OverlayArea is not null).GroupBy(m => m.Unit!)
-                .ToDictionary(g => g.Key, g => layout.PlacedArea(g.First().OverlayArea!)!.Value);
-            // Placed by page, the variables may not fit, or may now overlap a fixed-address variable
-            // (review M18 part 3, finding 1): then place them one after another. That try reports
-            // any error as before.
-            try
-            {
-                code = Assembler.Assemble(items, codeAreas, platform.InstructionSet, () =>
-                {
-                    foreach (var (g, label) in imageLabels) g.Address = label.Address;
-                    foreach (var (v, offset) in plan.ZeroedGlobals.Concat(plan.NoinitGlobals).Concat(plan.CopiedGlobals)) v.Address = bss.Address + offset;
-                    foreach (var (v, offset) in plan.FrameVariables) v.Address = bss.Address + offset;
-                }, overlayAreas, program.Modules.Where(m => m.ImportedBy is not null && m.OverlayArea is not null).GroupBy(m => m.Unit!).ToDictionary(g => g.Key, g => g.First().ImportedBy!.Pos),
-                layout.Variables);
-                CheckFixedAddresses(program, platform, code, plan);
-                if (system)
-                {
-                    var (built, needed) = SystemFile(platform, code.Segments, start.Address, moves.Count > 0 ? moved.Address - start.Address : 0,
-                        program.Main.Pos, program.Modules[^1].Syntax.Memory?.Pos ?? program.Main.Pos);
-                    if (!needed.SequenceEqual(moves))
-                    {
-                        if (++passes > 8) throw new InvalidOperationException("The Apple II's startup copies did not settle");
-                        moves = needed;
-                        continue;
-                    }
-                    systemFile = built;
-                }
-                break;
-            }
-            catch (CompileError) when (CanJoin())
-            {
-                codeAreas = Joined(codeAreas);
-                byPage = true;
-            }
-            catch (Exception e) when (byPage && plan.PageArrays.Count > 0 && e is Assembler.NoPageStart or CompileError) { byPage = false; }
-            catch (Assembler.NoPageStart)
-            {
-                // Only aligned variables are left to place the block for.
-                var widest = plan.ZeroedGlobals.Concat(plan.NoinitGlobals).Concat(plan.CopiedGlobals).Select(e => e.Var).MaxBy(v => v.Alignment)!;
-                throw new CompileError(widest.Pos,
-                    $"The variables after the program ({plan.TotalSize} bytes) must start where '{widest.Name}' is at a multiple of ${widest.Alignment:X}, and no program area has room for them there. " +
-                    "Make a program area larger, or use a smaller alignment");
-            }
+            if (warnings == WarningMode.AsErrors && HasWarnings) ThrowWarningsAsErrors();
+            return program;
         }
 
-        // The file covers every byte from the lowest to the highest address used; gaps are zeros.
-        int loadAddress = code.Segments.Min(s => s.Address);
-        int fileEnd = code.Segments.Max(s => s.Address + s.Bytes.Length);
-        var image = new byte[fileEnd - loadAddress];
-        foreach (var (address, bytes) in code.Segments) bytes.CopyTo(image, address - loadAddress);
-        byte[] file;
-        int prgSize = 0, prgFirst = 0;
-        // In the order the main file imports them, which is the order a bank is filled in (spec 8.5).
-        var banks = program.Modules.Where(m => m.InBank).OrderBy(m => m.ImportedBy!.Pos.Line).ThenBy(m => m.ImportedBy!.Pos.Column).ToList();
-        int bankCount = 0;
-        if (cartridge is not null) (file, prgSize, prgFirst, bankCount) = NesFile(cartridge, code.Segments, plan, banks.GroupBy(m => m.Unit!).ToDictionary(g => g.Key, g => g.First().Bank!.Value), code.Overlays);
-        else file = systemFile ?? platform.FileOf(loadAddress, image, code.Segments, binary ? null : start.Address);
-
-        var symbols = new Dictionary<string, int>();
-        var variables = new Dictionary<string, VariableInfo>();
-        foreach (var g in program.Globals)
+        /// <summary>Gives a later error the warnings found before it; with <c>--warnings-as-errors</c>, they are errors instead.</summary>
+        public void AddWarnings(CompileError e)
         {
-            symbols[g.Name] = g.Address;
-            variables[g.Name] = new VariableInfo(g.Name, g.Address, g.Type.Size, g.Type.ToString(), null, g.IsData, g.InChr);
-        }
-        foreach (var f in program.Functions)
-        {
-            // An inline function has no code of its own, only a frame.
-            if (!f.IsInline) symbols[f.Name] = gen.LabelOf(f).Address;
-            foreach (var v in f.FrameVariables.Where(v => v.Kind != VariableKind.Temp))
-            {
-                symbols[v.QualifiedName] = v.Address;
-                variables[v.QualifiedName] = new VariableInfo(v.QualifiedName, v.Address, v.Type.Size, v.Type.ToString(), f.Name, false);
-            }
+            if (warnings == WarningMode.AsErrors) ThrowWarningsAsErrors();
+            e.WithWarnings = _errors.Sort(e.All.Concat(_found!));
         }
 
-        // The emulators accept dots inside labels, so names stay as in the listing and cannot clash (util.bump, util_bump).
-        string labels = platform.Labels.Write(symbols, cartridge is null ? null : NesLabelMap(prgFirst, bankCount, banks.ToDictionary(m => m.Name, m => m.Bank!.Value), program.Globals.Where(g => g.InChr).Select(g => g.Name).ToHashSet()));
-
-        var entries = new List<(string Name, int Address)>();
-        string? apiModule = null, apiName = null;
-        if (binary)
+        // --warnings-as-errors: each warning is an error, and the build stops (spec 13).
+        private void ThrowWarningsAsErrors()
         {
-            var use = new RegisterUse(gen, program.Functions);
-            var setupChange = items.SkipWhile(i => i is not LabelDef { Label: var l } || l != setup).OfType<Instr>()
-                .TakeWhile(i => i.Mnemonic != Rts)
-                .Aggregate(CpuState.None, (acc, i) => acc | (Instructions.Effects(i.Mnemonic, i.Mode).Writes & (CpuState.A | CpuState.X | CpuState.Y)));
-            var table = new List<(string Name, FunctionSymbol? Function, int Address, CpuState Changed)> { ("setup", null, start.Address, setupChange) };
-            for (int i = 0; i < program.Exports.Count; i++)
-            {
-                var f = program.Exports[i];
-                table.Add((f.Name, f, program.ExportedAs.GetValueOrDefault(f)?.FixedAddress ?? start.Address + 3 * (i + 1), use.Changed(f)));
-            }
-            entries.AddRange(table.Select(t => (t.Name, t.Address)));
-            // export level_api: each entry keeps what its routine promises to keep.
-            if (program.ExportedAs.Count > 0)
-            {
-                var api = program.ExportedAs.Values.First().Module!;
-                var interfaceSetup = (FunctionSymbol)api.Scope["setup"];
-                foreach (var (name, f, _, changed) in table)
-                {
-                    var routine = f is null ? interfaceSetup : program.ExportedAs[f];
-                    foreach (var reg in routine.Keeps.OrderBy(r => r))
-                        if (changed.HasFlag(reg switch { Register.A => CpuState.A, Register.X => CpuState.X, _ => CpuState.Y }))
-                            throw new CompileError(f?.Pos ?? program.Main.Pos,
-                                f is null
-                                    ? $"'{api.Name}.setup' promises to keep {reg}, but the binary's startup code changes it. Remove {reg} from its 'keeps' list"
-                                    : $"'{name}' changes {reg}, which '{api.Name}.{name}' promises to keep. Change the function so that it leaves {reg} alone, or remove {reg} from the routine's 'keeps' list");
-                }
-            }
-
-            var fileRange = new AddressRange(loadAddress, fileEnd - 1);
-            // Every range the binary uses, once: a host may not reserve overlapping ranges.
-            var others = new List<(string Prefix, string What, AddressRange Range)>();
-            var emitted = new List<AddressRange> { fileRange };
-            var counts = new Dictionary<string, int>();
-            void Emit(string prefix, string what, AddressRange range)
-            {
-                foreach (var piece in MemoryLayout.Subtract([range], emitted))
-                {
-                    int n = counts[prefix] = counts.GetValueOrDefault(prefix) + 1;
-                    others.Add((n == 1 ? prefix : prefix + n, what, piece));
-                    emitted.Add(piece);
-                }
-            }
-            if (code.Variables is { } vr) Emit("VARS", "variables, zeroed by setup", vr);
-            foreach (var (name, use2) in plan.RegionUse) Emit(name.ToUpperInvariant(), $"region {name}", use2);
-            var zpUsed = program.Globals.Where(g => g.FixedAddress is null && g.Region is null)
-                .Concat(program.Functions.SelectMany(f => f.FrameVariables))
-                .Where(v => v.AliasOf is null && v.Address is >= 0 and < 0x100 && v.Register is null).ToList();
-            foreach (var zr in layout.ZeroPage.OrderBy(r => r.First))
-            {
-                var inRange = zpUsed.Where(v => v.Address >= zr.First && v.Address <= zr.Last).ToList();
-                if (inRange.Count > 0)
-                    Emit("ZP", "zero page used by the binary", new AddressRange(inRange.Min(v => v.Address), inRange.Max(v => v.Address + v.Type.Size - 1)));
-            }
-            foreach (var g in program.Globals.Where(g => g.FixedAddress is not null && !g.IsData && !g.InVolatileArea).OrderBy(g => g.FixedAddress))
-                Emit("FIXED", $"'{g.Name}', at a fixed address", new AddressRange(g.FixedAddress!.Value, g.FixedAddress.Value + g.Type.Size - 1));
-            foreach (var r in layout.Reserved.OrderBy(r => r.First)) Emit("RESERVED", "reserved in the binary's memory block", r);
-
-            string baseName = sourcePath is null ? "binary" : Path.GetFileNameWithoutExtension(sourcePath);
-            apiName = baseName + "_api";
-            apiModule = BinaryInterface.Generate(baseName + platform.BinaryExtension, apiName, table, fileRange, others);
+            foreach (var w in _found!) _errors.Add(new CompileError(w.Pos, w.Description));
+            _errors.ThrowIfAny();
         }
-
-        if (program.ExportTableAddress is int tableAddress)
-        {
-            // The program's table, for plug-ins: no setup, no memory ranges (spec 12.3).
-            var use = new RegisterUse(gen, program.Functions);
-            var table = program.Exports.Select((f, i) => (f.Name, (FunctionSymbol?)f, tableAddress + 3 * i, use.Changed(f))).ToList();
-            entries.AddRange(table.Select(t => (t.Name, t.Item3)));
-            string baseName = sourcePath is null ? "program" : Path.GetFileNameWithoutExtension(sourcePath);
-            apiName = baseName + "_api";
-            apiModule = BinaryInterface.GenerateTable(baseName + platform.FileExtension, apiName, table);
-        }
-
-        if (program.Implementations.Count > 0)
-        {
-            // Code around a call to an interface routine relies on what the routine promises to keep.
-            var use = new RegisterUse(gen, program.Functions);
-            foreach (var entry in program.Implementations)
-                foreach (var reg in entry.Routine.Keeps.OrderBy(r => r))
-                    if (use.Changed(entry.Function).HasFlag(reg switch { Register.A => CpuState.A, Register.X => CpuState.X, _ => CpuState.Y }))
-                        throw new CompileError(entry.Function.Pos,
-                            $"'{entry.Function.Name}' changes {reg}, which '{entry.Interface.Name}.{entry.Name}' promises to keep. Change the function so that it leaves {reg} alone, or remove {reg} from the routine's 'keeps' list");
-        }
-
-        var overlayFiles = new List<OverlayFile>();
-        foreach (var module in program.Modules.Where(m => m.OverlayArea is not null && !m.InBank))
-        {
-            if (!code.Overlays.TryGetValue(module.Name, out var segments)) continue;
-            int first = Math.Min(segments.Min(s => s.Address), program.Layout.Overlays[module.OverlayArea!].First);
-            var overlayImage = new byte[segments.Max(s => s.Address + s.Bytes.Length) - first];
-            foreach (var (address, bytes) in segments) bytes.CopyTo(overlayImage, address - first);
-            overlayFiles.Add(new OverlayFile(module.Name, module.OverlayArea!, first, overlayImage,
-                platform.FileOf(first, overlayImage, [(first, overlayImage)], null)));
-        }
-
-        var report = new StringBuilder();
-        // A .prg holds the gaps between areas; a .xex and a system file hold only the runs of bytes.
-        report.AppendLine(platform.Format == OutputFormat.Prg
-            ? $"Code and data: ${loadAddress:X4}-${fileEnd - 1:X4} ({image.Length} bytes)"
-            : $"Code and data: {string.Join(", ", code.Segments.Select(s => $"${s.Address:X4}-${s.Address + s.Bytes.Length - 1:X4}"))} ({code.Segments.Sum(s => s.Bytes.Length)} bytes)");
-        if (systemFile is not null)
-            report.AppendLine($"System file: {systemFile.Length} bytes, loaded at ${platform.LoadAddress:X4}-${platform.LoadAddress + systemFile.Length - 1:X4}"
-                + (moves.Count > 0 ? $"; the startup code copies {Plural(moves.Count, "area", "areas")} into place: {string.Join(", ", moves.Select(m => $"${m.From:X4} to ${m.To:X4}, {m.Count} bytes"))}" : ""));
-        if (withIo)
-            report.AppendLine($"io: {PrefixSize} bytes of startup code, which set an empty prefix to the program's folder");
-        if (cartridge is not null)
-            report.AppendLine($"Cartridge: {cartridge.Board.Name} (mapper {cartridge.Board.Mapper}), {(cartridge.VerticalMirroring ? "vertical" : "horizontal")} mirroring, " +
-                (cartridge.Board.BankArea is null ? $"{prgSize / 1024} KB of PRG ROM at ${prgFirst:X4}-$FFFF, "
-                    : $"{prgSize / 1024} KB of PRG ROM in {Plural(bankCount, "bank", "banks")} of 16 KB, the last fixed at $C000-$FFFF, ") +
-                (cartridge.Board.ChrRom ? $"{ChrBank / 1024} KB of CHR ROM" : "CHR RAM") +
-                (plan.CopiedSize > 0 ? $"; the startup code copies {Plural(plan.CopiedSize, "byte", "bytes")} of initial values to RAM" : ""));
-        string variablesAt = cartridge is null ? "after the program" : "in RAM";
-        report.AppendLine(code.Variables is { } vars
-            ? $"Variables {variablesAt}: {plan.TotalSize} bytes, up to ${vars.Last:X4}"
-              + (plan.PageArrays.Count > 0
-                  ? $", from ${vars.First:X4}, placed so that indexed reads do not cross a page: {string.Join(", ", plan.PageArrays.Select(a => $"{a.QualifiedName} ${a.Address:X4}"))}"
-                  : "")
-            : $"Variables {variablesAt}: 0 bytes");
-        foreach (var g in program.Globals.Where(g => g.Alignment > 1).OrderBy(g => g.Address))
-            report.AppendLine($"Aligned {g.Name}: ${g.Address:X4} (@ align({g.Alignment})), {Plural(AlignmentPadding(g, plan, code), "byte", "bytes")} of padding before it");
-        foreach (var table in program.Globals.Where(g => g.IsOffsetTable))
-            report.AppendLine($"Offset table {table.Name}: {table.Type.Size} bytes, in the program");
-        // The low table follows the high one.
-        foreach (var (function, pos, high, _, span) in gen.MatchTables)
-            report.AppendLine($"Jump table of the indexed match at {pos} in {function.Name}: {new AddressRange(high.Address, high.Address + 2 * span - 1)}, {2 * span} bytes for {span} values");
-        // The variables' own RAM (the NES) has its line above (review M27, suggestion 7).
-        var programAreas = code.Areas.Where(a => !layout.Variables.Any(v => v.Contains(a.Free))).ToList();
-        if (programAreas.Count > 1 || layout.Regions.Count > 0)
-        {
-            report.AppendLine("Program areas:");
-            foreach (var a in programAreas)
-                report.AppendLine($"  {a.Free}: {a.UsedEnd - a.Free.First} of {a.Free.Size} bytes used");
-            foreach (var (name, range) in layout.Regions)
-                report.AppendLine(plan.RegionUse.TryGetValue(name, out var use)
-                    ? $"  region {name} {range}: {use.Size} of {range.Size} bytes used"
-                    : $"  region {name} {range}: unused");
-        }
-        foreach (var (name, range) in layout.Banks)
-        {
-            report.AppendLine($"Bank area {name} {range}:");
-            foreach (var bank in banks.GroupBy(m => m.Bank!.Value).OrderBy(g => g.Key))
-            {
-                int used = code.Overlays.TryGetValue(bank.First().Unit!, out var placed) ? placed.Sum(s => s.Bytes.Length) : 0;
-                report.AppendLine($"  bank {bank.Key}: {string.Join(", ", bank.Select(m => m.Name))}, {used} of {range.Size} bytes");
-            }
-        }
-        foreach (var (name, range) in layout.Chr)
-            report.AppendLine($"Chr area {name} {range}: {plan.ChrUse.GetValueOrDefault(name)} of {range.Size} bytes used");
-        foreach (var area in layout.Overlays)
-        {
-            var inArea = overlayFiles.Where(o => o.Area == area.Key).ToList();
-            report.AppendLine($"Overlay area {area.Key} {area.Value}" + (inArea.Count == 0 ? ": no overlay" : ":"));
-            foreach (var o in inArea)
-                report.AppendLine($"  {o.Name}{platform.BinaryExtension}: {o.Image.Length} of {area.Value.Size} bytes (${o.LoadAddress:X4}-${o.LoadAddress + o.Image.Length - 1:X4})");
-        }
-        if (binary)
-        {
-            report.AppendLine($"Jump table at ${start.Address:X4}:");
-            foreach (var (name, address) in entries) report.AppendLine($"  ${address:X4}  {name}");
-        }
-        else if (program.ExportTableAddress is int exportTable)
-        {
-            report.AppendLine($"Export table at ${exportTable:X4}:");
-            foreach (var (name, address) in entries) report.AppendLine($"  ${address:X4}  {name}");
-        }
-        // Information, not a warning (spec 8.1): a call from one root can overwrite another root's call in progress.
-        var shared = program.Functions.Where(f => f.Roots.Count > 1 && !f.IsInline && f.FrameVariables.Sum(v => v.Type.Size) > 0).ToList();
-        if (shared.Count > 0)
-        {
-            report.AppendLine("Functions with memory reachable from two roots:");
-            foreach (var f in shared)
-                report.AppendLine($"  {f.Name} ({Bytes(f.FrameVariables.Sum(v => v.Type.Size))}): {string.Join(", ", f.Roots.OrderBy(program.Functions.IndexOf).Select(r => r.Name))}");
-        }
-        report.AppendLine("Zero page:");
-        report.Append(plan.ZeroPageMap);
-
-        return new CompileResult
-        {
-            File = file,
-            Image = image,
-            Segments = code.Segments,
-            LoadAddress = loadAddress,
-            Platform = platform,
-            Entry = system ? platform.LoadAddress : start.Address,
-            HaltAddress = halt.Address,
-            SetsIrqVector = vectors.Irq,
-            SourceFiles = program.Modules.Where(m => m.Path is not null).Select(m => m.Path!).ToList(),
-            Listing = code.Listing,
-            Symbols = symbols,
-            Labels = labels,
-            Report = report.ToString(),
-            Sections = code.Sections,
-            Areas = code.Areas,
-            Entries = entries,
-            Overlays = overlayFiles,
-            ApiModule = apiModule,
-            ApiModuleName = apiName,
-            Instructions = code.Instructions,
-            Variables = variables,
-            DeclaredFunctions = program.Modules.SelectMany(m => m.Scope.Values.OfType<FunctionSymbol>()).Select(f => f.Name).ToHashSet(),
-            TextEncoding = program.TextEncoding,
-            BankWindow = layout.Banks.Count > 0 ? cartridge?.Board.BankArea : null,
-        };
     }
 
     private static string Bytes(int n) => n == 1 ? "1 byte" : $"{n} bytes";

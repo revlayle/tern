@@ -65,7 +65,10 @@ public enum TokenKind
 }
 
 /// <param name="Encoding">The encoding prefix of a char or string literal (<c>screen"..."</c>), or null.</param>
-public readonly record struct Token(TokenKind Kind, string Text, long Value, SourcePos Pos, string? Encoding = null)
+/// <param name="Start">Where the token starts in the source text, as an offset; with a prefix, at the prefix.</param>
+/// <param name="End">Where it ends: the offset after its last character (after the closing quote of a literal).</param>
+/// <param name="Doc">The <c>///</c> comment lines right before the token, joined with line breaks, or null (for doc comments, M28).</param>
+public readonly record struct Token(TokenKind Kind, string Text, long Value, SourcePos Pos, string? Encoding = null, int Start = 0, int End = 0, string? Doc = null)
 {
     public override string ToString() => Kind == TokenKind.Identifier || Kind == TokenKind.Number ? Text : Kind.ToString();
 }
@@ -137,9 +140,14 @@ public static class Lexer
         // can span lines. A brace resets the count, so an unclosed bracket is reported near it.
         int nesting = 0;
 
-        void Add(TokenKind kind, string text, long value, int start, string? encoding = null)
+        // The /// lines read since the last token, for the next one.
+        string? doc = null;
+
+        // A token from start to end (end: after its last character).
+        void Add(TokenKind kind, string text, long value, int start, int end, string? encoding = null)
         {
-            tokens.Add(new Token(kind, text, value, Pos(start), encoding));
+            tokens.Add(new Token(kind, text, value, Pos(start), encoding, start, end, kind == TokenKind.Newline ? null : doc));
+            if (kind != TokenKind.Newline) doc = null;
             if (kind is TokenKind.LParen or TokenKind.LBracket) nesting++;
             else if (kind is TokenKind.RParen or TokenKind.RBracket) nesting = Math.Max(0, nesting - 1);
             else if (kind is TokenKind.LBrace or TokenKind.RBrace) nesting = 0;
@@ -152,7 +160,7 @@ public static class Lexer
             string text = ReadQuoted(source, ref i, Pos);
             if (quote == '\'' && text.Length != 1)
                 throw new CompileError(Pos(start), "A character literal holds exactly one character; use \"...\" for a string");
-            Add(quote == '"' ? TokenKind.String : TokenKind.Char, text, 0, start, encoding);
+            Add(quote == '"' ? TokenKind.String : TokenKind.Char, text, 0, start, i, encoding);
         }
 
         // The source text of the operand before i on this line, such as n, a[i] or p.x: names joined by
@@ -188,16 +196,18 @@ public static class Lexer
             catch (CompileError e) when (report is not null)
             {
                 report(e);
+                // The token starts where the error is (for a language server's error range), on this line.
+                int at = e.Pos.Line == line ? lineStart + e.Pos.Column - 1 : i;
                 while (i < source.Length && source[i] != '\n') i++;
                 // The parser drops the statement with this token, and its own errors there.
-                tokens.Add(new Token(TokenKind.Error, "", 0, e.Pos));
+                tokens.Add(new Token(TokenKind.Error, "", 0, e.Pos, Start: at, End: i));
                 nesting = 0;
             }
         }
 
         if (tokens.Count > 0 && EndsStatement(tokens[^1].Kind))
-            Add(TokenKind.Newline, "\\n", 0, i);
-        tokens.Add(new Token(TokenKind.Eof, "", 0, Pos(i)));
+            Add(TokenKind.Newline, "\\n", 0, i, i);
+        tokens.Add(new Token(TokenKind.Eof, "", 0, Pos(i), Start: i, End: i));
         return tokens;
 
         // Reads one token, or skips a line break, spaces or a comment.
@@ -208,7 +218,7 @@ public static class Lexer
             if (c == '\n')
             {
                 if (nesting == 0 && tokens.Count > 0 && EndsStatement(tokens[^1].Kind))
-                    Add(TokenKind.Newline, "\\n", 0, i);
+                    Add(TokenKind.Newline, "\\n", 0, i, i + 1);
                 i++;
                 line++;
                 lineStart = i;
@@ -218,7 +228,15 @@ public static class Lexer
 
             if (c == '/' && Peek(source, i + 1) == '/')
             {
+                int start = i;
                 while (i < source.Length && source[i] != '\n') i++;
+                // A doc comment: /// but not ////. Its text, without one space after the slashes, goes to the next token.
+                if (string.CompareOrdinal(source, start, "///", 0, 3) == 0 && Peek(source, start + 3) != '/')
+                {
+                    var text = source[(start + 3)..i].TrimEnd('\r');
+                    if (text.StartsWith(' ')) text = text[1..];
+                    doc = doc is null ? text : doc + "\n" + text;
+                }
                 return;
             }
             if (c == '/' && Peek(source, i + 1) == '*')
@@ -233,7 +251,7 @@ public static class Lexer
                 if (i >= source.Length) throw new CompileError(start, "Unterminated block comment. Add '*/' where the comment ends");
                 // A line break inside the comment ends the statement, as one outside it does (spec 2).
                 if (line > start.Line && nesting == 0 && tokens.Count > 0 && EndsStatement(tokens[^1].Kind))
-                    Add(TokenKind.Newline, "\\n", 0, i);
+                    Add(TokenKind.Newline, "\\n", 0, i, i);
                 i += 2;
                 return;
             }
@@ -270,7 +288,7 @@ public static class Lexer
                         return;
                     }
                 }
-                Add(Keywords.TryGetValue(word, out var kw) ? kw : TokenKind.Identifier, word, 0, start);
+                Add(Keywords.TryGetValue(word, out var kw) ? kw : TokenKind.Identifier, word, 0, start, i);
                 return;
             }
 
@@ -301,7 +319,7 @@ public static class Lexer
                     if (double.IsInfinity(real))
                         throw new CompileError(Pos(start), $"The real number {text} is too large. Use a value below 1.7e308");
                     i = realEnd;
-                    Add(TokenKind.Real, text, 0, start);
+                    Add(TokenKind.Real, text, 0, start, i);
                     return;
                 }
                 while (i < source.Length && (IsHexDigit(source[i]) || source[i] == '_')) i++;
@@ -318,7 +336,7 @@ public static class Lexer
                         throw new CompileError(Pos(start), "Number is too large. Use a value up to $7FFFFFFFFFFFFFFF (9223372036854775807)");
                     value = value * radix + dv;
                 }
-                Add(TokenKind.Number, source[start..i], value, start);
+                Add(TokenKind.Number, source[start..i], value, start, i);
                 return;
             }
 
@@ -337,7 +355,7 @@ public static class Lexer
             {
                 if (string.CompareOrdinal(source, i, text, 0, text.Length) == 0)
                 {
-                    Add(kind, text, 0, i);
+                    Add(kind, text, 0, i, i + text.Length);
                     i += text.Length;
                     matched = true;
                     break;

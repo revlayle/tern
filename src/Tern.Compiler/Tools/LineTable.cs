@@ -59,7 +59,7 @@ public static class LineTable
         sb.AppendLine(run
             ? "; Per source line: bytes, the cycles of its instructions once each (+: a branch or page crossing adds more), how often its first instruction ran, and the cycles they took in the run."
             : "; Per source line: bytes, and the cycles of its instructions once each (+: a branch or page crossing adds more).");
-        int fileWidth = Math.Max(4, rows.Max(r => r.File.Length));
+        int fileWidth = Math.Max(4, rows.Count == 0 ? 0 : rows.Max(r => r.File.Length));
         string fileHeader = modules ? "file".PadRight(fileWidth) + " " : "";
         static string Addresses(Row r) => string.Join(" ", r.Addresses.Select(a => a.Size == 1 ? $"${a.First:X4}" : $"${a.First:X4}-${a.Last:X4}"));
         int width = Math.Max(9, rows.Count == 0 ? 0 : rows.Max(r => Addresses(r).Length));
