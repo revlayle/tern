@@ -81,8 +81,9 @@ internal sealed class Apple2Machine(OverlayDisk disk) : Machine
     private string? Mli(Cpu6502 cpu, Ram ram, StringBuilder output)
     {
         // jsr $BF00 is followed by the command byte and the parameters' address; the MLI returns after them.
-        int sp = 0x100 + (byte)(cpu.SP + 1);
-        int at = (ram.Bytes[sp] | ram.Bytes[sp + 1] << 8) + 1;
+        // The return address's bytes, on the stack page: SP + 2 wraps to $0100 as on the CPU.
+        int low = 0x100 + (byte)(cpu.SP + 1), high = 0x100 + (byte)(cpu.SP + 2);
+        int at = (ram.Bytes[low] | ram.Bytes[high] << 8) + 1;
         int command = ram.Bytes[at & 0xFFFF];
         int list = ram.Bytes[(at + 1) & 0xFFFF] | ram.Bytes[(at + 2) & 0xFFFF] << 8;
         if (command == Quit) return "the program quit (MLI QUIT)";
@@ -91,7 +92,7 @@ internal sealed class Apple2Machine(OverlayDisk disk) : Machine
                 ? $"MLI call ${command:X2}, which writes to the disk; the emulator only reads the build's overlay files"
                 : $"MLI call ${command:X2}, which the emulator does not have (stand-ins: QUIT ${Quit:X2}, GET_PREFIX ${GetPrefix:X2}, SET_PREFIX ${SetPrefix:X2}, and GET_FILE_INFO ${GetFileInfo:X2}, OPEN ${Open:X2}, GET_EOF ${GetEof:X2}, READ ${Read:X2} and CLOSE ${Close:X2} for the build's overlay files)";
         int back = at + 2;
-        (ram.Bytes[sp], ram.Bytes[sp + 1]) = ((byte)back, (byte)(back >> 8));
+        (ram.Bytes[low], ram.Bytes[high]) = ((byte)back, (byte)(back >> 8));
         cpu.A = (byte)error;
         cpu.C = error != 0;
         cpu.Z = error == 0;

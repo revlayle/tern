@@ -100,7 +100,7 @@ public static class RunReport
                 sb.AppendLine($"{head} = {value}" + (d.Variable!.Type == "bool" ? (value != 0 ? " (true)" : " (false)") : $" (${(d.Size == 1 ? value & 0xFF : value & 0xFFFF).ToString(d.Size == 1 ? "X2" : "X4")})"));
                 continue;
             }
-            sb.AppendLine($"{head} ({d.Size} bytes):");
+            sb.AppendLine($"{head} ({(d.Size == 1 ? "1 byte" : $"{d.Size} bytes")}):");
             for (int k = 0; k < d.Size; k += 16)
             {
                 var chunk = bytes.AsSpan(d.Address + k, Math.Min(16, d.Size - k)).ToArray();

@@ -1,3 +1,4 @@
+using Tern.Cpu;
 using Tern.Compiler.Tools;
 
 namespace Tern.Compiler.Tests;
@@ -139,6 +140,20 @@ public class Apple2RunTests
         Assert.True(run.Returned, run.Stop);
         Assert.Equal(7, run.Ram.Bytes[0x0310]);
         Assert.False(run.Cpu.C);
+    }
+
+    [Fact]
+    public void The_mli_reads_its_return_address_across_the_end_of_the_stack_page()
+    {
+        // jsr $BF00 at $0301 with SP at $FF before it: the return address $0303 is at $01FF and, wrapped, $0100 (review code-quality-tools 18).
+        var ram = new Ram();
+        (ram.Bytes[0x01FF], ram.Bytes[0x0100]) = (0x03, 0x03);
+        (ram.Bytes[0x0304], ram.Bytes[0x0305], ram.Bytes[0x0306]) = (0xCC, 0x20, 0x03);   // CLOSE, parameters at $0320
+        (ram.Bytes[0x0320], ram.Bytes[0x0321]) = (1, 0);
+        var cpu = new Cpu6502(ram) { SP = 0xFE };
+        Assert.Null(Machine.For(Platform.Apple2).Call(0xBF00, cpu, ram, new System.Text.StringBuilder()));
+        // It returns after the command and the parameters' address: rts goes to $0306 + 1.
+        Assert.Equal((0x06, 0x03), (ram.Bytes[0x01FF], ram.Bytes[0x0100]));
     }
 
     [Fact]

@@ -308,7 +308,7 @@ $C000 (4 bytes):
   $C000  AA AA AA AA
 $C1FC (4 bytes):
   $C1FC  AA AA AA AA
-$C200 (1 bytes):
+$C200 (1 byte):
   $C200  20
 ```
 

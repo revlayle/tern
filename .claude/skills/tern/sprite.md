@@ -176,7 +176,7 @@ A=$18 X=$3F Y=$C3 SP=$FB PC=$08A7
 pointer0 $07F8 u8 = 13 ($0D)
 $D000 (2 bytes):
   $D000  A0 8C
-$D015 (1 bytes):
+$D015 (1 byte):
   $D015  01
 ```
 

@@ -6,6 +6,20 @@ namespace Tern.Compiler.Tests;
 /// <summary>M19: the source map (<see cref="CompileResult.Instructions"/>) and the bytes and cycles per source line.</summary>
 public class LineTableTests
 {
+    [Fact]
+    public void An_empty_table_has_its_header_only()
+    {
+        var text = LineTable.Format([]);
+        Assert.StartsWith("; Per source line", text);
+    }
+
+    [Fact]
+    public void An_index_error_without_a_line_names_only_its_file()
+    {
+        Assert.Equal("main.tern: index 9 is outside 'buf'", new IndexError("main.tern", null, "", "index 9 is outside 'buf'", 0).ToString());
+        Assert.Equal("main.tern:4: index 9 is outside 'buf'", new IndexError("main.tern", 4, "", "index 9 is outside 'buf'", 0).ToString());
+    }
+
     private const string Crc = """
         var crc: u8
 
