@@ -226,7 +226,7 @@ public class AtariLibraryTests
             ram.Bytes[0x0222] = 0x5F; ram.Bytes[0x0223] = 0xE4;   // VVBLKI = SYSVBV
             ram.Bytes[0x0224] = 0x62; ram.Bytes[0x0225] = 0xE4;   // VVBLKD = XITVBV
             ram.Bytes[0xFFFA] = 0x00; ram.Bytes[0xFFFB] = 0xE0;
-            var cpu = new Cpu6502(ram) { PC = (ushort)result.Entry, SP = 0xFF };
+            var cpu = new Cpu6502(ram, result.Platform.Cpu) { PC = (ushort)result.Entry, SP = 0xFF };
             StartState.Set(cpu);
             bool inVbi = false;
             int sp = 0;
@@ -281,7 +281,7 @@ public class AtariLibraryTests
         var ram = new Ram();
         StartState.Fill(ram);
         ram.Load((ushort)result.LoadAddress, result.Image);
-        var cpu = new Cpu6502(ram) { PC = (ushort)result.Entry, SP = 0xFF };
+        var cpu = new Cpu6502(ram, result.Platform.Cpu) { PC = (ushort)result.Entry, SP = 0xFF };
         StartState.Set(cpu);
         for (int i = 0; i < 2000; i++) cpu.Step();
         Assert.NotEqual(result.HaltAddress, cpu.PC);

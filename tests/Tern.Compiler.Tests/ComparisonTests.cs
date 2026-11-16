@@ -67,7 +67,7 @@ public class ComparisonTests
         var result = TernCompiler.Compile(File.ReadAllText(path), sourcePath: path);
         var ram = new Ram();
         ram.Load((ushort)result.LoadAddress, result.Image);
-        var cpu = new Cpu6502(ram) { PC = (ushort)result.Entry, SP = 0xFF, I = true };
+        var cpu = new Cpu6502(ram, result.Platform.Cpu) { PC = (ushort)result.Entry, SP = 0xFF, I = true };
         int main = result.Symbols["main"];
         while (cpu.PC != main) Step(cpu, name + " startup");
         long from = cpu.Cycles;
@@ -87,7 +87,7 @@ public class ComparisonTests
         var result = TernCompiler.Compile(File.ReadAllText(path), sourcePath: path);
         var ram = new Ram();
         ram.Load((ushort)result.LoadAddress, result.Image);
-        var cpu = new Cpu6502(ram) { PC = (ushort)result.Entry, SP = 0xFF, I = true };
+        var cpu = new Cpu6502(ram, result.Platform.Cpu) { PC = (ushort)result.Entry, SP = 0xFF, I = true };
         int main = result.Symbols["main"];
         while (cpu.PC != main) Step(cpu, "startup");
         var count = new Dictionary<int, int>();
@@ -139,7 +139,7 @@ public class ComparisonTests
         int entry = ParseLabels(File.ReadAllLines(labels), @"^(\w+)\s*=\s*\$([0-9a-fA-F]+)")["start"];
         ram.Bytes[0x1FF] = (byte)((Sentinel - 1) >> 8);
         ram.Bytes[0x1FE] = (byte)((Sentinel - 1) & 0xFF);
-        var cpu = new Cpu6502(ram) { PC = (ushort)entry, SP = 0xFD, I = true };
+        var cpu = new Cpu6502(ram, Platform.C64.Cpu) { PC = (ushort)entry, SP = 0xFD, I = true };
         var count = new Dictionary<int, int>();
         var cycles = new Dictionary<int, long>();
         while (cpu.PC != Sentinel)
@@ -241,7 +241,7 @@ public class ComparisonTests
         var symbols = ParseLabels(File.ReadAllLines(labels), @"^al\s+([0-9a-fA-F]+)\s+\.(\S+)", addressFirst: true);
 
         // Run the startup code, then time main alone.
-        var cpu = new Cpu6502(ram) { PC = 0x1000, SP = 0xFF, I = true };
+        var cpu = new Cpu6502(ram, Platform.C64.Cpu) { PC = 0x1000, SP = 0xFF, I = true };
         int main = symbols["_main"];
         while (cpu.PC != main) Step(cpu, "startup");
         int returnTo = (ram.Bytes[0x100 + cpu.SP + 1] | (ram.Bytes[0x100 + cpu.SP + 2] << 8)) + 1;
@@ -302,7 +302,7 @@ public class ComparisonTests
 
         // Run the startup code, then time main alone.
         // The BASIC header is a line of tokens, not code: start at _start.
-        var cpu = new Cpu6502(ram) { PC = (ushort)symbols["_start"], SP = 0xFF, I = true };
+        var cpu = new Cpu6502(ram, Platform.C64.Cpu) { PC = (ushort)symbols["_start"], SP = 0xFF, I = true };
         int main = symbols["main"];
         while (cpu.PC != main) Step(cpu, name + " (llvm-mos) startup");
         int returnTo = (ram.Bytes[0x100 + cpu.SP + 1] | (ram.Bytes[0x100 + cpu.SP + 2] << 8)) + 1;
@@ -338,7 +338,7 @@ public class ComparisonTests
     {
         ram.Bytes[0x1FF] = (byte)((Sentinel - 1) >> 8);
         ram.Bytes[0x1FE] = (byte)((Sentinel - 1) & 0xFF);
-        var cpu = new Cpu6502(ram) { PC = (ushort)entry, SP = 0xFD, I = true };
+        var cpu = new Cpu6502(ram, Platform.C64.Cpu) { PC = (ushort)entry, SP = 0xFD, I = true };
         while (cpu.PC != Sentinel) Step(cpu, $"routine at ${entry:X4}");
         return cpu.Cycles;
     }

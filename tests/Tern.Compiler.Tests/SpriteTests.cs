@@ -69,7 +69,7 @@ public sealed class SpriteTests
             StartState.Fill(Ram);
             Ram.Load((ushort)Result.LoadAddress, Result.Image);
             Vic = new FakeVic(Ram, pointerBase);
-            Cpu = new Cpu6502(Vic) { PC = (ushort)Result.Entry, SP = 0xFF, I = true };
+            Cpu = new Cpu6502(Vic, Result.Platform.Cpu) { PC = (ushort)Result.Entry, SP = 0xFF, I = true };
             StartState.Set(Cpu);
             Vic.Cpu = Cpu;
             Vic.StealCycles = stealCycles;

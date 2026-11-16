@@ -21,7 +21,7 @@ public sealed class Library
         StartState.Fill(Ram);
         Ram.Load((ushort)Result.LoadAddress, Result.Image);
         setup?.Invoke(Ram);
-        Cpu = new Cpu6502(Ram) { PC = (ushort)Result.Entry, SP = 0xFF };
+        Cpu = new Cpu6502(Ram, Result.Platform.Cpu) { PC = (ushort)Result.Entry, SP = 0xFF };
         StartState.Set(Cpu);
         RunToHalt(1_000_000);
     }
