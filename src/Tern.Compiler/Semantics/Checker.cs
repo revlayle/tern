@@ -94,6 +94,27 @@ public sealed partial class Checker
 
     private CheckedProgram Run(List<Module> modules)
     {
+        _mainModule = modules[^1];
+        DeclareNames(modules);
+        // Declarations file by file. A constant (or, for len(), a global) that another declaration
+        // uses before its turn is declared then (Demand).
+        foreach (var module in modules) DeclareFile(module);
+        CheckMemoryNames(_mainModule);
+        CheckPlacedImports(_mainModule);
+        CheckBoardModules(modules);
+        var implementations = CheckImplements(modules);
+        MarkFixedGlobals();
+        var entry = FindEntry(_mainModule);
+        CheckBodies(modules);
+        // The call graph and what follows need a program without errors (spec 13).
+        _errors?.ThrowIfAny();
+        _warnings?.AddRange(FindWarnings(modules, _warnLibrary, entry.Exports));
+        return BuildCallGraph(modules, entry, implementations);
+    }
+
+    /// <summary>The names every declaration may need first: broken names, const fns and encodings, struct names and module parameters.</summary>
+    private void DeclareNames(List<Module> modules)
+    {
         // Names whose declaration (or import) had a syntax error: their uses add no errors (spec 13).
         foreach (var module in modules)
             foreach (var (name, pos) in module.Syntax.BrokenNames)
@@ -101,7 +122,6 @@ public sealed partial class Checker
 
         // Const fns and encodings first: declaring one needs no other declaration, and constants of any
         // file may call them or use them in a literal (spec 4.1, 2.1).
-        _mainModule = modules[^1];
         foreach (var module in modules)
         {
             _module = module;
@@ -122,54 +142,62 @@ public sealed partial class Checker
             if (!Recover(() => DeclareParameters(module, modules[^1])))
                 foreach (var p in program.Header?.Parameters ?? []) module.Scope.TryAdd(p.Name, new ErrorSymbol(p.Name, p.Pos));
         }
+    }
 
-        // Declarations file by file. A constant (or, for len(), a global) that another declaration
-        // uses before its turn is declared then (Demand).
-        foreach (var module in modules)
-        {
-            _module = module;
-            var program = module.Syntax;
-            foreach (var c in program.Consts) Declaring(c.Name, c.Pos, () => DeclareConst(c));
-            if (!module.IsMain && program.Memory is { } wrongMemory)
-                Recover(() => throw new CompileError(wrongMemory.Pos, $"Only the program's main file may have a memory block, since it describes the whole program; '{module.Name}' is a module. Move the block to the main file"));
-            if (!module.IsMain && program.Exports.Count > 0)
-                Recover(() => throw new CompileError(program.Exports[0].Pos, $"Only the program's main file may export functions; '{module.Name}' is a module. Move the 'export' line to the main file"));
-            if (module.IsMain) Recover(EnsureMemoryLayout);
-            foreach (var s in program.Structs)
-                if (module.Scope.GetValueOrDefault(s.Name) is StructSymbol st && st.Declaration == s)
-                    Declaring(s.Name, s.Pos, () => LayOut(st));
-            foreach (var f in program.Functions)
-                if (!Declaring(f.Name, f.Pos, () => DeclareFunction(f))) _brokenFunctions.Add(f);
-            foreach (var g in program.Globals.Where(g => g.Symbol is null)) Declaring(g.Name, g.Pos, () => DeclareGlobal(g));
-            // Initial values with addresses after all of the file's globals, so they can name globals declared below.
-            // Only this file's: a global declared early for another module's constant waits for its own
-            // module's turn, when the functions and globals it names are declared.
-            foreach (var (decl, v, _) in _addressInits.Where(a => a.Module == module).ToList())
-                Declaring(decl.Name, decl.Pos, () => v.InitialBytes = ConstantBytes(decl.Init!, v.Type, v));
-            _addressInits.RemoveAll(a => a.Module == module);
-            // After the globals, so that a variable named as an address gets the right error.
-            foreach (var f in program.Functions.Where(f => f.Address is not null && !_brokenFunctions.Contains(f)))
-                if (!Declaring(f.Name, f.Pos, () => DeclareRoutine(f, f.Symbol!))) _brokenFunctions.Add(f);
-            foreach (var a in program.Asserts) Recover(() => CheckAssert(a, module));
-            // Encodings no literal used yet, so that their errors are reported too.
-            foreach (var e in program.Encodings)
-                if (module.Scope.GetValueOrDefault(e.Name) is EncodingSymbol es && es.Declaration == e)
-                    Declaring(e.Name, e.Pos, () => Resolve(es, e.Pos));
-            CheckDefaultEncodingLines(module);
-            module.Declared = true;
-        }
+    /// <summary>The declarations of one file, in the order their checks need: constants, the memory block, structs, functions, globals, routines, asserts, encodings.</summary>
+    private void DeclareFile(Module module)
+    {
+        _module = module;
+        var program = module.Syntax;
+        foreach (var c in program.Consts) Declaring(c.Name, c.Pos, () => DeclareConst(c));
+        if (!module.IsMain && program.Memory is { } wrongMemory)
+            Recover(() => throw new CompileError(wrongMemory.Pos, $"Only the program's main file may have a memory block, since it describes the whole program; '{module.Name}' is a module. Move the block to the main file"));
+        if (!module.IsMain && program.Exports.Count > 0)
+            Recover(() => throw new CompileError(program.Exports[0].Pos, $"Only the program's main file may export functions; '{module.Name}' is a module. Move the 'export' line to the main file"));
+        if (module.IsMain) Recover(EnsureMemoryLayout);
+        foreach (var s in program.Structs)
+            if (module.Scope.GetValueOrDefault(s.Name) is StructSymbol st && st.Declaration == s)
+                Declaring(s.Name, s.Pos, () => LayOut(st));
+        foreach (var f in program.Functions)
+            if (!Declaring(f.Name, f.Pos, () => DeclareFunction(f))) _brokenFunctions.Add(f);
+        foreach (var g in program.Globals.Where(g => g.Symbol is null)) Declaring(g.Name, g.Pos, () => DeclareGlobal(g));
+        // Initial values with addresses after all of the file's globals, so they can name globals declared below.
+        // Only this file's: a global declared early for another module's constant waits for its own
+        // module's turn, when the functions and globals it names are declared.
+        foreach (var (decl, v, _) in _addressInits.Where(a => a.Module == module).ToList())
+            Declaring(decl.Name, decl.Pos, () => v.InitialBytes = ConstantBytes(decl.Init!, v.Type, v));
+        _addressInits.RemoveAll(a => a.Module == module);
+        // After the globals, so that a variable named as an address gets the right error.
+        foreach (var f in program.Functions.Where(f => f.Address is not null && !_brokenFunctions.Contains(f)))
+            if (!Declaring(f.Name, f.Pos, () => DeclareRoutine(f, f.Symbol!))) _brokenFunctions.Add(f);
+        foreach (var a in program.Asserts) Recover(() => CheckAssert(a, module));
+        // Encodings no literal used yet, so that their errors are reported too.
+        foreach (var e in program.Encodings)
+            if (module.Scope.GetValueOrDefault(e.Name) is EncodingSymbol es && es.Declaration == e)
+                Declaring(e.Name, e.Pos, () => Resolve(es, e.Pos));
+        CheckDefaultEncodingLines(module);
+        module.Declared = true;
 
+    }
+
+    /// <summary>The main file's memory block: a NES program needs one, and a region's name must not be another name of the file (spec 8.4).</summary>
+    private void CheckMemoryNames(Module mainModule)
+    {
         // Every NES program is a cartridge, so its memory block names the board (spec 8.4).
-        if (_platform.Boards.Count > 0 && modules[^1].Syntax.Memory is null && !modules[^1].Syntax.HasSyntaxErrors)
-            Recover(() => throw new CompileError(new SourcePos(1, 1, modules[^1].Path), MemoryLayout.NeedsCartridge(_platform)));
+        if (_platform.Boards.Count > 0 && mainModule.Syntax.Memory is null && !mainModule.Syntax.HasSyntaxErrors)
+            Recover(() => throw new CompileError(new SourcePos(1, 1, mainModule.Path), MemoryLayout.NeedsCartridge(_platform)));
 
         // "@ name" means a region or an address, never either depending on other declarations (spec 8.4).
-        foreach (var line in modules[^1].Syntax.Memory?.Lines.Where(l => l.Kind is MemoryKind.Region or MemoryKind.Chr) ?? [])
-            if (modules[^1].Scope.TryGetValue(line.Name!, out var clash) && clash is not ErrorSymbol || modules[^1].Imports.ContainsKey(line.Name!))
+        foreach (var line in mainModule.Syntax.Memory?.Lines.Where(l => l.Kind is MemoryKind.Region or MemoryKind.Chr) ?? [])
+            if (mainModule.Scope.TryGetValue(line.Name!, out var clash) && clash is not ErrorSymbol || mainModule.Imports.ContainsKey(line.Name!))
                 Recover(() => throw new CompileError(line.Pos,
                     $"The {(line.Kind == MemoryKind.Chr ? "chr area" : "region")} '{line.Name}' has the name of {(clash is null ? "an imported module" : $"a {KindName(clash)} of the main file (line {clash.Pos.Line})")}, so '@ {line.Name}' would be ambiguous. Rename the region"));
+    }
 
-        foreach (var import in modules[^1].Syntax.Imports.Where(i => i.Area is not null))
+    /// <summary>The areas named by the main file's imports (<c>import m @ area</c>, <c>@ area[n]</c>, spec 8.5).</summary>
+    private void CheckPlacedImports(Module mainModule)
+    {
+        foreach (var import in mainModule.Syntax.Imports.Where(i => i.Area is not null))
         {
             // The block had an error: its areas are not known (review M27, suggestion 9).
             if (_memoryFailed) break;
@@ -182,17 +210,18 @@ public sealed partial class Checker
             }
             if (_layout.Banks.ContainsKey(import.Area!))
             {
-                Recover(() => InModule(modules[^1], () => import.BankNumber = BankNumber(import)));
+                Recover(() => InModule(mainModule, () => import.BankNumber = BankNumber(import)));
                 continue;
             }
             Recover(() => throw new CompileError(import.AreaPos, _layout.Regions.ContainsKey(import.Area!)
                 ? $"'{import.Area}' is a region, not an overlay area; '@' on an import names an area declared with 'overlay {import.Area}' in the memory block. Use the name of an overlay area"
                 : $"The memory block has no overlay area '{import.Area}'. Add a line 'first..=last overlay {import.Area}' to it"));
         }
-        CheckBoardModules(modules);
+    }
 
-        var implementations = CheckImplements(modules);
-
+    /// <summary>Marks the fixed-address globals in a volatile or an overlay area.</summary>
+    private void MarkFixedGlobals()
+    {
         foreach (var g in _globals)
         {
             if (g.FixedAddress is not int fixedAt) continue;
@@ -200,8 +229,15 @@ public sealed partial class Checker
             if (_layout.IsVolatile(fixedAt, span.Last)) g.InVolatileArea = true;
             if (_layout.Overlays.Values.Any(a => a.Overlaps(span))) g.InOverlayArea = true;
         }
+    }
 
-        var mainModule = modules[^1];
+    /// <summary>Where the program starts: its main, or the root of a binary's entries, and what it exports (spec 12.3).</summary>
+    /// <param name="Main">The program's main, or the root of a binary's entries; null after an error.</param>
+    private sealed record Entry(FunctionSymbol Main, List<FunctionSymbol> Exports, Dictionary<FunctionSymbol, FunctionSymbol> ExportedAs, int? ExportTable);
+
+    /// <summary>The program's main, or a binary's entries, and its exports (spec 12.3).</summary>
+    private Entry FindEntry(Module mainModule)
+    {
         var exports = new List<FunctionSymbol>();
         var exportedAs = new Dictionary<FunctionSymbol, FunctionSymbol>();
         int? exportTable = null;
@@ -268,17 +304,28 @@ public sealed partial class Checker
                 }
             }
         });
+        return new Entry(main, exports, exportedAs, exportTable);
+    }
 
+    /// <summary>The bodies of every file's functions.</summary>
+    private void CheckBodies(List<Module> modules)
+    {
         foreach (var module in modules)
         {
             _module = module;
             foreach (var f in module.Syntax.Functions.Where(f => f.Address is null && !_brokenFunctions.Contains(f))) Recover(() => CheckFunctionBody(f));
         }
         Recover(CheckInlineCallsBetweenOverlays);
-        // The call graph and what follows need a program without errors (spec 13).
-        _errors?.ThrowIfAny();
-        _warnings?.AddRange(FindWarnings(modules, _warnLibrary, exports));
+    }
 
+    /// <summary>
+    /// Lowers the bodies and keeps only what main and the interrupt handlers can reach, callers before
+    /// callees, with the globals they use.
+    /// </summary>
+    private CheckedProgram BuildCallGraph(List<Module> modules, Entry entry, List<Implementation> implementations)
+    {
+        var (main, exports, exportedAs, exportTable) = entry;
+        var mainModule = _mainModule;
         // Struct fields become plain variables, arrays and pointers for the code generator.
         foreach (var module in modules)
             foreach (var f in module.Syntax.Functions) Lowering.Apply(f.Body);
