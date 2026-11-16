@@ -81,7 +81,7 @@ public static partial class Cli
             catch (FormatException e) { return Fail(json, new Diagnostic(input, 0, 0, "error", "--dump " + e.Message, null), "--dump " + e.Message); }
             RunResult run;
             try { run = Runner.Run(program, RunOptionsOf(args) with { MainFile = Path.GetFileName(input) }); }
-            catch (InvalidOperationException e) { return Fail(json, new Diagnostic(input, 0, 0, "error", e.Message, null), e.Message); }
+            catch (RunError e) { return Fail(json, new Diagnostic(input, 0, 0, "error", e.Message, null), e.Message); }
             bool screen = args.Has("--screen");
             var lines = args.Has("--profile") ? LineTable.Rows(program, Path.GetFileName(input), run.Profile) : null;
             output.Write(json ? RunReport.Json(run, dumps, screen, lines, Warnings(program, input)) + Environment.NewLine : RunReport.Text(run, dumps, screen, lines));

@@ -83,7 +83,7 @@ public static class Runner
     {
         options ??= new RunOptions();
         if (program.HaltAddress < 0)
-            throw new InvalidOperationException("A binary without main cannot be run on its own: run the program that loads and calls it");
+            throw new RunError("A binary without main cannot be run on its own: run the program that loads and calls it");
         var (machine, ram, nes, cpu) = Start(program, options);
 
         var inProgram = program.Sections.Select(s => (s.Address, End: s.Address + s.Size)).ToList();

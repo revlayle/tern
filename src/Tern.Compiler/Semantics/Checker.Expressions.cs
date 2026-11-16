@@ -178,7 +178,7 @@ public sealed partial class Checker
         var source = c.Operand.Type;
         if (!target.IsScalar) throw new CompileError(c.Pos, $"Cannot convert to {target}. Convert to a number, bool or pointer type");
         if (target.Kind == TypeKind.Bool)
-            throw new CompileError(c.Pos, "Numbers cannot be converted to bool; compare instead, c.g. 'x != 0'");
+            throw new CompileError(c.Pos, "Numbers cannot be converted to bool; compare instead, e.g. 'x != 0'");
         if (target.IsPointer || source.IsPointer)
         {
             // Pointers convert to other pointers and to and from u16, with no code.

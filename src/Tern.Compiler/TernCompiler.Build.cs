@@ -117,7 +117,7 @@ public static partial class TernCompiler
             bool CanJoin() => Cartridge is { Board.BankArea: null } && Joined(codeAreas).Count < codeAreas.Count;
             for (bool byPage = true; ;)
             {
-                var plan = Allocator.Allocate(program, platform, byPage, indexed);
+                var plan = Allocator.Allocate(program, byPage, indexed);
                 CheckPlan(plan);
                 var vectors = Cartridge is null ? default : CheckVectors(plan);
                 var (items, imageLabels) = Items(functionCode, plan, vectors, moves, exact: passes < 4);

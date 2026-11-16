@@ -99,6 +99,15 @@ public sealed class CliTests : IDisposable
         Assert.Contains("error: A binary without main cannot be run on its own. Measure the function in a program that loads and calls it", output);
     }
 
+    [Fact]
+    public void Run_of_a_binary_without_main_is_an_error()
+    {
+        string lib = Write("lib2.tern", "var n: u8\nfn bump() { n += 1 }\nexport bump\n");
+        var (code, _, error) = Tern("run", "--target", "c64", lib);
+        Assert.Equal(1, code);
+        Assert.Contains("A binary without main cannot be run on its own: run the program that loads and calls it", error);
+    }
+
     /// <summary>Throws on its first write, then works: a bug inside a command that the last catch must report.</summary>
     private sealed class FailsOnce : StringWriter
     {

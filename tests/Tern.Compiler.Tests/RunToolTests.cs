@@ -266,7 +266,8 @@ public class RunToolTests
     public void A_binary_without_main_cannot_be_run()
     {
         var program = TernCompiler.Compile("var n: u8\nexport bump\nfn bump() { n += 1 }");
-        var e = Assert.Throws<InvalidOperationException>(() => Runner.Run(program));
+        // A RunError of its own (tools 18, R7): Cli reports only these as the user's problem.
+        var e = Assert.Throws<RunError>(() => Runner.Run(program));
         Assert.Contains("A binary without main cannot be run on its own", e.Message);
     }
 
