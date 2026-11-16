@@ -18,20 +18,30 @@ internal abstract class Machine
         _ => new C64Machine(program?.Overlays ?? []),
     };
 
-    /// <summary>The routines with stand-ins, for the message when the run reaches another ROM address.</summary>
-    public abstract string StandIns { get; }
+    /// <summary>
+    /// A ROM routine with a stand-in (review code-quality-tools 6): its address, its name, what it
+    /// does (returning why the run stops, or null), and a note for the list. <see cref="Has"/>,
+    /// <see cref="Call"/> and <see cref="StandIns"/>, which the help prints, all come from <see cref="Routines"/>.
+    /// </summary>
+    protected sealed record StandIn(int Address, string Name, Func<Cpu6502, Ram, StringBuilder, string?> Run, string Note = "");
+
+    /// <summary>The machine's stand-ins, in the order the help lists them.</summary>
+    protected abstract IReadOnlyList<StandIn> Routines { get; }
+
+    /// <summary>The routines with stand-ins, for the message when the run reaches another ROM address and for the help.</summary>
+    public string StandIns => Routines.Count == 0 ? "none" : string.Join(", ", Routines.Select(s => $"{s.Name} ${s.Address:X4}{(s.Note == "" ? "" : " " + s.Note)}"));
 
     /// <summary>Sets up memory as after the machine starts, before the program is loaded.</summary>
     public abstract void Start(Ram ram);
 
     /// <summary>Whether <paramref name="pc"/> is a routine with a stand-in.</summary>
-    public abstract bool Has(int pc);
+    public bool Has(int pc) => Routines.Any(s => s.Address == pc);
 
     /// <summary>
     /// Does the work of the routine at <paramref name="pc"/> (the caller then returns as rts would). Text
     /// printed goes to <paramref name="output"/>. Returns why the run stops, or null.
     /// </summary>
-    public abstract string? Call(int pc, Cpu6502 cpu, Ram ram, StringBuilder output);
+    public string? Call(int pc, Cpu6502 cpu, Ram ram, StringBuilder output) => Routines.Single(s => s.Address == pc).Run(cpu, ram, output);
 
     /// <summary>The text screen's address in <paramref name="ram"/>, columns and rows.</summary>
     public abstract (int Address, int Columns, int Rows) Screen(Ram ram);
@@ -65,13 +75,24 @@ internal abstract class Machine
 internal sealed class C64Machine(IReadOnlyList<OverlayFile> overlays) : Machine
 {
     public const int ScreenAddress = 0x0400, Columns = 40, Rows = 25;
-    private const int Chrout = 0xFFD2, Getin = 0xFFE4, Plot = 0xFFF0, Setnam = 0xFFBD, Setlfs = 0xFFBA, Load = 0xFFD5;
 
     private (int Row, int Column) _cursor;
     private string _fileName = "";
     private int _secondary;
 
-    public override string StandIns => "CHROUT $FFD2, GETIN $FFE4, PLOT $FFF0, SETNAM $FFBD, SETLFS $FFBA, LOAD $FFD5";
+    protected override IReadOnlyList<StandIn> Routines =>
+    [
+        new(0xFFD2, "CHROUT", (cpu, ram, output) => { Print(cpu.A, ram, output); cpu.C = false; return CursorBytes(ram); }),
+        new(0xFFE4, "GETIN", (cpu, ram, _) => { cpu.A = 0; cpu.Z = true; cpu.N = false; cpu.C = false; return CursorBytes(ram); }),
+        new(0xFFF0, "PLOT", Plot),
+        new(0xFFBD, "SETNAM", (cpu, ram, _) =>
+        {
+            _fileName = string.Concat(Enumerable.Range(0, cpu.A).Select(i => (char)ram.Bytes[(cpu.X | cpu.Y << 8) + i & 0xFFFF]));
+            return null;
+        }),
+        new(0xFFBA, "SETLFS", (cpu, _, _) => { _secondary = cpu.Y; return null; }),
+        new(0xFFD5, "LOAD", (cpu, ram, _) => Load(cpu, ram)),
+    ];
 
     public override void Start(Ram ram)
     {
@@ -85,88 +106,85 @@ internal sealed class C64Machine(IReadOnlyList<OverlayFile> overlays) : Machine
     /// <summary>The color CHROUT writes into color RAM (COLOR, $0286).</summary>
     private const int TextColor = 0x0286;
 
-    public override bool Has(int pc) => pc is Chrout or Getin or Plot or Setnam or Setlfs or Load;
-
     public override (int Address, int Columns, int Rows) Screen(Ram ram) => (ScreenAddress, Columns, Rows);
 
-    public override string? Call(int pc, Cpu6502 cpu, Ram ram, StringBuilder output)
+    /// <summary>PLOT: reads the cursor with carry set, sets it with carry clear.</summary>
+    private string? Plot(Cpu6502 cpu, Ram ram, StringBuilder output)
     {
-        switch (pc)
-        {
-            case Chrout: Print(cpu.A); cpu.C = false; break;
-            case Getin: cpu.A = 0; cpu.Z = true; cpu.N = false; cpu.C = false; break;
-            case Setnam:
-                _fileName = string.Concat(Enumerable.Range(0, cpu.A).Select(i => (char)ram.Bytes[(cpu.X | cpu.Y << 8) + i & 0xFFFF]));
-                return null;
-            case Setlfs: _secondary = cpu.Y; return null;
-            case Load:
-            {
-                // The build's overlays are the disk. Secondary address 0 loads to X/Y; X/Y return the end.
-                var file = overlays.FirstOrDefault(o => o.Name.ToUpperInvariant() == _fileName);
-                cpu.C = file is null;
-                if (file is null)
-                {
-                    cpu.A = 4;      // the KERNAL's "file not found"
-                    return null;
-                }
-                int at = _secondary == 0 ? cpu.X | cpu.Y << 8 : file.LoadAddress;
-                if (at + file.Image.Length > 0x10000)
-                    return $"LOAD of '{_fileName}' at ${at:X4} goes past $FFFF ({file.Image.Length} bytes)";
-                ram.Load((ushort)at, file.Image);
-                int end = at + file.Image.Length;
-                (cpu.X, cpu.Y) = ((byte)end, (byte)(end >> 8));
-                return null;
-            }
-            default:
-                if (cpu.C) { cpu.X = (byte)_cursor.Row; cpu.Y = (byte)_cursor.Column; }
-                else _cursor = (Math.Min((int)cpu.X, Rows - 1), Math.Min((int)cpu.Y, Columns - 1));
-                break;
-        }
+        if (cpu.C) { cpu.X = (byte)_cursor.Row; cpu.Y = (byte)_cursor.Column; }
+        else _cursor = (Math.Min((int)cpu.X, Rows - 1), Math.Min((int)cpu.Y, Columns - 1));
+        return CursorBytes(ram);
+    }
+
+    /// <summary>The KERNAL's cursor row and column ($D6, $D3), as CHROUT, GETIN and PLOT leave them.</summary>
+    private string? CursorBytes(Ram ram)
+    {
         ram.Bytes[0xD6] = (byte)_cursor.Row;
         ram.Bytes[0xD3] = (byte)_cursor.Column;
         return null;
+    }
 
-        // CHROUT in the upper-case character set: letters, digits and punctuation, return, clear,
-        // home and the four cursor moves; other control codes are ignored.
-        void Print(byte ch)
+    /// <summary>The build's overlays are the disk. Secondary address 0 loads to X/Y; X/Y return the end.</summary>
+    private string? Load(Cpu6502 cpu, Ram ram)
+    {
+        var file = overlays.FirstOrDefault(o => o.Name.ToUpperInvariant() == _fileName);
+        cpu.C = file is null;
+        if (file is null)
         {
-            switch (ch)
-            {
-                case 13: output.Append('\n'); NewLine(); return;
-                case 147:
-                    ram.Bytes.AsSpan(ScreenAddress, Columns * Rows).Fill(32);
-                    _cursor = (0, 0);
-                    return;
-                case 19: _cursor = (0, 0); return;
-                case 17: if (_cursor.Row < Rows - 1) _cursor.Row++; return;
-                case 145: if (_cursor.Row > 0) _cursor.Row--; return;
-                case 29: if (_cursor.Column < Columns - 1) _cursor.Column++; return;
-                case 157: if (_cursor.Column > 0) _cursor.Column--; return;
-            }
-            int code = ch switch
-            {
-                >= 32 and < 64 => ch,
-                >= 64 and < 96 => ch - 64,
-                >= 96 and < 128 => ch - 32,
-                >= 160 and < 192 => ch - 64,
-                >= 192 and < 255 => ch - 128,
-                255 => 94,
-                _ => -1,
-            };
-            if (code < 0) return;
-            output.Append(ScreenChar((byte)code));
-            ram.Bytes[ScreenAddress + _cursor.Row * Columns + _cursor.Column] = (byte)code;
-            ram.Bytes[0xD800 + _cursor.Row * Columns + _cursor.Column] = ram.Bytes[TextColor];
-            if (++_cursor.Column == Columns) NewLine();
+            cpu.A = 4;      // the KERNAL's "file not found"
+            return null;
         }
+        int at = _secondary == 0 ? cpu.X | cpu.Y << 8 : file.LoadAddress;
+        if (at + file.Image.Length > 0x10000)
+            return $"LOAD of '{_fileName}' at ${at:X4} goes past $FFFF ({file.Image.Length} bytes)";
+        ram.Load((ushort)at, file.Image);
+        int end = at + file.Image.Length;
+        (cpu.X, cpu.Y) = ((byte)end, (byte)(end >> 8));
+        return null;
+    }
 
-        void NewLine()
+    /// <summary>
+    /// CHROUT in the upper-case character set: letters, digits and punctuation, return, clear, home
+    /// and the four cursor moves; other control codes are ignored.
+    /// </summary>
+    private void Print(byte ch, Ram ram, StringBuilder output)
+    {
+        switch (ch)
         {
-            _cursor.Column = 0;
-            if (_cursor.Row < Rows - 1) { _cursor.Row++; return; }
-            ram.Bytes.AsSpan(ScreenAddress + Columns, Columns * (Rows - 1)).CopyTo(ram.Bytes.AsSpan(ScreenAddress));
-            ram.Bytes.AsSpan(ScreenAddress + Columns * (Rows - 1), Columns).Fill(32);
+            case 13: output.Append('\n'); NewLine(ram); return;
+            case 147:
+                ram.Bytes.AsSpan(ScreenAddress, Columns * Rows).Fill(32);
+                _cursor = (0, 0);
+                return;
+            case 19: _cursor = (0, 0); return;
+            case 17: if (_cursor.Row < Rows - 1) _cursor.Row++; return;
+            case 145: if (_cursor.Row > 0) _cursor.Row--; return;
+            case 29: if (_cursor.Column < Columns - 1) _cursor.Column++; return;
+            case 157: if (_cursor.Column > 0) _cursor.Column--; return;
         }
+        int code = ch switch
+        {
+            >= 32 and < 64 => ch,
+            >= 64 and < 96 => ch - 64,
+            >= 96 and < 128 => ch - 32,
+            >= 160 and < 192 => ch - 64,
+            >= 192 and < 255 => ch - 128,
+            255 => 94,
+            _ => -1,
+        };
+        if (code < 0) return;
+        output.Append(ScreenChar((byte)code));
+        ram.Bytes[ScreenAddress + _cursor.Row * Columns + _cursor.Column] = (byte)code;
+        ram.Bytes[0xD800 + _cursor.Row * Columns + _cursor.Column] = ram.Bytes[TextColor];
+        if (++_cursor.Column == Columns) NewLine(ram);
+    }
+
+    private void NewLine(Ram ram)
+    {
+        _cursor.Column = 0;
+        if (_cursor.Row < Rows - 1) { _cursor.Row++; return; }
+        ram.Bytes.AsSpan(ScreenAddress + Columns, Columns * (Rows - 1)).CopyTo(ram.Bytes.AsSpan(ScreenAddress));
+        ram.Bytes.AsSpan(ScreenAddress + Columns * (Rows - 1), Columns).Fill(32);
     }
 
     /// <summary>A screen code in the upper-case character set; reversed characters as the plain ones.</summary>
@@ -204,7 +222,6 @@ internal sealed class C64Machine(IReadOnlyList<OverlayFile> overlays) : Machine
 internal sealed class AtariMachine(IReadOnlyList<OverlayFile> overlays) : Machine
 {
     public const int ScreenAddress = 0xBC40, Columns = 40, Rows = 24;
-    private const int Ciov = 0xE456, Setvbv = 0xE45C;
     private const int Savmsc = 0x58, Lmargn = 0x52, Rmargn = 0x53, Rowcrs = 0x54, Colcrs = 0x55;
     private const int Iccom = 0x0342, Icsta = 0x0343, Icbal = 0x0344, Icbll = 0x0348, Icax1 = 0x034A;
     private const int Ok = 1, Eof = 0x88, NotFound = 0xAA, AlreadyOpen = 0x81, NotOpen = 0x85, BadName = 0xA5;
@@ -212,7 +229,18 @@ internal sealed class AtariMachine(IReadOnlyList<OverlayFile> overlays) : Machin
     /// <summary>The overlay file open on each IOCB (1-7) and the next byte to read.</summary>
     private readonly Dictionary<int, (byte[] File, int Pos)> _open = [];
 
-    public override string StandIns => "CIOV $E456 for put bytes on IOCB 0 (the screen editor) and for reading the build's overlay files on IOCBs 1-7, SETVBV $E45C";
+    protected override IReadOnlyList<StandIn> Routines =>
+    [
+        new(0xE456, "CIOV", Ciov, "for put bytes on IOCB 0 (the screen editor) and for reading the build's overlay files on IOCBs 1-7"),
+        new(0xE45C, "SETVBV", (cpu, ram, _) =>
+        {
+            if (cpu.A is not (6 or 7)) return $"SETVBV with A = {cpu.A}; the stand-in sets the VBI vectors only (A = 6 or 7)";
+            int vector = cpu.A == 6 ? 0x0222 : 0x0224;
+            ram.Bytes[vector] = cpu.Y;
+            ram.Bytes[vector + 1] = cpu.X;
+            return null;
+        }),
+    ];
 
     public override void Start(Ram ram)
     {
@@ -226,20 +254,11 @@ internal sealed class AtariMachine(IReadOnlyList<OverlayFile> overlays) : Machin
         ram.Bytes[Colcrs + 1] = 0;
     }
 
-    public override bool Has(int pc) => pc is Ciov or Setvbv;
-
     public override (int Address, int Columns, int Rows) Screen(Ram ram) => (ram.Bytes[Savmsc] | ram.Bytes[Savmsc + 1] << 8, Columns, Rows);
 
-    public override string? Call(int pc, Cpu6502 cpu, Ram ram, StringBuilder output)
+    /// <summary>CIOV: put bytes on IOCB 0; open, get bytes and close the build's overlay files on IOCBs 1-7.</summary>
+    private string? Ciov(Cpu6502 cpu, Ram ram, StringBuilder output)
     {
-        if (pc == Setvbv)
-        {
-            if (cpu.A is not (6 or 7)) return $"SETVBV with A = {cpu.A}; the stand-in sets the VBI vectors only (A = 6 or 7)";
-            int vector = cpu.A == 6 ? 0x0222 : 0x0224;
-            ram.Bytes[vector] = cpu.Y;
-            ram.Bytes[vector + 1] = cpu.X;
-            return null;
-        }
         int x = cpu.X, command = ram.Bytes[Iccom + x];
         int buffer = ram.Bytes[Icbal + x] | ram.Bytes[Icbal + x + 1] << 8;
         int length = ram.Bytes[Icbll + x] | ram.Bytes[Icbll + x + 1] << 8;

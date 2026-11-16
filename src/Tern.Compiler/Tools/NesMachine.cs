@@ -1,4 +1,3 @@
-using System.Text;
 using Tern.Cpu;
 
 namespace Tern.Compiler.Tools;
@@ -10,13 +9,10 @@ namespace Tern.Compiler.Tools;
 /// </summary>
 internal sealed class NesMachine : Machine
 {
-    public override string StandIns => "none: the NES has no ROM routines";
+    /// <summary>None: the NES has no ROM routines.</summary>
+    protected override IReadOnlyList<StandIn> Routines => [];
 
     public override void Start(Ram ram) { }
-
-    public override bool Has(int pc) => false;
-
-    public override string? Call(int pc, Cpu6502 cpu, Ram ram, StringBuilder output) => null;
 
     /// <summary>Not in CPU memory: <see cref="Runner.Screen"/> gives the nametable's place in PPU memory.</summary>
     public override (int Address, int Columns, int Rows) Screen(Ram ram) => (0x2000, 32, 30);

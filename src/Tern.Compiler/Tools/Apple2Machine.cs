@@ -22,11 +22,24 @@ namespace Tern.Compiler.Tools;
 internal sealed class Apple2Machine(IReadOnlyList<OverlayFile> overlays) : Machine
 {
     public const int ScreenAddress = 0x0400, Columns = 40, Rows = 24;
-    private const int Cout = 0xFDED, Home = 0xFC58, SetNorm = 0xFE84, Init = 0xFB2F, SetVid = 0xFE93, SetKbd = 0xFE89, Mli = 0xBF00;
     private const int Wndlft = 0x20, Wndwdth = 0x21, Wndtop = 0x22, Wndbtm = 0x23, Ch = 0x24, Cv = 0x25, Basl = 0x28, Invflg = 0x32, Csw = 0x36, Ksw = 0x38;
     private const int Blank = 0xA0;
 
-    public override string StandIns => "COUT $FDED, HOME $FC58, SETNORM $FE84, INIT $FB2F, SETVID $FE93, SETKBD $FE89, and the MLI at $BF00 for QUIT, CLOSE, GET_PREFIX, SET_PREFIX, and for reading the build's overlay files";
+    protected override IReadOnlyList<StandIn> Routines =>
+    [
+        new(0xFDED, "COUT", (cpu, ram, output) => { Print(cpu.A, ram, output); return null; }),
+        new(0xFC58, "HOME", (_, ram, _) =>
+        {
+            for (int row = ram.Bytes[Wndtop]; row < Math.Min((int)ram.Bytes[Wndbtm], Rows); row++) ram.Bytes.AsSpan(Row(row), Columns).Fill(Blank);
+            Cursor(ram, ram.Bytes[Wndtop], 0);
+            return null;
+        }),
+        new(0xFE84, "SETNORM", (cpu, ram, _) => { ram.Bytes[Invflg] = 0xFF; cpu.Y = 0xFF; return null; }),
+        new(0xFB2F, "INIT", (_, ram, _) => { SetWindow(ram); Cursor(ram, Rows - 1, 0); return null; }),
+        new(0xFE93, "SETVID", (_, ram, _) => { (ram.Bytes[Csw], ram.Bytes[Csw + 1]) = (0xF0, 0xFD); return null; }),
+        new(0xFE89, "SETKBD", (_, ram, _) => { (ram.Bytes[Ksw], ram.Bytes[Ksw + 1]) = (0x1B, 0xFD); return null; }),
+        new(0xBF00, "MLI", Mli, "for QUIT, CLOSE, GET_PREFIX, SET_PREFIX, and for reading the build's overlay files"),
+    ];
 
     private const int BadPath = 0x40, TooManyFiles = 0x42, BadRef = 0x43, NotFound = 0x46, Eof = 0x4C;
     /// <summary>The overlay file open under each reference number, and the next byte to read.</summary>
@@ -42,8 +55,6 @@ internal sealed class Apple2Machine(IReadOnlyList<OverlayFile> overlays) : Machi
         (ram.Bytes[Ksw], ram.Bytes[Ksw + 1]) = (0x1B, 0xFD);
     }
 
-    public override bool Has(int pc) => pc is Cout or Home or SetNorm or Init or SetVid or SetKbd or Mli;
-
     public override (int Address, int Columns, int Rows) Screen(Ram ram) => (ScreenAddress, Columns, Rows);
 
     public override int RowAddress(Ram ram, int row) => Row(row);
@@ -51,89 +62,68 @@ internal sealed class Apple2Machine(IReadOnlyList<OverlayFile> overlays) : Machi
     /// <summary>The address of text page 1's row <paramref name="row"/>.</summary>
     public static int Row(int row) => ScreenAddress + 128 * (row % 8) + 40 * (row / 8);
 
-    public override string? Call(int pc, Cpu6502 cpu, Ram ram, StringBuilder output)
+    /// <summary>The MLI: QUIT, the prefix calls, and reading the build's overlay files.</summary>
+    private string? Mli(Cpu6502 cpu, Ram ram, StringBuilder output)
     {
-        switch (pc)
+        // jsr $BF00 is followed by the command byte and the parameters' address; the MLI returns after them.
+        int sp = 0x100 + (byte)(cpu.SP + 1);
+        int at = (ram.Bytes[sp] | ram.Bytes[sp + 1] << 8) + 1;
+        int command = ram.Bytes[at & 0xFFFF];
+        int list = ram.Bytes[(at + 1) & 0xFFFF] | ram.Bytes[(at + 2) & 0xFFFF] << 8;
+        if (command == 0x65) return "the program quit (MLI QUIT)";
+        if (FileCall(command, list, ram) is not int error)
+            return command is 0xC0 or 0xC1 or 0xC2 or 0xC3 or 0xCB or 0xD0
+                ? $"MLI call ${command:X2}, which writes to the disk; the emulator only reads the build's overlay files"
+                : $"MLI call ${command:X2}, which the emulator does not have (stand-ins: QUIT $65, GET_PREFIX $C7, SET_PREFIX $C6, and GET_FILE_INFO $C4, OPEN $C8, GET_EOF $D1, READ $CA and CLOSE $CC for the build's overlay files)";
+        int back = at + 2;
+        (ram.Bytes[sp], ram.Bytes[sp + 1]) = ((byte)back, (byte)(back >> 8));
+        cpu.A = (byte)error;
+        cpu.C = error != 0;
+        cpu.Z = error == 0;
+        cpu.N = error >= 0x80;
+        return null;
+    }
+
+    /// <summary>COUT1: the character at the cursor, through INVFLG; return, line feed and backspace.</summary>
+    private void Print(byte code, Ram ram, StringBuilder output)
+    {
+        int top = ram.Bytes[Wndtop], bottom = Math.Min((int)ram.Bytes[Wndbtm], Rows), width = Math.Min((int)ram.Bytes[Wndwdth], Columns);
+        int row = Math.Min((int)ram.Bytes[Cv], bottom - 1), column = ram.Bytes[Ch];
+        if (code >= 0xA0) code &= ram.Bytes[Invflg];
+        if (code is >= 0x80 and < 0xA0)
         {
-            case Cout: Print(cpu.A); break;
-            case Home:
-                for (int row = ram.Bytes[Wndtop]; row < Math.Min((int)ram.Bytes[Wndbtm], Rows); row++) ram.Bytes.AsSpan(Row(row), Columns).Fill(Blank);
-                Cursor(ram, ram.Bytes[Wndtop], 0);
-                break;
-            case SetNorm:
-                ram.Bytes[Invflg] = 0xFF;
-                cpu.Y = 0xFF;
-                break;
-            case Init:
-                SetWindow(ram);
-                Cursor(ram, Rows - 1, 0);
-                break;
-            case SetVid: (ram.Bytes[Csw], ram.Bytes[Csw + 1]) = (0xF0, 0xFD); break;
-            case SetKbd: (ram.Bytes[Ksw], ram.Bytes[Ksw + 1]) = (0x1B, 0xFD); break;
-            default:
+            switch (code)
             {
-                // jsr $BF00 is followed by the command byte and the parameters' address; the MLI returns after them.
-                int sp = 0x100 + (byte)(cpu.SP + 1);
-                int at = (ram.Bytes[sp] | ram.Bytes[sp + 1] << 8) + 1;
-                int command = ram.Bytes[at & 0xFFFF];
-                int list = ram.Bytes[(at + 1) & 0xFFFF] | ram.Bytes[(at + 2) & 0xFFFF] << 8;
-                if (command == 0x65) return "the program quit (MLI QUIT)";
-                if (FileCall(command, list, ram) is not int error)
-                    return command is 0xC0 or 0xC1 or 0xC2 or 0xC3 or 0xCB or 0xD0
-                        ? $"MLI call ${command:X2}, which writes to the disk; the emulator only reads the build's overlay files"
-                        : $"MLI call ${command:X2}, which the emulator does not have (stand-ins: QUIT $65, GET_PREFIX $C7, SET_PREFIX $C6, and GET_FILE_INFO $C4, OPEN $C8, GET_EOF $D1, READ $CA and CLOSE $CC for the build's overlay files)";
-                int back = at + 2;
-                (ram.Bytes[sp], ram.Bytes[sp + 1]) = ((byte)back, (byte)(back >> 8));
-                cpu.A = (byte)error;
-                cpu.C = error != 0;
-                cpu.Z = error == 0;
-                cpu.N = error >= 0x80;
-                break;
+                case 0x8D: output.Append('\n'); column = 0; Down(); break;
+                case 0x8A: Down(); break;
+                case 0x88:
+                    if (column > 0) column--;
+                    else
+                    {
+                        column = width - 1;
+                        if (row > top) row--;
+                    }
+                    break;
             }
         }
-        return null;
-
-        // COUT1: the character at the cursor, through INVFLG; return, line feed and backspace.
-        void Print(byte code)
+        else
         {
-            int top = ram.Bytes[Wndtop], bottom = Math.Min((int)ram.Bytes[Wndbtm], Rows), width = Math.Min((int)ram.Bytes[Wndwdth], Columns);
-            int row = Math.Min((int)ram.Bytes[Cv], bottom - 1), column = ram.Bytes[Ch];
-            if (code >= 0xA0) code &= ram.Bytes[Invflg];
-            if (code is >= 0x80 and < 0xA0)
+            output.Append(ScreenChar(code));
+            int basl = ram.Bytes[Basl] | ram.Bytes[Basl + 1] << 8;
+            ram.Bytes[(basl + column) & 0xFFFF] = code;
+            if (++column >= width)
             {
-                switch (code)
-                {
-                    case 0x8D: output.Append('\n'); column = 0; Down(); break;
-                    case 0x8A: Down(); break;
-                    case 0x88:
-                        if (column > 0) column--;
-                        else
-                        {
-                            column = width - 1;
-                            if (row > top) row--;
-                        }
-                        break;
-                }
+                column = 0;
+                Down();
             }
-            else
-            {
-                output.Append(ScreenChar(code));
-                int basl = ram.Bytes[Basl] | ram.Bytes[Basl + 1] << 8;
-                ram.Bytes[(basl + column) & 0xFFFF] = code;
-                if (++column >= width)
-                {
-                    column = 0;
-                    Down();
-                }
-            }
-            Cursor(ram, row, column);
+        }
+        Cursor(ram, row, column);
 
-            void Down()
-            {
-                if (row < bottom - 1) { row++; return; }
-                for (int r = top; r < bottom - 1; r++) ram.Bytes.AsSpan(Row(r + 1), Columns).CopyTo(ram.Bytes.AsSpan(Row(r)));
-                ram.Bytes.AsSpan(Row(bottom - 1), Columns).Fill(Blank);
-            }
+        void Down()
+        {
+            if (row < bottom - 1) { row++; return; }
+            for (int r = top; r < bottom - 1; r++) ram.Bytes.AsSpan(Row(r + 1), Columns).CopyTo(ram.Bytes.AsSpan(Row(r)));
+            ram.Bytes.AsSpan(Row(bottom - 1), Columns).Fill(Blank);
         }
     }
 
