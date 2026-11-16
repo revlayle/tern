@@ -15,20 +15,21 @@ namespace Tern.Compiler.Backend;
 /// </summary>
 public static partial class Optimizer
 {
+    /// <param name="instructions">The target CPU's instructions: a change uses only modes it has.</param>
     /// <param name="startsProgram">The function is main, entered once just after the startup code cleared memory.</param>
-    public static void Run(List<AsmItem> code, FunctionSymbol function, bool startsProgram = false)
+    public static void Run(List<AsmItem> code, FunctionSymbol function, InstructionSet instructions, bool startsProgram = false)
     {
         ThreadJumps(code);
         RemoveUnreachable(code);
-        Improve(code, function);
+        Improve(code, function, instructions);
         // After the other changes, which may use what the stores tell them (A holds x after sta x).
-        if (startsProgram && RemoveStoresOfStartupZeros(code)) Improve(code, function);
+        if (startsProgram && RemoveStoresOfStartupZeros(code)) Improve(code, function, instructions);
     }
 
-    private static void Improve(List<AsmItem> code, FunctionSymbol function)
+    private static void Improve(List<AsmItem> code, FunctionSymbol function, InstructionSet instructions)
     {
         while (RemoveRedundant(code, function) | FoldShiftTests(code, function) | UseOperandInA(code, function)
-            | RemoveDeadLoads(code, function) | RemoveDeadStores(code, function) | ReadCopiesFromSource(code, function)
+            | RemoveDeadLoads(code, function) | RemoveDeadStores(code, function) | ReadCopiesFromSource(code, function, instructions)
             | SinkStoresFromLoops(code, function) | RemoveJumpsToNext(code) | GroupConstantStores(code)) { }
     }
 }

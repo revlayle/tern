@@ -341,6 +341,23 @@ public sealed class WarningTests : IDisposable
             """));
     }
 
+    // Review code-quality-semantics 20: the missing-return check and this warning use one rule (NeverFinishes).
+    // A function whose return is followed by unreachable code cannot reach its end: a warning, not
+    // "can reach its end without returning a value".
+    [Fact]
+    public void A_function_that_never_reaches_its_end_needs_no_return_there()
+    {
+        Assert.Equal(["5: This statement is never reached, since the 'return' on line 4 ends the function. Remove it"], Warnings("""
+            var n: u8
+            var r: u8
+            fn f() -> u8 {
+                return 1
+                n = 2
+            }
+            fn main() { r = f() }
+            """));
+    }
+
     [Fact]
     public void Statements_after_break_continue_and_endless_loops_are_warned()
     {

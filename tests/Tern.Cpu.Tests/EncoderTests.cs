@@ -9,7 +9,7 @@ public class EncoderTests
     private static byte[] Enc(Mnemonic m, AddressingMode mode, int operand = 0, int pc = 0x1000)
     {
         var bytes = new List<byte>();
-        Encoder.Encode(m, mode, operand, pc, bytes);
+        Encoder.Encode(InstructionSet.Nmos6502, m, mode, operand, pc, bytes);
         return bytes.ToArray();
     }
 
@@ -44,11 +44,11 @@ public class EncoderTests
     [Fact]
     public void Every_opcode_round_trips_through_decode()
     {
-        foreach (var info in InstructionSet.All)
+        foreach (var info in InstructionSet.Nmos6502.All)
         {
             var bytes = Enc(info.Mnemonic, info.Mode, info.Mode == Relative ? 0x1010 : 0x12, pc: 0x1000);
             Assert.Equal(info.Size, bytes.Length);
-            Assert.Equal(info, InstructionSet.Decode(bytes[0]));
+            Assert.Equal(info, InstructionSet.Nmos6502.Decode(bytes[0]));
         }
     }
 }

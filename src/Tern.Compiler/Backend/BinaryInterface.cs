@@ -1,5 +1,6 @@
 using System.Text;
 using Tern.Compiler.Semantics;
+using Tern.Cpu;
 
 namespace Tern.Compiler.Backend;
 

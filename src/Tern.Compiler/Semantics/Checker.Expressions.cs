@@ -446,7 +446,7 @@ public sealed partial class Checker
     /// <summary>An overlay may not take the address of a function of another overlay in its area (spec 8.5).</summary>
     private void CheckSiblingAddress(FunctionSymbol f, SourcePos pos)
     {
-        if (_function?.OverlayArea is { } area && f.OverlayArea == area && f.OverlayUnit != _function.OverlayUnit)
+        if (_function is not null && NotPresentWith(f, _function.OverlayArea, _function.OverlayUnit))
             throw new CompileError(pos,
                 $"addr({f.Name}) is in {f.Module!.Name}, which is {NeverTogether(f.Module, _function.Module!)} as {_function.Module!.Name}. They are never loaded together, so the address would point at the wrong code. " +
                 "Take the address in resident code, or put one of them in another area");
@@ -632,18 +632,17 @@ public sealed partial class Checker
             void Visit(FunctionSymbol inline)
             {
                 if (!seen.Add(inline)) return;
-                foreach (var g in inline.UsedGlobals.Where(g => g.OverlayArea == area && g.OverlayUnit != caller.OverlayUnit && (g.FixedAddress is null || g.IsData) && g.Region is null
-                    && (g.IsData || !g.Module!.InBank)))
+                foreach (var g in inline.UsedGlobals.Where(g => NotPresentWith(g, area, caller.OverlayUnit)))
                     throw new CompileError(pos,
                         $"'{caller.Name}' calls the inline function '{callee.Name}', which is copied into it and uses '{g.Name}', {(g.IsData ? "data" : "a variable")} of {g.Module!.Name}. " +
                         $"{caller.Module!.Name} and {g.Module.Name} are {NeverTogether(caller.Module, g.Module)}, never loaded together, and share their memory. Keep shared state in a resident module or the main file");
-                foreach (var f in inline.UsedAddresses.Where(f => f.OverlayArea == area && f.OverlayUnit != caller.OverlayUnit))
+                foreach (var f in inline.UsedAddresses.Where(f => NotPresentWith(f, area, caller.OverlayUnit)))
                     throw new CompileError(pos,
                         $"'{caller.Name}' calls the inline function '{callee.Name}', which is copied into it and takes addr({f.Name}). " +
                         $"{caller.Module!.Name} and {f.Module!.Name} are {NeverTogether(caller.Module, f.Module)}, never loaded together, so the address would point at the wrong code. Take the address in resident code");
                 foreach (var next in inline.Callees)
                     if (next.IsInline) Visit(next);
-                    else if (next.OverlayArea == area && next.OverlayUnit != caller.OverlayUnit)
+                    else if (NotPresentWith(next, area, caller.OverlayUnit))
                         throw new CompileError(pos,
                             $"'{caller.Name}' calls the inline function '{callee.Name}', which is copied into it and calls '{next.Name}'. " +
                             $"{caller.Module!.Name} and {next.Module!.Name} are {NeverTogether(caller.Module, next.Module!)}, so they are never loaded together. Call between them from resident code");
@@ -660,11 +659,11 @@ public sealed partial class Checker
     {
         if (!_dead) caller.Callees.Add(callee);
         if (!_dead && callee.IsInline && caller.OverlayArea is not null && callee.OverlayUnit != caller.OverlayUnit) _inlineCalls.Add((caller, callee, pos));
-        if (caller.OverlayArea is { } area && callee.OverlayArea == area && callee.OverlayUnit != caller.OverlayUnit && !callee.IsInline)
+        if (NotPresentWith(callee, caller.OverlayArea, caller.OverlayUnit) && !callee.IsInline)
             throw new CompileError(pos, caller.Module!.InBank
                 ? $"'{caller.Name}' calls '{callee.Name}', but the modules {caller.Module.Name} and {callee.Module!.Name} are {NeverTogether(caller.Module, callee.Module)}, and only one bank is selected at a time. " +
                   "Put both modules in the same bank, or call between them from resident code"
-                : $"'{caller.Name}' calls '{callee.Name}', but the modules {caller.Module.Name} and {callee.Module!.Name} are both in the overlay area '{area}', so they are never loaded together. " +
+                : $"'{caller.Name}' calls '{callee.Name}', but the modules {caller.Module.Name} and {callee.Module!.Name} are both in the overlay area '{caller.OverlayArea}', so they are never loaded together. " +
                   "Call between them from resident code, or put one of them in another area");
     }
 }

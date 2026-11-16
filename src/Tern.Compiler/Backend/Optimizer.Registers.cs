@@ -79,12 +79,14 @@ public static partial class Optimizer
     /// <summary>Forgets the elements read through <paramref name="r"/>, which has changed.</summary>
     private static void ForgetIndex(State s, Reg r) => s.Forget(op => op is Element { Index: var x } && x == r);
 
-    private static Reg? Loaded(Mnemonic m) => m switch { Lda => Reg.A, Ldx => Reg.X, Ldy => Reg.Y, _ => null };
-    private static Reg? Stored(Mnemonic m) => m switch { Sta => Reg.A, Stx => Reg.X, Sty => Reg.Y, _ => null };
-    private static (Reg From, Reg To)? Transfer(Mnemonic m) => m switch
-    {
-        Tax => (Reg.A, Reg.X), Tay => (Reg.A, Reg.Y), Txa => (Reg.X, Reg.A), Tya => (Reg.Y, Reg.A), _ => null,
-    };
+    /// <summary>The register <paramref name="s"/> names, if it names exactly one of A, X and Y.</summary>
+    private static Reg? RegOf(CpuState? s) => (s & CpuState.Registers) switch { CpuState.A => Reg.A, CpuState.X => Reg.X, CpuState.Y => Reg.Y, _ => null };
+
+    // Loads, stores and transfers, from the instruction table.
+    private static Reg? Loaded(Mnemonic m) => RegOf(Instructions.Loaded(m));
+    private static Reg? Stored(Mnemonic m) => RegOf(Instructions.Stored(m));
+    private static (Reg From, Reg To)? Transfer(Mnemonic m) =>
+        Instructions.Transfer(m) is { } t ? (RegOf(t.From)!.Value, RegOf(t.To)!.Value) : null;
 
     /// <summary>An operand whose value can be remembered: an immediate, or a byte of ordinary memory.</summary>
     private static bool Trackable(Instr i) => i.Mode switch
@@ -130,7 +132,7 @@ public static partial class Optimizer
             s.Clear();
             return;
         }
-        if (i.Mnemonic is Jsr or Brk)
+        if (ChangesAnything(i))
         {
             // A call may change any register and any ordinary memory. Other instructions of an asm
             // block are followed like compiler-generated ones: they change what AsmEffects says.
@@ -159,25 +161,26 @@ public static partial class Optimizer
             return;
         }
 
-        var (_, writes) = AsmEffects.Of(m, i.Mode);
-        if (i.Mode != Accumulator && (AsmEffects.WritesMemory(m, i.Mode) || i.Mode is IndirectIndexed or IndexedIndirect))
+        var (_, writes) = Instructions.Effects(m, i.Mode);
+        var use = MemoryUse.Of(i);
+        if (use.Writes)
         {
-            if (i.Mode is Absolute or ZeroPage && i.Operand is VarOperand { Variable: var v, Offset: var at })
+            switch (use.Target)
             {
-                ForgetWrite(s, v, function, at);
-                if (Stored(m) is Reg st && Trackable(i)) s.Regs[(int)st].Add(i.Operand!);
-            }
-            else if (i.Mode is AbsoluteX or AbsoluteY or ZeroPageX or ZeroPageY && i.Operand is VarOperand { Variable: var array })
-            {
-                // An indexed write changes only the array (an index outside it is not supported,
-                // provisional); fixed-address arrays may overlap other fixed-address variables.
-                ForgetWrite(s, array, function);
-                if (Stored(m) is Reg st && ElementOf(i) is { } element) s.Regs[(int)st].Add(element);
-            }
-            else if (AsmEffects.WritesMemory(m, i.Mode) || Stored(m) is not null)
-            {
-                // Through a pointer, or at a fixed numeric address: any memory may change.
-                s.Forget(op => op is VarOperand or Element);
+                case MemoryTarget.Byte:
+                    ForgetWrite(s, use.Operand!.Variable, function, use.Operand.Offset);
+                    if (Stored(m) is Reg st && Trackable(i)) s.Regs[(int)st].Add(i.Operand!);
+                    break;
+                case MemoryTarget.Element:
+                    // An indexed write changes only the array (an index outside it is not supported,
+                    // provisional); fixed-address arrays may overlap other fixed-address variables.
+                    ForgetWrite(s, use.Operand!.Variable, function);
+                    if (Stored(m) is Reg st2 && ElementOf(i) is { } element) s.Regs[(int)st2].Add(element);
+                    break;
+                default:
+                    // Through a pointer, at a fixed numeric address, or into code: any memory may change.
+                    s.Forget(op => op is VarOperand or Element);
+                    break;
             }
         }
 
@@ -191,10 +194,8 @@ public static partial class Optimizer
             ForgetIndex(s, reg);
             if (known is not null) s.Regs[(int)reg].Add(new Imm((known.Value + delta) & 0xFF));
         }
-        if (writes.HasFlag(CpuState.Z))
-            s.Flags = m is Inx or Dex ? Reg.X : m is Iny or Dey ? Reg.Y
-                : writes.HasFlag(CpuState.A) && m is not (Cmp or Bit) ? Reg.A : null;
-        if (m is Plp or Rti) s.Flags = null;
+        // N and Z come from the one register the instruction writes (none: cmp, bit, plp, a shift in memory).
+        if (writes.HasFlag(CpuState.Z)) s.Flags = RegOf(writes);
     }
 
     /// <summary>
@@ -211,8 +212,7 @@ public static partial class Optimizer
 
     /// <summary>An asm instruction writes to a code label, so it changes the code itself (or another function patches this one).</summary>
     private static bool SelfModifying(List<AsmItem> code, FunctionSymbol function) =>
-        function.CodePatched || code.Any(item => item is Instr { AsmPos: not null, Operand: LabelOperand } w
-            && (AsmEffects.WritesMemory(w.Mnemonic, w.Mode) || Stored(w.Mnemonic) is not null));
+        function.CodePatched || code.Any(item => item is Instr { AsmPos: not null, Operand: LabelOperand } w && MemoryUse.Of(w).Writes);
 
     /// <summary>The state before each item, from the start of the function and every jump into a label.</summary>
     private static State?[] Analyse(List<AsmItem> code, FunctionSymbol function)
@@ -241,8 +241,11 @@ public static partial class Optimizer
             if (code[k] is Instr i)
             {
                 Step(s, i, function, selfModifying);
-                if (Target(i) is { } t && positions.TryGetValue(t, out int tp)) Join(tp, i.Mnemonic == Beq ? IsZero(s) : s);
-                if (i.Mnemonic == Bne) s = IsZero(s);
+                // A branch on Z: where it goes with Z set, the register N and Z came from is 0.
+                var row = Instructions.Of(i.Mnemonic);
+                bool onZero = row is { Flow: Flow.Branch, Condition: CpuState.Z };
+                if (ExitsOf(code, k, positions).Inside is int tp) Join(tp, onZero && row.WhenSet ? IsZero(s) : s);
+                if (onZero && !row.WhenSet) s = IsZero(s);
             }
             if (FallsThrough(code[k])) Join(k + 1, s);
         }
@@ -270,19 +273,22 @@ public static partial class Optimizer
                 if (++steps > 200) return true;
                 if (code[j] is LabelTable or DataBytes) return true;
                 if (code[j] is not Instr i) continue;
-                if (i.Mnemonic is Jsr or Rti) break;
-                if (i.Mnemonic == Rts)
-                {
-                    if (FromAsm(i) || returnsInNz || Dispatches(code)) return true;
-                    break;
-                }
-                var (reads, writes) = AsmEffects.Of(i.Mnemonic, i.Mode);
+                // A call and rti set N and Z (the callee, the flags pulled).
+                var (reads, writes) = Instructions.Effects(i.Mnemonic, i.Mode);
                 if ((reads & (CpuState.N | CpuState.Z)) != 0) return true;
                 if (writes.HasFlag(CpuState.N) && writes.HasFlag(CpuState.Z)) break;
-                if (IsBranch(i.Mnemonic) || i.Mnemonic == Mnemonic.Jmp)
+                var exits = ExitsOf(code, j, positions);
+                if (exits.Elsewhere) return true;
+                if (exits.Returns)
                 {
-                    if (Target(i) is not { } target || !positions.TryGetValue(target, out int at)) return true;
-                    if (i.Mnemonic == Mnemonic.Jmp) { j = at - 1; continue; }
+                    // The caller reads N and Z of a bool returned in them; a jump table's dispatch enters an arm.
+                    if (FromAsm(i) || returnsInNz) return true;
+                    foreach (var l in UnknownEntries(code)) if (positions.TryGetValue(l, out int u)) paths.Push(u);
+                    break;
+                }
+                if (exits.Inside is int at)
+                {
+                    if (!exits.Next) { j = at - 1; continue; }
                     paths.Push(at);
                 }
             }

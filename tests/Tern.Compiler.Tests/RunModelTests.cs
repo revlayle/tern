@@ -20,7 +20,7 @@ public class RunModelTests
         image[5] = 1;
         image[6] = 1;
         var bus = new NesBus(new Ram(), image);
-        var cpu = new Cpu6502(bus);
+        var cpu = new Cpu6502(bus, Platform.Nes.Cpu);
         bus.Cpu = cpu;
         return (bus, cpu);
     }

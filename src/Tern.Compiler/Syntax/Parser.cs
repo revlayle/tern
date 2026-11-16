@@ -149,9 +149,9 @@ public sealed partial class Parser
         return t.Kind is TokenKind.Const or TokenKind.Var or TokenKind.Data or TokenKind.Fn
             or TokenKind.Struct or TokenKind.Private or TokenKind.Interrupt or TokenKind.Inline or TokenKind.Noinit or TokenKind.Volatile
             or TokenKind.Linear or TokenKind.Asm or TokenKind.Assert or TokenKind.Export or TokenKind.Import or TokenKind.Module
-            || t is { Kind: TokenKind.Identifier, Text: "indexed" or "memory" }
-            || t is { Kind: TokenKind.Identifier, Text: "encoding" } && next.Kind == TokenKind.Identifier
-            || t is { Kind: TokenKind.Identifier, Text: "default" } && next is { Kind: TokenKind.Identifier, Text: "encoding" }
+            || Word.Is(t, Word.Indexed) || Word.Is(t, Word.Memory)
+            || Word.Is(t, Word.Encoding) && next.Kind == TokenKind.Identifier
+            || Word.Is(t, Word.Default) && Word.Is(next, Word.Encoding)
             || t.Kind == TokenKind.Identifier && next.Kind is TokenKind.Fn or TokenKind.Var or TokenKind.Const or TokenKind.Data or TokenKind.Struct
             || t is { Kind: TokenKind.Identifier, Text: "let" } && next.Kind == TokenKind.Identifier;
     }
@@ -161,14 +161,14 @@ public sealed partial class Parser
     {
         int k = from;
         while (_tokens[k].Kind is TokenKind.Private or TokenKind.Noinit or TokenKind.Volatile or TokenKind.Inline or TokenKind.Interrupt
-               or TokenKind.Linear or TokenKind.Asm || _tokens[k] is { Kind: TokenKind.Identifier, Text: "indexed" })
+               or TokenKind.Linear or TokenKind.Asm || Word.Is(_tokens[k], Word.Indexed))
             k++;
         // A word from another language before the keyword (pub fn, async fn), or 'let name'.
         if (_tokens[k].Kind == TokenKind.Identifier && _tokens[k + 1].Kind is TokenKind.Fn or TokenKind.Var or TokenKind.Const or TokenKind.Data or TokenKind.Struct)
             k++;
         else if (_tokens[k] is { Kind: TokenKind.Identifier, Text: "let" } && _tokens[k + 1].Kind == TokenKind.Identifier)
             return (_tokens[k + 1].Text, _tokens[k + 1].Pos);
-        if (_tokens[k] is { Kind: TokenKind.Identifier, Text: "encoding" } && _tokens[k + 1].Kind == TokenKind.Identifier)
+        if (Word.Is(_tokens[k], Word.Encoding) && _tokens[k + 1].Kind == TokenKind.Identifier)
             return (_tokens[k + 1].Text, _tokens[k + 1].Pos);
         if (_tokens[k].Kind is not (TokenKind.Const or TokenKind.Var or TokenKind.Data or TokenKind.Fn or TokenKind.Struct or TokenKind.Import)) return null;
         if (_tokens[k].Kind == TokenKind.Const && _tokens[k + 1].Kind == TokenKind.Fn) k++;
@@ -182,6 +182,9 @@ public sealed partial class Parser
     private Token Current => _tokens[_pos];
     private Token PeekAt(int offset) => _tokens[Math.Min(_pos + offset, _tokens.Count - 1)];
     private bool At(TokenKind kind) => Current.Kind == kind;
+
+    /// <summary>True if the current token is the word <paramref name="word"/> (<see cref="Word"/>).</summary>
+    private bool AtWord(string word) => Word.Is(Current, word);
 
     private Token Advance() => _tokens[_pos++];
 

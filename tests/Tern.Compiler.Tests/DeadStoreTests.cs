@@ -25,7 +25,7 @@ public class DeadStoreTests
     private static string Optimize(FunctionSymbol function, params AsmItem[] code)
     {
         var list = code.ToList();
-        Optimizer.Run(list, function);
+        Optimizer.Run(list, function, InstructionSet.Nmos6502);
         return string.Join("|", list.OfType<Instr>().Select(i => $"{i.Mnemonic.ToString().ToLowerInvariant()} {i.Operand}".Trim()));
     }
 

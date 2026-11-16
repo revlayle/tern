@@ -1,3 +1,4 @@
+using Tern.Compiler.Tools;
 using Tern.Cpu;
 
 namespace Tern.Compiler.Tests;
@@ -601,7 +602,7 @@ public class C64LibraryTests
         StartState.Fill(ram);
         ram.Load((ushort)result.LoadAddress, result.Image);
         var bus = new BusLog(ram, [0xD020]);
-        var cpu = new Cpu6502(bus) { PC = (ushort)result.Entry, SP = 0xFF, I = true };
+        var cpu = new Cpu6502(bus, result.Platform.Cpu) { PC = (ushort)result.Entry, SP = 0xFF, I = true };
         StartState.Set(cpu);
         long next = 1000;
         int taken = 0;

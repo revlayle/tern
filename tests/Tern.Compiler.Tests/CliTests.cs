@@ -194,6 +194,14 @@ public sealed class CliTests : IDisposable
     [InlineData(new[] { "run", "--target", "c64", "SRC", "--dump" }, "--dump needs a value after it")]
     [InlineData(new[] { "SRC", "--target" }, "--target needs a value after it")]
     [InlineData(new[] { "run", "--target", "c64", "SRC", "--fast" }, "Unknown argument: --fast")]
+    [InlineData(new[] { "--target", "c64", "SRC", "b.tern" }, "Unknown argument: b.tern")]
+    [InlineData(new[] { "run", "--target", "c64", "SRC", "--set", "$DC00" }, "--set '$DC00': write an address and a byte, as $DC00=$FF")]
+    // Review code-quality-tools 5: an option of another command is named as one, wherever it is in the table.
+    [InlineData(new[] { "bench", "--target", "c64", "SRC", "-o", "x.prg" }, "-o is an option of tern <file.tern>, not of tern bench")]
+    [InlineData(new[] { "--target", "c64", "SRC", "--cycles", "100" }, "--cycles is an option of tern run and tern bench, not of tern <file.tern>")]
+    [InlineData(new[] { "bench", "--target", "c64", "SRC", "--screen" }, "--screen is an option of tern run, not of tern bench")]
+    [InlineData(new[] { "run", "--target", "c64", "SRC", "--code", "x = 1" }, "--code is an option of tern bench, not of tern run")]
+    [InlineData(new[] { "bench", "--target", "c64", "SRC", "--no-warnings" }, "--no-warnings is an option of tern <file.tern> and tern run, not of tern bench")]
     public void A_bad_option_value_names_the_option_and_the_value(string[] args, string expected)
     {
         string src = Write("a.tern");
@@ -225,6 +233,45 @@ public sealed class CliTests : IDisposable
         Assert.Contains("which take no cycles", help);
         Assert.Contains("A brk stops the run, except on the NES when the program sets the IRQ vector", help);
         Assert.Contains("exits with 4 on an internal error", help);
+    }
+
+    // Review code-quality-tools 5: the help and the readers come from one table of options.
+    [Theory]
+    [InlineData("tern <file.tern> compiles", "--target", "-o", "--json", "--max-errors", "--no-warnings", "--warnings-as-errors")]
+    [InlineData("tern run <file.tern> compiles", "--target", "--json", "--max-errors", "--no-warnings", "--warnings-as-errors",
+        "--cycles", "--irq", "--set", "--dump", "--screen", "--profile")]
+    [InlineData("tern bench compiles", "--target", "--json", "--max-errors", "--cycles", "--irq", "--set", "--dump", "--code", "--decl", "--fn")]
+    public void The_help_names_each_option_under_each_command_that_takes_it(string section, params string[] options)
+    {
+        string help = Tern("--help").Output;
+        string[] starts = ["tern <file.tern> compiles", "tern run <file.tern> compiles", "tern bench compiles"];
+        int start = help.IndexOf(section, StringComparison.Ordinal);
+        int end = starts.Select(s => help.IndexOf(s, start + 1, StringComparison.Ordinal)).Where(i => i > start).DefaultIfEmpty(help.Length).Min();
+        var named = System.Text.RegularExpressions.Regex.Matches(help[start..end], @"(?<![\w-])(-o|--[a-z-]+)\b").Select(m => m.Value).ToHashSet();
+        Assert.Subset(named, options.ToHashSet());
+    }
+
+    [Fact]
+    public void Every_option_the_help_names_is_read_by_a_command()
+    {
+        var names = System.Text.RegularExpressions.Regex.Matches(Tern("--help").Output, @"(?<![\w-])(-o|--[a-z-]+)\b").Select(m => m.Value).Distinct().ToList();
+        Assert.Equal(15, names.Count);
+        foreach (var name in names)
+        {
+            // Each command either reads the option or names the commands it belongs to; none calls it unknown.
+            foreach (var command in new[] { new[] { "--target", "c64" }, ["run", "--target", "c64"], ["bench", "--target", "c64"] })
+                Assert.DoesNotContain("Unknown argument", Tern([.. command, name]).Error);
+        }
+    }
+
+    [Fact]
+    public void Bench_keeps_the_order_of_files_and_code_variants()
+    {
+        string a = Write("first.tern"), b = Write("third.tern");
+        var (code, output, _) = Tern("bench", "--target", "c64", a, "--code", "var x: u8 = 1", b);
+        Assert.Equal(0, code);
+        Assert.True(output.IndexOf("first.tern", StringComparison.Ordinal) < output.IndexOf("code 1", StringComparison.Ordinal));
+        Assert.True(output.IndexOf("code 1", StringComparison.Ordinal) < output.IndexOf("third.tern", StringComparison.Ordinal));
     }
 
     // ---------- Bench's ok and exit code (tools 8) ----------

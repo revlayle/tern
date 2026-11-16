@@ -284,7 +284,7 @@ fn same(a: ptr u8, b: ptr u8, pages: u8) -> bool {
 }
 
 fn main() {
-    r = same($C000, $C800, 2)
+    r = same($C000, $C000, 2)     // a block against itself: every byte is compared
 }
 ```
 
@@ -303,15 +303,15 @@ fn same(a: ptr u8, b: ptr u8, count: u16) -> bool {
 }
 
 fn main() {
-    r = same($C000, $C800, 512)
+    r = same($C000, $C000, 512)     // a block against itself: every byte is compared
 }
 ```
 
 ```console
 $ tern bench --target c64 pages.tern bytes.tern --fn same --dump r
 variant     program  same bytes   calls     cycles  per call    zp  other
-pages.tern       85          35       1       9283      9283     7      0
-bytes.tern       99          47       1      27703     27703     7      0
+pages.tern       83          35       1       9283      9283     7      0
+bytes.tern       97          47       1      27703     27703     7      0
 Memory (zp: zero page bytes, other: the rest; the measured function's variables and the program's globals):
   pages.tern: r $0002 bool, same.a $0003 ptr u8, same.b $0005 ptr u8, same.pages $0007 u8, same._loop0 $0008 u8
   bytes.tern: r $0002 bool, same.a $0003 ptr u8, same.b $0005 ptr u8, same.count $0007 u16

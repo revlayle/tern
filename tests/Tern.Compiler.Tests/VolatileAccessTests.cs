@@ -30,6 +30,8 @@ public class VolatileAccessTests
         new("X += 1", 1, (v, a, b) => v + 1),
         new("X -= 1", 1, (v, a, b) => v - 1),
         new("X += 2", 1, (v, a, b) => v + 2),
+        new("X += 256", 1, (v, a, b) => v + 256),
+        new("X -= 512", 1, (v, a, b) => v - 512),
         new("X &= b", 1, (v, a, b) => v & b),
         new("X |= b", 1, (v, a, b) => v | b),
         new("X ^= b", 1, (v, a, b) => v ^ b),
@@ -43,31 +45,16 @@ public class VolatileAccessTests
 
     private static readonly string[] Targets = ["v", "arr[i]", "s.f"];
 
-    /// <summary>
-    /// The cases that fail today, by the finding that explains them (docs/status.md lists them).
-    /// Each finding's cases run in their own skipped theory below; when it is fixed, remove the skip.
-    /// </summary>
-    private static string? KnownFailure(string type, string target, string statement) =>
-        type == "u16" && target != "arr[i]" && statement is "X += 1" or "X += 2" ? "question 170" : null;
-
-    private static TheoryData<string, string, string> CasesWhere(Func<string?, bool> known)
+    public static TheoryData<string, string, string> Cases()
     {
         var data = new TheoryData<string, string, string>();
         foreach (var type in new[] { "u8", "u16" })
             foreach (var target in Targets)
                 foreach (var s in Statements)
-                    if (known(KnownFailure(type, target, s.Text)))
+                    if (type == "u16" || !s.Text.Contains("256") && !s.Text.Contains("512"))   // a whole page only fits a u16
                         data.Add(type, target, s.Text);
         return data;
     }
-
-    public static TheoryData<string, string, string> Cases() => CasesWhere(f => f is null);
-    public static TheoryData<string, string, string> Question170() => CasesWhere(f => f == "question 170");
-
-    [Theory(Skip = "Question 170: a 16-bit volatile 'x += 1' writes the high byte only on a carry")]
-    [MemberData(nameof(Question170))]
-    public void Open_question_170(string type, string target, string statement) =>
-        A_volatile_target_is_read_and_written_once(type, target, statement);
 
     // The statement's own bytes: v at $C000, element 2 of the split array at $C010, field f at offset 1 of s at $C020.
     private static (int Lo, int Hi) Place(string target) => target switch

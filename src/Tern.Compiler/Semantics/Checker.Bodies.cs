@@ -22,11 +22,11 @@ public sealed partial class Checker
         // Copied into the caller, an rts or rti would end the caller too.
         if (decl is { IsAsm: true, IsInline: true })
             foreach (var ins in ((AsmStmt)decl.Body.Statements[0]).Lines.OfType<AsmInstruction>())
-                if (ins.Mnemonic is Tern.Cpu.Mnemonic.Rts or Tern.Cpu.Mnemonic.Rti)
+                if (Tern.Cpu.Instructions.Returns(ins.Mnemonic))
                     throw new CompileError(ins.Pos,
                         $"'{ins.Mnemonic.ToString().ToLowerInvariant()}' in an inline asm fn would end the function that calls it, since the code is copied there. Remove it: the code simply runs on after the copy");
 
-        if (_function.ReturnType.Kind != TypeKind.Void && !decl.IsAsm && !AlwaysReturns(decl.Body))
+        if (_function.ReturnType.Kind != TypeKind.Void && !decl.IsAsm && NeverFinishes(decl.Body, constantConditions: true) is null)
             throw new CompileError(decl.Pos, $"'{decl.Name}' can reach its end without returning a value. Add a 'return' at the end");
 
         _scopes.Clear();
@@ -264,7 +264,11 @@ public sealed partial class Checker
             if (v < 0 && other.Type.IsInteger && !other.Type.IsSigned)
                 throw new CompileError(literal.Pos,
                     $"A loop from a negative bound counts with a signed variable, but the other bound is {other.Type}. Convert it with 'as {(v >= -128 && other.Type.Size == 1 ? "i8" : "i16")}'");
-            type = other.Type.IsSigned && other.Type.Size == 1 && (v < -128 || v > 127) ? TernType.I16 : Unify(f.From, f.To, f.Pos);
+            // A u8 start with an exclusive end of 256 counts with a u8 to the end of the page (decision 2026-11-15, question 172).
+            if (literal == f.To && v == 256 && !f.Inclusive && other.Type.Kind == TypeKind.U8 && f.Step is null or { ConstValue: > 0 })
+                type = TernType.U8;
+            else
+                type = other.Type.IsSigned && other.Type.Size == 1 && (v < -128 || v > 127) ? TernType.I16 : Unify(f.From, f.To, f.Pos);
         }
         else
             type = Unify(f.From, f.To, f.Pos);
@@ -442,46 +446,39 @@ public sealed partial class Checker
     }
 
     /// <summary>True if the code calls a function that may change <paramref name="reg"/>: any function except a routine that keeps it.</summary>
-    private bool ContainsCall(Node node, Register reg) => node switch
+    private bool ContainsCall(Node node, Register reg) =>
+        // Not inside assembly (its jsr is checked with the block) or a local const (computed at compile time).
+        node.Descendants(enter: n => n is not (AsmStmt or ConstDecl)).Any(n => n is CallExpr c
+            // A name that is not declared is not counted: checking the body reports it (review code-quality-semantics 11).
+            && !BuiltinNames.Contains(c.Name) && Lookup(c.Name) is { } called && !(called is FunctionSymbol f && f.Keeps.Contains(reg)));
+
+    /// <summary>
+    /// The statement that keeps <paramref name="s"/> from finishing, or null if it may finish (spec 13): a
+    /// <c>return</c>, <c>break</c> or <c>continue</c>; a <c>while</c> whose condition is true, with no
+    /// <c>break</c> of its own; an <c>if</c> with <c>else</c>, or a <c>match</c> with <c>_</c>, none of whose
+    /// branches finishes (the <c>if</c> or <c>match</c> itself); in a block, the first statement that never
+    /// finishes. A syntax error, already reported, counts as never finishing. The one rule for the missing
+    /// return and the unreachable-code warning (review code-quality-semantics 20). With
+    /// <paramref name="constantConditions"/>, a condition known at compile time counts as true; without it only
+    /// the word <c>true</c> does, since the warnings do not evaluate conditions (spec 13).
+    /// </summary>
+    internal static Stmt? NeverFinishes(Stmt s, bool constantConditions) => s switch
     {
-        // A name that is not declared is not counted: checking the body reports it (review code-quality-semantics 11).
-        CallExpr c => (c.Name is not ("addr" or "len" or "sizeof" or "offset") && Lookup(c.Name) is { } called && !(called is FunctionSymbol f && f.Keeps.Contains(reg)))
-            || c.Args.Any(a => ContainsCall(a, reg)),
-        BlockStmt b => b.Statements.Any(x => ContainsCall(x, reg)),
-        IfStmt i => ContainsCall(i.Condition, reg) || ContainsCall(i.Then, reg) || (i.Else is not null && ContainsCall(i.Else, reg)),
-        WhileStmt w => ContainsCall(w.Condition, reg) || ContainsCall(w.Body, reg),
-        ForStmt f => ContainsCall(f.From, reg) || ContainsCall(f.To, reg) || (f.Step is not null && ContainsCall(f.Step, reg)) || ContainsCall(f.Body, reg),
-        MatchStmt m => ContainsCall(m.Subject, reg) || m.Arms.Any(a => ContainsCall(a.Body, reg)),
-        ReturnStmt r => r.Value is not null && ContainsCall(r.Value, reg),
-        AssignStmt a => ContainsCall(a.Target, reg) || ContainsCall(a.Value, reg),
-        ExprStmt e => ContainsCall(e.Expr, reg),
-        VarDecl v => v.Init is not null && ContainsCall(v.Init, reg),
-        UnaryExpr u => ContainsCall(u.Operand, reg),
-        BinaryExpr b => ContainsCall(b.Left, reg) || ContainsCall(b.Right, reg),
-        IndexExpr ix => ContainsCall(ix.Target, reg) || ContainsCall(ix.Index, reg),
-        MemberExpr m => ContainsCall(m.Target, reg),
-        CastExpr c => ContainsCall(c.Operand, reg),
-        _ => false,
+        ReturnStmt or BreakStmt or ContinueStmt or ErrorStmt => s,
+        BlockStmt b => b.Statements.Select(x => NeverFinishes(x, constantConditions)).FirstOrDefault(x => x is not null),
+        WhileStmt w when (constantConditions ? w.Condition.ConstValue == 1 : w.Condition is BoolExpr { Value: true }) && !Breaks(w.Body) => s,
+        IfStmt { Else: not null } i when NeverFinishes(i.Then, constantConditions) is not null && NeverFinishes(i.Else, constantConditions) is not null => s,
+        MatchStmt m when m.Arms.Any(a => a.IsDefault) && m.Arms.All(a => NeverFinishes(a.Body, constantConditions) is not null) => s,
+        _ => null,
     };
 
-    private static bool AlwaysReturns(Stmt stmt) => stmt switch
-    {
-        ReturnStmt => true,
-        ErrorStmt => true,   // a syntax error, reported: maybe the return (spec 13)
-        BlockStmt { Code: [.., var last] } => AlwaysReturns(last),
-        IfStmt i => i.Else is not null && AlwaysReturns(i.Then) && AlwaysReturns(i.Else),
-        WhileStmt w => w.Condition.ConstValue == 1 && !ContainsBreak(w.Body),
-        MatchStmt m => m.Arms.Count > 0 && m.Arms[^1].IsDefault && m.Arms.All(a => AlwaysReturns(a.Body)),
-        _ => false,
-    };
-
-    /// <summary>True if a break leaves this loop body (breaks inside nested loops do not count).</summary>
-    private static bool ContainsBreak(Stmt stmt) => stmt switch
+    /// <summary>True if a <c>break</c> leaves this loop body (a <c>break</c> of an inner loop does not count).</summary>
+    private static bool Breaks(Stmt s) => s switch
     {
         BreakStmt => true,
-        BlockStmt b => b.Statements.Any(ContainsBreak),
-        IfStmt i => ContainsBreak(i.Then) || (i.Else is not null && ContainsBreak(i.Else)),
-        MatchStmt m => m.Arms.Any(a => ContainsBreak(a.Body)),
+        BlockStmt b => b.Statements.Any(Breaks),
+        IfStmt i => Breaks(i.Then) || i.Else is not null && Breaks(i.Else),
+        MatchStmt m => m.Arms.Any(a => Breaks(a.Body)),
         _ => false,
     };
 

@@ -42,4 +42,18 @@ public sealed partial class Checker
     /// <summary>Why two placed modules of one area are never there together: overlays share the area, banks are switched.</summary>
     private static string NeverTogether(Module a, Module b) =>
         a.InBank ? $"in banks {a.Bank} and {b.Bank} of the bank area '{a.OverlayArea}'" : $"in the same overlay area '{a.OverlayArea}'";
+
+    /// <summary>
+    /// True if <paramref name="v"/> is not in memory while code of <paramref name="unit"/> (an overlay or a
+    /// bank of <paramref name="area"/>) runs: it belongs to another unit of the same area, which shares that
+    /// memory (spec 8.5). A fixed address or a region is outside the area, and a bank's variables are resident
+    /// in RAM; only its data is in the bank. One rule for every check (review code-quality-semantics 20).
+    /// </summary>
+    private static bool NotPresentWith(VariableSymbol v, string? area, string? unit) =>
+        area is not null && v.OverlayArea == area && v.OverlayUnit != unit && (v.FixedAddress is null || v.IsData) && v.Region is null
+        && (v.IsData || !v.Module!.InBank);
+
+    /// <summary>True if <paramref name="f"/> is not in memory while code of <paramref name="unit"/> of <paramref name="area"/> runs.</summary>
+    private static bool NotPresentWith(FunctionSymbol f, string? area, string? unit) =>
+        area is not null && f.OverlayArea == area && f.OverlayUnit != unit;
 }

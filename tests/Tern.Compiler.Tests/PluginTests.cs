@@ -142,6 +142,8 @@ public sealed class PluginTests : IDisposable
     [InlineData("fn leave() { n = 0 }", "inline fn leave() { n = 0 }", "'leave' is inline")]
     [InlineData("fn leave() { n = 0 }", "interrupt fn leave() { n = 0 }", "'leave' is an interrupt handler")]
     [InlineData("fn leave() { n = 0 }", "var leave: u8", "'level_api.leave' has no function in this binary")]
+    // A routine at a fixed address has no body here, as for an overlay (review code-quality-semantics 20: one matching for both).
+    [InlineData("fn leave() { n = 0 }", "fn leave() @ $C000", "'level_api.leave' has no function in this binary")]
     [InlineData("fn leave() { n = 0 }", "fn leave() { n = 0 }\nfn setup() { }", "'setup' is the name of the binary's startup entry")]
     [InlineData("data header: level_api.LevelHeader @ $600C = level_api.LevelHeader { width = 40, height = 12, start_x = 3 }\n", "",
         "'level_api.header' is data every binary of level_api provides. Declare 'data header: level_api.LevelHeader @ $600C = ...' in the main file")]

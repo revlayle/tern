@@ -12,7 +12,7 @@ public class CpuTests
         var ram = new Ram();
         var bytes = new List<byte>();
         foreach (var (m, mode, operand) in program)
-            Encoder.Encode(m, mode, operand, origin + bytes.Count, bytes);
+            Encoder.Encode(InstructionSet.Nmos6502, m, mode, operand, origin + bytes.Count, bytes);
         ram.Load(origin, bytes.ToArray());
         return (new Cpu6502(ram) { PC = origin }, ram);
     }
@@ -33,8 +33,8 @@ public class CpuTests
         // $0200: nop / nop. Handler at $0300: inc $10 / rti.
         var (cpu, ram) = Setup(0x0200, (Nop, Implied, 0), (Nop, Implied, 0));
         var handler = new List<byte>();
-        Encoder.Encode(Inc, ZeroPage, 0x10, 0x0300, handler);
-        Encoder.Encode(Rti, Implied, 0, 0x0302, handler);
+        Encoder.Encode(InstructionSet.Nmos6502, Inc, ZeroPage, 0x10, 0x0300, handler);
+        Encoder.Encode(InstructionSet.Nmos6502, Rti, Implied, 0, 0x0302, handler);
         ram.Load(0x0300, handler.ToArray());
         ram.Bytes[0xFFFE] = 0x00;
         ram.Bytes[0xFFFF] = 0x03;

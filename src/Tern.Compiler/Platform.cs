@@ -26,6 +26,9 @@ public sealed class Platform
 {
     public required string Name { get; init; }
     public required CpuVariant Cpu { get; init; }
+
+    /// <summary>The instructions of <see cref="Cpu"/>, which the checker, the backend and <c>tern run</c> use.</summary>
+    public InstructionSet InstructionSet => InstructionSet.For(Cpu);
     /// <summary>Where the program file is loaded.</summary>
     public required int LoadAddress { get; init; }
     /// <summary>Bytes placed at <see cref="LoadAddress"/> before the code, e.g. a BASIC SYS line.</summary>

@@ -116,9 +116,9 @@ public sealed class MemoryLayout
             if (first > last)
                 throw new CompileError(line.Pos, $"The range starts at ${first:X4} and ends at ${last:X4}, before its start. Write the lower address first");
             var range = new AddressRange((int)first, (int)last);
-            if (line.Kind is "bank" or "chr" && cartridge is null)
-                throw new CompileError(line.Pos, $"A '{line.Kind}' area is part of a cartridge board, which the {platform.Name} does not have. Remove the line");
-            if (line.Kind == "bank")
+            if (line.Kind is MemoryKind.Bank or MemoryKind.Chr && cartridge is null)
+                throw new CompileError(line.Pos, $"A '{line.Kind.Word()}' area is part of a cartridge board, which the {platform.Name} does not have. Remove the line");
+            if (line.Kind == MemoryKind.Bank)
             {
                 var board = cartridge!.Board;
                 if (board.BankArea is not { } window)
@@ -131,7 +131,7 @@ public sealed class MemoryLayout
                     throw new CompileError(line.Pos, $"The area '{line.Name}' is declared twice. Give each area its own name");
                 banks[line.Name!] = range;
             }
-            if (line.Kind == "chr")
+            if (line.Kind == MemoryKind.Chr)
             {
                 // The PPU's addresses: not checked against the CPU's ranges.
                 if (!cartridge!.Board.ChrRom)
@@ -154,42 +154,42 @@ public sealed class MemoryLayout
                 var rom = new AddressRange(board.CodeAreas.Concat(board.BankArea is { } b ? [b] : []).Min(a => a.First),
                     board.CodeAreas.Concat(board.BankArea is { } b2 ? [b2] : []).Max(a => a.Last));
                 // Decision 2026-11-14 (question 160): the board gives the code areas, so the line has no meaning.
-                if (line.Kind == "program")
+                if (line.Kind == MemoryKind.Program)
                     throw new CompileError(line.Pos,
                         $"A 'program' line has no meaning on the {platform.Name.ToUpperInvariant()}: the board '{board.Name}' gives the code areas ({List(board.CodeAreas)}), and the variables are in RAM, {ram}. Remove the line, or use 'reserved' or 'region' to take a range out of ROM or RAM");
-                if (line.Kind == "overlay")
+                if (line.Kind == MemoryKind.Overlay)
                     throw new CompileError(line.Pos,
                         $"A cartridge has no disk to load an overlay from, and the board '{board.Name}' no RAM at {range} to load it into. " +
                         (board.BankArea is { } window
                             ? $"Remove the line, and place modules in banks: '${window.First:X4}..=${window.Last:X4} bank {line.Name}' and 'import m @ {line.Name}[0]'"
                             : "Remove the line, or use a board with banks ('cartridge uxrom') and place modules in a bank area"));
-                if (line.Kind == "region" && !ram.Contains(range))
+                if (line.Kind == MemoryKind.Region && !ram.Contains(range))
                     throw new CompileError(line.Pos,
                         $"A region must lie in RAM, {ram}; {range} does not ({new AddressRange(platform.RamEnd + 1, 0x1FFF)} repeats the RAM, and the board '{board.Name}' has no RAM elsewhere). Use addresses in that range");
-                if (line.Kind == "reserved" && !ram.Contains(range) && !rom.Contains(range))
+                if (line.Kind == MemoryKind.Reserved && !ram.Contains(range) && !rom.Contains(range))
                     throw new CompileError(line.Pos,
                         $"A reserved range must lie in RAM, {ram}, or in the board's ROM, {rom}; {range} does not. Use addresses in one of them");
             }
             switch (line.Kind)
             {
-                case "program": program.Add(range); break;
-                case "zeropage":
+                case MemoryKind.Program: program.Add(range); break;
+                case MemoryKind.Zeropage:
                     if (last > 0xFF)
                         throw new CompileError(line.Pos, $"A zeropage range must lie in $00-$FF; {range} does not. Use addresses below $100");
                     zeroPage.Add(range);
                     break;
-                case "reserved": reserved.Add(range); break;
-                case "region":
+                case MemoryKind.Reserved: reserved.Add(range); break;
+                case MemoryKind.Region:
                     if (overlays.ContainsKey(line.Name!) || !regions.TryAdd(line.Name!, range))
                         throw new CompileError(line.Pos, $"The region '{line.Name}' is declared twice. Give each region its own name");
                     break;
-                case "volatile": volatileRanges.Add(range); break;
-                case "overlay":
+                case MemoryKind.Volatile: volatileRanges.Add(range); break;
+                case MemoryKind.Overlay:
                     if (!overlays.TryAdd(line.Name!, range) || regions.ContainsKey(line.Name!) || banks.ContainsKey(line.Name!))
                         throw new CompileError(line.Pos, $"The overlay area '{line.Name}' is declared twice. Give each area its own name");
                     break;
             }
-            if (line.Kind != "volatile")
+            if (line.Kind != MemoryKind.Volatile)
             {
                 foreach (var (other, otherLine) in claimed)
                     if (range.Overlaps(other))
@@ -231,7 +231,7 @@ public sealed class MemoryLayout
         $"A {platform.Name.ToUpperInvariant()} program is a cartridge image, so its memory block names the board. " +
         $"Write 'memory {{ cartridge {platform.Boards[0].Name} vertical }}' (boards: {string.Join(", ", platform.Boards.Select(b => b.Name))}; mirroring: vertical or horizontal)";
 
-    private static string Describe(MemoryLine line) => line.Name is null ? line.Kind : $"{line.Kind} {line.Name}";
+    private static string Describe(MemoryLine line) => line.Name is null ? line.Kind.Word() : $"{line.Kind.Word()} {line.Name}";
 
     /// <summary>The parts of <paramref name="areas"/> that lie outside <paramref name="taken"/>, in order.</summary>
     public static List<AddressRange> Subtract(IEnumerable<AddressRange> areas, IEnumerable<AddressRange> taken)

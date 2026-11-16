@@ -33,6 +33,21 @@ public class RunToolTests
     }
 
     [Fact]
+    public void A_run_starts_from_the_seeded_memory_and_registers_with_a_blank_screen()
+    {
+        // Decision 2026-11-15 (question 171): as the test harnesses, not zero, so a read of memory the program never wrote shows.
+        var (program, run) = RunSource("""
+            var before: u8 @ $C000
+            var seen: u8
+            fn main() { seen = before }
+            """);
+        Assert.True(run.Returned);
+        Assert.Equal(Seeded.At(0xC000), run.Ram.Bytes[program.Symbols["seen"]]);
+        Assert.NotEqual(0, Seeded.At(0xC000));
+        Assert.All(Runner.ScreenText(run.Ram), line => Assert.Equal("", line));
+    }
+
+    [Fact]
     public void Functions_get_their_calls_and_the_cycles_inside_them()
     {
         var (_, run) = RunSource("""
@@ -191,7 +206,7 @@ public class RunToolTests
             """);
         Assert.True(run.Returned);
         Assert.Equal(1, run.Ram.Bytes[program.Symbols["failed"]]);
-        Assert.Equal(0, run.Ram.Bytes[0x6000]);
+        Assert.Equal(Seeded.At(0x6000), run.Ram.Bytes[0x6000]);
     }
 
     [Fact]
@@ -208,13 +223,13 @@ public class RunToolTests
         Assert.Equal(0, run.Ram.Bytes[program.Symbols["failed"]]);
         var file = program.Overlays.Single();
         Assert.Equal(file.Image, run.Ram.Bytes[0x7000..(0x7000 + file.Image.Length)]);
-        Assert.Equal(0, run.Ram.Bytes[0x6000]);
+        Assert.Equal(Seeded.At(0x6000), run.Ram.Bytes[0x6000]);
     }
 
     [Fact]
     public void A_jump_into_empty_memory_stops_at_the_brk()
     {
-        var (_, run) = RunSource("fn main() {\n asm {\n jmp $9000\n }\n }");
+        var (_, run) = RunSource("fn main() {\n asm {\n jmp $9000\n }\n }", new RunOptions { Sets = [new MemorySet(0x9000, 0)] });
         Assert.False(run.Returned);
         Assert.Equal("brk at $9000 (often a jump into empty memory)", run.Stop);
     }
@@ -334,7 +349,7 @@ public class RunToolTests
         Assert.Equal($"table ${program.Symbols["table"]:X4} [u8; 6] (6 bytes):", lines[5]);
         Assert.Equal($"  ${program.Symbols["table"]:X4}  01 02 03 04 05 06", lines[6]);
         Assert.Equal("$C000 (2 bytes):", lines[7]);
-        Assert.Equal("  $C000  00 00", lines[8]);
+        Assert.Equal($"  $C000  {Seeded.At(0xC000):X2} {Seeded.At(0xC001):X2}", lines[8]);
         Assert.Equal("Screen ($0400, 40 x 25):", lines[9]);
         Assert.Equal("  |" + new string(' ', 40) + "|", lines[10]);
         Assert.Equal(10 + 25, lines.Count(l => l.Length > 0));

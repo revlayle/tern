@@ -215,11 +215,15 @@ public class OverlayTests
 
     // ---------- c64.load ----------
 
-    /// <summary>Stand-ins for SETNAM, SETLFS and LOAD that record their inputs and load the overlay whose name, in capitals, is the file name.</summary>
-    private sealed class FakeKernal
+    /// <summary>
+    /// Records the inputs of SETNAM, SETLFS and LOAD, then runs tern run's stand-in for each, which loads the
+    /// overlay whose name, in capitals, is the file name (review code-quality-tests 12: one model of the KERNAL).
+    /// </summary>
+    private sealed class KernalRecorder
     {
         public string Name = "";
         public int Device = -1, Secondary = -1, LogicalFile = -1, LoadA = -1;
+        private Tools.Machine? _machine;
 
         public IReadOnlyDictionary<int, Action<Run>> Traps => new Dictionary<int, Action<Run>>
         {
@@ -227,16 +231,14 @@ public class OverlayTests
             {
                 int at = run.Cpu.X | run.Cpu.Y << 8;
                 Name = string.Concat(Enumerable.Range(0, run.Cpu.A).Select(i => (char)run.Ram.Bytes[at + i]));
+                StandIn(run);
             },
-            [0xFFBA] = run => (LogicalFile, Device, Secondary) = (run.Cpu.A, run.Cpu.X, run.Cpu.Y),
-            [0xFFD5] = run =>
-            {
-                LoadA = run.Cpu.A;
-                var file = run.Result.Overlays.FirstOrDefault(o => o.Name.ToUpperInvariant() == Name);
-                run.Cpu.C = file is null;
-                if (file is not null) run.Ram.Load((ushort)file.LoadAddress, file.Image);
-            },
+            [0xFFBA] = run => { (LogicalFile, Device, Secondary) = (run.Cpu.A, run.Cpu.X, run.Cpu.Y); StandIn(run); },
+            [0xFFD5] = run => { LoadA = run.Cpu.A; StandIn(run); },
         };
+
+        private void StandIn(Run run) =>
+            Assert.Null((_machine ??= Tools.Machine.For(run.Result.Platform, run.Result)).Call(run.Cpu.PC, run.Cpu, run.Ram, run.Output));
     }
 
     private const string LoadProgram = """
@@ -261,7 +263,7 @@ public class OverlayTests
     [Fact]
     public void C64_load_calls_the_KERNAL_and_returns_its_carry()
     {
-        var kernal = new FakeKernal();
+        var kernal = new KernalRecorder();
         var r = With(Modules, path => Run.Program(LoadProgram, sourcePath: path, traps: kernal.Traps));
         Assert.False(r.U8("failed") != 0);
         Assert.Equal(20, r.U8("v"));           // level1 was loaded by the call and ran
@@ -276,7 +278,7 @@ public class OverlayTests
     [Fact]
     public void C64_load_is_a_direct_sequence_of_KERNAL_calls()
     {
-        var r = With(Modules, path => Run.Program(LoadProgram, sourcePath: path, traps: new FakeKernal().Traps));
+        var r = With(Modules, path => Run.Program(LoadProgram, sourcePath: path, standIns: true));
         Assert.Contains("jsr $FFBD", r.Result.Listing);
         Assert.Contains("jsr $FFBA", r.Result.Listing);
         Assert.Contains("jsr $FFD5", r.Result.Listing);
@@ -286,7 +288,7 @@ public class OverlayTests
     public void The_levels_example_loads_two_levels_in_turn_and_a_reload_resets_the_variables()
     {
         var path = AsmTests.FindExample("levels.tern");
-        var r = Run.Program(File.ReadAllText(path), sourcePath: path, traps: new FakeKernal().Traps);
+        var r = Run.Program(File.ReadAllText(path), sourcePath: path, standIns: true);
         var screen = r.Ram.Bytes;
         Assert.Equal(0x34, screen[0x0400]);           // '4': level1.lives is 3 after each load, 4 after drawing
         Assert.All(Enumerable.Range(1, 479), i => Assert.Equal(1, screen[0x0400 + i]));          // 'A'
@@ -977,5 +979,24 @@ public class OverlayTests
     {
         var modules = new Dictionary<string, string>(Modules) { ["level1"] = "import level2" + Environment.NewLine + Level1 + Environment.NewLine + line + Environment.NewLine };
         Assert.Contains(expected, Message(Header + Environment.NewLine + "fn main() { load(1) }", modules));
+    }
+
+    // Review code-quality-semantics 20: data a sibling places in a region is outside the area, so always there,
+    // for an address in data as for a read (one rule, NotPresentWith; the address check left out the region).
+    [Fact]
+    public void An_overlay_may_hold_the_address_of_a_siblings_data_in_a_region()
+    {
+        var modules = new Dictionary<string, string>(Modules)
+        {
+            ["level1"] = "import level2\ndata other: [ptr u8; 1] = [addr(level2.SHARED)]\nfn peek() -> u8 using A {\n var p: ptr u8 = other[0]\n return p[1]\n}\n",
+            ["level2"] = Level2 + "\ndata SHARED: [u8; 2] @ tables = [5, 6]\n",
+        };
+        string main = Header.Replace("$6000..=$6FFF  overlay levels", "$6000..=$6FFF  overlay levels\n    $7000..=$70FF  region tables") +
+            "\nvar got: u8\nfn main() {\n load(1)\n got = level1.peek()\n}\n";
+        var result = With(modules, path => TernCompiler.Compile(main, sourcePath: path));
+        Assert.Equal(0x7000, result.Symbols["level2.SHARED"]);
+        var level1 = result.Overlays.Single(o => o.Name == "level1");
+        int other = result.Symbols["level1.other"] - level1.LoadAddress;
+        Assert.Equal(new byte[] { 0x00, 0x70 }, level1.Image[other..(other + 2)]);
     }
 }

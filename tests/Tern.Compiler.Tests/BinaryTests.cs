@@ -1,3 +1,4 @@
+using Tern.Compiler.Tools;
 using Tern.Compiler.Syntax;
 using Tern.Cpu;
 
@@ -38,7 +39,7 @@ public class BinaryTests
             Result = TernCompiler.Compile(source, sourcePath: sourcePath);
             StartState.Fill(Ram);
             Ram.Load((ushort)Result.LoadAddress, Result.Image);
-            Cpu = new Cpu6502(Ram) { SP = 0xFF };
+            Cpu = new Cpu6502(Ram, Result.Platform.Cpu) { SP = 0xFF };
             StartState.Set(Cpu);
         }
 
@@ -379,7 +380,7 @@ public class BinaryTests
         StartState.Fill(ram);
         ram.Load((ushort)result.LoadAddress, result.Image);
         setup?.Invoke(ram);
-        var cpu = new Cpu6502(ram) { PC = (ushort)result.Entry, SP = 0xFF, I = true };
+        var cpu = new Cpu6502(ram, result.Platform.Cpu) { PC = (ushort)result.Entry, SP = 0xFF, I = true };
         StartState.Set(cpu);
         long nextIrq = irqEvery;
         while (cpu.Cycles < cycles)

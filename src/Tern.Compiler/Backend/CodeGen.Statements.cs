@@ -111,7 +111,9 @@ public sealed partial class CodeGen
             if (w.Body.Code.FirstOrDefault() is ForStmt first && NonEmptyInside(w.Condition, first)) _nonEmpty.Add(first);
             Place(top);
             _loops.Add((end, test));
+            int bodyStart = _out.Count;
             GenBlock(w.Body);
+            CheckHeld(bodyStart, _out.Count, held, w.Body);
             _loops.RemoveAt(_loops.Count - 1);
             // The decrement must be the body's last instruction: dec v, or dex / dey for a held v.
             bool zFromDecrement = decremented is { } d && _out.Count > 0 && _out[^1] switch
@@ -156,7 +158,7 @@ public sealed partial class CodeGen
     {
         ContinueStmt => true,
         WhileStmt or ForStmt => false,
-        _ => Children(node).Any(ContinuesLoop),
+        _ => node.Children.Any(ContinuesLoop),
     };
 
     /// <summary>
@@ -453,6 +455,12 @@ public sealed partial class CodeGen
             {
                 Op(a.Op == TokenKind.PlusEq ? Inc : Dec, Var(v));
             }
+            else if (v.IsVolatile)
+            {
+                // inc / bne / inc would write the high byte only on a carry, and lda / bne / dec / dec would read
+                // the low byte twice: every byte is read and written once (spec 4), so the add or subtraction instead.
+                Assign(target, new BinaryExpr(a.Pos, a.Op == TokenKind.PlusEq ? TokenKind.Plus : TokenKind.Minus, target, a.Value) { Type = target.Type });
+            }
             else if (a.Op == TokenKind.PlusEq)
             {
                 var done = NewLabel("inc");
@@ -460,11 +468,6 @@ public sealed partial class CodeGen
                 Branch(Bne, done);
                 Op(Inc, Var(v, 1));
                 Place(done);
-            }
-            else if (v.IsVolatile)
-            {
-                // lda / bne / dec / dec would read the low byte twice (spec 4): the subtraction instead.
-                Assign(target, new BinaryExpr(a.Pos, TokenKind.Minus, target, a.Value) { Type = target.Type });
             }
             else
             {
@@ -489,7 +492,8 @@ public sealed partial class CodeGen
         }
 
         // w += 256 / w -= 256 on a 16-bit variable: inc w+1 / dec w+1; another multiple of 256 adds to the high byte only.
-        if (a.Op is TokenKind.PlusEq or TokenKind.MinusEq && target is NameExpr { Symbol: { InMemory: true, Type.Size: 2 } wv }
+        // Not on a volatile variable, whose low byte is read and written too (spec 4).
+        if (a.Op is TokenKind.PlusEq or TokenKind.MinusEq && target is NameExpr { Symbol: { InMemory: true, Type.Size: 2, IsVolatile: false } wv }
             && a.Value.ConstValue is long whole && (whole & 0xFF) == 0 && whole is > 0 and <= 0xFF00)
         {
             long k = whole >> 8;
@@ -509,7 +513,8 @@ public sealed partial class CodeGen
             && FoldIndexOffset(incx.Index, ArrayOf(incx)) is var (incIndex, incShift) && IndexIsCheap(incIndex)
             && (incIndex is NameExpr { Symbol.Register: Register.X } || (incIndex is not NameExpr { Symbol.Register: not null } && !_reserved.Contains(Register.X))))
         {
-            LoadIndex(incIndex);   // X, by the condition above
+            var incReg = LoadIndex(incIndex);
+            CheckRegister(incReg, Register.X, "the index of inc a,x loads into X");
             Emit(a.Op == TokenKind.PlusEq ? Inc : Dec, AbsoluteX, Indexed(ArrayOf(incx), 0, incShift, incIndex));
             return;
         }
@@ -712,12 +717,14 @@ public sealed partial class CodeGen
             saved = AcquireTemp(1);
             Op(Sta, Var(saved));
         }
+        int start = _out.Count;
         var reg = LoadIndex(index);
         if (saved is not null)
         {
             Op(Lda, Var(saved));
             Release(saved);
         }
+        else CheckUnchanged(start, CpuState.A, "loading the index keeps A (IndexIsCheap)");
         Emit(Sta, reg == Register.X ? AbsoluteX : AbsoluteY, Indexed(arr, table, shift, index));
     }
 }

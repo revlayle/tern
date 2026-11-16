@@ -200,8 +200,7 @@ public sealed partial class Checker
         if (v.Kind != VariableKind.Global || _function is null) return;
         // Overlays in one area share their memory: another one's variables are not there while this one runs.
         // A bank's variables are resident, in RAM; its data is in the bank.
-        if (_function.OverlayArea is { } area && v.OverlayArea == area && v.OverlayUnit != _function.OverlayUnit && (v.FixedAddress is null || v.IsData) && v.Region is null
-            && (v.IsData || !v.Module!.InBank))
+        if (NotPresentWith(v, _function.OverlayArea, _function.OverlayUnit))
             throw new CompileError(pos,
                 $"'{v.Name}' belongs to {v.Module!.Name}, which is {NeverTogether(v.Module, _function.Module!)} as {_function.Module!.Name}. They are never loaded together and share their memory. " +
                 "Keep shared state in a resident module or the main file");
@@ -326,19 +325,8 @@ public sealed partial class Checker
         throw new CompileError(a.Pos, a.Message);
     }
 
-    private static void CollectNames(Expr e, HashSet<string> names)
-    {
-        switch (e)
-        {
-            case NameExpr n: names.Add(n.Name); break;
-            case UnaryExpr u: CollectNames(u.Operand, names); break;
-            case BinaryExpr b: CollectNames(b.Left, names); CollectNames(b.Right, names); break;
-            case CallExpr c: foreach (var x in c.Args) CollectNames(x, names); break;
-            case CastExpr c: CollectNames(c.Operand, names); break;
-            case IndexExpr i: CollectNames(i.Target, names); CollectNames(i.Index, names); break;
-            case MemberExpr m: CollectNames(m.Target, names); break;
-        }
-    }
+    private static void CollectNames(Expr e, HashSet<string> names) =>
+        names.UnionWith(e.Descendants().OfType<NameExpr>().Select(n => n.Name));
 
     private void DeclareConst(ConstDecl decl)
     {
@@ -377,7 +365,7 @@ public sealed partial class Checker
 
     private void DeclareFunction(FnDecl decl)
     {
-        if (decl.Name is "addr" or "len" or "sizeof" or "offset" or "include_bytes")
+        if (BuiltinNames.Contains(decl.Name))
             throw new CompileError(decl.Pos, $"'{decl.Name}' is a built-in function; choose another name");
         var fn = new FunctionSymbol(_module.Qualify(decl.Name), decl.Pos) { Declaration = decl, IsInterrupt = decl.IsInterrupt, IsInline = decl.IsInline };
         decl.Symbol = fn;
@@ -838,11 +826,10 @@ public sealed partial class Checker
             throw new CompileError(init.Pos,
                 "An address in an initial value is filled in when the program is placed, so it can only be used alone, plus or minus a constant, or as .lo / .hi. Assign other values at the start of main");
         // Overlays in one area share their memory: the other one's code or data is not there while this one is loaded (spec 8.5).
-        var (otherArea, otherModule, name) = function is not null ? (function.OverlayArea, function.Module, function.Name) : (variable!.OverlayArea, variable.Module, variable.QualifiedName);
-        if (target.OverlayArea is { } area && otherArea == area && otherModule!.Unit != target.Module!.Unit && (variable is null || variable.FixedAddress is null || variable.IsData)
-            && (variable is null || variable.IsData || !otherModule.InBank))
+        var (otherModule, name) = function is not null ? (function.Module, function.Name) : (variable!.Module, variable.QualifiedName);
+        if (function is not null ? NotPresentWith(function, target.OverlayArea, target.OverlayUnit) : NotPresentWith(variable!, target.OverlayArea, target.OverlayUnit))
             throw new CompileError(init.Pos,
-                $"'{name}' is in {otherModule!.Name}, which is {NeverTogether(otherModule, target.Module)} as {target.Module!.Name}. They are never loaded together, so the address would point at the wrong memory. " +
+                $"'{name}' is in {otherModule!.Name}, which is {NeverTogether(otherModule, target.Module!)} as {target.Module!.Name}. They are never loaded together, so the address would point at the wrong memory. " +
                 "Take the address in resident code, or put one of them in another area");
         var (fillVariable, fillOffset) = (variable?.AliasOf ?? variable, (int)offset + (variable?.AliasOffset ?? 0));
         if (part == AddressPart.Word && highAt is { } h && h != at + 1)
@@ -870,17 +857,7 @@ public sealed partial class Checker
     }
 
     /// <summary>Whether the expression has an <c>addr()</c> in it, before it is checked.</summary>
-    private static bool UsesAddr(Expr e) => e switch
-    {
-        CallExpr c => c.Name == "addr" || c.Args.Any(UsesAddr),
-        UnaryExpr u => UsesAddr(u.Operand),
-        BinaryExpr b => UsesAddr(b.Left) || UsesAddr(b.Right),
-        CastExpr c => UsesAddr(c.Operand),
-        MemberExpr m => UsesAddr(m.Target),
-        ArrayLiteralExpr a => a.Elements.Any(UsesAddr),
-        StructLiteralExpr s => s.Fields.Any(f => UsesAddr(f.Value)),
-        _ => false,
-    };
+    private static bool UsesAddr(Expr e) => e.Descendants().Any(n => n is CallExpr { Name: "addr" });
 
     /// <param name="layOut">False for the target of a pointer, which may be a struct still being laid out (<c>next: ptr Enemy</c>).</param>
     private TernType ResolveType(TypeSyntax syntax, bool layOut = true)

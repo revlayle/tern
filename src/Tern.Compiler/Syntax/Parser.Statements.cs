@@ -56,13 +56,13 @@ public sealed partial class Parser
             case TokenKind.Const when PeekAt(1).Kind == TokenKind.Fn:
                 throw new CompileError(Current.Pos, "'const fn' must be declared outside functions. Move it to the top level of the file");
             case TokenKind.Const: return ParseConst();
-            case TokenKind.Identifier when _inConstFn && Current.Text == "emit" && PeekAt(1).Kind == TokenKind.LBrace:
+            case TokenKind.Identifier when _inConstFn && AtWord(Word.Emit) && PeekAt(1).Kind == TokenKind.LBrace:
             {
                 var t = Advance();
                 return new EmitStmt(t.Pos, ParseAsmBody(emit: true));
             }
             // Outside a const fn, 'emit {' would be read as a struct literal (review code-quality-syntax 19).
-            case TokenKind.Identifier when Current.Text == "emit" && PeekAt(1).Kind == TokenKind.LBrace:
+            case TokenKind.Identifier when AtWord(Word.Emit) && PeekAt(1).Kind == TokenKind.LBrace:
                 throw new CompileError(Current.Pos,
                     "'emit' adds assembly to the caller only in a const fn, a code generator. Write the assembly in an 'asm { }' block here, or move it into a const fn");
             case TokenKind.Linear when PeekAt(1).Kind == TokenKind.Data:
@@ -81,7 +81,7 @@ public sealed partial class Parser
             }
             case TokenKind.For: return ParseFor();
             case TokenKind.Match: return ParseMatch();
-            case TokenKind.Identifier when Current.Text == "indexed" && PeekAt(1).Kind == TokenKind.Match:
+            case TokenKind.Identifier when AtWord(Word.Indexed) && PeekAt(1).Kind == TokenKind.Match:
                 Advance();
                 return ParseMatch(indexed: true);
             case TokenKind.Break:
@@ -187,7 +187,7 @@ public sealed partial class Parser
             bool isDefault = false;
             do
             {
-                if (At(TokenKind.Identifier) && Current.Text == "_")
+                if (AtWord(Word.Discard))
                 {
                     var underscore = Advance();
                     if (patterns.Count > 0 || At(TokenKind.Comma))
@@ -237,14 +237,14 @@ public sealed partial class Parser
         string range = TokenText(rangeStart, _pos);
         // 'step' is a keyword only here, right after the range (spec 13); elsewhere it is a name.
         Expr? step = null;
-        if (At(TokenKind.Identifier) && Current.Text == "step")
+        if (AtWord(Word.Step))
         {
             Advance();
             step = ParseHeaderExpr();
         }
         Register? reg = Accept(TokenKind.Using) ? ParseRegister() : null;
         var body = ParseBlock();
-        return new ForStmt(start.Pos, name.Text == "_" ? null : name.Text, from, to, inclusive, step, reg, body) { RangeText = range, VariablePos = name.Pos };
+        return new ForStmt(start.Pos, name.Text == Word.Discard ? null : name.Text, from, to, inclusive, step, reg, body) { RangeText = range, VariablePos = name.Pos };
     }
 
     // ---------- Assembly ----------
@@ -338,7 +338,7 @@ public sealed partial class Parser
 
         // "asl a": the accumulator, for the shifts and rotates.
         if (m is Mnemonic.Asl or Mnemonic.Lsr or Mnemonic.Rol or Mnemonic.Ror
-            && At(TokenKind.Identifier) && Current.Text is "a" or "A"
+            && At(TokenKind.Identifier) && Registers.Named(Current.Text, asm: true) == Register.A
             && PeekAt(1).Kind is TokenKind.Newline or TokenKind.RBrace)
         {
             Advance();
@@ -368,12 +368,9 @@ public sealed partial class Parser
         if (Accept(TokenKind.Comma))
         {
             var r = Expect(TokenKind.Identifier, "x or y after ','");
-            index = r.Text switch
-            {
-                "x" or "X" => Register.X,
-                "y" or "Y" => Register.Y,
-                _ => throw new CompileError(r.Pos, $"Expected x or y after ',', found '{r.Text}'. Write ',x' or ',y'"),
-            };
+            index = Registers.Named(r.Text, asm: true) is Register.X or Register.Y
+                ? Registers.Named(r.Text, asm: true)
+                : throw new CompileError(r.Pos, $"Expected x or y after ',', found '{r.Text}'. Write ',x' or ',y'");
         }
         return new AsmInstruction(pos, m, AsmForm.Direct, operand, index);
     }
@@ -381,7 +378,7 @@ public sealed partial class Parser
     private void ExpectIndexRegister(Register reg, string form)
     {
         var r = Expect(TokenKind.Identifier, $"{reg.ToString().ToLowerInvariant()} in {form}");
-        if (!string.Equals(r.Text, reg.ToString(), StringComparison.OrdinalIgnoreCase))
+        if (Registers.Named(r.Text, asm: true) != reg)
             throw new CompileError(r.Pos, $"Expected {reg.ToString().ToLowerInvariant()} in {form}, found '{r.Text}'. Write {form}");
     }
 }

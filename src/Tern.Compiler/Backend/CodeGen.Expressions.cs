@@ -52,7 +52,13 @@ public sealed partial class CodeGen
         if (IsPointerIndex(ix))
         {
             if (ix.Type.Size != 1 || DirectPointer(ix.Target) is not { } p || !PointerIndexIsCheap(ix)) return null;
-            return (m, _) => { LoadPointerIndex(ix, 0); Emit(m, IndirectIndexed, Var(p)); };
+            return (m, _) =>
+            {
+                int start = _out.Count;
+                LoadPointerIndex(ix, 0);
+                CheckUnchanged(start, CpuState.A, "loading Y for a pointer element keeps A (PointerIndexIsCheap)");
+                Emit(m, IndirectIndexed, Var(p));
+            };
         }
         var arr = ArrayOf(ix);
         var (index, shift) = FoldIndexOffset(ix.Index, arr);
@@ -61,22 +67,15 @@ public sealed partial class CodeGen
         if (size == 2 && ReadsVolatile(index)) return null;
         return (m, b) =>
         {
+            int start = _out.Count;
             var reg = LoadIndex(index);
+            CheckUnchanged(start, CpuState.A, "loading the index keeps A (IndexIsCheap)");
             Emit(m, reg == Register.X ? AbsoluteX : AbsoluteY, Indexed(arr, b == 0 ? 0 : HighTable(arr), shift, index));
         };
     }
 
     /// <summary>True if evaluating e reads volatile memory.</summary>
-    private static bool ReadsVolatile(Expr e) => e switch
-    {
-        NameExpr { Symbol: VariableSymbol v } => v.IsVolatile,
-        UnaryExpr u => ReadsVolatile(u.Operand),
-        BinaryExpr b => ReadsVolatile(b.Left) || ReadsVolatile(b.Right),
-        IndexExpr ix => ReadsVolatile(ix.Target) || ReadsVolatile(ix.Index),
-        MemberExpr m => ReadsVolatile(m.Target),
-        CastExpr c => ReadsVolatile(c.Operand),
-        _ => false,
-    };
+    private static bool ReadsVolatile(Expr e) => e.Descendants().Any(n => n is NameExpr { Symbol: VariableSymbol { IsVolatile: true } });
 
     /// <summary>Loading this index into X or Y does not change A.</summary>
     private bool IndexIsCheap(Expr index) =>
@@ -263,7 +262,11 @@ public sealed partial class CodeGen
     /// <summary>As <see cref="CarryFor(TokenKind)"/>, with no <c>clc</c> when the code for <paramref name="last"/>, just generated, left the carry clear.</summary>
     private void CarryFor(TokenKind op, Expr last)
     {
-        if (op == TokenKind.Plus && CarryClearAfter(last)) return;
+        if (op == TokenKind.Plus && CarryClearAfter(last))
+        {
+            CheckCarryClear(last);
+            return;
+        }
         CarryFor(op);
     }
 

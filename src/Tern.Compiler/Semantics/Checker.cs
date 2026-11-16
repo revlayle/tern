@@ -1,4 +1,5 @@
 using Tern.Compiler.Syntax;
+using Tern.Cpu;
 
 namespace Tern.Compiler.Semantics;
 
@@ -34,6 +35,9 @@ public sealed class CheckedProgram(
 /// </summary>
 public sealed partial class Checker
 {
+    /// <summary>The built-in functions (spec 6.5, 6.6), which no declaration may be named: one list for every check (review code-quality-semantics 20).</summary>
+    internal static readonly IReadOnlySet<string> BuiltinNames = new HashSet<string> { "addr", "len", "sizeof", "offset", "include_bytes" };
+
     private readonly List<Dictionary<string, Symbol>> _scopes = [];
     private readonly List<VariableSymbol> _globals = [];
     /// <summary>The file being checked.</summary>
@@ -47,12 +51,15 @@ public sealed partial class Checker
     private readonly Dictionary<VariableSymbol, long> _loopMax = [];
     private int _hiddenCounter;
     private readonly Platform _platform;
+    /// <summary>The target CPU's instructions: the modes assembly may use, and the indirect jump's page wrap.</summary>
+    private readonly InstructionSet _instructions;
 
     private MemoryLayout _layout;
 
     private Checker(Platform platform, ErrorList? errors)
     {
         _platform = platform;
+        _instructions = platform.InstructionSet;
         _errors = errors;
         _layout = MemoryLayout.Default(platform);
     }
@@ -146,10 +153,10 @@ public sealed partial class Checker
             Recover(() => throw new CompileError(new SourcePos(1, 1, modules[^1].Path), MemoryLayout.NeedsCartridge(_platform)));
 
         // "@ name" means a region or an address, never either depending on other declarations (spec 8.4).
-        foreach (var line in modules[^1].Syntax.Memory?.Lines.Where(l => l.Kind is "region" or "chr") ?? [])
+        foreach (var line in modules[^1].Syntax.Memory?.Lines.Where(l => l.Kind is MemoryKind.Region or MemoryKind.Chr) ?? [])
             if (modules[^1].Scope.TryGetValue(line.Name!, out var clash) && clash is not ErrorSymbol || modules[^1].Imports.ContainsKey(line.Name!))
                 Recover(() => throw new CompileError(line.Pos,
-                    $"The {(line.Kind == "chr" ? "chr area" : "region")} '{line.Name}' has the name of {(clash is null ? "an imported module" : $"a {KindName(clash)} of the main file (line {clash.Pos.Line})")}, so '@ {line.Name}' would be ambiguous. Rename the region"));
+                    $"The {(line.Kind == MemoryKind.Chr ? "chr area" : "region")} '{line.Name}' has the name of {(clash is null ? "an imported module" : $"a {KindName(clash)} of the main file (line {clash.Pos.Line})")}, so '@ {line.Name}' would be ambiguous. Rename the region"));
 
         foreach (var import in modules[^1].Syntax.Imports.Where(i => i.Area is not null))
         {
@@ -376,9 +383,8 @@ public sealed partial class Checker
     {
         var pos = mainModule.Syntax.Exports[0].Pos;
         int start = _layout.Program[0].First;
-        // By the names they have inside the module: the symbols' names are qualified (level_api.enter).
-        var routines = api.Scope.Where(e => e.Value is FunctionSymbol { FixedAddress: not null })
-            .Select(e => (Name: e.Key, Routine: (FunctionSymbol)e.Value)).OrderBy(e => e.Routine.FixedAddress).ToList();
+        var routines = InterfaceRoutines(api);
+        var binary = new Implementer(mainModule, "this binary", "the main file", $"every binary of {api.Name}", "the caller of a binary");
 
         if (routines.FirstOrDefault(r => r.Name == "setup").Routine is not { } setup)
             throw new CompileError(pos,
@@ -406,26 +412,14 @@ public sealed partial class Checker
             if (r.FixedInputs.Count > 0)
                 throw new CompileError(r.Pos,
                     $"'{api.Name}.{name}' has fixed inputs, which a function of the binary cannot receive. Declare them as parameters in registers");
-            if (!mainModule.Scope.TryGetValue(name, out var symbol) || symbol is not FunctionSymbol f)
-                throw new CompileError(pos,
-                    $"'{api.Name}.{name}' has no function in this binary. Write 'fn {name}({Signature.Parameters(r)}){Signature.Return(r)}' in the main file");
-            CheckExportable(f, name, f.Pos, "the caller of a binary");
-            if (!Signature.Matches(f, r))
-                throw new CompileError(f.Pos,
-                    $"'{name}' does not match '{api.Name}.{name}': it is 'fn {name}({Signature.Parameters(f)}){Signature.Return(f)}', the interface says 'fn {name}({Signature.Parameters(r)}){Signature.Return(r)}'. Change the function to match");
-            result[f] = r;
+            result[ImplementingFunction(api, name, r, binary, pos)] = r;
         }
 
-        // Data every binary provides at a fixed address, such as a level's header: the interface's
-        // volatile variables. A plain fixed variable is memory of the host, which levels may use.
-        foreach (var (name, v) in api.Scope.Where(e => e.Value is VariableSymbol { FixedAddress: not null, IsData: false, DeclaredVolatile: true })
-                     .Select(e => (e.Key, (VariableSymbol)e.Value)).OrderBy(e => e.Item2.FixedAddress))
+        // Data every binary provides at a fixed address, such as a level's header. A plain fixed variable
+        // is memory of the host, which levels may use.
+        foreach (var (name, v) in InterfaceData(api))
         {
-            string want = $"data {name}: {v.Type} @ ${v.FixedAddress:X4}";
-            if (!mainModule.Scope.TryGetValue(name, out var symbol) || symbol is not VariableSymbol d)
-                throw new CompileError(pos, $"'{api.Name}.{name}' is data every binary of {api.Name} provides. Declare '{want} = ...' in the main file");
-            if (!d.IsData || !d.Type.SameAs(v.Type) || d.FixedAddress != v.FixedAddress)
-                throw new CompileError(d.Pos, $"'{name}' does not match '{api.Name}.{name}'. Declare it as '{want} = ...'");
+            ImplementingData(api, name, v, binary, pos);
             _binaryData[v] = name;
         }
         return result;

@@ -239,7 +239,7 @@ public class CopyFromSourceTests
         string Optimize(params AsmItem[] code)
         {
             var list = code.ToList();
-            Optimizer.Run(list, f);
+            Optimizer.Run(list, f, InstructionSet.Nmos6502);
             return string.Join("|", list.OfType<Instr>().Select(i => $"{i.Mnemonic.ToString().ToLowerInvariant()} {i.Operand}".Trim()));
         }
         Instr Abs(Mnemonic m, VariableSymbol v) => new(m, Absolute, new VarOperand(v));

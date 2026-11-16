@@ -6,21 +6,54 @@ namespace Tern.Compiler.Syntax;
 public abstract class Node(SourcePos pos)
 {
     public SourcePos Pos { get; } = pos;
+
+    /// <summary>
+    /// The nodes directly inside this one, in source order (review code-quality-semantics 14). Every
+    /// type, expression, statement and assembly line must list them (the property is abstract there),
+    /// so a walk over <see cref="Descendants"/> never skips a new child. Declarations list none.
+    /// </summary>
+    public virtual IEnumerable<Node> Children => [];
+
+    /// <summary>
+    /// This node and every node inside it, depth first in source order. The walk does not go inside
+    /// a node for which <paramref name="enter"/> is false (the node itself is still listed).
+    /// </summary>
+    public IEnumerable<Node> Descendants(Func<Node, bool>? enter = null)
+    {
+        var stack = new Stack<Node>();
+        stack.Push(this);
+        while (stack.Count > 0)
+        {
+            var node = stack.Pop();
+            yield return node;
+            if (enter is not null && !enter(node)) continue;
+            foreach (var child in node.Children.Reverse()) stack.Push(child);
+        }
+    }
+
+    /// <summary>The nodes given, without the missing ones.</summary>
+    protected static IEnumerable<Node> Of(params Node?[] nodes) => nodes.OfType<Node>();
 }
 
 // ---------- Types ----------
 
-public abstract class TypeSyntax(SourcePos pos) : Node(pos);
+public abstract class TypeSyntax(SourcePos pos) : Node(pos)
+{
+    public abstract override IEnumerable<Node> Children { get; }
+}
 public sealed class NamedTypeSyntax(SourcePos pos, string name) : TypeSyntax(pos)
 {
+    public override IEnumerable<Node> Children => [];
     public string Name { get; } = name;
 }
 public sealed class PointerTypeSyntax(SourcePos pos, TypeSyntax target) : TypeSyntax(pos)
 {
+    public override IEnumerable<Node> Children => [Target];
     public TypeSyntax Target { get; } = target;
 }
 public sealed class ArrayTypeSyntax(SourcePos pos, TypeSyntax element, Expr? length) : TypeSyntax(pos)
 {
+    public override IEnumerable<Node> Children => Of(Element, Length);
     public TypeSyntax Element { get; } = element;
     /// <summary>The length, or null for <c>[T; _]</c>: taken from the list initial value (spec 4).</summary>
     public Expr? Length { get; } = length;
@@ -30,6 +63,8 @@ public sealed class ArrayTypeSyntax(SourcePos pos, TypeSyntax element, Expr? len
 
 public abstract class Expr(SourcePos pos) : Node(pos)
 {
+    public abstract override IEnumerable<Node> Children { get; }
+
     /// <summary>Set by the checker.</summary>
     public TernType Type { get; set; } = TernType.Error;
     /// <summary>Set by the checker when the expression is a compile-time constant.</summary>
@@ -55,11 +90,13 @@ public abstract class Expr(SourcePos pos) : Node(pos)
 
 public sealed class NumberExpr(SourcePos pos, long value) : Expr(pos)
 {
+    public override IEnumerable<Node> Children => [];
     public long Value { get; } = value;
 }
 /// <summary>A real literal such as <c>1.5</c> (spec 4.1): only in compile-time code.</summary>
 public sealed class RealExpr(SourcePos pos, double value, string text) : Expr(pos)
 {
+    public override IEnumerable<Node> Children => [];
     public double Value { get; } = value;
     /// <summary>As written, for error messages.</summary>
     public string Text { get; } = text;
@@ -69,6 +106,7 @@ public sealed class RealExpr(SourcePos pos, double value, string text) : Expr(po
 /// </summary>
 public sealed class ListForExpr(SourcePos pos, Expr element, string? variable, Expr from, Expr to, bool inclusive, Expr? step) : Expr(pos)
 {
+    public override IEnumerable<Node> Children => Of(Element, From, To, Step);
     public Expr Element { get; } = element;
     /// <summary>Null for <c>_</c>.</summary>
     public string? Variable { get; } = variable;
@@ -82,6 +120,7 @@ public sealed class ListForExpr(SourcePos pos, Expr element, string? variable, E
 /// <summary>A char literal such as <c>'A'</c> or <c>screen'A'</c>; the checker turns it into a number.</summary>
 public sealed class CharExpr(SourcePos pos, char value, string? encoding) : Expr(pos)
 {
+    public override IEnumerable<Node> Children => [];
     public char Value { get; } = value;
     /// <summary>The encoding prefix, or null for the target's default.</summary>
     public string? Encoding { get; } = encoding;
@@ -89,6 +128,7 @@ public sealed class CharExpr(SourcePos pos, char value, string? encoding) : Expr
 /// <summary>A string literal: <c>"..."</c> in the target's default encoding, or <c>screen"..."</c> in a named one.</summary>
 public sealed class StringExpr(SourcePos pos, string text, string? encoding) : Expr(pos)
 {
+    public override IEnumerable<Node> Children => [];
     /// <summary>The characters after escapes; see <see cref="Lexer.RawByteBase"/>.</summary>
     public string Text { get; } = text;
     /// <summary>The encoding prefix, or null for the target's default.</summary>
@@ -103,15 +143,18 @@ public sealed record FieldValue(SourcePos Pos, string Name, Expr Value);
 /// </summary>
 public sealed class StructLiteralExpr(SourcePos pos, string structName, List<FieldValue> fields) : Expr(pos)
 {
+    public override IEnumerable<Node> Children => Fields.Select(f => f.Value);
     public string StructName { get; } = structName;
     public List<FieldValue> Fields { get; } = fields;
 }
 public sealed class BoolExpr(SourcePos pos, bool value) : Expr(pos)
 {
+    public override IEnumerable<Node> Children => [];
     public bool Value { get; } = value;
 }
 public sealed class NameExpr(SourcePos pos, string name) : Expr(pos)
 {
+    public override IEnumerable<Node> Children => [];
     public string Name { get; } = name;
     /// <summary>
     /// For a name in an instruction a generator emitted (spec 4.1): the symbol it names in the
@@ -123,11 +166,13 @@ public sealed class NameExpr(SourcePos pos, string name) : Expr(pos)
 }
 public sealed class UnaryExpr(SourcePos pos, TokenKind op, Expr operand) : Expr(pos)
 {
+    public override IEnumerable<Node> Children => [Operand];
     public TokenKind Op { get; } = op;
     public Expr Operand { get; set; } = operand;
 }
 public sealed class BinaryExpr(SourcePos pos, TokenKind op, Expr left, Expr right) : Expr(pos)
 {
+    public override IEnumerable<Node> Children => [Left, Right];
     public TokenKind Op { get; } = op;
     public Expr Left { get; set; } = left;
     public Expr Right { get; set; } = right;
@@ -140,6 +185,7 @@ public sealed class BinaryExpr(SourcePos pos, TokenKind op, Expr left, Expr righ
 }
 public sealed class CallExpr(SourcePos pos, string name, List<Expr> args) : Expr(pos)
 {
+    public override IEnumerable<Node> Children => Args;
     public string Name { get; } = name;
     public List<Expr> Args { get; } = args;
     public FunctionSymbol? Function { get; set; }
@@ -150,6 +196,7 @@ public sealed class CallExpr(SourcePos pos, string name, List<Expr> args) : Expr
 }
 public sealed class IndexExpr(SourcePos pos, Expr target, Expr index) : Expr(pos)
 {
+    public override IEnumerable<Node> Children => [Target, Index];
     public Expr Target { get; set; } = target;
     public Expr Index { get; set; } = index;
 
@@ -165,22 +212,28 @@ public sealed class IndexExpr(SourcePos pos, Expr target, Expr index) : Expr(pos
 /// <summary>Member access. In v0 only <c>.lo</c> and <c>.hi</c> on 16-bit values.</summary>
 public sealed class MemberExpr(SourcePos pos, Expr target, string member) : Expr(pos)
 {
+    public override IEnumerable<Node> Children => [Target];
     public Expr Target { get; set; } = target;
     public string Member { get; } = member;
 }
 public sealed class ArrayLiteralExpr(SourcePos pos, List<Expr> elements) : Expr(pos)
 {
+    public override IEnumerable<Node> Children => Elements;
     public List<Expr> Elements { get; } = elements;
 }
 public sealed class CastExpr(SourcePos pos, Expr operand, TypeSyntax target) : Expr(pos)
 {
+    public override IEnumerable<Node> Children => [Operand, Target];
     public Expr Operand { get; set; } = operand;
     public TypeSyntax Target { get; } = target;
 }
 
 // ---------- Statements ----------
 
-public abstract class Stmt(SourcePos pos) : Node(pos);
+public abstract class Stmt(SourcePos pos) : Node(pos)
+{
+    public abstract override IEnumerable<Node> Children { get; }
+}
 
 public enum PlacementKind { None, Address, ZeroPage, Align }
 
@@ -196,6 +249,7 @@ public sealed class Placement(PlacementKind kind, Expr? address = null)
 
 public sealed class VarDecl(SourcePos pos, string name, TypeSyntax? type, Placement placement, Expr? init) : Stmt(pos)
 {
+    public override IEnumerable<Node> Children => Of(TypeSyntax, Placement.Address, Placement.Alignment, Init);
     public string Name { get; } = name;
     public TypeSyntax? TypeSyntax { get; } = type;
     public Placement Placement { get; } = placement;
@@ -214,6 +268,7 @@ public sealed class VarDecl(SourcePos pos, string name, TypeSyntax? type, Placem
 }
 public sealed class AssignStmt(SourcePos pos, Expr target, TokenKind op, Expr value) : Stmt(pos)
 {
+    public override IEnumerable<Node> Children => [Target, Value];
     public Expr Target { get; set; } = target;
     /// <summary><see cref="TokenKind.Eq"/> or a compound operator such as <see cref="TokenKind.PlusEq"/>.</summary>
     public TokenKind Op { get; } = op;
@@ -221,16 +276,19 @@ public sealed class AssignStmt(SourcePos pos, Expr target, TokenKind op, Expr va
 }
 public sealed class ExprStmt(SourcePos pos, Expr expr) : Stmt(pos)
 {
+    public override IEnumerable<Node> Children => [Expr];
     public Expr Expr { get; set; } = expr;
 }
 public sealed class BlockStmt(SourcePos pos, List<Stmt> statements) : Stmt(pos)
 {
+    public override IEnumerable<Node> Children => Statements;
     public List<Stmt> Statements { get; } = statements;
     /// <summary>The statements that may have code: all but local <c>const</c> declarations.</summary>
     public List<Stmt> Code => Statements.Where(s => s is not ConstDecl).ToList();
 }
 public sealed class IfStmt(SourcePos pos, Expr condition, BlockStmt then, Stmt? @else) : Stmt(pos)
 {
+    public override IEnumerable<Node> Children => Of(Condition, Then, Else);
     public Expr Condition { get; set; } = condition;
     public BlockStmt Then { get; } = then;
     /// <summary>A <see cref="BlockStmt"/>, or an <see cref="IfStmt"/> for "else if".</summary>
@@ -238,6 +296,7 @@ public sealed class IfStmt(SourcePos pos, Expr condition, BlockStmt then, Stmt? 
 }
 public sealed class WhileStmt(SourcePos pos, Expr condition, BlockStmt body) : Stmt(pos)
 {
+    public override IEnumerable<Node> Children => [Condition, Body];
     public Expr Condition { get; set; } = condition;
     public BlockStmt Body { get; } = body;
 }
@@ -245,6 +304,7 @@ public sealed class ForStmt(
     SourcePos pos, string? variable, Expr from, Expr to, bool inclusive, Expr? step, Register? usingRegister, BlockStmt body)
     : Stmt(pos)
 {
+    public override IEnumerable<Node> Children => Of(From, To, Step, Body);
     /// <summary>Null for <c>_</c>.</summary>
     public string? Variable { get; } = variable;
     /// <summary>Where the loop variable is written.</summary>
@@ -264,7 +324,10 @@ public sealed class ForStmt(
     /// <summary>True for a step that is a u8 expression; the loop counts up and <c>StepValue</c> is 1.</summary>
     public bool VariableStep { get; set; }
 }
-public sealed class BreakStmt(SourcePos pos) : Stmt(pos);
+public sealed class BreakStmt(SourcePos pos) : Stmt(pos)
+{
+    public override IEnumerable<Node> Children => [];
+}
 
 /// <summary>
 /// A statement with a syntax error, which was reported (spec 13). <see cref="Name"/> is the name it
@@ -272,12 +335,14 @@ public sealed class BreakStmt(SourcePos pos) : Stmt(pos);
 /// </summary>
 public sealed class ErrorStmt(SourcePos pos, string? name) : Stmt(pos)
 {
+    public override IEnumerable<Node> Children => [];
     public string? Name { get; } = name;
 }
 
 /// <summary><c>match subject { 0 => a()  1, 2 => b()  3..=7 => { ... }  _ => c() }</c></summary>
 public sealed class MatchStmt(SourcePos pos, Expr subject, List<MatchArm> arms) : Stmt(pos)
 {
+    public override IEnumerable<Node> Children => [Subject, .. Arms.SelectMany(a => a.Patterns.SelectMany(p => Of(p.Low, p.High)).Append(a.Body))];
     public Expr Subject { get; set; } = subject;
     public List<MatchArm> Arms { get; } = arms;
     /// <summary>Written <c>indexed match</c>: always a jump table, with no range check (spec 5.2).</summary>
@@ -313,6 +378,7 @@ public sealed class MatchPattern(SourcePos pos, Expr low, Expr? high)
 /// <summary>An <c>asm { ... }</c> block, or the body of an <c>asm fn</c>.</summary>
 public sealed class AsmStmt(SourcePos pos, List<AsmLine> lines) : Stmt(pos)
 {
+    public override IEnumerable<Node> Children => [.. Locals, .. Lines];
     public List<AsmLine> Lines { get; } = lines;
     /// <summary>The <c>var</c> lines at the start of an <c>inline asm fn</c> body (spec 6.2): its local variables.</summary>
     public List<VarDecl> Locals { get; } = [];
@@ -324,6 +390,8 @@ public sealed class AsmStmt(SourcePos pos, List<AsmLine> lines) : Stmt(pos)
 
 public abstract class AsmLine(SourcePos pos) : Node(pos)
 {
+    public abstract override IEnumerable<Node> Children { get; }
+
     /// <summary>For a line a generator emitted (spec 4.1): the generator call in the asm block. <see cref="Node.Pos"/> is the emit line.</summary>
     public SourcePos? CalledFrom { get; init; }
 }
@@ -331,6 +399,7 @@ public abstract class AsmLine(SourcePos pos) : Node(pos)
 /// <summary>A local label such as <c>.loop:</c>. <see cref="Name"/> includes the dot.</summary>
 public sealed class AsmLabel(SourcePos pos, string name) : AsmLine(pos)
 {
+    public override IEnumerable<Node> Children => [];
     public string Name { get; } = name;
 }
 
@@ -356,6 +425,7 @@ public enum AsmForm
 public sealed class AsmInstruction(SourcePos pos, Mnemonic mnemonic, AsmForm form, Expr? operand, Register? index)
     : AsmLine(pos)
 {
+    public override IEnumerable<Node> Children => Of(Operand);
     public Mnemonic Mnemonic { get; } = mnemonic;
     public AsmForm Form { get; } = form;
     public Expr? Operand { get; } = operand;
@@ -371,12 +441,14 @@ public sealed class AsmInstruction(SourcePos pos, Mnemonic mnemonic, AsmForm for
 /// <summary>A generator call on a line of its own in an asm block (spec 4.1); the checker replaces it with the instructions it emits.</summary>
 public sealed class AsmGeneratorCall(SourcePos pos, CallExpr call) : AsmLine(pos)
 {
+    public override IEnumerable<Node> Children => [Call];
     public CallExpr Call { get; } = call;
 }
 
 /// <summary>A local label used as an operand: <c>bne .loop</c>.</summary>
 public sealed class AsmLabelExpr(SourcePos pos, string name) : Expr(pos)
 {
+    public override IEnumerable<Node> Children => [];
     /// <summary>Includes the dot.</summary>
     public string Name { get; } = name;
 }
@@ -391,20 +463,26 @@ public sealed record AsmValue(
 {
     public bool IsNumber => Variable is null && Function is null && Label is null;
 }
-public sealed class ContinueStmt(SourcePos pos) : Stmt(pos);
+public sealed class ContinueStmt(SourcePos pos) : Stmt(pos)
+{
+    public override IEnumerable<Node> Children => [];
+}
 /// <summary><c>emit { ... }</c> in a <c>const fn</c> (spec 4.1): adds its instructions to the asm block that called the generator.</summary>
 public sealed class EmitStmt(SourcePos pos, AsmStmt fragment) : Stmt(pos)
 {
+    public override IEnumerable<Node> Children => [Fragment];
     public AsmStmt Fragment { get; } = fragment;
 }
 /// <summary><c>assert condition, "message"</c> in a <c>const fn</c> (spec 4.1): fails the compile when the condition is false.</summary>
 public sealed class AssertStmt(SourcePos pos, Expr condition, string message) : Stmt(pos)
 {
+    public override IEnumerable<Node> Children => [Condition];
     public Expr Condition { get; } = condition;
     public string Message { get; } = message;
 }
 public sealed class ReturnStmt(SourcePos pos, Expr? value) : Stmt(pos)
 {
+    public override IEnumerable<Node> Children => Of(Value);
     public Expr? Value { get; set; } = value;
 }
 
@@ -413,6 +491,7 @@ public sealed class ReturnStmt(SourcePos pos, Expr? value) : Stmt(pos)
 /// <summary>A <c>const</c> declaration: at the top level, or a statement scoped to its block (spec 4).</summary>
 public sealed class ConstDecl(SourcePos pos, string name, TypeSyntax? type, Expr value) : Stmt(pos)
 {
+    public override IEnumerable<Node> Children => Of(TypeSyntax, Value);
     public string Name { get; } = name;
     public TypeSyntax? TypeSyntax { get; } = type;
     public Expr Value { get; set; } = value;
@@ -570,12 +649,11 @@ public sealed class MemoryDecl(SourcePos pos, List<MemoryLine> lines) : Node(pos
 public sealed record CartridgeLine(SourcePos Pos, string Board, SourcePos BoardPos, IReadOnlyList<(string Name, SourcePos Pos)> Options);
 
 /// <summary>One line of the memory block: <c>first..=last kind [name]</c>.</summary>
-public sealed class MemoryLine(SourcePos pos, Expr first, Expr last, string kind, string? name) : Node(pos)
+public sealed class MemoryLine(SourcePos pos, Expr first, Expr last, MemoryKind kind, string? name) : Node(pos)
 {
     public Expr First { get; } = first;
     public Expr Last { get; } = last;
-    /// <summary>program, zeropage, reserved, region, volatile, overlay, bank or chr.</summary>
-    public string Kind { get; } = kind;
+    public MemoryKind Kind { get; } = kind;
     /// <summary>The name after <c>region</c>, <c>overlay</c>, <c>bank</c> or <c>chr</c>.</summary>
     public string? Name { get; } = name;
 }

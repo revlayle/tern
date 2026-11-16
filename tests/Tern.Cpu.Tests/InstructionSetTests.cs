@@ -9,9 +9,9 @@ public class InstructionSetTests
     [Fact]
     public void Has_all_151_documented_opcodes()
     {
-        Assert.Equal(151, InstructionSet.All.Count);
-        Assert.Equal(151, InstructionSet.All.Select(o => o.Opcode).Distinct().Count());
-        Assert.Equal(56, InstructionSet.All.Select(o => o.Mnemonic).Distinct().Count());
+        Assert.Equal(151, InstructionSet.Nmos6502.All.Count);
+        Assert.Equal(151, InstructionSet.Nmos6502.All.Select(o => o.Opcode).Distinct().Count());
+        Assert.Equal(56, InstructionSet.Nmos6502.All.Select(o => o.Mnemonic).Distinct().Count());
     }
 
     /// <summary>
@@ -53,7 +53,7 @@ public class InstructionSetTests
         for (int op = 0; op < 256; op++)
         {
             int expected = Cycles[op >> 4][op & 15];
-            var info = InstructionSet.Decode((byte)op);
+            var info = InstructionSet.Nmos6502.Decode((byte)op);
             if (expected == 0) { Assert.Null(info); continue; }
             Assert.True(info.HasValue, $"${op:X2} is documented");
             Assert.True(expected == info!.Value.Cycles, $"${op:X2} {info.Value.Mnemonic} {info.Value.Mode}: {info.Value.Cycles} cycles, the datasheet gives {expected}");
@@ -74,7 +74,7 @@ public class InstructionSetTests
     [InlineData(Brk, Implied, 0x00, 1, 7)]
     public void Known_opcodes(Mnemonic m, AddressingMode mode, int opcode, int size, int cycles)
     {
-        Assert.True(InstructionSet.TryGet(m, mode, out var info));
+        Assert.True(InstructionSet.Nmos6502.TryGet(m, mode, out var info));
         Assert.Equal(opcode, info.Opcode);
         Assert.Equal(size, info.Size);
         Assert.Equal(cycles, info.Cycles);
@@ -83,7 +83,7 @@ public class InstructionSetTests
     [Fact]
     public void Stores_never_get_page_cross_penalty()
     {
-        Assert.All(InstructionSet.All.Where(o => o.Mnemonic is Sta or Stx or Sty),
+        Assert.All(InstructionSet.Nmos6502.All.Where(o => o.Mnemonic is Sta or Stx or Sty),
             o => Assert.False(o.PageCrossPenalty));
     }
 }

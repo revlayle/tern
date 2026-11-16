@@ -66,7 +66,7 @@ fn main() {
 ```console
 $ tern run --target c64 check.tern --dump after_right --dump after_up_left --dump ship.x --dump ship.shots
 Main returned: 26414 cycles (26377 in main)
-A=$10 X=$00 Y=$00 SP=$FF PC=$0827
+A=$10 X=$5A Y=$C3 SP=$FF PC=$0827
 after_right $0006 u16 = 320 ($0140)
 after_up_left $0008 u8 = 50 ($32)
 ship.x $0002 u16 = 220 ($00DC)
@@ -172,7 +172,7 @@ $06  1  ship.move.joy
 ```console
 $ tern run --target c64 game.tern --cycles 20000 --dump pointer0 --dump '$D000:2' --dump '$D015:1'
 Stopped after 20000 cycles; main had not returned: 20001 cycles (19973 in main)
-A=$00 X=$3F Y=$00 SP=$FB PC=$08A7
+A=$18 X=$3F Y=$C3 SP=$FB PC=$08A7
 pointer0 $07F8 u8 = 13 ($0D)
 $D000 (2 bytes):
   $D000  A0 8C

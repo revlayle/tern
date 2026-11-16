@@ -21,7 +21,7 @@ public sealed partial class Checker : ICompileTimeHost
 
     private void DeclareConstFn(FnDecl decl)
     {
-        if (decl.Name is "addr" or "len" or "sizeof" or "offset" or "include_bytes")
+        if (BuiltinNames.Contains(decl.Name))
             throw new CompileError(decl.Pos, $"'{decl.Name}' is a built-in function; choose another name");
         var fn = new ConstFnSymbol(_module.Qualify(decl.Name), decl.Pos, decl) { Module = _module };
         foreach (var p in decl.Parameters)
@@ -212,7 +212,7 @@ public sealed partial class Checker : ICompileTimeHost
             ConstSymbol { Real: not null } => true,
             _ => false,
         },
-        CallExpr { Name: "addr" or "len" or "sizeof" or "offset" or "include_bytes" } => false,
+        CallExpr c when BuiltinNames.Contains(c.Name) => false,
         CallExpr c => Lookup(c.Name) switch
         {
             ConstFnSymbol => true,
