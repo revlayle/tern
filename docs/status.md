@@ -5,8 +5,8 @@ Owned by the coding session. Updated at the end of every coding session.
 ## Current
 
 - **Milestone:** R3, fixes in the lexer, the driver, the tools and the CLI (roadmap "Before the first release: fixes and cleanup", R3; `docs/reviews/code-quality-syntax.md`, `docs/reviews/code-quality-tools.md`). R1 and R2 are merged.
-- **Branch:** `r3-fixes`, from `main` at `7fdf77b`. All of R3 is done: every correctness finding of the two files (syntax 2-5 and 12-19, tools 2, 3 and 8-16), the three spec decisions of 2026-11-15 in R3 (ASCII names; the NES vblank flag, NMI and `$2006`; `brk` with an IRQ handler), and tools 17's cycle-table test (left to R3 by R1's table). 6037 compiler tests pass and 1 theory is skipped (question 170), plus 37 CPU tests. No benchmark changed (1254 / 350780); `SkillTests` pass (no output moved; one sentence of `SKILL.md` on the NES's `tern run`). The suite takes about 11-18 seconds.
-- **Next step:** `/review r3-fixes`. Then R4 (one description per fact, and the CPU variant).
+- **Branch:** `r3-fixes`, from `main` at `7fdf77b`. All of R3 is done: every correctness finding of the two files (syntax 2-5 and 12-19, tools 2, 3 and 8-16), the three spec decisions of 2026-11-15 in R3 (ASCII names; the NES vblank flag, NMI and `$2006`; `brk` with an IRQ handler), and tools 17's cycle-table test (left to R3 by R1's table). Review R3 (`docs/reviews/r3.md`) found one must-fix (an output could overwrite an imported module), fixed in `e962e0e`; its five suggestions are handled (`7e2c003`, notes here). 6039 compiler tests pass and 1 theory is skipped (question 170), plus 37 CPU tests. No benchmark changed (1254 / 350780); `SkillTests` pass (no output moved; one sentence of `SKILL.md` on the NES's `tern run`). The suite takes about 11-18 seconds.
+- **Next step:** `/review r3-fixes` to re-check finding 1, or `/merge r3-fixes`. Then R4 (one description per fact, and the CPU variant).
 - **Done when, not met:** "no marked test is left": `VolatileAccessTests.Open_question_170` is still skipped, since question 170 is open for the spec session; no R1 test is marked for R3's areas.
 
 ### Review findings handled by R3
@@ -33,13 +33,13 @@ Roadmap "Before the first release" (decision 2026-11-15): one row per finding of
 | syntax 16 (private-use character becomes a raw byte) | `af43526` | `ErrorTests.Reports_the_whole_message_at_its_place` | fixed: an error that says to write `\$NN` |
 | syntax 17 (NES alignment padding `$00`) | `0c62722` | `NesTests.Alignment_padding_in_rom_is_ff` | fixed: `Padding.Fill`, `$FF` on a cartridge |
 | syntax 18 (`noinit linear data` two errors) | `b38279f` | `NoinitTests.A_modifier_error_is_the_only_error_of_its_declaration` | fixed |
-| syntax 19 (three messages) | `af43526`, `b38279f` | `ErrorTests.Reports_the_whole_message_at_its_place`, `DataTests.Reports_errors` | fixed: `0x`, `emit {` outside a const fn, `ascii` "not supported yet" |
+| syntax 19 (three messages) | `af43526`, `b38279f` | `ErrorTests.Reports_the_whole_message_at_its_place`, `DataTests.Reports_errors` | fixed: `0x`, `emit {` outside a const fn, `ascii` "not supported yet". Left: the general `name {` at the start of a statement (`foo { lda #1 }`), which still gets the struct literal's "Expected '=' and the value of ..."; R6 (messages as data; review R3, suggestion 6) |
 | syntax 20 (parser modes in fields) | | | not fixed: R5 (scoped helpers) |
 | syntax 21 (contextual words as strings) | | | not fixed: R4 (one description per fact) |
 | syntax 22 (small things) | | | not fixed: R5 |
 | tools 1 (run model split over three classes) | | | not fixed: R4 (one registry of stand-ins) and R6 (platforms as data) |
 | tools 2 (paths end in a stack trace) | `fd7068f` | `CliTests` (paths section) | fixed: `FileProblem` on every read and write, `-o` checked before compiling, a last catch ("Internal error", exit code 4), bench of a binary without main a failed variant |
-| tools 3 (`-o` overwrites the source or another output) | `fd7068f` | `CliTests.An_output_never_overwrites_the_source`, `Two_outputs_never_share_a_file`, `An_overlay_file_never_overwrites_the_program` | fixed: every path known before writing, compared by full path (case ignored on Windows and macOS) |
+| tools 3 (`-o` overwrites the source or another output) | `fd7068f`, `e962e0e` | `CliTests.An_output_never_overwrites_the_source`, `An_output_never_overwrites_an_imported_module`, `Two_outputs_never_share_a_file`, `An_overlay_file_never_overwrites_the_program` | fixed: every path known before writing, compared by full path (case ignored on Windows and macOS) with every file the compile read (`CompileResult.SourceFiles`; review R3, finding 1) |
 | tools 4 (one instruction set) | | | not fixed: R4 (the CPU variant) |
 | tools 5 (three option parsers) | | | not fixed: R4 (one CLI option table); tools 13 is fixed in place with `Count` and `RunCount` |
 | tools 6 (stand-ins in four places) | | | not fixed: R4; the help's paragraph is now built from `StandIns` (tools 14) |
@@ -132,6 +132,12 @@ Roadmap "Before the first release" (decision 2026-11-15): one row per finding of
 | tests 14 (small things) | | | not fixed: R6; the cycle table's check goes with tools 17 in R3 |
 
 ## Done
+
+- **R3 review** (2026-11-15, `docs/reviews/r3.md`): not ready to merge; one must-fix, five suggestions.
+  - Finding 1 (`e962e0e`): `-o util.tern` replaced an imported module. `CompileResult.SourceFiles` lists every file the compile read, and `Cli.Clash` refuses an output that is one of them. Test `CliTests.An_output_never_overwrites_an_imported_module` (failed before).
+  - Suggestion 2 (`7e2c003`): the non-ASCII name error names the code point ("'é' (U+00E9) cannot be in a name"). Writing UTF-8 to the console (at least under `--json`) is left for R5 or R6 (known limitations).
+  - Suggestion 3 (`7e2c003`): `CliTests.An_internal_error_is_a_message_and_exit_code_4` reaches the last catch with a writer that throws once.
+  - Suggestions 4-6: in question 173 (the two levels the body and the statement take), the long-method note (`Lexer.Tokenize`) and the NES line of known limitations, and the syntax 19 row (`name {` left for R6).
 
 - **R3: fixes in the lexer, the driver, the tools and the CLI** (2026-11-15, roadmap R3, reviews `code-quality-syntax.md` and `code-quality-tools.md`; the table above has one row per finding):
   - *Lexer and parser* (`af43526`, `ba8917c`, `b38279f`, `88bd21f`): ASCII-only names; a block comment with a line break ends the statement; `0x`, private-use characters, `emit {` outside a const fn and `ascii` get messages that name the cause; a generator named like a mnemonic is an error at its declaration; a `noinit`/`volatile` error drops its declaration; `Parser.MaxDepth` with `TernCompiler.Compile` on a 64 MB stack (`OnLargeStack`).
@@ -901,15 +907,16 @@ Cycles including `jsr` and `rts`, best and worst over the test values (`FloatTes
 
 ## Known limitations and technical debt
 
-- Long methods R3 touched (the method-length convention; R5 splits them): `Cli.Run` is about 260 lines (was about 230), since its three commands are local functions that share the writers; R3 added the path checks and the last catch to it. R4's option table and R5's split replace it. `Runner.Run` is about 125 lines (one loop around each step; R4's one run model per machine splits it).
+- Long methods R3 touched (the method-length convention; R5 splits them): `Cli.Run` is about 260 lines (was about 230), since its three commands are local functions that share the writers; R3 added the path checks and the last catch to it. R4's option table and R5's split replace it. `Runner.Run` is about 125 lines (one loop around each step; R4's one run model per machine splits it). `Lexer.Tokenize` is about 225 lines (R3 added about 25: the comment line break, the ASCII checks, `0x`, `NotAscii`); most of it is the local `Next`, one dispatch on the character, which reads best whole (review R3, suggestion 5).
 - Small output bugs of tools 18, left for R5: "(1 bytes)" in the run report, `IndexError.ToString` prints `file::` with no line, `LineTable.Format` throws on an empty table, and the Apple II stand-ins read the stack without wrapping at `$01FF`.
+- `tern` writes in the console's code page on Windows, so a message quoting a non-ASCII character can show '?' and `--json` output is not UTF-8 (review R3, suggestion 2; for R5 or R6: `Console.OutputEncoding`, at least under `--json`). The name error names the code point too.
 - `TernCompiler.Compile` starts a thread for each compile (`OnLargeStack`), about 0.1 ms; callers that catch `CompileError` see it rethrown with its stack trace kept.
 
 - `OptimizerTests.A_long_function_is_optimized_quickly` (5 seconds for 4500 statements) can fail when the whole suite runs in parallel on a loaded machine; it passes alone in about 0.5 s. Seen once at the start of R1, and in about one full run in four during R2 (the R2 optimizer is about 10% slower on it, 620 ms against 560 ms from the CLI, from the jump-table check in `NzLiveAfter`; the failures come from the parallel load). A longer limit or running it alone would remove the flake.
 - A 16-bit volatile `w += 256` is still `inc w+1`, which reads and writes only the high byte; it is the same question as 170.
 - The optimized-against-plain comparison (R1) leaves out programs with `addr(` or `noinit`, pointer variables and runs with setup, traps, IRQs or buttons; their values may depend on the layout or timing.
 - Two interface modules whose fixed routines overlap (`api1.value` and `api2.other` both at `$8000`) give "... are placed at overlapping addresses" at `main.tern:1:1`, not at either declaration (review M27 follow-up, outside the branch; for a later milestone).
-- NES: `tern run` has no option for the pads (only tests script them with `NesBus.Buttons`), no dump of PPU memory but `--screen`, and models no timing within a frame (sprite 0 hits, the length of vblank).
+- NES: `tern run` has no option for the pads (only tests script them with `NesBus.Buttons`), no dump of PPU memory but `--screen`, and models no other timing within a frame (sprite 0 hits; the length of vblank is modelled since R3).
 - NES: `addr()` of a function or variable inside `chr` data would be zeros in CHR ROM (the address fill is not applied there); tile data has no use for one.
 - NES: the optimizer treats a bank module's variables as it treats an overlay's (`OverlayArea` is set), so it keeps some loads and stores it could remove; they are resident RAM.
 - NES: the error for `implements` on a module with no area still says "overlay" only.
@@ -987,7 +994,7 @@ Not bugs; things to improve, mostly in M7 (optimizer).
 
 Open, from R3:
 
-173. **How deep a program may nest** (review code-quality-syntax 4, provisional). Every pass walks the tree by recursion, so a limit is needed for an error instead of a stack overflow. Built: `Parser.MaxDepth` = 256 levels, where brackets, unary operators, binary operators in a row (`a + b + c` is two levels: the tree is left-deep), `[i]` / `.name` / `as` chains, blocks and types each count one; past it, "This is nested more than 256 deep (brackets, operators in a row, blocks or types). Split it with a constant, a variable or a function". A 251-term sum compiles (tested); a 1000-term one is the error. The review suggested 64 for brackets alone; counting operators in a row made 256 the smaller restriction. Question: should spec 13 (or 2) name the limit, and is 256 right?
+173. **How deep a program may nest** (review code-quality-syntax 4, provisional). Every pass walks the tree by recursion, so a limit is needed for an error instead of a stack overflow. Built: `Parser.MaxDepth` = 256 levels, where brackets, unary operators, binary operators in a row (`a + b + c` is two levels: the tree is left-deep), `[i]` / `.name` / `as` chains, blocks and types each count one; past it, "This is nested more than 256 deep (brackets, operators in a row, blocks or types). Split it with a constant, a variable or a function". A 251-term sum compiles (tested); a 1000-term one is the error. The review suggested 64 for brackets alone; counting operators in a row made 256 the smaller restriction. The function body and the statement's expression take two levels, so 255 parentheses in `main` are already the error (review R3, suggestion 4): the number in the message is not the nesting the user sees. Question: should spec 13 (or 2) name the limit, is 256 right, and should the message say "about 256" or the count leave function bodies out?
 
 Open, from R2:
 
