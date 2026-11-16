@@ -698,6 +698,7 @@ Done when: each fixed bug has a test that failed before its fix, R1's marked tes
 
 - Ranked bugs 7, 8, 10, 11, 14 and 15, and the other correctness findings of the two files.
 - ASCII-only names (spec 2), and in `tern run` the NES vblank flag, NMI and `$2006` latch and `brk` with a program's IRQ handler (12.2), decision 2026-11-15.
+- With the review's must-fix, questions 170-173 (decision 2026-11-15): a volatile 16-bit `+=` / `-=` writes both bytes (spec 4, the marked test `Open_question_170`); `tern run` starts from the harnesses' seeded memory and registers (13); a `u8` variable start with an end of 256 (5.1); the nesting limit as built, now in spec 13.
 
 Done when: as R2, and no marked test is left.
 
