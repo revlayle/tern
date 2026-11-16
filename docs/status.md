@@ -4,10 +4,41 @@ Owned by the coding session. Updated at the end of every coding session.
 
 ## Current
 
-- **Milestone:** R3, fixes in the lexer, the driver, the tools and the CLI (roadmap "Before the first release: fixes and cleanup", R3; `docs/reviews/code-quality-syntax.md`, `docs/reviews/code-quality-tools.md`). R1 and R2 are merged.
-- **Branch:** `r3-fixes`, from `main` at `7fdf77b`. All of R3 is done: every correctness finding of the two files (syntax 2-5 and 12-19, tools 2, 3 and 8-16), the three spec decisions of 2026-11-15 in R3 (ASCII names; the NES vblank flag, NMI and `$2006`; `brk` with an IRQ handler), and tools 17's cycle-table test (left to R3 by R1's table). Review R3 (`docs/reviews/r3.md`) found one must-fix (an output could overwrite an imported module), fixed in `e962e0e`; its five suggestions are handled (`7e2c003`, notes here). The re-review says ready to merge. 6039 compiler tests pass and 1 theory is skipped (question 170), plus 37 CPU tests. No benchmark changed (1254 / 350780); `SkillTests` pass (no output moved; one sentence of `SKILL.md` on the NES's `tern run`). The suite takes about 11-18 seconds.
-- **Next step:** `/merge r3-fixes` (re-review R3: ready to merge). Then R4 (one description per fact, and the CPU variant).
-- **Done when, not met:** "no marked test is left": `VolatileAccessTests.Open_question_170` is still skipped, since question 170 is open for the spec session; no R1 test is marked for R3's areas.
+- **Milestone:** R4, one description per fact, and the CPU variant (roadmap "Before the first release: fixes and cleanup", R4; review themes 1 and 2 in `docs/reviews/code-quality.md`, with backend 7-10, semantics 14, 15 and 20, tools 4-6, syntax 13 and 21). R1, R2 and R3 are merged.
+- **Branch:** `r4-one-description`, from `main` at `74f2b46`. It starts with the four decisions of 2026-11-15 (questions 170-173) that R3's roadmap entry lists but R3 was merged without (`Open_question_170` was still skipped); they are built here, before the cleanup, as earlier late decisions were built at the start of the next milestone.
+- **Done on the branch:** questions 170-172 (173 needed nothing: spec 13 now names the limit as built); the instruction table and a set per CPU variant (`Tern.Cpu.Instructions`, `InstructionSet.For`), passed to the checker, CodeGen, the optimizer, the assembler and the emulator; the backend's control flow (`ExitsOf`) and instruction kinds from the table; memory use in one place (`MemoryUse.Of`); `Node.Children` / `Descendants` for the syntax tree, used by `ContainsCall`, `CollectNames`, `UsesAddr` and `LocalUses`, and a throwing default in `Lowering`. 6075 compiler tests and 50 CPU tests pass, none skipped. No benchmark moved (1254 / 350780). `SkillTests` outputs moved only with question 171 (the register line of `tern run`, rewritten; the bench in `costs.md` now compares a block with itself, same cycles).
+- **Next step:** go on with R4 on this branch: (1) one registry of `tern run` stand-ins per machine (tools 6, the R4 part of tools 1, tests 12); (2) one CLI option table for the parsers and the help (tools 5); (3) the rest, in the R4 table below (semantics 20, syntax 21, backend 10, tests 6, the walks still written by hand). Then `/review r4-one-description`.
+- **Done when, not met:** "no list of instruction effects, tree walk over every node kind, stand-in or CLI option exists twice": the stand-ins and the CLI options are not done; see the table.
+
+### Decisions built at the start of R4
+
+| Question | Commit | Guarded by | What |
+|---|---|---|---|
+| 170 | `9071527` | `VolatileAccessTests` (no skipped theory left; `+= 256` and `-= 512` added) | a volatile 16-bit `+= 1` is the add, not `inc` / `bne` / `inc`; `+= 256` (a multiple of 256) adds to both bytes; no benchmark moved |
+| 171 | `8d1b46c` | `RunToolTests.A_run_starts_from_the_seeded_memory_and_registers_with_a_blank_screen`; `Seeded.At` in the run tests that read untouched memory | `StartState` moved to `Tools` and `Runner` uses it; the C64's cursor bytes `$D3`/`$D6` are set at start; the help says so |
+| 172 | `b5553e4` | `LoopCounterTypeTests.A_u8_start_to_256_counts_with_a_u8_to_the_end_of_the_page`, `A_u8_start_to_256_ends_with_inx_and_bne`, `Other_ends_past_255_keep_the_type_of_the_variable_bound` | `start..256` with a `u8` start counts with a `u8`; no empty check (every start is below 256) |
+| 173 | | | nothing to build: spec 13 names the limit and its counting as built |
+
+### Review findings handled by R4
+
+| Finding | Commit | Guarded by | State |
+|---|---|---|---|
+| tools 4 (one instruction set) | `c1d5dec` | `InstructionsTests`, `InstructionSetTests`, `CpuTests` | fixed: `InstructionSet` is an instance per variant (`For`), with `DecimalMode` and `IndirectJumpWrapsInPage`; `Encoder` and `Cpu6502` take it; both `Step` switches throw on what they do not run; read-modify-write is a switch, not a lambda. Not done: a cycle count per variant (the 65C02's differ), since no second set of opcodes exists yet (M29) |
+| semantics 15 (NMOS effects in the checker) | `c1d5dec` | `InstructionsTests`, `AsmTests` | fixed: `AsmEffects.Of` is gone; effects come from `Tern.Cpu.Instructions`, which has no default; `AsmMode` asks the target's set; the `jmp ($xxFF)` rule applies when the set has the page wrap |
+| backend 7 (no CPU variant in the backend) | `c1d5dec`, `14059c8` | the suite | fixed: the platform's set reaches CodeGen, `Optimizer.Run` and `Assembler.Assemble`; branches, inverses, loads, stores, transfers and `FlagsMatchA` come from the table. Left: the unused `platform` parameter of `Allocator.Allocate`; the unconditional `cld` in `GenInterrupt`, a wasted byte on the 2A03 (a code change, so not in a cleanup milestone; for M29 or the spec session) |
+| backend 8 (memory effects in eight places) | `b09a0ee` | `MemoryUseTests`, the suite | fixed: `MemoryUse.Of(Instr)` (reads, writes, and where: a byte, an element, through a pointer, a number, code) in the register analysis, dead stores, sunk stores, copies from source, startup zeros, CodeGen's `using A` check and the NES page count |
+| backend 9 (control flow walked in seven places) | `14059c8` | the suite (`OperandMatrixTests` for backend 1) | fixed: `ExitsOf(code, k)` in every analysis; `Dispatches` is gone: an `rts` in a function with a jump table is judged by what the entries read (`RegistersLive`, `NzLiveAfter`), as R2's review asked. The dispatch `rts` is not marked when emitted (the finding's other suggestion); `UnknownEntries` still finds the entries |
+| semantics 14 (nine hand-written tree walks) | `5ad2222`, `8736c12` | `SyntaxTreeTests`, the suite | partly: `Node.Children` (abstract on types, expressions, statements and asm lines) and `Descendants`; `ContainsCall`, `CollectNames`, `UsesAddr` and `LocalUses` use them; `Lowering` throws on an unknown node. Left by hand: `AlwaysReturns` / `ContainsBreak` and `Unreachable` (they look at statements, not every node; one "never finishes" is semantics 20), `NeedsInterpreter` (chooses which children on purpose), `Describe` (not a walk), `ConstFnBodyCheck` |
+| syntax 13 (the mnemonic set from the variant) | `c1d5dec` | | partly: the parser knows every mnemonic of the enum (all variants); the checker allows only the modes the target's set has. A mnemonic the target lacks would get "has no ... mode", not "not an instruction of this CPU"; no such mnemonic exists until M29 |
+| tools 6 (stand-ins in four places) | | | not done yet: next step (1) |
+| tools 1 (run model split) | | | not done yet: its stand-in registry with tools 6; the rest is R6 |
+| tests 12 (library tests against the tests' own ROM model) | | | not done yet: with tools 6 |
+| tools 5 (three option parsers) | | | not done yet: next step (2) |
+| semantics 20 (rules written two or three times) | | | not done yet |
+| syntax 21 (contextual words as strings) | | | not done yet |
+| backend 10 (the generator predicts its own output) | | | not done yet |
+| tests 6 (the CPU variant in the test helpers) | | | not done yet: `Run` and `Library` build `Cpu6502` with the default variant |
+| tools 15 (bus cannot add cycles) | | | not done: R5 (structure), as R3 left it |
 
 ### Review findings handled by R3
 
@@ -106,9 +137,7 @@ Roadmap "Before the first release" (decision 2026-11-15): one row per finding of
 
 ### Marked failures left
 
-| Finding | Test | Cases | What fails |
-|---|---|--:|---|
-| question 170 | `VolatileAccessTests.Open_question_170` | 4 | a 16-bit volatile `x += 1` / `x += 2` writes the high byte only on a carry; open, see the question |
+None: question 170's cases pass since `9071527` (R4) and run with the others.
 
 ### Review findings handled by R1
 
@@ -992,18 +1021,8 @@ Not bugs; things to improve, mostly in M7 (optimizer).
 
 ## Questions for the spec session
 
-Open, from R3:
+Questions 170-173 (from R1, R2 and R3) were settled on 2026-11-15 (decisions.md) and are built at the start of R4 (173 as built).
 
-173. **How deep a program may nest** (review code-quality-syntax 4, provisional). Every pass walks the tree by recursion, so a limit is needed for an error instead of a stack overflow. Built: `Parser.MaxDepth` = 256 levels, where brackets, unary operators, binary operators in a row (`a + b + c` is two levels: the tree is left-deep), `[i]` / `.name` / `as` chains, blocks and types each count one; past it, "This is nested more than 256 deep (brackets, operators in a row, blocks or types). Split it with a constant, a variable or a function". A 251-term sum compiles (tested); a 1000-term one is the error. The review suggested 64 for brackets alone; counting operators in a row made 256 the smaller restriction. The function body and the statement's expression take two levels, so 255 parentheses in `main` are already the error (review R3, suggestion 4): the number in the message is not the nesting the user sees. Question: should spec 13 (or 2) name the limit, is 256 right, and should the message say "about 256" or the count leave function bodies out?
-
-Open, from R2:
-
-172. **A `u8` variable start with an end of 256** (review R2, suggestion 3). Spec 5.1 says "With a variable bound, the type comes from the bound's type". Read that way, `for i in start..256` with `start: u8` counts with a `u8` from `start` to 255, the natural way to walk from an offset to the end of a page. Built (as on `main`): an error, "256 does not fit in u8 (0 to 255), the type of 'start' ... Convert 'start' with 'as u16'"; its fix compiles. Question: should `u8_var..256` be allowed? If so, `Unify` would allow exactly an end of 256; the checker's `f.To.Type = type` path (`Checker.Bodies.cs`) and the generator's `to != 256` test (`CodeGen.Loops.cs`) already give the right loop (`inx` / `bne`).
-
-Open, from R1:
-
-171. **`tern run` starts with zero memory and registers** (review R1, note). The test harnesses now start with seeded memory and non-zero A, X, Y (R1), as a real machine does, so a missing load or clear shows. `tern run` (`Runner`) still starts at zero, so a program that reads memory it never wrote passes there and may fail on the machine. Built: zero. Question: should `tern run` fill memory too (a fixed pattern, or an option such as `--fill`), for R3 (tools)?
-170. **A 16-bit volatile `x += 1`.** Spec 11 gives `w += 1` (u16) as `inc w` / `bne +` / `inc w+1`, and the compiler uses it for a volatile `w` too (also `x += 2`: `lda` / `clc` / `adc #2` / `sta` / `bcc +` / `inc w+1`). The high byte is then read and written only when the low byte carries. Spec 4 says every read and write of volatile memory in the source happens exactly once; it does not say whether a byte the operation leaves unchanged counts. For a register pair that latches on the high write (a timer latch, a VERA address) the skipped write matters. Built: the shape above, also for volatile. Proposed: a volatile 16-bit `+=`/`-=` writes both bytes (the add of the general case, as spec 11 already says for an 8-bit volatile `x += 2`). The marked test `VolatileAccessTests.Open_question_170` expects that. (Not the same as R1-1, where `x -= 1` reads the low byte twice, which spec 4 forbids either way.)
 - Provisional (R1): "the bus log on for the whole suite" (roadmap R1, done when) is read as: every `Run` can log (`watch:`), and every test that checked volatile reads or writes by counting listing lines now uses the log. The log does not check anything by itself, since only the test knows what the source reads and writes.
 
 Questions 157-169 (from M27) were settled on 2026-11-14 (decisions.md): as built, except 160, 166 and 169 (errors), built on `m27-followup`.
