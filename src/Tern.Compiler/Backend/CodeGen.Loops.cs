@@ -54,71 +54,14 @@ public sealed partial class CodeGen
         var cont = NewLabel("fnext");
         var top = NewLabel("for");
 
-        if (from is not null && to is not null && !f.VariableStep)
-        {
-            long span = up ? to.Value - from.Value : from.Value - to.Value;
-            long count = inclusive ? (span < 0 ? 0 : span / d + 1) : (span <= 0 ? 0 : (span + d - 1) / d);
-            if (count == 0)
-            {
-                _out.Add(new Comment("empty loop: no code"));
-                return;
-            }
-            if (count == 1)
-            {
-                if (f.Variable is not null) SetCounter(c, f.From);
-                _loops.Add((end, end));
-                GenBlock(f.Body);
-                _loops.RemoveAt(_loops.Count - 1);
-                Place(end);
-                return;
-            }
-            if (f.Variable is null && d == 1 && count <= (type.Size == 1 ? 256 : 65535))
-            {
-                GenRepeat(f, c, count, top, cont, end);
-                return;
-            }
-        }
-
-        if (f.VariableStep && from is not null && to is not null && (inclusive ? from > to : from >= to))
-        {
-            _out.Add(new Comment("empty loop: no code"));
-            return;
-        }
+        if (EmptyOrShortLoop(f, c, top, cont, end)) return;
 
         // The end bound is evaluated once, before the loop.
-        VariableSymbol? boundTemp = null;
-        (Operand Lo, Operand Hi) bound;
-        if (to is not null)
-            bound = (Byte(to.Value), Byte(to.Value >> 8));
-        else if (f.To is NameExpr { Symbol: { InMemory: true, AliasOf: null, Kind: VariableKind.Local or VariableKind.Parameter } bv }
-                 && bv.Type.Size == type.Size && bv != c && !bv.AddressTaken && !AssignsVar(f.Body, bv))
-            bound = (Var(bv), Var(bv, 1));
-        else if (type.Size == 1 && f.To is MemberExpr { Target: NameExpr { Symbol: { InMemory: true, AliasOf: null, Kind: VariableKind.Local or VariableKind.Parameter } mv } }
-                 && mv != c && !mv.AddressTaken && !AssignsVar(f.Body, mv) && Simple1(f.To) is { } half)
-            bound = (half, Byte(0));   // n.lo of a local or parameter the body does not change: cpy n
-        else
-        {
-            boundTemp = AcquireTemp(type.Size);
-            if (type.Size == 1) { GenA(f.To); Op(Sta, Var(boundTemp)); }
-            else Gen16(f.To, new Loc(boundTemp));
-            bound = (Var(boundTemp), Var(boundTemp, 1));
-        }
+        var bound = LoopBound(f, c, out var boundTemp);
 
-        // A variable step is evaluated once too: used in place if it is a local the body does not change.
+        // A variable step is evaluated once too.
         VariableSymbol? stepTemp = null;
-        Operand? stepOperand = null;
-        if (f.VariableStep)
-        {
-            if (f.Step is NameExpr { Symbol: { InMemory: true, AliasOf: null, Kind: VariableKind.Local or VariableKind.Parameter } sv }
-                && sv.Type.Size == 1 && sv != c && !sv.AddressTaken && !AssignsVar(f.Body, sv))
-                stepOperand = Var(sv);
-            else
-            {
-                stepTemp = AcquireTemp(1);
-                GenA(f.Step!); Op(Sta, Var(stepTemp));
-                stepOperand = Var(stepTemp);
-            }
-        }
+        Operand? stepOperand = f.VariableStep ? LoopStep(f, c, out stepTemp) : null;
 
         // A signed loop with a larger step and a variable bound compares the counter with the end
         // flipped (eor #$80), so that cmp gives the signed order (spec 5.1).
@@ -141,6 +84,129 @@ public sealed partial class CodeGen
         // N and Z still hold the start value after a plain ldx / ldy of it.
         bool flagsHoldStart = c.Register is not null && Simple1(f.From) is not null;
 
+        var (inRegister, skip) = SkipIfEmpty(f, c, bound, end, flagsHoldStart);
+
+        Place(top);
+        _loops.Add((end, cont));
+        _loopDepth++;
+        int bodyStart = _out.Count;
+        GenBlock(f.Body);
+        CheckHeld(bodyStart, _out.Count, f.UsingRegister is null ? c : null, f.Body);
+        CheckHeld(bodyStart, _out.Count, inRegister, f.Body);
+        _loopDepth--;
+        _loops.RemoveAt(_loops.Count - 1);
+        Place(cont);
+        Source(f); // the step and the test belong to the loop's line (source map)
+
+        if (type.IsSigned)
+            StepSigned(c, up, d, inclusive, from, to, bound, flipped, top, end);
+        else if (type.Size == 1 && d == 1 && !f.VariableStep)
+            StepByOne(c, up, inclusive, from, to, bound, top, end);
+        else
+            StepGeneral(c, up, stepOperand ?? Byte(d), inclusive, to, bound, top, end);
+
+        Place(end);
+        ReleaseHeld(inRegister, f.Body);
+        if (skip is not null) Place(skip);
+        if (c.Register is { } r) _reserved.Remove(r);
+        if (flippedTemp is not null) Release(flippedTemp);
+        if (stepTemp is not null) Release(stepTemp);
+        if (boundTemp is not null) Release(boundTemp);
+    }
+
+    /// <summary>
+    /// A loop whose bounds are constants and which runs at most once, or counts with a hidden counter
+    /// (<see cref="GenRepeat"/>), or is empty: its code, and true. False for every other loop.
+    /// </summary>
+    private bool EmptyOrShortLoop(ForStmt f, VariableSymbol c, Label top, Label cont, Label end)
+    {
+        var type = c.Type;
+        int d = Math.Abs(f.StepValue);
+        bool up = f.StepValue > 0, inclusive = f.Inclusive;
+        long? from = f.From.ConstValue, to = f.To.ConstValue;
+        if (from is not null && to is not null && !f.VariableStep)
+        {
+            long span = up ? to.Value - from.Value : from.Value - to.Value;
+            long count = inclusive ? (span < 0 ? 0 : span / d + 1) : (span <= 0 ? 0 : (span + d - 1) / d);
+            if (count == 0)
+            {
+                _out.Add(new Comment("empty loop: no code"));
+                return true;
+            }
+            if (count == 1)
+            {
+                if (f.Variable is not null) SetCounter(c, f.From);
+                _loops.Add((end, end));
+                GenBlock(f.Body);
+                _loops.RemoveAt(_loops.Count - 1);
+                Place(end);
+                return true;
+            }
+            if (f.Variable is null && d == 1 && count <= (type.Size == 1 ? 256 : 65535))
+            {
+                GenRepeat(f, c, count, top, cont, end);
+                return true;
+            }
+        }
+
+        if (f.VariableStep && from is not null && to is not null && (inclusive ? from > to : from >= to))
+        {
+            _out.Add(new Comment("empty loop: no code"));
+            return true;
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// The loop's end, evaluated once before it: a constant, a local or parameter (or its <c>.lo</c>) the
+    /// body does not change, or else a temporary, <paramref name="boundTemp"/>, that the caller releases.
+    /// </summary>
+    private (Operand Lo, Operand Hi) LoopBound(ForStmt f, VariableSymbol c, out VariableSymbol? boundTemp)
+    {
+        boundTemp = null;
+        var type = c.Type;
+        long? to = f.To.ConstValue;
+        (Operand Lo, Operand Hi) bound;
+        if (to is not null)
+            bound = (Byte(to.Value), Byte(to.Value >> 8));
+        else if (f.To is NameExpr { Symbol: { InMemory: true, AliasOf: null, Kind: VariableKind.Local or VariableKind.Parameter } bv }
+                 && bv.Type.Size == type.Size && bv != c && !bv.AddressTaken && !AssignsVar(f.Body, bv))
+            bound = (Var(bv), Var(bv, 1));
+        else if (type.Size == 1 && f.To is MemberExpr { Target: NameExpr { Symbol: { InMemory: true, AliasOf: null, Kind: VariableKind.Local or VariableKind.Parameter } mv } }
+                 && mv != c && !mv.AddressTaken && !AssignsVar(f.Body, mv) && Simple1(f.To) is { } half)
+            bound = (half, Byte(0));   // n.lo of a local or parameter the body does not change: cpy n
+        else
+        {
+            boundTemp = AcquireTemp(type.Size);
+            if (type.Size == 1) { GenA(f.To); Op(Sta, Var(boundTemp)); }
+            else Gen16(f.To, new Loc(boundTemp));
+            bound = (Var(boundTemp), Var(boundTemp, 1));
+        }
+        return bound;
+    }
+
+    /// <summary>A variable step, evaluated once: a local the body does not change, or else a temporary, <paramref name="stepTemp"/>.</summary>
+    private Operand LoopStep(ForStmt f, VariableSymbol c, out VariableSymbol? stepTemp)
+    {
+        stepTemp = null;
+        if (f.Step is NameExpr { Symbol: { InMemory: true, AliasOf: null, Kind: VariableKind.Local or VariableKind.Parameter } sv }
+            && sv.Type.Size == 1 && sv != c && !sv.AddressTaken && !AssignsVar(f.Body, sv))
+            return Var(sv);
+        stepTemp = AcquireTemp(1);
+        GenA(f.Step!); Op(Sta, Var(stepTemp));
+        return Var(stepTemp);
+    }
+
+    /// <summary>
+    /// Skips the loop if the range is empty, unless the bounds prove it is not; loads the variable the
+    /// loop holds in a register (<see cref="HoldInRegister"/>). Returns it, and the label after its store
+    /// when the check skips its load.
+    /// </summary>
+    private (VariableSymbol? InRegister, Label? Skip) SkipIfEmpty(ForStmt f, VariableSymbol c, (Operand Lo, Operand Hi) bound, Label end, bool flagsHoldStart)
+    {
+        var type = c.Type;
+        bool up = f.StepValue > 0, inclusive = f.Inclusive;
+        long? from = f.From.ConstValue, to = f.To.ConstValue;
         // Skip the loop if the range is empty, unless the bounds prove it is not.
         long max = type.MaxValue;
         bool provablyNonEmpty = (from is not null && to is not null)
@@ -190,33 +256,7 @@ public sealed partial class CodeGen
             };
             CounterBranch(c, emptyIf, bound, end);
         }
-
-        Place(top);
-        _loops.Add((end, cont));
-        _loopDepth++;
-        int bodyStart = _out.Count;
-        GenBlock(f.Body);
-        CheckHeld(bodyStart, _out.Count, f.UsingRegister is null ? c : null, f.Body);
-        CheckHeld(bodyStart, _out.Count, inRegister, f.Body);
-        _loopDepth--;
-        _loops.RemoveAt(_loops.Count - 1);
-        Place(cont);
-        Source(f); // the step and the test belong to the loop's line (source map)
-
-        if (type.IsSigned)
-            StepSigned(c, up, d, inclusive, from, to, bound, flipped, top, end);
-        else if (type.Size == 1 && d == 1 && !f.VariableStep)
-            StepByOne(c, up, inclusive, from, to, bound, top, end);
-        else
-            StepGeneral(c, up, stepOperand ?? Byte(d), inclusive, to, bound, top, end);
-
-        Place(end);
-        ReleaseHeld(inRegister, f.Body);
-        if (skip is not null) Place(skip);
-        if (c.Register is { } r) _reserved.Remove(r);
-        if (flippedTemp is not null) Release(flippedTemp);
-        if (stepTemp is not null) Release(stepTemp);
-        if (boundTemp is not null) Release(boundTemp);
+        return (inRegister, skip);
     }
 
     /// <summary>
