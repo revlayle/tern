@@ -80,7 +80,7 @@ public sealed class NesBus : IBus
         _vertical = (image[6] & 1) != 0;
         _mapper = image[6] >> 4 | (image[7] & 0xF0);
         if (_mapper is not (0 or 2))
-            throw new RunError($"The cartridge has mapper {_mapper}, which tern run does not model: it runs mappers 0 (NROM) and 2 (UxROM). Run the program in an emulator such as Mesen");
+            throw new RunError($"The cartridge has mapper {_mapper}, which tern run does not model: it runs mappers 0 (NROM) and 2 (UxROM). Use an emulator such as Mesen to run it");
         image.AsSpan(16 + prgSize, chrSize).CopyTo(Ppu);
         // NROM-128 is seen twice; otherwise the first bank at $8000 and the last at $C000.
         _prg.AsSpan(0, Bank).CopyTo(ram.Bytes.AsSpan(0x8000));

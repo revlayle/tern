@@ -24,8 +24,11 @@ public class PrecedenceTests
         new("~a as u16", "u16", v => (ushort)~(ushort)v.A),
         new("~t[1]", "u8", v => (byte)~v.B),
         new("-t[2]", "u8", v => (byte)-v.C),
+        new("-s.x", "u8", v => (byte)-v.C),
+        new("~s.x", "u8", v => (byte)~v.C),
         // 1 and 5: as binds tighter than a shift.
         new("a as u16 << 5", "u16", v => (ushort)(v.A << 5)),
+        new("s.x as u16 << 4", "u16", v => (ushort)(v.C << 4)),
         // 2 (unary) and 4 (+ -).
         new("-a + b", "u8", v => (byte)(-v.A + v.B)),
         new("~a - b", "u8", v => (byte)(~v.A - v.B)),
@@ -67,7 +70,9 @@ public class PrecedenceTests
         new("p || q && r", "bool", v => B(v.P || (v.Q && v.R))),
         new("p && q || r", "bool", v => B((v.P && v.Q) || v.R)),
         new("a != b || q && r", "bool", v => B(v.A != v.B || (v.Q && v.R))),
-        // 2 (!) and 10, 11.
+        // 2 (!) and 9, 10, 11.
+        new("!p == q", "bool", v => B(!v.P == v.Q)),
+        new("!p != q", "bool", v => B(!v.P != v.Q)),
         new("!p && q", "bool", v => B(!v.P && v.Q)),
         new("!p || q", "bool", v => B(!v.P || v.Q)),
         // Left associativity on one level.
@@ -106,8 +111,9 @@ public class PrecedenceTests
             var t: [u8; 3]
 
             """);
+        source.AppendLine("struct S { x: u8 }\nvar s: S");
         for (int i = 0; i < Rows.Length; i++) source.AppendLine($"var r{i}: {Rows[i].Type}");
-        source.AppendLine("fn main() {\n    t[0] = a\n    t[1] = b\n    t[2] = c");
+        source.AppendLine("fn main() {\n    t[0] = a\n    t[1] = b\n    t[2] = c\n    s.x = c");
         for (int i = 0; i < Rows.Length; i++) source.AppendLine($"    r{i} = {Rows[i].Expr}");
         source.AppendLine("}");
 
@@ -152,7 +158,7 @@ public class PrecedenceTests
     [InlineData("17 % 5 * 3", "u8", 6)]
     [InlineData("100 / 10 / 5", "u8", 2)]
     [InlineData("~1 * 2", "i8", -4)]
-    [InlineData("-7 / 2", "i8", -3)]
+    [InlineData("~6 / 4", "i8", -1)]
     [InlineData("1 << 2 + 1", "u8", 8)]
     [InlineData("3 + 1 << 2", "u8", 16)]
     [InlineData("12 & 6 | 1", "u8", 5)]

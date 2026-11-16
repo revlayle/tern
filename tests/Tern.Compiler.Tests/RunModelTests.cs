@@ -45,7 +45,7 @@ public class RunModelTests
     public void Another_mapper_is_an_error_not_a_run_as_nrom(int mapper)
     {
         var e = Assert.Throws<RunError>(() => new NesBus(new Ram(), Image(mapper)));
-        Assert.Equal($"The cartridge has mapper {mapper}, which tern run does not model: it runs mappers 0 (NROM) and 2 (UxROM). Run the program in an emulator such as Mesen", e.Message);
+        Assert.Equal($"The cartridge has mapper {mapper}, which tern run does not model: it runs mappers 0 (NROM) and 2 (UxROM). Use an emulator such as Mesen to run it", e.Message);
     }
 
     // ---------- OAM DMA through the bus (tools 15) ----------

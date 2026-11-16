@@ -81,6 +81,42 @@ public class ConversionTests
         Assert.Empty(wrong);
     }
 
+    /// <summary>
+    /// Automatic widening wherever the destination gives the type (spec 3.5): an initial value, an array element,
+    /// an argument and a return value, besides the assignment above.
+    /// </summary>
+    [Theory]
+    [InlineData("i8", "i16", -128)]
+    [InlineData("i8", "i16", -1)]
+    [InlineData("i8", "i16", 0)]
+    [InlineData("i8", "i16", 127)]
+    [InlineData("u8", "u16", 0)]
+    [InlineData("u8", "u16", 128)]
+    [InlineData("u8", "u16", 255)]
+    public void Widening_is_automatic_wherever_the_destination_gives_the_type(string from, string to, long value)
+    {
+        var run = Run.Program($$"""
+            var s: {{from}} = {{value}}
+            var init: {{to}}
+            var element: [{{to}}; 2]
+            var argument: {{to}}
+            var returned: {{to}}
+            fn take(v: {{to}}) { argument = v }
+            fn give() -> {{to}} { return s }
+            fn main() {
+                var local: {{to}} = s
+                init = local
+                element[1] = s
+                take(s)
+                returned = give()
+            }
+            """);
+        long expected = Cast(value, to);
+        long Element() => to == "u16" ? run.U16At("element", 1, 2) : (short)run.U16At("element", 1, 2);
+        Assert.Equal([expected, expected, expected, expected],
+            new[] { Read(run, "init", to), Element(), Read(run, "argument", to), Read(run, "returned", to) });
+    }
+
     /// <summary>An untyped constant expression keeps its low bits with <c>as</c>, whatever its value (spec 3.5).</summary>
     [Theory]
     [InlineData("u8")]
