@@ -453,6 +453,12 @@ public sealed partial class CodeGen
             {
                 Op(a.Op == TokenKind.PlusEq ? Inc : Dec, Var(v));
             }
+            else if (v.IsVolatile)
+            {
+                // inc / bne / inc would write the high byte only on a carry, and lda / bne / dec / dec would read
+                // the low byte twice: every byte is read and written once (spec 4), so the add or subtraction instead.
+                Assign(target, new BinaryExpr(a.Pos, a.Op == TokenKind.PlusEq ? TokenKind.Plus : TokenKind.Minus, target, a.Value) { Type = target.Type });
+            }
             else if (a.Op == TokenKind.PlusEq)
             {
                 var done = NewLabel("inc");
@@ -460,11 +466,6 @@ public sealed partial class CodeGen
                 Branch(Bne, done);
                 Op(Inc, Var(v, 1));
                 Place(done);
-            }
-            else if (v.IsVolatile)
-            {
-                // lda / bne / dec / dec would read the low byte twice (spec 4): the subtraction instead.
-                Assign(target, new BinaryExpr(a.Pos, TokenKind.Minus, target, a.Value) { Type = target.Type });
             }
             else
             {
@@ -489,7 +490,8 @@ public sealed partial class CodeGen
         }
 
         // w += 256 / w -= 256 on a 16-bit variable: inc w+1 / dec w+1; another multiple of 256 adds to the high byte only.
-        if (a.Op is TokenKind.PlusEq or TokenKind.MinusEq && target is NameExpr { Symbol: { InMemory: true, Type.Size: 2 } wv }
+        // Not on a volatile variable, whose low byte is read and written too (spec 4).
+        if (a.Op is TokenKind.PlusEq or TokenKind.MinusEq && target is NameExpr { Symbol: { InMemory: true, Type.Size: 2, IsVolatile: false } wv }
             && a.Value.ConstValue is long whole && (whole & 0xFF) == 0 && whole is > 0 and <= 0xFF00)
         {
             long k = whole >> 8;
