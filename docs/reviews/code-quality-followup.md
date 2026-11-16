@@ -4,16 +4,129 @@ Roadmap R7 (decisions 2026-11-15 and 2026-11-16): a verdict for each of the 93 f
 
 Verdicts: **fixed**, **partly** (what is left is named, with who has it), **not fixed**, **left by decision** (with the date), **left for R6** (not read; R6's review checks it).
 
+## Verdict
+
+The fixes hold. All 15 ranked bugs and the other correctness findings the tables mark fixed behave as their findings ask; no fix was found broken, and no bug was found in a diff read. Of the 93 findings, 64 are fixed, 11 partly, 10 are left for R6 and 8 are not fixed. The 8, and a few parts of others, are construction findings that the R2 and R3 tables handed to R5 and that no milestone took: they need an owner or a decision (see "Must fix"), and none of them is wrong behavior.
+
 ## Progress
 
-The work is in the roadmap's four steps, committed after each. A session that continues starts at the first step not marked done.
+The work is in the roadmap's four steps, committed after each. All four are done; the table of the 93 verdicts follows, then the steps' details, then the must-fix items.
 
 | Step | State |
 |---|---|
 | 1. Ranked bugs 1-15, demonstration programs run again | done |
 | 2. Other correctness findings marked fixed | done |
 | 3. Rows marked "partly" | done |
-| 4. Construction searches (R4, R5) | not started |
+| 4. Construction searches (R4, R5) | done |
+
+## The 93 verdicts
+
+| | fixed | partly | not fixed | left for R6 | Total |
+|---|--:|--:|--:|--:|--:|
+| Backend | 12 | 0 | 3 | 2 | 17 |
+| Semantics | 18 | 0 | 2 | 2 | 22 |
+| Syntax | 15 | 4 | 2 | 1 | 22 |
+| Tools | 15 | 3 | 0 | 0 | 18 |
+| Tests | 4 | 4 | 1 | 5 | 14 |
+| **Total** | **64** | **11** | **8** | **10** | **93** |
+
+No finding as a whole is "left by a decision". Decisions shape six that count as fixed: backend 10 (checks instead of reserved registers, 2026-11-16), and semantics 3 and 13, syntax 12, tools 9 and 12 (2026-11-15); and one part of another: the `cld` on the 2A03 (backend 7, 2026-11-16, until M29). Every "not fixed" is a construction finding that no milestone took (step 3); none was marked fixed by a table. "Left for R6" rows were not read.
+
+| Finding | Verdict | Note |
+|---|---|---|
+| backend 1 | fixed | ranked 1; step 1 |
+| backend 2 | fixed | ranked 2; step 1 |
+| backend 3 | fixed | ranked 3; step 1 |
+| backend 4 | fixed | ranked 6; step 1 |
+| backend 5 | fixed | step 2 |
+| backend 6 | fixed | step 2 (by the diff) |
+| backend 7 | fixed | step 4; `cld` left by decision 2026-11-16 (M29); an unused parameter |
+| backend 8 | fixed | step 4 |
+| backend 9 | fixed | step 4 |
+| backend 10 | fixed | step 4; as decided 2026-11-16 |
+| backend 11 | not fixed | no owner (step 3) |
+| backend 12 | fixed | step 4 |
+| backend 13 | left for R6 |  |
+| backend 14 | fixed | step 4 |
+| backend 15 | left for R6 |  |
+| backend 16 | not fixed | no owner (step 3) |
+| backend 17 | not fixed | no owner (step 3) |
+| semantics 1 | fixed | ranked 4; step 1 |
+| semantics 2 | fixed | ranked 5; step 1 |
+| semantics 3 | fixed | step 2; decision 2026-11-15 |
+| semantics 4 | fixed | ranked 9; step 1 |
+| semantics 5 | fixed | ranked 12; step 1 |
+| semantics 6 | fixed | ranked 13; step 1 |
+| semantics 7 | fixed | step 2 |
+| semantics 8 | fixed | step 2 |
+| semantics 9 | fixed | step 2 |
+| semantics 10 | fixed | step 2 |
+| semantics 11 | fixed | step 2 |
+| semantics 12 | fixed | step 2; the fallback message is R6's |
+| semantics 13 | fixed | step 2; decision 2026-11-15 |
+| semantics 14 | fixed | step 4 |
+| semantics 15 | fixed | step 4 |
+| semantics 16 | left for R6 |  |
+| semantics 17 | left for R6 |  |
+| semantics 18 | fixed | step 4 |
+| semantics 19 | fixed | step 4 |
+| semantics 20 | fixed | step 4 |
+| semantics 21 | not fixed | no owner (step 3) |
+| semantics 22 | not fixed | no owner (step 3) |
+| syntax 1 | fixed | step 4; the platform branches and the retry's catch are R6's |
+| syntax 2 | fixed | ranked 14; step 1 |
+| syntax 3 | fixed | ranked 7; step 1 |
+| syntax 4 | fixed | ranked 10; step 1 |
+| syntax 5 | fixed | ranked 15; step 1 |
+| syntax 6 | left for R6 |  |
+| syntax 7 | partly | step 3; the rest is R6's |
+| syntax 8 | fixed | step 4; the rest is M28's |
+| syntax 9 | not fixed | no owner (step 3) |
+| syntax 10 | fixed | step 4 |
+| syntax 11 | partly | step 3; the rest is R6's, one part with no owner |
+| syntax 12 | fixed | step 2; decision 2026-11-15 |
+| syntax 13 | partly | step 2; the rest is M29's |
+| syntax 14 | fixed | step 2 |
+| syntax 15 | fixed | step 2 |
+| syntax 16 | fixed | step 2 |
+| syntax 17 | fixed | ranked 15; step 1 |
+| syntax 18 | fixed | step 2 |
+| syntax 19 | partly | step 2; the rest is R6's |
+| syntax 20 | fixed | step 4; one part waits for syntax 9 |
+| syntax 21 | fixed | step 4 |
+| syntax 22 | not fixed | no owner (step 3) |
+| tools 1 | partly | step 3; the rest is R6's |
+| tools 2 | fixed | ranked 11; step 1 |
+| tools 3 | fixed | ranked 8; step 1 |
+| tools 4 | fixed | step 4; cycles per variant are M29's |
+| tools 5 | fixed | step 4 |
+| tools 6 | fixed | step 4 |
+| tools 7 | partly | step 3; the rest is R6's |
+| tools 8 | fixed | step 2 |
+| tools 9 | fixed | step 2; decision 2026-11-15 |
+| tools 10 | fixed | step 2 |
+| tools 11 | fixed | step 2 |
+| tools 12 | fixed | step 2; decision 2026-11-15 |
+| tools 13 | fixed | step 2 |
+| tools 14 | fixed | step 2 |
+| tools 15 | fixed | step 4 |
+| tools 16 | fixed | step 2 (by its tests) |
+| tools 17 | fixed | step 2 |
+| tools 18 | partly | step 3; the rest has no owner |
+| tests 1 | fixed | step 2 |
+| tests 2 | fixed | step 2 |
+| tests 3 | fixed | step 2 |
+| tests 4 | left for R6 |  |
+| tests 5 | left for R6 |  |
+| tests 6 | partly | step 3; the rest is R6's |
+| tests 7 | partly | step 3; the rest is R6's |
+| tests 8 | fixed | step 2 |
+| tests 9 | left for R6 |  |
+| tests 10 | partly | step 3; the rest has no owner |
+| tests 11 | left for R6 |  |
+| tests 12 | partly | step 3; question 174 |
+| tests 13 | not fixed | "R5 or R6" in R1's table; R5 did not take it and R6's scope does not name it (step 3) |
+| tests 14 | left for R6 | the cycle table's check is done (tools 17) |
 
 ## Step 1: the ranked bugs
 
@@ -123,9 +236,31 @@ The tables of R2 and R3 mark these "not fixed: R5". R5's roadmap scope does not 
 | syntax 22 | Small things. |
 | tests 13 | `Run.Program` does everything in its constructor ("R5 or R6" in R1's table; with tools 1 it fits R6's run model, but R6's scope does not name it). |
 
+## Step 4: the construction themes of R4 and R5
+
+Checked by searching `src/` for what should be gone, not by reading the files. The guard tests the tables name were run (`InstructionsTests`, `MemoryUseTests`, `SyntaxTreeTests`, `CliTests`, `CheckTests`, `LanguageServerTests`, `BenchmarkTests`, `SkillTests`, the three tests of semantics 20, the DMA test of tools 15: all pass).
+
+| Finding | Verdict | The search, and what it found |
+|---|---|---|
+| backend 7, semantics 15, tools 4 (the CPU variant) | fixed | No list of branches, stores, loads or transfers is left in the backend or the checker: a search for mnemonic lists (`X or Y or ...`, `case Mnemonic.`) over `src/Tern.Compiler` finds only peephole patterns that match one shape (`Lda or Txa or Tya` as "the next load", `Beq or Bne` in one rewrite) and `Jsr or Jmp` in the checker's call test. `AsmEffects.Of` is gone. Two small lists remain, both for M29 with syntax 13: the parser's `asl / lsr / rol / ror` for the `a` operand (`Parser.Statements.cs:345`; the 65C02 adds `inc a` and `dec a`), and `Inx or Iny` / `Dex or Dey` as plus and minus one in the register tracking (`Optimizer.Registers.cs:191`). |
+| backend 8 (memory effects) | fixed | `MemoryUse.cs` is the one place; the optimizer files name `Sta` or `Lda` only inside rewrite patterns. |
+| backend 9 (control flow) | fixed | `ExitsOf` is used by the analyses (9 places); `Dispatches` is gone. |
+| backend 10 (predictions) | fixed (decision 2026-11-16) | `CodeGen.Checks.cs` holds the `[Conditional("DEBUG")]` checks, called from the generator's files. The review's other fix, reserving registers, is left by that decision. |
+| semantics 14 (tree walks) | fixed | `Node.Children` and `Descendants` exist and the walks use them; `Lowering` throws on an unknown node. The walks left by hand are the ones the table lists, plus one it does not: `Unreachable`'s `Inner` (`Checker.Warnings.cs:310`), a switch over the statements that hold blocks, with no default. A new statement kind with a block would get no "never reached" warning inside it; no wrong code. |
+| semantics 20 (rules written twice) | fixed | By its three tests, which pass. |
+| syntax 21 (contextual words) | fixed | No comparison of a token's text with a memory or modifier word is left (`Text == "linear"` and the like: none). |
+| tools 5 (option parsers) | fixed | Each option string is in `Cli.Options.cs` once, and read by name in `Cli.Commands.cs`. |
+| tools 6 (stand-ins) | fixed | Each ROM address is in its machine's `Routines` once. (`TernCompiler.Apple2.cs:17` names the same Apple II addresses for the startup code's calls: a platform fact, R6's.) |
+| syntax 1, 10; semantics 19; backend 12 (long methods) | fixed | Method lengths measured over `src/` by a script: none is over 300 lines, and the 12 over 100 are exactly those listed in `docs/status.md` (Known limitations), with the same lengths (`Lexer.Tokenize` 239 with its local `Next` 153, `Cpu6502.Step` 160, `InstructionSet.Nmos` 130, `CheckCall` 116, `GenCall` 116, `ParsePrimaryBody` 113, `CheckBinary` 108, `Interpreter.Exec` 105, `CheckFor` 103, `ReadCopiesFromSource` 103, `GenMatch` 101). |
+| syntax 20 (parser modes) | fixed | `Mode<T>` exists; no `_inAsm =`, `_inHeader =` or `_inConstFn =` assignment is left outside it. |
+| semantics 18 (context in fields) | fixed | `BodyContext` exists; `_allowLongBytes` and the list-length field are gone. |
+| backend 14 (per-function state) | fixed | `FunctionContext` exists (`CodeGen.cs:36`). |
+| syntax 8 (end positions) | fixed | `Node.Span`; `LanguageServerTests` pass. What is left is in step 3. |
+| tools 15 (bus cannot add cycles) | fixed | `Cpu6502.Stall`, called by the NES bus for DMA; no `Cycles +=` from outside the CPU. |
+
 ## Must fix
 
-No finding that R1-R5 marked fixed is not fixed or broken again: steps 1 to 3 found no bug.
+No finding that R1-R5 marked fixed is not fixed or broken again: the four steps found no bug, in the fixes' behavior or in the diffs read.
 
 What is open is ownership (step 3): findings and parts the tables handed on that no milestone or decision has. Each needs one of: a line in R6's scope, a later milestone, or a decision to leave it, recorded in `docs/decisions.md`. Most useful first:
 
@@ -133,4 +268,4 @@ What is open is ownership (step 3): findings and parts the tables handed on that
 2. **tools 18, the rest:** an unknown mapper run as NROM without a word and `Cli` reading any `InvalidOperationException` as "a binary without main" are the two with a user-visible effect; the other four are tidying.
 3. **syntax 9** (with the part of syntax 20 that waits for it): statement ends in the lexer. A design change in the lexer and parser; a decision to leave it until M28 needs it is reasonable.
 4. **backend 11, semantics 21, tests 13:** structure findings R5 did not take.
-5. **backend 16 and 17, semantics 22, syntax 22**, the unused `platform` parameter of `Allocator.Allocate` (backend 7), the interpreter's unstated guarantees (syntax 11), and the unreached self-recursive function (semantics 5): small things.
+5. **backend 16 and 17, semantics 22, syntax 22**, the unused `platform` parameter of `Allocator.Allocate` (backend 7), the interpreter's unstated guarantees (syntax 11), the unreached self-recursive function (semantics 5), and the one tree walk still without a default, `Inner` in `Checker.Warnings.cs` (semantics 14, step 4): small things.
