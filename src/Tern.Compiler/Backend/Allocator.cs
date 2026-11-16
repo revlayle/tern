@@ -62,7 +62,7 @@ public static class Allocator
 {
     /// <param name="byPage">Place indexed arrays so their reads do not cross a page (<see cref="RamPlan.PageArrays"/>); else one after another.</param>
     /// <param name="indexed">For each variable, the offsets of the code's indexed operands into it.</param>
-    public static RamPlan Allocate(CheckedProgram program, Platform platform, bool byPage = true,
+    public static RamPlan Allocate(CheckedProgram program, bool byPage = true,
         IReadOnlyDictionary<VariableSymbol, List<int>>? indexed = null)
     {
         var layout = program.Layout;
