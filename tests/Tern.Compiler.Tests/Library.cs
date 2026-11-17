@@ -42,6 +42,9 @@ public sealed class Library
     /// <summary>The 16-bit result in A (low) and X (high).</summary>
     public int AX => Cpu.A | (Cpu.X << 8);
 
+    /// <summary>The cycles of the <c>jsr</c> a caller makes: the run starts at the routine, so they are added (the rts is run).</summary>
+    private const int JsrCycles = 6;
+
     /// <summary>Calls a routine with the given registers. Returns its cycles, including the jsr and rts.</summary>
     public long Call(string function, int a = 0, int x = 0, int y = 0, bool carry = false, long maxCycles = 1_000_000)
     {
@@ -56,7 +59,7 @@ public sealed class Library
         Cpu.PC = (ushort)Address(function);
         long start = Cpu.Cycles;
         RunToHalt(maxCycles);
-        return Cpu.Cycles - start + 6;
+        return Cpu.Cycles - start + JsrCycles;
     }
 
     private void RunToHalt(long maxCycles)

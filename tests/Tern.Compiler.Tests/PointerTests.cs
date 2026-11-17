@@ -447,4 +447,44 @@ public class PointerTests
             """);
         Assert.Equal(5, r.U8("count"));
     }
+
+    /// <summary>The pointer errors (spec 3.4), with the part of the message each must have; moved from ErrorTests (review code-quality-tests 14).</summary>
+    [Theory]
+    [InlineData("var p: ptr\nfn main() { }", "'ptr' needs the type it points to")]
+    [InlineData("var p: ptr u8\nvar q: ptr u8\nvar r: ptr u8\nfn main() { r = p + q }", "Two pointers cannot be added")]
+    [InlineData("var p: ptr u8\nvar q: ptr u16\nvar w: u16\nfn main() { w = p - q }", "Cannot subtract ptr u16 from ptr u8")]
+    [InlineData("var p: ptr u8\nvar q: ptr u8\nfn main() { q = p - q }", "Expected ptr u8, found u16")]
+    [InlineData("var p: ptr u8\nfn main() { p = p & 7 }", "'&' does not work on pointers")]
+    [InlineData("var p: ptr u8\nfn main() { p <<= 1 }", "only '+=' and '-=' do")]
+    [InlineData("var p: ptr u8\nvar s: i8\nfn main() { p = p + s }", "moves by a u8 or u16, not i8")]
+    [InlineData("var p: ptr u8\nfn main() { p = p + -1 }", "use '-' to move back")]
+    [InlineData("var p: ptr u8\nvar q: ptr u8\nfn main() { q = 1 - p }", "cannot be subtracted from a number")]
+    [InlineData("var p: ptr u8\nvar w: u16\nfn main() { p = w }", "Expected ptr u8, found u16. Convert with 'as ptr u8'")]
+    // Review code-quality-semantics 12: every type mismatch says how to fix it, with a fix that compiles.
+    [InlineData("var b: bool = 1\nfn main() { }", "Expected bool, found a number. Write true or false, or compare, as in 'x != 0'")]
+    [InlineData("var b: bool\nvar x: u8\nfn main() { b = x }", "Expected bool, found u8. Compare instead, as in 'x != 0'")]
+    [InlineData("var b: bool\nvar x: u8\nfn main() { x = b }", "Expected u8, found bool. Use 'if' to choose a number, as in 'if b { x = 1 }'")]
+    [InlineData("var p: ptr u8\nvar x: u8\nfn main() { p = x }", "Expected ptr u8, found u8. Convert with 'as u16' first, then 'as ptr u8'")]
+    [InlineData("var p: ptr u8\nvar x: u8\nfn main() { x = p }", "Expected u8, found ptr u8. Convert with 'as u16' first, then take .lo or .hi")]
+    [InlineData("var p: ptr u8\nvar s: i16\nfn main() { s = p }", "Expected i16, found ptr u8. Convert with 'as u16' first, then 'as i16'")]
+    [InlineData("fn main() { var a: [u8; 2] = [1, 2] }", "An initial value for a local array is not supported yet. Assign the elements, or use a global or data")]
+    [InlineData("var p: ptr u8\nvar w: u16\nfn main() { w = w + p }", "A number before a pointer is not pointer arithmetic. Write 'p + w' to move the pointer, or convert the pointer with 'as u16' for a number")]
+    [InlineData("var p: ptr u8\nvar q: ptr u16\nfn main() { q = p }", "Convert with 'as ptr u16'")]
+    [InlineData("var p: ptr u8\nvar b: u8\nfn main() { b = p as u8 }", "a pointer converts only to u16 or another pointer")]
+    [InlineData("var p: ptr u8\nvar b: u8\nfn main() { p = b as ptr u8 }", "only u16 and pointers convert to a pointer")]
+    [InlineData("var p: ptr u8\nvar q: ptr u16\nfn main() { if p == q { } }", "Cannot compare ptr u8 with ptr u16")]
+    [InlineData("var p: ptr u8\nvar w: u16\nfn main() { if p == w { } }", "Cannot compare ptr u8 with u16")]
+    [InlineData("var p: ptr u8\nvar b: u8\nfn main() { b = p.lo }", "(p as u16).lo")]
+    [InlineData("var p: ptr u16\nvar w: u16\nfn main() { w = p[128] }", "Index 128 is too large")]
+    [InlineData("var p: ptr u8\nfn main() { for i in 0..4 using Y { p[0] = i } }", "needs the Y register")]
+    [InlineData("const C = 5\nvar p: ptr u8\nfn main() { p = addr(C) }", "is a constant, which has no address")]
+    [InlineData("var p: ptr u8\nfn main() { p = addr(nothing) }", "'nothing' is not declared")]
+    [InlineData("var p: ptr u8\nvar a: [u8; 2]\nfn main() { p = addr(a[1]) }", "addr() takes the name")]
+    [InlineData("var p: ptr u8\nfn main() { for i in 0..4 using X { p = addr(i) } }", "lives in a register")]
+    [InlineData("var p: ptr [u8; 4]\nfn main() { }", "A pointer must point to a number, bool, pointer or struct")]
+    public void Reports_pointer_errors(string source, string expected)
+    {
+        var e = Assert.Throws<Syntax.CompileError>(() => TernCompiler.Compile(source));
+        Assert.Contains(expected, e.Description, StringComparison.OrdinalIgnoreCase);
+    }
 }

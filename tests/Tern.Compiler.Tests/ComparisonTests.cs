@@ -25,11 +25,9 @@ public class ComparisonTests
 
     private sealed record Row(string Name, Measure Tern, Measure Asm, Measure Prog8, Measure C, Measure Mos);
 
-    [Fact]
+    [FactWhen("TERN_COMPARE", "it builds the benchmarks with the other compilers and writes the comparison report")]
     public void Every_implementation_gives_the_right_results_and_the_comparison_report_is_written()
     {
-        if (Environment.GetEnvironmentVariable("TERN_COMPARE") != "1") return;
-
         string dir = BenchmarkTests.Directory_;
         string work = Path.Combine(Path.GetTempPath(), "tern-compare-" + Guid.NewGuid().ToString("N")[..8]);
         Directory.CreateDirectory(work);
