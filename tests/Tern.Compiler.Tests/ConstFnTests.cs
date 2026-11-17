@@ -635,7 +635,7 @@ public sealed class ConstFnTests : IDisposable
     [InlineData("data t: [u8; _] = f()\nconst fn f() -> [int; _] { return [t[0]] }", "'t' depends on itself: t -> t")]
     [InlineData("const fn f() -> int { return nope }\nconst K = f()", "'nope' is not declared")]
     [InlineData("const fn f() -> int { return nope() }\nconst K = f()", "'nope' is not declared")]
-    [InlineData("const fn f() -> int { return f }\nconst K = f()", "'f' is a const fn; call it with ()")]
+    [InlineData("const fn f() -> int { return f }\nconst K = f()", "'f' is a const fn (called from line 2); call it with ()")]
     [InlineData("const fn f() -> int { var x = 1\n return x() }\nconst K = f()", "'x' is a variable, not a function")]
     [InlineData("const fn f() -> int { return [1, 2][5] }\nconst K = f()", "Index 5 is outside the array (length 2) (called from line 2). Use an index from 0 to 1")]
     [InlineData("const fn f() -> int { return 1 / (2 - 2) }\nconst K = f()", "Division by zero (called from line 2)")]
@@ -686,6 +686,17 @@ public sealed class ConstFnTests : IDisposable
         var e = Error(source + "\nfn main() { }");
         Assert.Contains(expected, e.Description);
     }
+
+    /// <summary>
+    /// The note goes right before the fix (review code-quality-syntax 11), where <c>--json</c> splits the
+    /// suggestion off, not after the first ". ": before R6 a first sentence with "e.g." was cut in two.
+    /// </summary>
+    [Theory]
+    [InlineData("A value, e.g. 5, is wrong. Use another", "A value, e.g. 5, is wrong (called from line 2). Use another")]
+    [InlineData("It is wrong; use another", "It is wrong (called from line 2); use another")]
+    [InlineData("It is wrong. It cannot be fixed", "It is wrong. It cannot be fixed (called from line 2)")]
+    public void The_called_from_note_goes_before_the_fix(string message, string expected) =>
+        Assert.Equal(expected, CompileTime.Interpreter.WithNote(message, "called from line 2"));
 
     // Review code-quality-syntax 2: an error two or three const fn calls deep names the line that started the evaluation too.
     [Theory]

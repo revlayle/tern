@@ -51,19 +51,27 @@ public sealed record Diagnostic(string File, int Line, int Column, string Severi
     /// <summary>Splits an error's text before the first sentence that tells how to fix it.</summary>
     public static (string Message, string? Suggestion) Split(string text)
     {
+        int i = FixStart(text);
+        if (i < 0) return (text, null);
+        string head = text[..i].TrimEnd();
+        string tail = text[(i + 2)..];
+        return (text[i] == '.' ? head + "." : head, char.ToUpperInvariant(tail[0]) + tail[1..]);
+    }
+
+    /// <summary>
+    /// Where the fix begins in an error's text: the index of the ". " or "; " before the first sentence that
+    /// starts with one of <see cref="FixVerbs"/>, or -1 when no sentence tells how to fix it.
+    /// </summary>
+    public static int FixStart(string text)
+    {
         for (int i = 0; i + 2 < text.Length; i++)
         {
             if (text[i] is not ('.' or ';') || text[i + 1] != ' ') continue;
             int start = i + 2, end = start;
             while (end < text.Length && char.IsLetter(text[end])) end++;
-            if (end > start && FixVerbs.Contains(text[start..end]))
-            {
-                string head = text[..i].TrimEnd();
-                string tail = text[start..];
-                return (text[i] == '.' ? head + "." : head, char.ToUpperInvariant(tail[0]) + tail[1..]);
-            }
+            if (end > start && FixVerbs.Contains(text[start..end])) return i;
         }
-        return (text, null);
+        return -1;
     }
 
     private static readonly JsonSerializerOptions Options = new()

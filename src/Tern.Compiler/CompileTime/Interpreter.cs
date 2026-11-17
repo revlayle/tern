@@ -40,13 +40,25 @@ public sealed partial class Interpreter
     }
 
     /// <summary>A variable of a const fn.</summary>
-    private sealed class Slot(CtValue value, CtType type, string? readOnly)
+    private sealed class Slot(CtValue value, CtType type, Fixed readOnly)
     {
         public CtValue Value { get; set; } = value;
         public CtType Type { get; } = type;
-        /// <summary>Why it cannot be assigned ("the loop variable", "a constant"), or null.</summary>
-        public string? ReadOnly { get; } = readOnly;
+        /// <summary>Why it cannot be assigned, or <see cref="Fixed.No"/>.</summary>
+        public Fixed ReadOnly { get; } = readOnly;
     }
+
+    /// <summary>Why a const fn's name cannot be assigned (review code-quality-syntax 11: not a text compared with text).</summary>
+    private enum Fixed { No, Constant, LoopVariable, ListVariable }
+
+    /// <summary>The name as a message gives it: "a constant", "the loop variable".</summary>
+    private static string Describe(Fixed why) => why switch
+    {
+        Fixed.Constant => "a constant",
+        Fixed.LoopVariable => "the loop variable",
+        Fixed.ListVariable => "the list's variable",
+        _ => throw new InvalidOperationException($"{why} is not a reason a name cannot be assigned"),
+    };
 
     private enum Flow { Normal, Break, Continue, Return }
 
@@ -68,10 +80,10 @@ public sealed partial class Interpreter
     /// <summary>A line as "main.tern:5", or "line 5" for source given without a file.</summary>
     public static string Where(SourcePos pos) => pos.File is null ? $"line {pos.Line}" : $"{Path.GetFileName(pos.File)}:{pos.Line}";
 
-    /// <summary>Adds "(note)" after the first sentence of an error, so that the fix stays at the end.</summary>
+    /// <summary>Adds "(note)" before the sentence that tells how to fix the error (<see cref="Tools.Diagnostic.FixStart"/>), so that the fix stays at the end.</summary>
     public static string WithNote(string message, string note)
     {
-        int end = message.IndexOf(". ", StringComparison.Ordinal);
+        int end = Tools.Diagnostic.FixStart(message);
         return end < 0 ? $"{message} ({note})" : $"{message[..end]} ({note}){message[end..]}";
     }
 
@@ -203,7 +215,7 @@ public sealed partial class Interpreter
             foreach (long i in Range(l.From, l.To, l.Inclusive, l.Step, l.RangeText))
             {
                 Step();
-                if (l.Variable is not null) Top.Scopes[^1][l.Variable] = new Slot(new CtInt(i), CtType.Int, "the list's variable");
+                if (l.Variable is not null) Top.Scopes[^1][l.Variable] = new Slot(new CtInt(i), CtType.Int, Fixed.ListVariable);
                 values.Add(Eval(l.Element));
                 positions.Add(l.Element.Pos);
                 if (values.Count > 0x10000)
@@ -230,7 +242,7 @@ public sealed partial class Interpreter
             if (step == 0) throw Error(stepExpr.Pos, "The step is 0, so the loop would never end. Use a step other than 0");
         }
         else if (from > to && IsConstant(fromExpr) && IsConstant(toExpr))
-            throw Error(fromExpr.Pos, Checker.CountsUp(text, fromExpr.Pos, "Write 'step -1' to count down").Description);
+            throw Error(fromExpr.Pos, Checker.CountsUpText(text, "Write 'step -1' to count down"));
         else step = 1;
         return Values(from, to, inclusive, step);
 
@@ -247,7 +259,7 @@ public sealed partial class Interpreter
     /// <summary>A bound that names none of the const fn's variables (its constants count as constant).</summary>
     private bool IsConstant(Expr e) => e switch
     {
-        NameExpr n => FindSlot(n.Name) is not { } s || s.ReadOnly == "a constant",
+        NameExpr n => FindSlot(n.Name) is not { } s || s.ReadOnly == Fixed.Constant,
         UnaryExpr u => IsConstant(u.Operand),
         BinaryExpr b => IsConstant(b.Left) && IsConstant(b.Right),
         CallExpr c => c.Name != "label" && c.Args.All(IsConstant),
@@ -542,7 +554,7 @@ public sealed partial class Interpreter
 
         var frame = new Frame(fn);
         for (int k = 0; k < args.Count; k++)
-            frame.Scopes[0][fn.Parameters[k].Name] = new Slot(args[k], fn.Parameters[k].Type, null);
+            frame.Scopes[0][fn.Parameters[k].Name] = new Slot(args[k], fn.Parameters[k].Type, Fixed.No);
         _frames.Add(frame);
         try
         {
@@ -557,7 +569,7 @@ public sealed partial class Interpreter
             if (fn.ReturnType is null) return null;
             if (flow != Flow.Return)
                 throw Error(fn.Pos, $"'{fn.Name}' ends without returning a value. Add a 'return' at its end");
-            return Convert(frame.Returned!, fn.ReturnType, fn.Declaration.ReturnType!.Pos, $"The value '{fn.Name}' returns");
+            return Convert(frame.Returned ?? throw new InvalidOperationException("The checker rejects a bare return in a const fn that returns a value"), fn.ReturnType, fn.Declaration.ReturnType!.Pos, $"The value '{fn.Name}' returns");
         }
         finally { _frames.RemoveAt(_frames.Count - 1); }
     }
@@ -579,8 +591,15 @@ public sealed partial class Interpreter
         finally { if (newScope) Top.Scopes.RemoveAt(Top.Scopes.Count - 1); }
     }
 
-    private void Bind(string name, CtValue value, CtType type, string? readOnly) => Top.Scopes[^1][name] = new Slot(value, type, readOnly);
+    private void Bind(string name, CtValue value, CtType type, Fixed readOnly) => Top.Scopes[^1][name] = new Slot(value, type, readOnly);
 
+    /// <summary>
+    /// Runs one statement of a const fn. The checker's body check (<c>ConstFnBodyCheck</c>) has already
+    /// rejected what a const fn may not hold, and this relies on it: a statement that is an expression is
+    /// a call, a <c>var</c> without a type has a value, and a <c>return</c> in a function with a return type
+    /// has one. Those three throw <see cref="InvalidOperationException"/> if the checker ever lets one
+    /// through (review code-quality-syntax 11); every other case is a user's error and says how to fix it.
+    /// </summary>
     private Flow Exec(Stmt s)
     {
         Step();
@@ -615,22 +634,22 @@ public sealed partial class Interpreter
                 }
                 else
                 {
-                    value = Eval(v.Init!).Copy();
+                    value = Eval(v.Init ?? throw new InvalidOperationException("The checker rejects a const fn's var with neither a type nor a value")).Copy();
                     type = value.Type;
                 }
-                Bind(v.Name, value, type, null);
+                Bind(v.Name, value, type, Fixed.No);
                 return Flow.Normal;
             }
             case ConstDecl c:
             {
                 var value = Eval(c.Value);
                 if (c.TypeSyntax is not null) value = Convert(value, Types.Resolve(c.TypeSyntax), c.Value.Pos, $"The value of '{c.Name}'");
-                Bind(c.Name, value.Copy(), value.Type, "a constant");
+                Bind(c.Name, value.Copy(), value.Type, Fixed.Constant);
                 return Flow.Normal;
             }
             case AssignStmt a: Assign(a); return Flow.Normal;
             case ExprStmt e:
-                Call((CallExpr)e.Expr, statement: true);
+                Call(e.Expr as CallExpr ?? throw new InvalidOperationException("The checker allows only calls as statements in a const fn"), statement: true);
                 return Flow.Normal;
             case BlockStmt b: return ExecBlock(b);
             case IfStmt i:
@@ -650,7 +669,7 @@ public sealed partial class Interpreter
                 {
                     Step();
                     Top.Scopes.Add([]);
-                    if (f.Variable is not null) Bind(f.Variable, new CtInt(i), CtType.Int, "the loop variable");
+                    if (f.Variable is not null) Bind(f.Variable, new CtInt(i), CtType.Int, Fixed.LoopVariable);
                     Flow flow;
                     try { flow = ExecBlock(f.Body); }
                     finally { Top.Scopes.RemoveAt(Top.Scopes.Count - 1); }
@@ -700,8 +719,8 @@ public sealed partial class Interpreter
             _host.Read(Top.Module, name.Name, name.Pos, true);
             throw Error(name.Pos, $"'{name.Name}' is not a variable of this const fn, which changes only its own variables. Declare a local copy: 'var my_{name.Name.Replace('.', '_')} = {name.Name}'");
         }
-        if (slot.ReadOnly is { } why)
-            throw Error(name.Pos, $"'{name.Name}' is {why}, which cannot be changed. Declare a variable with 'var' for a value that changes");
+        if (slot.ReadOnly != Fixed.No)
+            throw Error(name.Pos, $"'{name.Name}' is {Describe(slot.ReadOnly)}, which cannot be changed. Declare a variable with 'var' for a value that changes");
 
         CtValue Combine(CtValue old) => a.Op == TokenKind.Eq ? Eval(a.Value) : Binary(CompoundOp(a.Op), old, Eval(a.Value), a.Pos);
 
