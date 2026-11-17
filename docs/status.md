@@ -4,15 +4,23 @@ Owned by the coding session. Updated at the end of every coding session.
 
 ## Current
 
-- **Milestone:** R7 fixes, what no milestone owned (roadmap "R7 fixes"; decision 2026-11-16, "R7's must-fix items"; review `docs/reviews/code-quality-followup.md`, "Must fix"). R1-R5 and R7's review are merged; R6 comes after this.
-- **Branch:** `r7-fixes`, from `main` at `ff7b219`.
-- **Done on the branch:** all four items (table below): `PrecedenceTests` (spec 3.6) and `ConversionTests` (spec 3.5), each compared with C#; `RunError` for what `tern run` cannot run (a binary without main, an NES mapper other than 0 or 2), the only exception `Cli`'s `tern run` reports as the user's problem; `Allocator.Allocate` without its `platform` parameter; `Inner` in `Checker.Warnings.cs` throws on a statement it does not know. 6188 compiler tests and 50 CPU tests pass, none skipped (after the review's suggestions). No benchmark moved (1254 / 350780); `SkillTests` unchanged.
-- **Behavior changes** (each with a test that failed before it): an NES cartridge with a mapper other than 0 or 2 is an error in `tern run` (before, it ran as NROM); an `InvalidOperationException` from a run other than "a binary without main" is an internal error (exit code 4), not a user error (exit code 1); the `u8 as bool` error says "e.g." where it said "c.g." (found by `ConversionTests`). The precedence and conversion tables found no other bug.
-- **Next step:** `/merge r7-fixes` (review `docs/reviews/r7-fixes.md`: ready to merge, three suggestions, all handled). Then R6.
-- **Review R7 fixes** (`bf9e2c2`): suggestion 1, the unknown-mapper message's fix starts with "Use", a `FixVerbs` word; left for R6 (messages as data): the binary-without-main message, whose fix follows a colon, and `tern run`'s diagnostic built with no suggestion, so `--json` gives none for either run error. Suggestion 2: precedence rows for member access and for `!` against a compare; the constant row `-7 / 2`, which reads the same either way, replaced by `~6 / 4`. Suggestion 3: `ConversionTests.Widening_is_automatic_wherever_the_destination_gives_the_type` (initial value, array element, argument, return value). No failure found.
-- **Done when:** met as far as the coding session can tell: each item has its test, the benchmarks and `SkillTests` are unchanged, and the table below lists each item.
+- **Milestone:** R6, platforms as data, messages as data (roadmap "R6"; review themes 3 and 5, the rest of theme 7, tests 13 with the run model of tools 1; decisions 2026-11-16). R1-R5, R7's review and R7 fixes are merged.
+- **Branch:** `r6-data`, from `main` at `fc8c1cd`.
+- **Done on the branch** (table below): the run model as one machine per platform (tools 1, tests 13); platform rules from the description (semantics 16); one output object per kind of file (syntax 6, syntax 1's platform branches).
+- **Next step:** messages as data (semantics 12 and 17, syntax 7, 11 and 19, backend 13 and 15, tools 7), then the rest of test theme 7 (tests 4-7, 9, 11, 14), each with its row in the table below.
+- **Done when** (roadmap): adding a platform needs no change outside its description and its library, the feature suite passes on all four platforms, and the benchmarks and `SkillTests` are unchanged.
 
-### Review findings handled by R7 fixes
+### Review findings handled by R6
+
+| Finding | Commit | Guarded by | State |
+|---|---|---|---|
+| tools 1 (run model split between `Runner`, `Machine` and `NesBus`) | `0552b8d` | `RunModelTests.A_platform_with_no_machine_is_an_error_not_a_run_as_a_c64` (failed before), `The_screen_is_the_machine_that_ran`; the suite | fixed: `Machine` loads the file and gives the bus (`LoadFile`), ticks the chips (`AfterStep`), gives code places (`PlaceOf`), reads without side effects (`Peek`), says whether `brk` takes the IRQ (`RunsBrk`) and reads its own screen; `RunResult` keeps the machine that ran. Each platform names its machine (`Platform.NewMachine`); none is a `RunError`. `Runner` and the tests' `Run` have no NES test. `RunResult.Platform` has no C64 default |
+| tests 13 (`Run.Program` does everything in its constructor) | `0552b8d` | the suite | fixed: `Run.Compile` and `Run.Of` (run a compiled program) beside `Run.Program`; the run uses `tern run`'s machine, so the platform set-up is in one place. `LongBufferTests` and `NoinitTests` no longer compile twice. The optional parameters stay on `Program` (600 call sites), gathered in one `Settings` record inside |
+| semantics 16 ("has boards" stands for the NES) | `fe1bfc3` | `PlatformDataTests` (two failed before) | fixed: `Platform.CartridgeRequired`, `CartridgesPlanned` and `Title` replace `Boards.Count > 0`, the name `"apple2"` and `Name.ToUpperInvariant()`; a store to data in asm is allowed when the layout has a cartridge. The memory line kinds were already an enum (`MemoryKind`) |
+| syntax 6 (platform facts and output formats spread over the driver) | `ec4a671` | the suite, benchmarks, `SkillTests` (unchanged) | fixed: `OutputFormat` is a class per kind of file (`Output/`), whose `OutputBuild` holds the startup prelude, the items after the halt loop and the functions, RAM cleared at startup, padding, NROM's rejoined areas, the Apple II's copies, the file, the labels' places and the report's lines. The iNES build takes ROM ranges from the board, RAM from the platform; the Apple II's copy pointers come from its zero page; `Apple2Rom` holds the ROM addresses the startup code and `tern run` both name (the R7 note on tools 6). Left: `Board.Mapper` and `Board.Mirroring` stay on `Board` (the only boards are iNES ones; a C64 cartridge's board would carry its own) |
+| syntax 1, the platform branches in the builder | `ec4a671` | as syntax 6 | fixed with syntax 6. The retry's `catch` on any `CompileError` is backend 15's |
+
+### Review findings handled by R7 fixes (merged)
 
 | Finding | Commit | Guarded by | State |
 |---|---|---|---|
