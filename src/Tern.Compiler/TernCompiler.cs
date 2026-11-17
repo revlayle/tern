@@ -183,8 +183,7 @@ public static partial class TernCompiler
         }
         catch (CompileError e) when (checking.HasWarnings)
         {
-            checking.AddWarnings(e);
-            throw;
+            throw checking.WithWarnings(e);
         }
     }
 
@@ -213,18 +212,20 @@ public static partial class TernCompiler
             try { program = Checker.Check(Modules, platform, _errors, _found, warnLibrary); }
             catch (CompileError e) when (HasWarnings)
             {
-                AddWarnings(e);
-                throw;
+                throw WithWarnings(e);
             }
             if (warnings == WarningMode.AsErrors && HasWarnings) ThrowWarningsAsErrors();
             return program;
         }
 
-        /// <summary>Gives a later error the warnings found before it; with <c>--warnings-as-errors</c>, they are errors instead.</summary>
-        public void AddWarnings(CompileError e)
+        /// <summary>
+        /// A later error with the warnings found before it, as a new error (it is not changed); with
+        /// <c>--warnings-as-errors</c>, the warnings are thrown as errors instead.
+        /// </summary>
+        public CompileError WithWarnings(CompileError e)
         {
             if (warnings == WarningMode.AsErrors) ThrowWarningsAsErrors();
-            e.WithWarnings = _errors.Sort(e.All.Concat(_found!));
+            return e.Carrying(e.All.Skip(1).ToList(), e.MoreNotReported, copy => _errors.Sort(copy.All.Concat(_found!)));
         }
 
         // --warnings-as-errors: each warning is an error, and the build stops (spec 13).

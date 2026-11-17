@@ -20,11 +20,11 @@ public sealed class CompileError(SourcePos pos, string message) : Exception($"{p
     /// Every error of the compile, this one first (spec 13: one run reports every error it finds).
     /// Just this one for an error of a later stage, which are reported one at a time.
     /// </summary>
-    public IReadOnlyList<CompileError> All { get => _all ?? [this]; internal set => _all = value; }
-    private IReadOnlyList<CompileError>? _all;
+    public IReadOnlyList<CompileError> All => [this, .. _others];
+    private IReadOnlyList<CompileError> _others = [];
 
     /// <summary><c>--max-errors</c> stopped the compile: more errors were not reported.</summary>
-    public bool MoreNotReported { get; internal set; }
+    public bool MoreNotReported { get; private init; }
 
     /// <summary>
     /// What the error is about, for code that catches it to report it better where it knows more
@@ -39,8 +39,24 @@ public sealed class CompileError(SourcePos pos, string message) : Exception($"{p
     /// The errors in <see cref="All"/> and the warnings found before a later stage failed, sorted by
     /// place (spec 13). Just <see cref="All"/> when there are no warnings.
     /// </summary>
-    public IReadOnlyList<CompileError> WithWarnings { get => _withWarnings ?? All; internal set => _withWarnings = value; }
+    public IReadOnlyList<CompileError> WithWarnings => _withWarnings ?? All;
     private IReadOnlyList<CompileError>? _withWarnings;
+
+    /// <summary>
+    /// A new error like this one that carries the compile's other errors (<paramref name="others"/>, after it in
+    /// <see cref="All"/>) and, given this new error, its list with the warnings (<see cref="WithWarnings"/>). The
+    /// error a compile throws is made here, whole, and never changed after (review code-quality-syntax 7).
+    /// </summary>
+    internal CompileError Carrying(IReadOnlyList<CompileError> others, bool moreNotReported,
+        Func<CompileError, IReadOnlyList<CompileError>>? withWarnings = null)
+    {
+        var copy = new CompileError(Pos, Description)
+        {
+            CalledFrom = CalledFrom, Reason = Reason, IsWarning = IsWarning, MoreNotReported = moreNotReported, _others = others,
+        };
+        copy._withWarnings = withWarnings?.Invoke(copy);
+        return copy;
+    }
 }
 
 /// <summary>What a <see cref="CompileError"/> is about (<see cref="CompileError.Reason"/>).</summary>
