@@ -372,16 +372,4 @@ public class Apple2LibraryTests
         Assert.Equal(" TERN ON THE APPLE II: HI-RES AND TEXT", screen[21]);
         Assert.StartsWith(" PIXELS PLOTTED: ", screen[22]);
     }
-
-    [Fact]
-    public void The_benchmarks_run_on_the_apple_ii_with_the_same_results()
-    {
-        string dir = BenchmarkTests.Directory_;
-        foreach (var path in Directory.GetFiles(dir, "*.tern").Order(StringComparer.Ordinal))
-        {
-            var r = Run.Program(File.ReadAllText(path), sourcePath: path, maxCycles: 20_000_000, platform: Platform.Apple2);
-            Assert.Equal(0x2000, r.Result.Entry);
-            BenchmarkTests.Checks[Path.GetFileNameWithoutExtension(path)](new Results(r.Ram, (n, o) => r.Address(n) + o));
-        }
-    }
 }

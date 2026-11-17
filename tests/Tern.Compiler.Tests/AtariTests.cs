@@ -149,17 +149,6 @@ public class AtariTests
         finally { dir.Delete(recursive: true); }
     }
 
-    [Fact]
-    public void The_benchmarks_run_on_the_atari_with_the_same_results()
-    {
-        string dir = BenchmarkTests.Directory_;
-        foreach (var path in Directory.GetFiles(dir, "*.tern").Order(StringComparer.Ordinal))
-        {
-            var r = Run.Program(File.ReadAllText(path), sourcePath: path, maxCycles: 20_000_000, platform: Platform.Atari);
-            Assert.Equal(0x2000, r.Result.Entry);
-            BenchmarkTests.Checks[Path.GetFileNameWithoutExtension(path)](new Results(r.Ram, (n, o) => r.Address(n) + o));
-        }
-    }
 
     /// <summary>Every module that is not C64-only (spec 10.1), used once; run on both machines, the variables must agree.</summary>
     private const string Modules = """

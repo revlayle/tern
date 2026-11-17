@@ -116,15 +116,18 @@ public sealed class Run
                 + string.Join("\n", differences) + "\n\nOptimized:\n" + Result.Listing + "\nWithout the optimizer:\n" + plain.Result.Listing);
     }
 
-    /// <summary>Compiles a program for a run with <see cref="Of"/>.</summary>
-    /// <param name="platform">The target; the C64 if null.</param>
-    public static CompileResult Compile(string source, string? sourcePath = null, string? libraryDirectory = null, Platform? platform = null, bool optimize = true) =>
-        TernCompiler.Compile(source, platform, sourcePath: sourcePath, libraryDirectory: libraryDirectory, optimize: optimize);
+    /// <summary>Compiles a program for a run with <see cref="Of"/>, as its target needs it (<see cref="TestTarget.Adapt"/>).</summary>
+    /// <param name="platform">The target; <see cref="TestTarget.Default"/> if null.</param>
+    public static CompileResult Compile(string source, string? sourcePath = null, string? libraryDirectory = null, Platform? platform = null, bool optimize = true)
+    {
+        platform ??= TestTarget.Default;
+        return TernCompiler.Compile(TestTarget.Adapt(source, platform), platform, sourcePath: sourcePath, libraryDirectory: libraryDirectory, optimize: optimize);
+    }
 
     /// <param name="setup">Prepares memory after loading the program, e.g. with stand-ins for ROM routines.</param>
     /// <param name="irqEvery">If set, raises an IRQ this many cycles after the last one was taken (taken once interrupts are enabled).</param>
     /// <param name="traps">Stand-ins for ROM routines: when the CPU reaches the address, the action runs and the routine returns without executing.</param>
-    /// <param name="platform">The target; the C64 if null.</param>
+    /// <param name="platform">The target; <see cref="TestTarget.Default"/> if null.</param>
     /// <param name="buttons">On the NES: the buttons of pad 1 or 2 in a frame (<see cref="Tools.NesBus.Buttons"/>).</param>
     /// <param name="zeroStart">Starts with zero memory and zero registers instead of the <see cref="StartState"/>.</param>
     /// <param name="watch">The addresses whose reads and writes the CPU makes are logged in <see cref="Log"/>, given the compiled program.</param>

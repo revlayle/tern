@@ -78,22 +78,26 @@ public class OperandMatrix16Tests
 
     private static readonly int[] Values = [3, 0x1234];
 
-    /// <summary>Every form in every place and context; the loops with one value, to keep the run short.</summary>
-    public static TheoryData<string, string, string, int> Cases()
+    /// <summary>
+    /// Every form in every place and context; the loops with one value, to keep the run short. A case that compiles runs
+    /// on every platform (review code-quality-tests 5), an error is checked on the C64.
+    /// </summary>
+    public static TheoryData<string, string, string, int, string> Cases()
     {
-        var data = new TheoryData<string, string, string, int>();
+        var data = new TheoryData<string, string, string, int, string>();
         foreach (var form in Forms)
             foreach (var place in Places)
                 foreach (var context in Contexts)
                 {
                     if (place.Return is not null && context != "once") continue;
                     foreach (int v in context == "once" ? Values : Values[..1])
-                        data.Add(form.Name, place.Name, context, v);
+                        foreach (var target in ExpectedError(form, place, context) is null ? Platform.All.Select(p => p.Name) : [Platform.C64.Name])
+                            data.Add(form.Name, place.Name, context, v, target);
                 }
         return data;
     }
 
-    private static string Source(Form form, Place place, string context, int v)
+    private static string Source(Form form, Place place, string context, int v, Platform platform)
     {
         string body = place.Body.Replace("X", form.Text).Replace("V", v.ToString());
         if (context != "once")
@@ -112,8 +116,8 @@ public class OperandMatrix16Tests
             indexed var irecs: [S; 4]
             var arr: [u16; 4]
             var w: [u16; 4]
-            var p: ptr u16 = $3000
-            volatile var vv: u16 @ $C000
+            var p: ptr u16 = ${{TestTarget.ScratchRam(platform) + 0x80:X4}}
+            volatile var vv: u16 @ ${{TestTarget.ScratchRam(platform):X4}}
             var j: u8 = 2
             var q: u16 = {{Q}}
             var b: bool
@@ -159,11 +163,12 @@ public class OperandMatrix16Tests
 
     [Theory]
     [MemberData(nameof(Cases))]
-    public void A_16_bit_operand_gives_the_same_result_in_every_place(string formName, string placeName, string context, int v)
+    public void A_16_bit_operand_gives_the_same_result_in_every_place(string formName, string placeName, string context, int v, string target)
     {
         var form = Forms.Single(f => f.Name == formName);
         var place = Places.Single(p => p.Name == placeName);
-        string source = Source(form, place, context, v);
+        var platform = Platform.ByName(target)!;
+        string source = Source(form, place, context, v, platform);
         if (ExpectedError(form, place, context) is { } error)
         {
             var e = Assert.Throws<CompileError>(() => TernCompiler.Compile(source));
@@ -179,7 +184,8 @@ public class OperandMatrix16Tests
             { Type: "u16" } => model.Read(),
             _ => model.Read() >= Q ? 1 : 0,
         };
-        var run = Run.Program(source);
+        // Off the C64, results only: the comparison with a plain build is the C64's (it doubles the runs).
+        var run = Run.Program(source, platform: platform, comparePlain: platform == Platform.C64);
         Assert.Equal(r & 0xFFFF, run.U16("r"));
         Assert.Equal(@out, run.U16("out"));
         Assert.Equal(model.Calls, run.U8("calls"));
