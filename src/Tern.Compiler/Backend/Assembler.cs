@@ -77,10 +77,10 @@ public sealed class AssembledCode(
 public static partial class Assembler
 {
     /// <summary>
-    /// The variables were to start at a place in a page or at an alignment (<see cref="Reserve.Modulus"/>), but no area has room
-    /// for that, or a <c>jmp (...)</c> vector would then start at $xxFF. The caller places them another way.
+    /// Inside the layout: the variables were to start at a place in a page or at an alignment (<see cref="Reserve.Modulus"/>),
+    /// but no area has room for that. <see cref="Assemble"/> returns null for it; no caller sees it.
     /// </summary>
-    public sealed class NoPageStart() : Exception("The variables do not fit where they were placed in a page");
+    private sealed class NoPageStart() : Exception("The variables do not fit where they were placed in a page");
 
     private sealed class Slot(AsmItem item)
     {
@@ -105,10 +105,18 @@ public static partial class Assembler
     /// RAM for the variables' block when code is in ROM (the NES): the block goes there, in the first
     /// area with room, instead of after the code in <paramref name="areas"/>. Null or empty: after the code.
     /// </param>
-    public static AssembledCode Assemble(IReadOnlyList<AsmItem> items, IReadOnlyList<AddressRange> areas, InstructionSet cpu, Action? beforeEncode = null,
+    /// <returns>
+    /// The code, or null when the variables were to start at a place in a page or at an alignment (<see cref="Reserve.Modulus"/>)
+    /// and no area has room for that, or a <c>jmp (...)</c> vector would then start at $xxFF: the caller places them another way
+    /// (review code-quality-backend 15: an outcome, not an exception).
+    /// </returns>
+    public static AssembledCode? Assemble(IReadOnlyList<AsmItem> items, IReadOnlyList<AddressRange> areas, InstructionSet cpu, Action? beforeEncode = null,
         IReadOnlyDictionary<string, AddressRange>? overlayAreas = null, IReadOnlyDictionary<string, SourcePos>? overlayImports = null,
-        IReadOnlyList<AddressRange>? variableAreas = null) =>
-        new Assembly(items, areas, cpu, overlayAreas, overlayImports, variableAreas).Run(beforeEncode);
+        IReadOnlyList<AddressRange>? variableAreas = null)
+    {
+        try { return new Assembly(items, areas, cpu, overlayAreas, overlayImports, variableAreas).Run(beforeEncode); }
+        catch (NoPageStart) { return null; }
+    }
 
     /// <summary>
     /// The number of bytes to skip at <paramref name="pc"/> so that no vector at <c>pc + skip + offset</c>
@@ -131,7 +139,7 @@ public static partial class Assembler
         });
         return new CompileError(new SourcePos(1, 1),
             $"{(what == "the variables" ? "The variables need" : $"'{what}' needs")} {size} bytes, and no program area has room for them in one piece " +
-            $"(code is never split across areas). Areas: {string.Join("; ", areas)}. Make an area larger, or split the code into smaller functions");
+            $"(code is never split across areas). Areas: {string.Join("; ", areas)}. Make an area larger, or split the code into smaller functions") { Reason = new AreasFull() };
     }
 
     /// <summary>Uses a zero-page mode when the operand is a zero-page address and the instruction has one.</summary>

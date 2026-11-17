@@ -268,7 +268,7 @@ public static partial class Assembler
                         int room = ram.Select((a, i) => a.Last + 1 - used[firstForVariables + i]).Max();
                         throw new CompileError(new SourcePos(1, 1),
                             $"The variables need {reserve.Size} bytes, but the RAM for variables, {MemoryLayout.List(ram)} ({ram.Sum(a => a.Size)} bytes), has room for {room}. " +
-                            "Make arrays smaller, use 'data' for tables that never change (they stay in ROM), or put small variables in zero page with '@ zp'");
+                            "Make arrays smaller, use 'data' for tables that never change (they stay in ROM), or put small variables in zero page with '@ zp'") { Reason = new AreasFull() };
                     }
                     throw NoRoom("the variables", reserve.Size, free, used, names);
                 }

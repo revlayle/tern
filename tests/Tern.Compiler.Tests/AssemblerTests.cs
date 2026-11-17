@@ -20,7 +20,7 @@ public class AssemblerTests
                 new LabelDef(far),
                 new DataBytes(new byte[4]),
             ],
-            [new AddressRange(0x1000, 0x1FFF)], InstructionSet.Nmos6502);
+            [new AddressRange(0x1000, 0x1FFF)], InstructionSet.Nmos6502)!;
         var (address, bytes) = Assert.Single(code.Segments);
         Assert.Equal(0x1000, address);
         int target = 0x1000 + 5 + 200 + 3;

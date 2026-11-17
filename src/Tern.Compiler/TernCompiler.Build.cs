@@ -114,34 +114,43 @@ public static partial class TernCompiler
                     .ToDictionary(g => g.Key, g => layout.PlacedArea(g.First().OverlayArea!)!.Value);
                 // Placed by page, the variables may not fit, or may now overlap a fixed-address variable
                 // (review M18 part 3, finding 1): then place them one after another. That try reports
-                // any error as before.
+                // any error as before. Only errors whose reason says they depend on the layout are retried
+                // (review code-quality-backend 15); any other is the program's, whatever the layout.
+                bool retryPlain = byPage && plan.PageArrays.Count > 0;
+                AssembledCode? code;
                 try
                 {
-                    var code = Assembler.Assemble(items, codeAreas, platform.InstructionSet, () =>
+                    code = Assembler.Assemble(items, codeAreas, platform.InstructionSet, () =>
                     {
                         foreach (var (g, label) in imageLabels) g.Address = label.Address;
                         foreach (var (v, offset) in plan.ZeroedGlobals.Concat(plan.NoinitGlobals).Concat(plan.CopiedGlobals)) v.Address = bss.Address + offset;
                         foreach (var (v, offset) in plan.FrameVariables) v.Address = bss.Address + offset;
                     }, overlayAreas, program.Modules.Where(m => m.ImportedBy is not null && m.OverlayArea is not null).GroupBy(m => m.Unit!).ToDictionary(g => g.Key, g => g.First().ImportedBy!.Pos),
                     layout.Variables);
-                    CheckFixedAddresses(program, platform, code, plan);
-                    if (!Output.Settled(code)) continue;
-                    return new Assembled(plan, items, code);
+                    if (code is not null) CheckFixedAddresses(program, platform, code, plan);
                 }
-                catch (CompileError) when (Output.Rejoined(codeAreas) is { } joined)
+                catch (CompileError e) when (e.Reason is AreasFull && Output.Rejoined(codeAreas) is { } joined)
                 {
                     codeAreas = joined;
                     byPage = true;
+                    continue;
                 }
-                catch (Exception e) when (byPage && plan.PageArrays.Count > 0 && e is Assembler.NoPageStart or CompileError) { byPage = false; }
-                catch (Assembler.NoPageStart)
+                catch (CompileError e) when (e.Reason is AreasFull or OverlapsPlaced && retryPlain)
                 {
-                    // Only aligned variables are left to place the block for.
+                    byPage = false;
+                    continue;
+                }
+                if (code is null)
+                {
+                    // The variables placed by page have no start: one after another, unless only aligned variables are left to place the block for.
+                    if (retryPlain) { byPage = false; continue; }
                     var widest = plan.ZeroedGlobals.Concat(plan.NoinitGlobals).Concat(plan.CopiedGlobals).Select(e => e.Var).MaxBy(v => v.Alignment)!;
                     throw new CompileError(widest.Pos,
                         $"The variables after the program ({plan.TotalSize} bytes) must start where '{widest.Name}' is at a multiple of ${widest.Alignment:X}, and no program area has room for them there. " +
                         "Make a program area larger, or use a smaller alignment");
                 }
+                if (!Output.Settled(code)) continue;
+                return new Assembled(plan, items, code);
             }
         }
 

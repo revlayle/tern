@@ -301,7 +301,7 @@ public static partial class TernCompiler
                 if (area.UsedEnd > area.Free.First && range.Overlaps(used))
                     throw new CompileError(g.Pos,
                         $"'{g.Name}' at {range} overlaps the program and its variables at {used}. " +
-                        $"Move '{g.Name}', or make the program smaller");
+                        $"Move '{g.Name}', or make the program smaller") { Reason = new OverlapsPlaced() };
             }
             foreach (var module in code.Sections.Where(s => s.Overlay is not null && s.Size > 0).GroupBy(s => s.Overlay!))
             {
@@ -309,21 +309,21 @@ public static partial class TernCompiler
                 if (!g.DeclaredVolatile && module.Any(s => range.Overlaps(new AddressRange(s.Address, s.Address + s.Size - 1))))
                     throw new CompileError(g.Pos,
                         $"'{g.Name}' at {range} overlaps the overlay {module.Key} at {file}, which is loaded there. " +
-                        $"Declare it 'volatile var {g.Name}' if the overlap is intended; otherwise name the overlay's own variable ({module.Key}.name) or move '{g.Name}' out of the overlay's area");
+                        $"Declare it 'volatile var {g.Name}' if the overlap is intended; otherwise name the overlay's own variable ({module.Key}.name) or move '{g.Name}' out of the overlay's area") { Reason = new OverlapsPlaced() };
             }
             foreach (var (regionName, use) in plan.RegionUse)
                 if (range.Overlaps(use))
                     throw new CompileError(g.Pos,
-                        $"'{g.Name}' at {range} overlaps the variables the compiler placed in region '{regionName}' at {use}. Move '{g.Name}', or place it with the region");
+                        $"'{g.Name}' at {range} overlaps the variables the compiler placed in region '{regionName}' at {use}. Move '{g.Name}', or place it with the region") { Reason = new OverlapsPlaced() };
             foreach (var section in code.Sections.Where(s => s.IsFixed && s.Size > 0 && (s.Overlay is null || (g.Module?.OverlayArea is not null && g.Module.Unit == s.Overlay))))
                 if (range.Overlaps(new AddressRange(section.Address, section.Address + section.Size - 1)))
                     throw new CompileError(g.Pos,
-                        $"'{g.Name}' at {range} overlaps the data '{section.Name}' at {new AddressRange(section.Address, section.Address + section.Size - 1)}. Move one of them");
+                        $"'{g.Name}' at {range} overlaps the data '{section.Name}' at {new AddressRange(section.Address, section.Address + section.Size - 1)}. Move one of them") { Reason = new OverlapsPlaced() };
             foreach (var v in inZeroPage)
                 if (first <= v.Address + v.Type.Size - 1 && range.Last >= v.Address)
                     throw new CompileError(g.Pos,
                         $"'{g.Name}' at {range} overlaps '{v.QualifiedName}' at {new AddressRange(v.Address, v.Address + v.Type.Size - 1)}, " +
-                        $"which the compiler placed in zero page. Move '{g.Name}' out of {MemoryLayout.ListZeroPage(zeroPage)}");
+                        $"which the compiler placed in zero page. Move '{g.Name}' out of {MemoryLayout.ListZeroPage(zeroPage)}") { Reason = new OverlapsPlaced() };
         }
     }
 

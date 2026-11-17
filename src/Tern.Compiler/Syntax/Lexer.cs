@@ -52,6 +52,12 @@ public sealed record NotDeclared(string Name) : ErrorReason;
 /// <summary>A constant that does not fit in the type it is given.</summary>
 public sealed record DoesNotFit(long Value) : ErrorReason;
 
+/// <summary>No program area, or no RAM for the variables, has room for what the layout places: another layout may fit.</summary>
+public sealed record AreasFull : ErrorReason;
+
+/// <summary>A fixed-address variable overlaps what the layout placed (the program, its variables, an overlay): another layout may not.</summary>
+public sealed record OverlapsPlaced : ErrorReason;
+
 public enum TokenKind
 {
     Identifier, Number, Newline, Eof,
