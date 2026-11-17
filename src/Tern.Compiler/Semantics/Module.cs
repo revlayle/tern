@@ -30,7 +30,7 @@ public sealed class Module
     /// What is present as a whole in its area: an overlay module alone, or the modules of one bank
     /// ("levels[1]"). Two units of one area are never present together (spec 8.5); null for a resident module.
     /// </summary>
-    public string? Unit => OverlayArea is null ? null : InBank ? $"{OverlayArea}[{Bank}]" : Name;
+    public string? Unit => OverlayArea is null ? null : InBank ? Backend.CodePlace.BankUnit(OverlayArea, Bank) : Name;
     /// <summary>A module found in the compiler's library folders (spec 2.2): never warned about (spec 13).</summary>
     public bool IsLibrary { get; init; }
     /// <summary>Set by the checker once the file's top-level declarations are in <see cref="Scope"/>.</summary>

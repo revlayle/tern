@@ -176,7 +176,7 @@ public static partial class TernCompiler
             // The C64's BASIC line must be where the file loads; a .xex names its run address.
             if (!binary && platform.Header.Length > 0 && layout.Program[0].First != platform.LoadAddress)
                 throw new CompileError(program.Main.Pos,
-                    $"A program with 'main' starts at ${platform.LoadAddress:X4}, where the {platform.Title} BASIC line goes, but its first program area begins at ${layout.Program[0].First:X4}. " +
+                    $"A program with 'main' starts at ${platform.LoadAddress:X4}, where the {platform.Title} {platform.HeaderName} goes, but its first program area begins at ${layout.Program[0].First:X4}. " +
                     (layout.ProgramReplaced ? $"Start the first 'program' line of the memory block at ${platform.LoadAddress:X4}" : "Move the 'reserved' or 'region' range that covers it"));
             CheckFixedData(program, plan);
             if (program.ExportTableAddress is int tableAt)
@@ -197,13 +197,13 @@ public static partial class TernCompiler
             // implements (spec 8.5): a jmp at each interface routine's address, in the overlay's file; its code goes around them.
             foreach (var entry in program.Implementations)
             {
-                items.Add(new SectionStart($"{entry.Interface.Name}.{entry.Name}", entry.Routine.FixedAddress, Overlay: entry.Module.Unit));
+                items.Add(new SectionStart($"{entry.Interface.Name}.{entry.Name}", entry.Routine.FixedAddress, Overlay: entry.Module.Unit, Module: entry.Module.Name));
                 items.Add(new Instr(Jmp, Absolute, new LabelOperand(gen.LabelOf(entry.Function))));
             }
             if (program.ExportTableAddress is int table)
             {
                 // A program's export table: one jmp per function, in the order listed (spec 12.3).
-                items.Add(new SectionStart("export table", table));
+                items.Add(new SectionStart("export table", table, Kind: SectionKind.ExportTable));
                 foreach (var export in program.Exports)
                     items.Add(new Instr(Jmp, Absolute, new LabelOperand(gen.LabelOf(export))));
             }
@@ -224,7 +224,8 @@ public static partial class TernCompiler
         /// <summary>A program's startup code: the platform's first steps and the variables' setup, then <c>jsr main</c> and the halt loop.</summary>
         private List<AsmItem> Startup(RamPlan plan)
         {
-            List<AsmItem> items = [new SectionStart("startup"), new DataBytes(platform.Header), new LabelDef(start), new Comment("startup")];
+            var title = platform.HeaderName is { } header ? $"{header} and startup code" : "startup code";
+            List<AsmItem> items = [new SectionStart("startup", Kind: SectionKind.Head, Title: title), new DataBytes(platform.Header), new LabelDef(start), new Comment("startup")];
             items.AddRange(Output.BeforeStartup());
             items.AddRange(TernCompiler.Startup(plan, bss, gen.LabelOf, Output.Prelude(), Output.RamCleared, initial));
             items.Add(new Instr(Jsr, Absolute, new LabelOperand(gen.LabelOf(program.Main))));
@@ -240,7 +241,7 @@ public static partial class TernCompiler
         /// </summary>
         private List<AsmItem> JumpTable(RamPlan plan)
         {
-            List<AsmItem> items = [new SectionStart("jump table"), new LabelDef(start), new Instr(Jmp, Absolute, new LabelOperand(setup))];
+            List<AsmItem> items = [new SectionStart("jump table", Kind: SectionKind.Head), new LabelDef(start), new Instr(Jmp, Absolute, new LabelOperand(setup))];
             int at = layout.Program[0].First + 3;
             foreach (var export in program.Exports)
             {
@@ -268,7 +269,7 @@ public static partial class TernCompiler
                 var label = new Label(g.Name);
                 imageLabels[g] = label;
                 // A bank's data is in the bank, with its code (spec 8.5).
-                items.Add(new SectionStart(g.Name, Overlay: g.Module?.InBank == true ? g.OverlayUnit : null));
+                items.Add(new SectionStart(g.Name, Overlay: g.Module?.InBank == true ? g.OverlayUnit : null, Module: g.Module?.Name));
                 if (ImagePadding(g, Output.Padding) is { } padding) items.Add(padding);
                 items.Add(new LabelDef(label));
                 items.AddRange(ImageBytes(g, gen.LabelOf));

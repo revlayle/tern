@@ -17,6 +17,8 @@ public sealed class Platform
     public required int LoadAddress { get; init; }
     /// <summary>Bytes placed at <see cref="LoadAddress"/> before the code, e.g. a BASIC SYS line.</summary>
     public required byte[] Header { get; init; }
+    /// <summary>What <see cref="Header"/> is, in messages: "BASIC line"; null for a platform with no header.</summary>
+    public string? HeaderName { get; init; }
     /// <summary>
     /// Zero-page bytes the program may use: first and last address of each range, inclusive, in the
     /// order the compiler fills them. A variable cannot cross from one range to the next, so the
@@ -88,6 +90,7 @@ public sealed class Platform
     public static readonly Platform C64 = new()
     {
         Name = "c64",
+        HeaderName = "BASIC line",
         Title = "C64",
         CartridgesPlanned = true,
         Cpu = CpuVariant.Nmos6502,

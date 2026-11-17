@@ -13,7 +13,7 @@ public class PlatformDataTests
     internal static Platform Like(Platform p, string name, IReadOnlyList<Board>? boards = null, bool cartridgeRequired = false,
         bool machine = true) => new()
     {
-        Name = name, Title = name.ToUpperInvariant(), Cpu = p.Cpu, LoadAddress = p.LoadAddress, Header = p.Header, ZeroPage = p.ZeroPage,
+        Name = name, Title = name.ToUpperInvariant(), Cpu = p.Cpu, LoadAddress = p.LoadAddress, Header = p.Header, HeaderName = p.HeaderName, ZeroPage = p.ZeroPage,
         RamEnd = p.RamEnd, VolatileAreas = p.VolatileAreas, DefaultEncoding = p.DefaultEncoding, Format = p.Format, Labels = p.Labels,
         Rom = p.Rom, Boards = boards ?? p.Boards, CartridgeRequired = cartridgeRequired, VariableRam = p.VariableRam, NewMachine = machine ? p.NewMachine : null,
     };
@@ -34,6 +34,20 @@ public class PlatformDataTests
         var withBoards = Like(Platform.C64, "c64crt", [Board.Nrom]);
         var e = Assert.Throws<CompileError>(() => TernCompiler.Compile("data d: [u8; 2] = [1, 2]\nfn main() { asm {\n inc d\n } }", withBoards));
         Assert.Equal("'d' is data, which is read-only. Declare it with 'var' to change it", e.Description);
+    }
+
+    /// <summary>
+    /// The startup section names the platform's header (review code-quality-backend 13): before R6 every
+    /// platform's message named "the BASIC line and startup code", read from the section's name.
+    /// </summary>
+    [Theory]
+    [InlineData("c64", "'first' at $0801-$0803 overlaps the BASIC line and startup code at $0801-")]
+    [InlineData("atari", "'first' at $2000-$2002 overlaps the startup code at $2000-")]
+    public void Data_over_the_startup_code_names_what_is_there(string target, string expected)
+    {
+        var platform = Platform.ByName(target)!;
+        var e = Assert.Throws<CompileError>(() => TernCompiler.Compile($"data first: [u8; 3] @ ${platform.LoadAddress:X4} = [1, 2, 3]\nfn main() {{ }}", platform));
+        Assert.StartsWith(expected, e.Description);
     }
 
     /// <summary>The cartridge rule is the platform's, whatever its name.</summary>

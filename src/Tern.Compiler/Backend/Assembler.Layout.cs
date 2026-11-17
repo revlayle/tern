@@ -137,7 +137,7 @@ public static partial class Assembler
             int firstEnd = Lay(firstSection, areas[0].First);
             if (firstEnd <= areas[0].First) return;
             var head = new AddressRange(areas[0].First, firstEnd - 1);
-            string what = firstSection.Info.Name == "jump table" ? "jump table" : "BASIC line and startup code";
+            string what = firstSection.Info.Title ?? firstSection.Info.Name;
             if (firstEnd > areas[0].Last + 1)
                 throw new CompileError(new SourcePos(1, 1),
                     $"The {what} ({firstEnd - areas[0].First} bytes) must be at the start of the first program area, but it does not fit in {areas[0]}. Make the first area larger");
@@ -147,9 +147,9 @@ public static partial class Assembler
                 int end = Lay(section, at);
                 if (end > at && head.Overlaps(new AddressRange(at, end - 1)))
                     throw new CompileError(new SourcePos(1, 1),
-                        $"'{section.Info.Name}' at {new AddressRange(at, end - 1)} overlaps the {(firstSection.Info.Name == "jump table" ? "jump table" : "BASIC line and startup code")} at {head}, " +
+                        $"'{section.Info.Name}' at {new AddressRange(at, end - 1)} overlaps the {what} at {head}, " +
                         "which must be at the start of the first program area. " +
-                        (section.Info.Name == "export table" ? $"Give the export table an address after ${head.Last:X4}" : "Move the data, or start the program area lower"));
+                        (section.Info.Kind == SectionKind.ExportTable ? $"Give the export table an address after ${head.Last:X4}" : "Move the data, or start the program area lower"));
             }
         }
 
@@ -201,13 +201,12 @@ public static partial class Assembler
                 pos = end;
             }
             // A bank ("levels[1]") holds the modules placed in it; its sections are named module.name.
-            if (!fits && module.Key.EndsWith(']'))
+            if (!fits && CodePlace.Bank(module.Key) is (string bankArea, int bankNumber))
             {
-                var sizes = module.GroupBy(s => s.Info.Name.Contains('.') ? s.Info.Name[..s.Info.Name.IndexOf('.')] : s.Info.Name)
+                var sizes = module.GroupBy(s => s.Info.Module ?? s.Info.Name)
                     .Select(g => $"{g.Key} ({g.Sum(s => SizeOf(s))} bytes)");
-                int at = module.Key.IndexOf('[');
                 throw new CompileError(overlayImports?.GetValueOrDefault(module.Key) ?? new SourcePos(1, 1),
-                    $"Bank {module.Key[(at + 1)..^1]} of '{module.Key[..at]}' needs {size} bytes, but a bank has {area.Size}: {string.Join(", ", sizes)}. Move a module to another bank, or make one smaller");
+                    $"Bank {bankNumber} of '{bankArea}' needs {size} bytes, but a bank has {area.Size}: {string.Join(", ", sizes)}. Move a module to another bank, or make one smaller");
             }
             if (!fits)
                 throw new CompileError(overlayImports?.GetValueOrDefault(module.Key) ?? new SourcePos(1, 1),
@@ -270,7 +269,7 @@ public static partial class Assembler
                             $"The variables need {reserve.Size} bytes, but the RAM for variables, {MemoryLayout.List(ram)} ({ram.Sum(a => a.Size)} bytes), has room for {room}. " +
                             "Make arrays smaller, use 'data' for tables that never change (they stay in ROM), or put small variables in zero page with '@ zp'") { Reason = new AreasFull() };
                     }
-                    throw NoRoom("the variables", reserve.Size, free, used, names);
+                    throw NoRoom(null, reserve.Size, free, used, names);
                 }
                 reserve.Label.Address = placedAt;
                 slots[reserveSlot].Address = placedAt;
