@@ -20,7 +20,7 @@ public sealed record VariableInfo(string Name, int Address, int Size, string Typ
 public sealed class CompileResult
 {
     /// <summary>
-    /// The program file in the platform's format (<see cref="Platform.FileOf"/>): a .prg, or a .xex with
+    /// The program file in the platform's kind (<see cref="Platform.Format"/>): a .prg, or a .xex with
     /// one load segment per run of bytes and the run address (none for a binary without main).
     /// </summary>
     public required byte[] File { get; init; }
@@ -237,7 +237,7 @@ public static partial class TernCompiler
 
     private static string Bytes(int n) => n == 1 ? "1 byte" : $"{n} bytes";
 
-    private static string Plural(int n, string one, string many) => n == 1 ? $"1 {one}" : $"{n} {many}";
+    internal static string Plural(int n, string one, string many) => n == 1 ? $"1 {one}" : $"{n} {many}";
 
     /// <summary>A program's export table is placed like fixed data: in a program or reserved area (spec 12.3).</summary>
     private static void CheckExportTable(CheckedProgram program, AddressRange range)
@@ -331,16 +331,16 @@ public static partial class TernCompiler
     /// Startup code: the platform's own first steps (<paramref name="prelude"/>), then set up zero-page
     /// globals and clear the uninitialized ones in RAM (except noinit ones).
     /// </summary>
-    /// <param name="ramCleared">The prelude cleared all of RAM (the NES): zeros are not stored again.</param>
+    /// <param name="ramCleared">The RAM the prelude cleared (the NES's): zeros there are not stored again.</param>
     /// <param name="initial">The initial values in ROM that the startup copies (<see cref="RamPlan.CopiedGlobals"/>).</param>
     private static List<AsmItem> Startup(RamPlan plan, Label bss, Func<FunctionSymbol, Label> labelOf, IEnumerable<AsmItem> prelude,
-        bool ramCleared = false, Label? initial = null)
+        AddressRange? ramCleared = null, Label? initial = null)
     {
         var items = new List<AsmItem> { new Instr(Cld) };
         items.AddRange(prelude);
 
         int? a = null;
-        foreach (var g in plan.ZeroPageGlobals.Where(g => !g.NoInit && !(ramCleared && g.InitialBytes is null)))
+        foreach (var g in plan.ZeroPageGlobals.Where(g => !g.NoInit && !(ramCleared is not null && g.InitialBytes is null)))
         {
             var bytes = ByteLayout(g, g.InitialBytes ?? new byte[g.Type.Size]);
             var addresses = AddressBytes(g);
@@ -368,9 +368,9 @@ public static partial class TernCompiler
             items.Add(new Comment("copy the initial values from ROM"));
             CopyBlock(items, plan.CopiedSize, p => new LabelOperand(initial!, p), p => new LabelOperand(bss, plan.CopiedStart + p), "copy");
         }
-        if (plan.ZeroedSize > 0 && !ramCleared)
+        if (plan.ZeroedSize > 0 && ramCleared is null)
             ClearBlock(items, plan.ZeroedSize, p => new LabelOperand(bss, plan.ZeroedStart + p), "clear");
-        foreach (var block in plan.RegionClears.Where(b => !ramCleared || b.First > 0x07FF))
+        foreach (var block in plan.RegionClears.Where(b => ramCleared is not { } cleared || b.First > cleared.Last))
             ClearBlock(items, block.Size, p => new AddrOperand(block.First + p), $"clear_{block.First:X4}_");
         return items;
     }
@@ -401,10 +401,53 @@ public static partial class TernCompiler
     }
 
     /// <summary>
+    /// Copies <paramref name="size"/> bytes from <paramref name="from"/> to <paramref name="to"/>, 256 at a time,
+    /// as <see cref="ClearBlock"/> clears: the startup code's copy of the initial values from ROM to RAM.
+    /// </summary>
+    private static void CopyBlock(List<AsmItem> items, int size, Func<int, Operand> from, Func<int, Operand> to, string name)
+    {
+        for (int p = 0; p < size / 256; p++)
+        {
+            var loop = new Label($"{name}{p}");
+            items.Add(new Instr(Ldx, Immediate, new Imm(0)));
+            items.Add(new LabelDef(loop));
+            items.Add(new Instr(Lda, AbsoluteX, from(p * 256)));
+            items.Add(new Instr(Sta, AbsoluteX, to(p * 256)));
+            items.Add(new Instr(Inx));
+            items.Add(new Instr(Bne, Relative, new LabelOperand(loop)));
+        }
+        int rest = size % 256;
+        if (rest > 0)
+        {
+            var loop = new Label(name);
+            items.Add(new Instr(Ldx, Immediate, new Imm(rest)));
+            items.Add(new LabelDef(loop));
+            items.Add(new Instr(Lda, AbsoluteX, from(size / 256 * 256 - 1)));
+            items.Add(new Instr(Sta, AbsoluteX, to(size / 256 * 256 - 1)));
+            items.Add(new Instr(Dex));
+            items.Add(new Instr(Bne, Relative, new LabelOperand(loop)));
+        }
+    }
+
+    /// <summary>The initial values of the variables the startup code copies to RAM: their bytes in the block's order, gaps as zeros.</summary>
+    private static List<AsmItem> InitialValues(RamPlan plan, Label initial, Func<FunctionSymbol, Label> labelOf)
+    {
+        var items = new List<AsmItem> { new SectionStart("initial values"), new LabelDef(initial) };
+        int at = plan.CopiedStart;
+        foreach (var (g, offset) in plan.CopiedGlobals.OrderBy(e => e.Offset))
+        {
+            if (offset > at) items.Add(new DataBytes(new byte[offset - at]));
+            items.AddRange(ImageBytes(g, labelOf));
+            at = offset + g.Type.Size;
+        }
+        return items;
+    }
+
+    /// <summary>
     /// The initial value of a global in the program image. Addresses in it (spec 4) are filled in
     /// by the assembler from the functions' labels and the variables' addresses.
     /// </summary>
-    private static IEnumerable<AsmItem> ImageBytes(VariableSymbol g, Func<FunctionSymbol, Label> labelOf)
+    internal static IEnumerable<AsmItem> ImageBytes(VariableSymbol g, Func<FunctionSymbol, Label> labelOf)
     {
         var bytes = ByteLayout(g, g.InitialBytes ?? new byte[g.Type.Size]);
         int start = 0;
@@ -434,7 +477,7 @@ public static partial class TernCompiler
     }
 
     /// <summary>Where byte <paramref name="i"/> of a value is in its memory layout (see <see cref="ByteLayout"/>).</summary>
-    private static int LayoutIndex(VariableSymbol v, int i)
+    internal static int LayoutIndex(VariableSymbol v, int i)
     {
         if (!v.Type.IsArray || v.Type.Element!.Size == 1 || v.Type.Linear) return i;
         int size = v.Type.Element.Size;
@@ -446,7 +489,7 @@ public static partial class TernCompiler
     /// its layout in memory: an array of 16-bit values or of structs, unless linear, is split into one
     /// table per element byte (spec 3.2, 3.3): byte k of element i is at k * length + i.
     /// </summary>
-    private static byte[] ByteLayout(VariableSymbol v, byte[] bytes)
+    internal static byte[] ByteLayout(VariableSymbol v, byte[] bytes)
     {
         if (!v.Type.IsArray || v.Type.Element!.Size == 1 || v.Type.Linear) return bytes;
         var split = new byte[bytes.Length];

@@ -39,18 +39,18 @@ internal sealed class Apple2Machine(OverlayDisk disk) : Machine
 
     protected override IReadOnlyList<StandIn> Routines =>
     [
-        new(0xFDED, "COUT", (cpu, ram, output) => { Print(cpu.A, ram, output); return null; }),
-        new(0xFC58, "HOME", (_, ram, _) =>
+        new(Apple2Rom.Cout, "COUT", (cpu, ram, output) => { Print(cpu.A, ram, output); return null; }),
+        new(Apple2Rom.Home, "HOME", (_, ram, _) =>
         {
             Window(ram).Clear();
             Cursor(ram, ram.Bytes[Wndtop], 0);
             return null;
         }),
-        new(0xFE84, "SETNORM", (cpu, ram, _) => { ram.Bytes[Invflg] = 0xFF; cpu.Y = 0xFF; return null; }),
-        new(0xFB2F, "INIT", (_, ram, _) => { SetWindow(ram); Cursor(ram, Rows - 1, 0); return null; }),
-        new(0xFE93, "SETVID", (_, ram, _) => { (ram.Bytes[Csw], ram.Bytes[Csw + 1]) = (0xF0, 0xFD); return null; }),
-        new(0xFE89, "SETKBD", (_, ram, _) => { (ram.Bytes[Ksw], ram.Bytes[Ksw + 1]) = (0x1B, 0xFD); return null; }),
-        new(0xBF00, "MLI", Mli, "for QUIT, CLOSE, GET_PREFIX, SET_PREFIX, and for reading the build's overlay files"),
+        new(Apple2Rom.SetNorm, "SETNORM", (cpu, ram, _) => { ram.Bytes[Invflg] = 0xFF; cpu.Y = 0xFF; return null; }),
+        new(Apple2Rom.Init, "INIT", (_, ram, _) => { SetWindow(ram); Cursor(ram, Rows - 1, 0); return null; }),
+        new(Apple2Rom.SetVid, "SETVID", (_, ram, _) => { (ram.Bytes[Csw], ram.Bytes[Csw + 1]) = (0xF0, 0xFD); return null; }),
+        new(Apple2Rom.SetKbd, "SETKBD", (_, ram, _) => { (ram.Bytes[Ksw], ram.Bytes[Ksw + 1]) = (0x1B, 0xFD); return null; }),
+        new(Apple2Rom.Mli, "MLI", Mli, "for QUIT, CLOSE, GET_PREFIX, SET_PREFIX, and for reading the build's overlay files"),
     ];
 
     /// <summary>The MLI's calls: the ones with stand-ins, then the ones that write to the disk.</summary>
