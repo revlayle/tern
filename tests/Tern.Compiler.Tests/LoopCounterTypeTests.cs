@@ -59,6 +59,7 @@ public class LoopCounterTypeTests
         else Assert.Contains("Expected u8, found u16", Assert.Throws<CompileError>(() => TernCompiler.Compile(assign)).Description);
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void A_whole_page_is_walked_with_a_u8_in_x()
     {
@@ -111,6 +112,7 @@ public class LoopCounterTypeTests
             }
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void A_u8_start_to_256_ends_with_inx_and_bne()
     {

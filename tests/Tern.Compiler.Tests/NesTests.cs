@@ -69,6 +69,7 @@ public class NesTests
         Assert.Equal(9, r.U8("a", 1));
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void The_startup_code_is_the_specs()
     {

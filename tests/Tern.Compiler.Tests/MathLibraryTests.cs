@@ -138,6 +138,7 @@ public class MathLibraryTests
         Assert.Equal((17, 3081), Range(right));
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void Calls_compile_to_the_spec_shape()
     {

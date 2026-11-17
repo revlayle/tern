@@ -190,6 +190,7 @@ public class SignedLoopTests
     }
 
     // Spec 11 rows.
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void A_constant_signed_range_is_the_unsigned_code()
     {
@@ -202,6 +203,7 @@ public class SignedLoopTests
         Assert.Equal("ldx #$F6|BODY|inx|cpx #$0A|bne|rts", Loop(Listing.Code(r)));
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void Down_to_zero_tests_the_sign_of_the_start()
     {
@@ -216,6 +218,7 @@ public class SignedLoopTests
         Assert.Equal("ldx n|bmi|BODY|dex|bpl|ldx n|beq|bmi|BODY|dex|bne|rts", Loop(Listing.Code(r)));
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void Variable_bounds_are_checked_once_with_a_signed_compare()
     {
@@ -229,6 +232,7 @@ public class SignedLoopTests
         Assert.Equal("ldx f.a|txa|sec|sbc f.b|bvc|eor #$80|bpl|BODY|inx|cpx f.b|bne|rts", Loop(Listing.Code(r, "f")));
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void A_larger_step_with_a_variable_end_stops_on_overflow()
     {

@@ -177,6 +177,7 @@ public class SignedMathTests
         Assert.Equal(0, r.I8("s", 128));
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void Sin8_adds_its_table_only_when_used()
     {

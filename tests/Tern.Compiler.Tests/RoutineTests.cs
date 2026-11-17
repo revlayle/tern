@@ -58,6 +58,7 @@ public class RoutineTests
 
     private static byte[] Logged(Run r) => r.Ram.Bytes.AsSpan(0xC500, r.Ram.Bytes[0xC5FF]).ToArray();
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void Calls_are_a_direct_jsr()
     {
@@ -113,6 +114,7 @@ public class RoutineTests
         Assert.Equal([0, 0, 0, 0xAB, 0, 0xCD], r.Ram.Bytes.AsSpan(0xC400, 6).ToArray());
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void A_one_byte_argument_for_A_is_computed_straight_into_A()
     {
@@ -126,6 +128,7 @@ public class RoutineTests
         Assert.DoesNotContain("_t", main);
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void Loops_using_x_or_y_may_call_routines_that_keep_the_register()
     {
@@ -140,6 +143,7 @@ public class RoutineTests
         Assert.Contains("BD", r.Result.Listing);    // lda msg,x
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void Routines_in_assembly()
     {
@@ -166,6 +170,7 @@ public class RoutineTests
         Assert.Contains("jsr log", r.Result.Listing);
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void Fixed_inputs_in_the_carry()
     {
@@ -186,6 +191,7 @@ public class RoutineTests
         Assert.Equal(["ldx row", "ldy #$0A", "clc", "jsr $C060", "sec", "jsr $C060", "stx pos", "sty pos+1", "rts"], Listing.Instructions(r));
     }
 
+    [Trait("Shape", "nmos6502")]
     [Theory]
     [InlineData(0)]
     [InlineData(255)]

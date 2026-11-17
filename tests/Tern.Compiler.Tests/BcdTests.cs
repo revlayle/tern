@@ -181,6 +181,7 @@ public class BcdTests
             }
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void A_bcd_add_in_main_survives_an_interrupt_handler_that_adds_in_binary()
     {

@@ -165,6 +165,7 @@ public class LinearArrayTests
         Assert.Equal(3003, r.U16("out"));
     }
 
+    [Trait("Shape", "nmos6502")]
     [Theory]
     // Spec 11: a variable index costs one asl.
     [InlineData("w = pts[i]", "lda i|asl a|tax|lda pts,x|sta w|lda pts+1,x|sta w+1|rts")]

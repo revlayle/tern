@@ -5,6 +5,7 @@ namespace Tern.Compiler.Tests;
 /// <summary>M19: <c>-> bool using overflow</c>, the V flag as a return value (spec 6.1, 7).</summary>
 public class OverflowTests
 {
+    [Trait("Shape", "nmos6502")]
     [Theory]
     [InlineData(0x00)]
     [InlineData(0x40)]
@@ -93,6 +94,7 @@ public class OverflowTests
         Assert.Equal(overflow ? 1 : 0, r.U8("stored"));
     }
 
+    [Trait("Shape", "nmos6502")]
     [Theory]
     [InlineData(0x00)]
     [InlineData(0x40)]
@@ -167,6 +169,7 @@ public class OverflowTests
         Assert.Equal(overflow ? 1 : 0, r.U8("loops"));
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void If_is_the_adc_then_bvc()
     {

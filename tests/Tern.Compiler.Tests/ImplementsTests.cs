@@ -112,6 +112,7 @@ public class ImplementsTests
         Assert.Equal(11, r.U8("d"));
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void A_call_to_an_interface_routine_is_a_jsr_to_its_address()
     {
@@ -122,6 +123,7 @@ public class ImplementsTests
         Assert.Matches(@"20 00 60 +jsr \$6000", r.Listing);
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void Each_overlay_file_has_a_jmp_at_each_routine_address_to_its_own_function()
     {

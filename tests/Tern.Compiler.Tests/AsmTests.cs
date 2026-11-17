@@ -51,6 +51,7 @@ public class AsmTests
         Assert.Equal(expected, Bytes(r, "buffer", 8));
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void Asm_fn_register_parameters_have_no_memory_and_are_not_stored()
     {
@@ -111,6 +112,7 @@ public class AsmTests
         Assert.Equal(a + b > 255 ? 1 : 0, r.U8("carry"));
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void Rts_is_added_only_when_the_block_does_not_end_with_rts_rti_or_jmp()
     {
@@ -144,6 +146,7 @@ public class AsmTests
 
     // Review R4, suggestion 2: a body that ends in an instruction that does not fall through (the table's
     // FallsThrough) gets no rts after it. The hand list left out rti; the optimizer removed that rts anyway.
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void A_function_ending_in_rti_or_an_indirect_jmp_gets_no_rts()
     {
@@ -195,6 +198,7 @@ public class AsmTests
         Assert.Equal(0x0400 + 80, r.U16("w"));
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void Indirect_indexed_through_a_tern_pointer()
     {
@@ -249,6 +253,7 @@ public class AsmTests
         Assert.Equal(r.Address("main"), r.U16("target"));
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void Other_addressing_modes()
     {
@@ -300,6 +305,7 @@ public class AsmTests
         Assert.Contains("96 ", r.Result.Listing);    // stx zx,y
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void Fixed_address_variables_and_volatile_registers()
     {
@@ -405,6 +411,7 @@ public class AsmTests
         Assert.Equal(5, r.U8("b"));
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void Listing_shows_what_a_block_reads_and_changes()
     {
@@ -426,6 +433,7 @@ public class AsmTests
         Assert.Contains("; asm: reads A X C D, changes A X C Z N V, reads other score, writes other score", r.Result.Listing);
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void Instructions_are_kept_as_written()
     {
@@ -572,6 +580,7 @@ public class AsmTests
         Assert.Equal(r.Address("f") & 0xFF, r.U8("lo"));
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void Jump_vector_at_a_fixed_address_away_from_a_page_end_is_kept()
     {
@@ -586,6 +595,7 @@ public class AsmTests
         Assert.Equal(new SourcePos(5, 13), e.Pos);
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void Kernal_example_prints_through_chrout()
     {
@@ -622,6 +632,7 @@ public class AsmTests
             Listing.Instructions(r, "print"));
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void Kernal_example_listing_has_no_stand_in_for_chrout()
     {
@@ -647,6 +658,7 @@ public class AsmTests
     /// compiler places a vector it allocates so that it never starts at $xxFF. Zero page is full,
     /// so v goes after the program, and the size of pad moves it across a page end.
     /// </summary>
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void Jump_vectors_never_start_at_the_end_of_a_page()
     {

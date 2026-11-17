@@ -17,11 +17,12 @@ public sealed class Library
     /// <param name="calls">Statements that call the routines to test, e.g. "math.mul8(0, 0)".</param>
     public Library(string imports, string calls, Action<Ram>? setup = null)
     {
-        Result = TernCompiler.Compile($"{imports}\nvar go: bool\nfn main() {{\n    if go {{\n{calls}\n    }}\n}}\n");
+        Result = Run.Compile($"{imports}\nvar go: bool\nfn main() {{\n    if go {{\n{calls}\n    }}\n}}\n");
         StartState.Fill(Ram);
-        Ram.Load((ushort)Result.LoadAddress, Result.Image);
+        // tern run's machine loads the file, as for a run (review code-quality-tests 6).
+        var bus = Machine.For(Result.Platform, Result).Load(Result, Ram);
         setup?.Invoke(Ram);
-        Cpu = new Cpu6502(Ram, Result.Platform.Cpu) { PC = (ushort)Result.Entry, SP = 0xFF };
+        Cpu = new Cpu6502(bus, Result.Platform.Cpu) { PC = (ushort)Result.Entry, SP = 0xFF };
         StartState.Set(Cpu);
         RunToHalt(1_000_000);
     }

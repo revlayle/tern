@@ -5,6 +5,7 @@ namespace Tern.Compiler.Tests;
 /// <summary><c>inline fn</c> (spec 6.2): the body is copied into each caller instead of a <c>jsr</c>.</summary>
 public class InlineTests
 {
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void Calls_are_replaced_by_the_body()
     {
@@ -30,6 +31,7 @@ public class InlineTests
         Assert.Contains("main.clamp.v", r.Result.Symbols.Keys); // its parameter is in main's frame
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void A_small_inline_function_is_its_body()
     {

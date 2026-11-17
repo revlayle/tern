@@ -75,6 +75,7 @@ public class ElementValueTests
             Optimize(Abs(Ldx, Out), Imm(Lda, 1), X(Sta, screen), X(Lda, screen), Abs(Sta, Out), I(Rts)));
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void An_element_updated_in_place_is_tested_from_a()
     {

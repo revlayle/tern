@@ -96,6 +96,7 @@ public class AddressInitTests
         Assert.Equal(77, r.Ram.Bytes[player + 6]);
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void An_rts_jump_table_of_function_addresses_minus_one()
     {

@@ -47,6 +47,7 @@ public sealed class ModuleTests : IDisposable
         }
         """;
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void A_program_in_several_files()
     {
@@ -207,6 +208,7 @@ public sealed class ModuleTests : IDisposable
         Assert.DoesNotContain("util.table", one.Symbols.Keys);
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void The_listing_names_the_module_file()
     {

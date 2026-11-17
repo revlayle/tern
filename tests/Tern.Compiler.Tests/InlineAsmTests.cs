@@ -5,6 +5,7 @@ namespace Tern.Compiler.Tests;
 /// <summary>M9: <c>inline asm fn</c> (spec 6.2, 7).</summary>
 public class InlineAsmTests
 {
+    [Trait("Shape", "nmos6502")]
     [Theory]
     [InlineData(0)]
     [InlineData(1)]
@@ -29,6 +30,7 @@ public class InlineAsmTests
         Assert.DoesNotContain("twice_plus_one:", r.Result.Listing);
     }
 
+    [Trait("Shape", "nmos6502")]
     [Theory]
     [InlineData(0, 5)]
     [InlineData(4, 5)]
@@ -168,6 +170,7 @@ public class InlineAsmTests
         Assert.Equal(runs, r.U8("n"));
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void An_empty_body_costs_only_the_branch()
     {
@@ -188,6 +191,7 @@ public class InlineAsmTests
         Assert.Equal(1, r.U8("yes"));
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void The_library_interrupt_switches_are_inline_asm()
     {

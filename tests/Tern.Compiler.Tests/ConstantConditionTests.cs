@@ -11,6 +11,7 @@ public class ConstantConditionTests
         fn b() { r = 2 }
         """;
 
+    [Trait("Shape", "nmos6502")]
     [Theory]
     [InlineData("const F = false", "F", "b", "a", 2)]
     [InlineData("const T = true", "T", "a", "b", 1)]
@@ -83,6 +84,7 @@ public class ConstantConditionTests
         Assert.Contains("300 does not fit in u8", e.Description);
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void The_sprites_module_without_FLICKER_has_no_flicker_code_or_tables()
     {

@@ -65,6 +65,7 @@ public class Apple2LibraryTests
         Assert.Equal("", run.Output);
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void Put_is_cout_itself()
     {
@@ -198,6 +199,7 @@ public class Apple2LibraryTests
             Assert.Equal(HiresRow(y), r.Ram.Bytes[table + y] | r.Ram.Bytes[table + 192 + y] << 8);
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void Soft_switches_are_written()
     {
@@ -236,6 +238,7 @@ public class Apple2LibraryTests
         Assert.Equal(expected == 0 ? 0x55 : 0, r.Ram.Bytes[0xC010]);
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void Click_and_tone_read_the_speaker()
     {

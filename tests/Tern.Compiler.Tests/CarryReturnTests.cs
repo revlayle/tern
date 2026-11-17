@@ -64,6 +64,7 @@ public class CarryReturnTests
         }
     }
 
+    [Trait("Shape", "nmos6502")]
     [Theory]
     [InlineData("a > b", "lda f.a|clc|sbc f.b|rts")]
     [InlineData("a >= b", "lda f.a|cmp f.b|rts")]
@@ -80,6 +81,7 @@ public class CarryReturnTests
         Assert.Equal(code, Listing.Code(r, "f"));
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void A_register_parameter_compares_with_cpx()
     {

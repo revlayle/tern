@@ -104,6 +104,7 @@ public class CpuModuleTests
         Assert.Equal(1, r.U8("n"));
     }
 
+    [Trait("Shape", "nmos6502")]
     [Theory]
     [InlineData("carry", "bcc")]
     [InlineData("zero", "bne")]

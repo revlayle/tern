@@ -101,6 +101,7 @@ public class AddressConversionTests
         Assert.Equal([(byte)((map + 299) >> 8), (byte)(map + 2)], r.Ram.Bytes.AsSpan(r.Address("table"), 2).ToArray());
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void Lo_and_hi_of_an_address_with_an_offset_is_one_load()
     {

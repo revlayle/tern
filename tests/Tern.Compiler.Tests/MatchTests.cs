@@ -76,6 +76,7 @@ public class MatchTests
         }
         """;
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void A_plain_match_of_8_or_more_compares_stays_a_chain()
     {
@@ -93,6 +94,7 @@ public class MatchTests
         Assert.Contains("cmp #$0A|beq", Listing.CodeWithLabels(r, "f"));
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void An_indexed_match_with_gaps_and_ranges_and_no_default_uses_a_jump_table()
     {
@@ -109,6 +111,7 @@ public class MatchTests
         Assert.Matches(@"Jump table of the indexed match at 4:\d+ in f: \$[0-9A-F]{4}-\$[0-9A-F]{4}, 22 bytes for 11 values", r.Result.Report);
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void An_indexed_match_from_zero_with_a_default_and_gaps()
     {
@@ -149,6 +152,7 @@ public class MatchTests
         for (int v = 0; v < 256; v++) Assert.Equal((v & 7) switch { 0 => 10, 1 => 11, 2 or 3 => 12, 7 => 14, _ => 13 }, res[v]);
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void Signed_values_in_an_indexed_match_with_a_negative_lowest_value()
     {
@@ -328,6 +332,7 @@ public class MatchTests
         Assert.Equal(5, r.U8("none"));
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void An_indexed_match_inside_a_loop_using_x_uses_y()
     {
@@ -353,6 +358,7 @@ public class MatchTests
         Assert.Matches(@"tay\|lda main\.jumphi\d+,y", Listing.CodeWithLabels(r));
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void A_long_plain_match_inside_loops_using_x_and_y_is_a_compare_chain()
     {
@@ -382,6 +388,7 @@ public class MatchTests
         Assert.DoesNotContain("jumphi", r.Result.Listing);
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void A_match_with_only_a_default_still_reads_a_volatile_value()
     {

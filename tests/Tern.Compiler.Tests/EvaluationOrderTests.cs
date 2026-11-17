@@ -156,6 +156,7 @@ public class EvaluationOrderTests
         Assert.Equal(result, Program(body).U8("r"));
     }
 
+    [Trait("Shape", "nmos6502")]
     [Theory]
     [InlineData("r = v1 - (v2 & 3)")]
     [InlineData("r = (v1 & 3) | (v2 & 3)")]

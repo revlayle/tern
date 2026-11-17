@@ -8,6 +8,7 @@ public class AParameterTests
 {
     private static readonly int[] Tops = [0, 1, 127, 128, 254, 255];
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void Clamp_compares_the_parameter_in_a()
     {
@@ -28,6 +29,7 @@ public class AParameterTests
         }
     }
 
+    [Trait("Shape", "nmos6502")]
     [Theory]
     [InlineData("v > t")]
     [InlineData("v <= t")]
@@ -57,6 +59,7 @@ public class AParameterTests
         }
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void After_a_changes_or_at_a_label_the_parameter_is_read_from_memory()
     {
@@ -112,6 +115,7 @@ public class AParameterTests
 
     private static readonly int[] Words = [0, 1, 255, 256, 257, 0x7FFF, 0x8000, 0xFFFE, 0xFFFF];
 
+    [Trait("Shape", "nmos6502")]
     [Theory]
     [InlineData("<")]
     [InlineData("<=")]
@@ -161,6 +165,7 @@ public class AParameterTests
         Assert.StartsWith(op is "==" or "!=" ? "cmp then.t|" : "cpx then.t+1|", Listing.Code(r, "then"));
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void A_using_ax_parameter_returned_unchanged_needs_no_memory()
     {
@@ -182,6 +187,7 @@ public class AParameterTests
         Assert.Equal("cpx top+1|bcc clamp.endif0|bne clamp.cmp1|cmp top|bcc clamp.endif0|beq clamp.endif0|ldx top+1|lda top|rts|rts", Listing.Code(r, "clamp"));
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void After_a_call_a_using_ax_parameter_is_read_from_memory()
     {

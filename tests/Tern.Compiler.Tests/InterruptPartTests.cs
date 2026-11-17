@@ -51,6 +51,7 @@ public sealed class InterruptPartTests : IDisposable
         Assert.Contains("Recursion is not allowed: a -> b -> a", e.Message);
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void A_part_with_parameters_and_a_flag_return_runs_inside_the_handler()
     {
@@ -140,6 +141,7 @@ public sealed class InterruptPartTests : IDisposable
     }
 
     /// <summary>Handlers clear decimal mode first, unless they run no adc, sbc or jsr (spec 6.3).</summary>
+    [Trait("Shape", "nmos6502")]
     [Theory]
     [InlineData("var x: u8\nvar y: u8\ninterrupt fn frame() { x += y }", true)]
     [InlineData("var x: u8\nvar y: u8\ninterrupt fn frame() { x = y - 1 }", true)]
@@ -157,6 +159,7 @@ public sealed class InterruptPartTests : IDisposable
         Assert.Equal("rti", code[^1]);
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void A_part_ends_with_rts_and_its_handler_with_rti()
     {
@@ -216,6 +219,7 @@ public sealed class InterruptPartTests : IDisposable
             """), "p");
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void A_handler_called_only_by_an_uncompiled_module_handler_is_still_a_handler()
     {

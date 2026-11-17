@@ -25,6 +25,7 @@ public class PagePlacementTests
         Assert.Contains("placed so that indexed reads do not cross a page: marks $", r.Result.Report);
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void Each_table_of_a_split_array_stays_in_its_page()
     {
@@ -156,6 +157,7 @@ public class PagePlacementTests
     }
 
     // Review M18 part 3, suggestion 2.
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void An_array_only_stored_through_an_index_is_not_placed()
     {

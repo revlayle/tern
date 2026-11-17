@@ -67,6 +67,7 @@ public class AtariLibraryTests
         Assert.Equal("XYA", run.Output);
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void Put_costs_one_call_into_cio()
     {
@@ -291,6 +292,7 @@ public class AtariLibraryTests
         Assert.Equal(1, ram.Bytes[result.Symbols["done"]]);
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void Exit_jumps_through_dosvec()
     {

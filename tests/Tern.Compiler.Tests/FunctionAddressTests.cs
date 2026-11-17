@@ -19,6 +19,7 @@ public class FunctionAddressTests
         }
         """;
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void Addr_of_a_function_is_its_address()
     {

@@ -66,6 +66,7 @@ public class WideningAddTests
         Assert.Equal(999, r.U16("w"));
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void The_code_is_the_spec_shape()
     {

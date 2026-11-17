@@ -7,6 +7,7 @@ namespace Tern.Compiler.Tests;
 /// </summary>
 public class LoopControlTests
 {
+    [Trait("Shape", "nmos6502")]
     [Theory]
     [InlineData(0)]
     [InlineData(1)]
@@ -35,6 +36,7 @@ public class LoopControlTests
         Assert.Contains("lda n|beq main.wend", code);   // the entry test: n is not known
     }
 
+    [Trait("Shape", "nmos6502")]
     [Theory]
     [InlineData(0)]
     [InlineData(255)]
@@ -58,6 +60,7 @@ public class LoopControlTests
         Assert.Contains("dec n+1|bne main.while", Listing.Code(r));
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void A_held_counter_tests_its_dex()
     {
@@ -76,6 +79,7 @@ public class LoopControlTests
         Assert.Contains("dex|bne main.while", Listing.Code(r));
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void Continue_needs_the_full_test()
     {
@@ -98,6 +102,7 @@ public class LoopControlTests
         Assert.DoesNotContain("dec n|bne", Listing.Code(r));
     }
 
+    [Trait("Shape", "nmos6502")]
     [Theory]
     [InlineData(2, 16, true)]
     [InlineData(15, 16, true)]
@@ -119,6 +124,7 @@ public class LoopControlTests
         Assert.Equal(!known, Listing.Code(r).Contains("jmp"));
     }
 
+    [Trait("Shape", "nmos6502")]
     [Theory]
     [InlineData(new byte[] { 5, 3, 9, 0, 255, 128, 1, 1 })]
     [InlineData(new byte[] { 0 })]
@@ -148,6 +154,7 @@ public class LoopControlTests
         Assert.Contains("dec main.last|bne main.while", code);
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void An_inner_loop_after_another_statement_keeps_its_empty_test()
     {
@@ -166,6 +173,7 @@ public class LoopControlTests
         Assert.Contains("bcs main.fend", Listing.Code(r));
     }
 
+    [Trait("Shape", "nmos6502")]
     [Theory]
     [InlineData(0)]
     [InlineData(1)]

@@ -42,6 +42,7 @@ public class NoinitTests
         Assert.True(r.Address("z") < 0x100);
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void Noinit_globals_are_not_in_the_cleared_range()
     {

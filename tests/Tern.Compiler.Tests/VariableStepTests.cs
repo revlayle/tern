@@ -94,6 +94,7 @@ public class VariableStepTests
         Assert.Equal(1 + (255 - 10) / 6, r.U8("count"));
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void An_inclusive_255_loop_ends_on_the_carry_with_no_compare()
     {

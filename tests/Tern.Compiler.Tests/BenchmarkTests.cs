@@ -198,6 +198,7 @@ public class BenchmarkTests
     }
 
     /// <summary>The instructions of main between a label and the next, as mnemonics (M9: same as the assembly).</summary>
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void The_sieve_inner_loop_is_the_loop_of_the_assembly_version()
     {

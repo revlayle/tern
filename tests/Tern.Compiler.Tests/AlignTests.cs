@@ -62,6 +62,7 @@ public class AlignTests
         Assert.Equal(5, r.U8("table", 9));
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void A_long_noinit_buffer_starts_the_block_and_the_zeroed_variables_follow_it()
     {
@@ -91,6 +92,7 @@ public class AlignTests
         Assert.Equal($"Aligned buffer: ${at:X4} (@ align(256)), {padding} bytes of padding before it", line.TrimEnd());
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void The_report_counts_the_padding_before_a_variable()
     {
@@ -113,6 +115,7 @@ public class AlignTests
         Assert.Equal(2, r.U8("b"));
     }
 
+    [Trait("Shape", "nmos6502")]
     [Theory]
     [InlineData(2)]
     [InlineData(64)]

@@ -115,6 +115,7 @@ public class NesBankTests : IDisposable
         Assert.Contains($"NesPrgRom:{3 * 0x4000 + r.Symbols["main"] - 0xC000:X4}:main", lines);
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void The_startup_selects_bank_0_by_writing_0_over_a_0()
     {

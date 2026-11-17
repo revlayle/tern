@@ -35,6 +35,7 @@ public class LineTableTests
         }
         """;
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void Every_instruction_of_the_listing_is_in_the_map_with_its_bytes_and_cycles()
     {

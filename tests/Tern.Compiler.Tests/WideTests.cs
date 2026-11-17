@@ -279,6 +279,7 @@ public class WideTests
         Assert.Equal(7, r.U8("top"));
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void The_arcade_example_compiles_with_every_new_module()
     {
@@ -295,6 +296,7 @@ public class WideTests
         Assert.Equal(TernCompiler.Compile("fn main() { }").Image.Length, TernCompiler.Compile("import wide\nfn main() { }").Image.Length);
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void Only_the_widths_that_are_used_are_compiled()
     {

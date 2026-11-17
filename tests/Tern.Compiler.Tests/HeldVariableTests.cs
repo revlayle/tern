@@ -7,6 +7,7 @@ namespace Tern.Compiler.Tests;
 /// </summary>
 public class HeldVariableTests
 {
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void A_stack_pointer_stays_in_x_through_a_match_jump_table()
     {
@@ -74,6 +75,7 @@ public class HeldVariableTests
         Assert.Contains("stx sp|lda stack+3", code);
     }
 
+    [Trait("Shape", "nmos6502")]
     [Theory]
     [InlineData(0)]
     [InlineData(250)]
@@ -102,6 +104,7 @@ public class HeldVariableTests
         Assert.DoesNotContain("inc count", code);
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void A_local_index_is_stored_after_a_break()
     {
@@ -131,6 +134,7 @@ public class HeldVariableTests
         Assert.Contains("txa|sta at", code);
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void Plain_pointer_accesses_use_y()
     {
@@ -159,6 +163,7 @@ public class HeldVariableTests
         Assert.Contains("sty k", code);
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void A_handler_running_beside_the_loop_changes_nothing()
     {
@@ -191,6 +196,7 @@ public class HeldVariableTests
         Assert.DoesNotContain("inc sp", Listing.Code(r));
     }
 
+    [Trait("Shape", "nmos6502")]
     [Theory]
     [InlineData("fn f() {}", "f()")]                                     // a call may read sp
     [InlineData("", "asm { nop }")]                                        // assembly
@@ -215,6 +221,7 @@ public class HeldVariableTests
         Assert.Contains("inc sp", Listing.Code(r));
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void Not_held_volatile_address_taken_or_in_an_endless_loop()
     {
@@ -247,6 +254,7 @@ public class HeldVariableTests
         Assert.Contains("inc sp", Listing.Code(endless));
     }
 
+    [Trait("Shape", "nmos6502")]
     [Theory]
     [InlineData(0, 60)]
     [InlineData(1, 60)]
@@ -276,6 +284,7 @@ public class HeldVariableTests
         for (int k = 0; k < 256; k++) Assert.Equal(a[k], r.U8("a", k));
     }
 
+    [Trait("Shape", "nmos6502")]
     [Theory]
     [InlineData(20)]
     [InlineData(1)]
@@ -302,6 +311,7 @@ public class HeldVariableTests
         for (int k = 0; k < 256; k++) Assert.Equal(b[k], r.U8("b", k));
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void Adding_two_alone_makes_a_variable_worth_holding()
     {

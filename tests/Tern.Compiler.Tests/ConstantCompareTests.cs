@@ -52,6 +52,7 @@ public class ConstantCompareTests
         for (int k = 0; k < 256; k++) Assert.Equal(Flags((sbyte)k, c), r.U8("flags", k));
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void Greater_than_a_constant_compares_with_the_next_value()
     {

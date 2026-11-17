@@ -106,6 +106,7 @@ public class StructTests
         Assert.Equal(-2, r.I16("neg"));
     }
 
+    [Trait("Shape", "nmos6502")]
     [Theory]
     // Spec 3.3: player.hp is lda player+2.
     [InlineData("x = player.hp", "lda player+2|sta x|rts")]
@@ -129,6 +130,7 @@ public class StructTests
         Assert.Equal(expected, Listing.Code(r));
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void Sixteen_bit_operations_between_fields_need_no_temporary()
     {
@@ -185,6 +187,7 @@ public class StructTests
         Assert.Equal(7, r.U8("out"));
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void A_struct_variable_in_zero_page()
     {
@@ -200,6 +203,7 @@ public class StructTests
 
     // ---------- Structs at a fixed address ----------
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void A_struct_at_a_fixed_address_uses_the_field_offsets()
     {
@@ -222,6 +226,7 @@ public class StructTests
         Assert.Contains("8D 20 D0", r.Result.Listing); // sta $D020
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void Fields_at_a_fixed_address_are_volatile()
     {
@@ -289,6 +294,7 @@ public class StructTests
         Assert.True(r.Address("main.e") < 0x100, "a pointer used for fields must be in zero page");
     }
 
+    [Trait("Shape", "nmos6502")]
     [Theory]
     // Spec 3.3.
     [InlineData("e.hp -= 1", "ldy #$02|lda (e),y|sec|sbc #$01|sta (e),y|rts")]
@@ -442,6 +448,7 @@ public class StructTests
         Assert.Contains("Variables after the program: 44 bytes", r.Result.Report); // 4 records of 11 bytes
     }
 
+    [Trait("Shape", "nmos6502")]
     [Theory]
     // Spec 3.3: enemies[i].x is a single lda enemies_x,x. Byte k of the record is the table at k * 8.
     [InlineData("x = enemies[i].x", "ldx i|lda enemies,x|sta x|rts")]
@@ -647,6 +654,7 @@ public class StructTests
         Assert.Equal(player + 1, r.U16At("at", 5, 6));
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void Addr_of_a_field_is_a_constant_address()
     {

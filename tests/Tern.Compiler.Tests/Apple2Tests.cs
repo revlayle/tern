@@ -114,6 +114,7 @@ public class Apple2Tests
         Assert.DoesNotContain("copies", r.Result.Report);
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void The_startup_sets_up_40_column_text_and_points_reset_at_a_routine_that_quits()
     {
@@ -223,6 +224,7 @@ public class Apple2Tests
             $"the startup code copies 2 areas into place: $2000 to $0800, {first} bytes, ${0x2000 + first:X4} to $6000, {areas[1].Bytes.Length} bytes", r.Result.Report);
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void An_area_that_overlaps_its_place_in_the_file_is_copied_from_its_end()
     {
@@ -267,6 +269,7 @@ public class Apple2Tests
         Assert.Contains("copies 1 area into place", r.Result.Report);
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void A_copy_of_whole_pages_has_no_loop_for_the_rest_and_no_test_of_its_counts()
     {

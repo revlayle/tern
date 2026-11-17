@@ -90,6 +90,7 @@ public class DeadLoadTests
         Assert.Equal("lda p|lda #$02|sta x|rts", Optimize(null, new Instr(Lda, IndirectIndexed, new VarOperand(p)), Imm(Lda, 2), Abs(Sta, X), new Instr(Rts)));
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void A_function_result_in_A_survives_in_a_program()
     {

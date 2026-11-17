@@ -327,6 +327,7 @@ public sealed class SpriteTests
         Assert.Equal(without.Image.Length, with.Image.Length);
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void Update_calls_the_flicker_build_only_with_FLICKER()
     {

@@ -49,6 +49,7 @@ public class UnderscoreLoopTests
         return data;
     }
 
+    [Trait("Shape", "nmos6502")]
     [Theory]
     [MemberData(nameof(Forms))]
     public void An_underscore_loop_is_never_slower_than_its_named_twin(string range, string body, int m)
@@ -64,6 +65,7 @@ public class UnderscoreLoopTests
             $"for _ took {plain.Cpu.Cycles} cycles, for i {named.Cpu.Cycles}\n{plain.Result.Listing}\n{named.Result.Listing}");
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void A_repeat_loop_holds_a_variable_in_the_free_index_register()
     {

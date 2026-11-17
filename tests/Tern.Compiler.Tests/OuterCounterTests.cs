@@ -7,6 +7,7 @@ namespace Tern.Compiler.Tests;
 /// </summary>
 public class OuterCounterTests
 {
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void The_outer_counter_is_in_y_and_the_inner_one_in_x()
     {
@@ -30,6 +31,7 @@ public class OuterCounterTests
         Assert.DoesNotContain("main.j", code);
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void An_inner_loop_indexing_by_the_outer_counter_takes_x()
     {
@@ -52,6 +54,7 @@ public class OuterCounterTests
         Assert.DoesNotContain("main.j", code);
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void Beside_an_inner_using_y_loop_the_outer_counter_is_in_x()
     {
@@ -86,6 +89,7 @@ public class OuterCounterTests
         Assert.Contains("dex|bne", code);
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void A_pointer_access_in_the_outer_loop_leaves_y_free()
     {
@@ -109,6 +113,7 @@ public class OuterCounterTests
         Assert.DoesNotContain("main.j", code);
     }
 
+    [Trait("Shape", "nmos6502")]
     [Theory]
     [InlineData("for j in 0..i { t += 1 }")]           // the counter is the inner loop's bound
     [InlineData("for j in 0..4 { t += 1 }\n g()")]     // a call

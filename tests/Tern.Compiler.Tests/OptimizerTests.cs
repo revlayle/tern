@@ -6,6 +6,7 @@ namespace Tern.Compiler.Tests;
 /// </summary>
 public class OptimizerTests
 {
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void A_stored_value_is_not_loaded_again()
     {
@@ -21,6 +22,7 @@ public class OptimizerTests
         Assert.Equal(5, r.U8("y"));
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void An_index_register_is_not_loaded_twice()
     {
@@ -37,6 +39,7 @@ public class OptimizerTests
         Assert.Equal(9, r.U8("b", 2));
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void An_indexed_write_changes_only_its_array()
     {
@@ -56,6 +59,7 @@ public class OptimizerTests
         Assert.Contains("lda b / sta v", Listing.Code(r, separator: " / "));
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void A_value_known_on_every_path_into_a_label_is_kept()
     {
@@ -74,6 +78,7 @@ public class OptimizerTests
         Assert.Equal(3, r.U8("y"));
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void Volatile_memory_is_read_every_time()
     {
@@ -104,6 +109,7 @@ public class OptimizerTests
         Assert.Equal(2, r.U8("v"));
     }
 
+    [Trait("Shape", "nmos6502")]
     [Theory]
     [InlineData("f()")]
     [InlineData("p[0] = 9")]
@@ -126,6 +132,7 @@ public class OptimizerTests
         Assert.Equal(between.StartsWith("asm") ? 7 : 9, r.U8("v"));
     }
 
+    [Trait("Shape", "nmos6502")]
     [Theory]
     [InlineData("nop", true)]
     [InlineData("cli", true)]
@@ -152,6 +159,7 @@ public class OptimizerTests
         Assert.Equal(5, r.U8("y"));
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void Assembly_that_writes_a_variable_makes_the_optimizer_forget_only_that_one()
     {
@@ -175,6 +183,7 @@ public class OptimizerTests
         Assert.Contains("inc x / sta z / lda x / sta y", Listing.Code(r, separator: " / "));
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void A_long_function_is_optimized_quickly()
     {
@@ -190,6 +199,7 @@ public class OptimizerTests
         Assert.DoesNotContain("lda x ", r.Listing);   // every y = x uses the A that was just stored
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void An_endless_loop_has_no_rts_after_it()
     {
@@ -202,6 +212,7 @@ public class OptimizerTests
         Assert.Equal("inc x / jmp main.while0", Listing.Code(r, separator: " / "));
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void Assembly_is_never_changed()
     {
@@ -239,6 +250,7 @@ public class OptimizerTests
         Assert.Equal(3, r.U8("r"));
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void A_transfer_back_is_removed_when_the_registers_are_still_equal()
     {
@@ -274,6 +286,7 @@ public class OptimizerTests
         Assert.Equal([6, 7, 8, 9], r.Ram.Bytes.AsSpan(r.Address("src"), 4).ToArray());
     }
 
+    [Trait("Shape", "nmos6502")]
     [Theory]
     [InlineData(0x00)]
     [InlineData(0x01)]
@@ -311,6 +324,7 @@ public class OptimizerTests
         Assert.Contains("asl a / bcs ", Listing.Code(r, separator: " / "));
     }
 
+    [Trait("Shape", "nmos6502")]
     [Theory]
     [InlineData(0)]
     [InlineData(1)]
@@ -330,6 +344,7 @@ public class OptimizerTests
         Assert.Equal(1, Listing.Code(r, separator: " / ").Split("ldx sp").Length - 1);
     }
 
+    [Trait("Shape", "nmos6502")]
     [Theory]
     [InlineData(0)]
     [InlineData(1)]
@@ -395,6 +410,7 @@ public class OptimizerTests
         Assert.Equal(0, r.U8("out"));
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void An_index_register_is_loaded_once_for_several_arrays_with_the_same_index()
     {
@@ -434,6 +450,7 @@ public class OptimizerTests
         Assert.Equal(start, r.U8("count"));
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void Nothing_but_the_branch_lies_between_a_bodys_last_asm_and_the_while_test()
     {
@@ -481,6 +498,7 @@ public class OptimizerTests
 
     // M18 F19: lda x / eor y with y already in A is eor x.
 
+    [Trait("Shape", "nmos6502")]
     [Theory]
     [InlineData("^", "eor")]
     [InlineData("&", "and")]
@@ -511,6 +529,7 @@ public class OptimizerTests
         }
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void A_subtraction_keeps_its_load()
     {
@@ -526,6 +545,7 @@ public class OptimizerTests
         Assert.Equal("lda #$1E / sta b / lda t / sec / sbc b / sta t / rts", Listing.Code(r, separator: " / "));
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void An_operand_in_A_on_only_one_path_keeps_the_load()
     {
@@ -546,6 +566,7 @@ public class OptimizerTests
 /// <summary>A parameter passed in X or Y stays in its register when the body allows it (roadmap M7).</summary>
 public class RegisterParameterTests
 {
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void A_parameter_in_x_indexes_directly()
     {
@@ -563,6 +584,7 @@ public class RegisterParameterTests
         Assert.DoesNotContain("set.i", r.Result.Symbols.Keys);
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void A_parameter_in_y_indexes_a_pointer_directly()
     {
@@ -579,6 +601,7 @@ public class RegisterParameterTests
         Assert.Equal(42, r.U8("out"));
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void A_loop_inside_uses_the_other_index_register()
     {
@@ -599,6 +622,7 @@ public class RegisterParameterTests
 
     // Since M18 (F3) a store that is never read back is removed (the reload became txa), so the
     // store shows only where the body reads the copy; the results show X was not relied on.
+    [Trait("Shape", "nmos6502")]
     [Theory]
     [InlineData("fn f(i: u8 using X) { g()\n a[i] = 1 }", 2, 1, true)]                   // a call
     [InlineData("fn f(i: u8 using X) { i += 1\n a[i] = 1 }", 3, 1, true)]                // assigned
@@ -617,6 +641,7 @@ public class RegisterParameterTests
         Assert.Equal(stored, r.Result.Listing.Contains("stx f.i"));
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void A_parameter_in_y_is_stored_when_another_pointer_access_needs_y()
     {
@@ -648,6 +673,7 @@ public class RegisterParameterTests
         Assert.DoesNotContain("sty h.n", r.Result.Listing);   // only p[n]: stays in Y
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void An_inline_function_keeps_its_parameter_in_the_register()
     {
@@ -693,6 +719,7 @@ public class RegisterParameterTests
 /// <summary>The counter of an innermost loop goes in X or Y when the body allows it (roadmap M7).</summary>
 public class LoopRegisterTests
 {
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void An_innermost_loop_counts_in_x()
     {
@@ -707,6 +734,7 @@ public class LoopRegisterTests
         for (int i = 0; i < 8; i++) Assert.Equal(i + 1, r.U8("a", i));
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void A_loop_that_only_indexes_a_pointer_by_its_counter_counts_in_y()
     {
@@ -723,6 +751,7 @@ public class LoopRegisterTests
         for (int i = 0; i < 256; i++) Assert.Equal((byte)(i * 7), r.Ram.Bytes[0xC100 + i]);
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void A_loop_with_other_pointer_accesses_counts_in_x()
     {

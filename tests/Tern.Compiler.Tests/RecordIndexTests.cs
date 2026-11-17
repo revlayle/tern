@@ -163,6 +163,7 @@ public class RecordIndexTests
         Assert.Equal(Enumerable.Range(0, 8).Sum(i => i + 50) & 0xFF, r.U8("total"));
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void Constant_indexes_are_fixed_addresses_and_work_on_any_struct_size()
     {
@@ -249,6 +250,7 @@ public class RecordIndexTests
         Assert.Equal(3, r.Ram.Bytes[r.Address("c") + 10]);
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void The_table_is_left_out_when_no_variable_index_uses_it()
     {
@@ -278,6 +280,7 @@ public class RecordIndexTests
         Assert.Equal(1, r.U8("arr", 2));
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void A_user_name_cannot_clash_with_the_offset_table()
     {

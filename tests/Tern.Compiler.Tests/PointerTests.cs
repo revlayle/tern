@@ -326,6 +326,7 @@ public class PointerTests
         Assert.Equal(7, r.Ram.Bytes[0x3000 + 300]);
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void Fixed_address_pointers()
     {

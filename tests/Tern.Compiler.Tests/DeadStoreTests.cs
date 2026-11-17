@@ -191,6 +191,7 @@ public class DeadStoreTests
 
     // ---------- Programs ----------
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void Globals_overwritten_before_they_are_read_give_the_same_results()
     {
@@ -222,6 +223,7 @@ public class DeadStoreTests
         Assert.Equal(2, main.Split("sta last").Length - 1);
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void A_local_used_only_from_a_is_not_stored()
     {
@@ -243,6 +245,7 @@ public class DeadStoreTests
         Assert.DoesNotContain("sta main.t", r.Result.Listing);
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void A_value_read_in_the_next_pass_of_a_loop_stays()
     {
@@ -268,6 +271,7 @@ public class DeadStoreTests
         Assert.Contains("sta main.prev", r.Result.Listing);
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void A_local_read_in_a_match_arm_reached_through_the_jump_table_stays()
     {
@@ -337,6 +341,7 @@ public class DeadStoreTests
         Assert.Equal("lda #$01", Optimize(Imm(Lda, 1), Abs(Sta, T)));
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void An_interrupt_handler_with_locals_runs_beside_main()
     {
