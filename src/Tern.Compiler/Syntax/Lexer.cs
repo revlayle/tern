@@ -26,6 +26,12 @@ public sealed class CompileError(SourcePos pos, string message) : Exception($"{p
     /// <summary><c>--max-errors</c> stopped the compile: more errors were not reported.</summary>
     public bool MoreNotReported { get; internal set; }
 
+    /// <summary>
+    /// What the error is about, for code that catches it to report it better where it knows more
+    /// (review code-quality-semantics 17): read instead of the message's words. Null for most errors.
+    /// </summary>
+    public ErrorReason? Reason { get; init; }
+
     /// <summary>A warning (spec 13): code that does nothing. Never thrown; it does not stop the build.</summary>
     public bool IsWarning { get; init; }
 
@@ -36,6 +42,15 @@ public sealed class CompileError(SourcePos pos, string message) : Exception($"{p
     public IReadOnlyList<CompileError> WithWarnings { get => _withWarnings ?? All; internal set => _withWarnings = value; }
     private IReadOnlyList<CompileError>? _withWarnings;
 }
+
+/// <summary>What a <see cref="CompileError"/> is about (<see cref="CompileError.Reason"/>).</summary>
+public abstract record ErrorReason;
+
+/// <summary>A name that is not declared.</summary>
+public sealed record NotDeclared(string Name) : ErrorReason;
+
+/// <summary>A constant that does not fit in the type it is given.</summary>
+public sealed record DoesNotFit(long Value) : ErrorReason;
 
 public enum TokenKind
 {

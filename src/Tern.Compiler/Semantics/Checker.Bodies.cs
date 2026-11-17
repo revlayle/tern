@@ -197,7 +197,7 @@ public sealed partial class Checker
             if (a.Value.Type.IsPointer && target.Type.Kind == TypeKind.U16)
                 throw new CompileError(a.Value.Pos, $"Expected {target.Type}, found {a.Value.Type}. Convert with 'as u16'");
             try { Coerce(a.Value, target.Type); }
-            catch (CompileError error) when (a.Value.ConstValue is long v && error.Description.Contains(" does not fit in "))
+            catch (CompileError error) when (error.Reason is DoesNotFit && a.Value.ConstValue is long v)
             {
                 var wider = WiderFor(v, target.Type);
                 var written = Describe(target);

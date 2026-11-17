@@ -144,7 +144,7 @@ public sealed partial class Checker
         if (_module.Imports.ContainsKey(name))
             return new CompileError(pos, $"'{name}' is a module; use the names in it as {name}.name");
         int dot = name.IndexOf('.');
-        if (dot <= 0) return new CompileError(pos, $"'{name}' is not declared. Check the spelling, or declare it");
+        if (dot <= 0) return new CompileError(pos, $"'{name}' is not declared. Check the spelling, or declare it") { Reason = new NotDeclared(name) };
         // s.a() where s is declared: a field or member, not a function in a module.
         switch (Lookup(name[..dot]))
         {
@@ -166,7 +166,7 @@ public sealed partial class Checker
                 $"'{name}' cannot be used in a declaration of {here}: {other.Name} and {here} import each other, and {other.Name} is declared after {here}. " +
                 $"Move {name[(dot + 1)..]} to {here}, or to a module both import");
         }
-        return new CompileError(pos, $"'{name}' is not declared. Check the spelling, or declare it in {other.Name}");
+        return new CompileError(pos, $"'{name}' is not declared. Check the spelling, or declare it in {other.Name}") { Reason = new NotDeclared(name) };
     }
 
     private static string KindName(Symbol s) => s switch
@@ -181,7 +181,7 @@ public sealed partial class Checker
 
     /// <summary><c>text.put</c> where <c>text</c> is not declared: most likely a missing import.</summary>
     private static CompileError MissingImport(string module, SourcePos pos) =>
-        new(pos, $"'{module}' is not declared. Add 'import {module}' at the top of the file to use the module {module}");
+        new(pos, $"'{module}' is not declared. Add 'import {module}' at the top of the file to use the module {module}") { Reason = new NotDeclared(module) };
 
     /// <summary>Reports <c>name.member</c> where <c>name</c> is not declared as a missing import.</summary>
     private void CheckMemberTarget(MemberExpr m)
@@ -254,9 +254,8 @@ public sealed partial class Checker
                 try { CheckExpr(value); }
                 catch (CompileError e)
                 {
-                    var m = System.Text.RegularExpressions.Regex.Match(e.Description, "^'([^']+)' is not declared");
-                    if (m.Success && _unusableConstants.TryGetValue(m.Groups[1].Value, out var why))
-                        throw new CompileError(e.Pos, $"'{m.Groups[1].Value}' cannot be used in a parameter value, since it does not check without the rest of the program: {why}. Write the value as a number");
+                    if (e.Reason is NotDeclared { Name: var missing } && _unusableConstants.TryGetValue(missing, out var why))
+                        throw new CompileError(e.Pos, $"'{missing}' cannot be used in a parameter value, since it does not check without the rest of the program: {why}. Write the value as a number");
                     throw new CompileError(e.Pos, e.Description + ". A parameter value uses literals and the main file's constants that do not depend on imported modules. Write the value as a number");
                 }
                 finally { _module = saved; }

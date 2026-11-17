@@ -86,7 +86,7 @@ public sealed partial class Checker
             if (e.IsBitPattern && v < 0 && !target.IsSigned)
                 throw new CompileError(e.Pos, $"'~' gives {v} here, a pattern wider than {target}: the value before '~' has bits above {target}. Use a value that fits in {target} before '~'");
             if (v < target.MinValue || v > target.MaxValue)
-                throw new CompileError(e.Pos, $"{v} does not fit in {target} ({target.MinValue} to {target.MaxValue}). Use a value in that range, or a wider type");
+                throw new CompileError(e.Pos, $"{v} does not fit in {target} ({target.MinValue} to {target.MaxValue}). Use a value in that range, or a wider type") { Reason = new DoesNotFit(v) };
             e.Type = target;
             return;
         }
@@ -120,7 +120,7 @@ public sealed partial class Checker
     private static void CoerceNamed(Expr e, TernType target, string? setBy, bool isConstant)
     {
         try { Coerce(e, target); }
-        catch (CompileError error) when (setBy is not null && target.IsInteger && error.Description.Contains(" does not fit in "))
+        catch (CompileError error) when (error.Reason is DoesNotFit && setBy is not null && target.IsInteger)
         {
             long v = e.ConstValue!.Value;
             var wider = WiderFor(v, target);
