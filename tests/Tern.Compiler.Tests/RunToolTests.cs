@@ -44,7 +44,7 @@ public class RunToolTests
         Assert.True(run.Returned);
         Assert.Equal(Seeded.At(0xC000), run.Ram.Bytes[program.Symbols["seen"]]);
         Assert.NotEqual(0, Seeded.At(0xC000));
-        Assert.All(Runner.ScreenText(run.Ram), line => Assert.Equal("", line));
+        Assert.All(Runner.ScreenText(run), line => Assert.Equal("", line));
     }
 
     [Fact]
@@ -88,7 +88,7 @@ public class RunToolTests
             }
             """);
         Assert.Equal("HELLO\n1!", run.Output);
-        var screen = Runner.ScreenText(run.Ram);
+        var screen = Runner.ScreenText(run);
         Assert.Equal(25, screen.Count);
         Assert.Equal("HELLO", screen[0]);
         Assert.Equal("1!", screen[1]);
@@ -107,7 +107,7 @@ public class RunToolTests
                 }
             }
             """);
-        var screen = Runner.ScreenText(run.Ram);
+        var screen = Runner.ScreenText(run);
         // 30 lines and a return after the last: the screen shows the last 24 and an empty line.
         Assert.Equal(((char)('A' + 6)).ToString(), screen[0]);
         Assert.Equal(((char)('A' + 29)).ToString(), screen[23]);
@@ -128,7 +128,7 @@ public class RunToolTests
                 key = c64.getin()
             }
             """);
-        Assert.Equal(new string(' ', 7) + "X", Runner.ScreenText(run.Ram)[3]);
+        Assert.Equal(new string(' ', 7) + "X", Runner.ScreenText(run)[3]);
         Assert.Equal(3, run.Ram.Bytes[program.Symbols["at"]]);
         Assert.Equal(8, run.Ram.Bytes[program.Symbols["at"] + 1]);
         Assert.Equal(0, run.Ram.Bytes[program.Symbols["key"]]);

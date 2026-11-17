@@ -170,7 +170,7 @@ internal sealed class AtariMachine(OverlayDisk disk) : Machine
     }
 
     /// <summary>An internal screen code; inverse characters as the plain ones.</summary>
-    public override char ScreenChar(byte code)
+    protected override char ScreenChar(byte code)
     {
         code &= 0x7F;
         return code switch

@@ -27,6 +27,16 @@ internal sealed class Apple2Machine(OverlayDisk disk) : Machine
     /// <summary>The control codes COUT1 acts on.</summary>
     private const byte Return = 0x8D, Linefeed = 0x8A, Backspace = 0x88;
 
+    /// <summary>The startup code calls SETNORM, INIT, SETVID, SETKBD, HOME and the MLI's GET_PREFIX.</summary>
+    public override bool StartupCallsRom => true;
+
+    /// <summary>A system file is one block at its load address ($2000), which its startup code moves into place (spec 12.2).</summary>
+    protected override IBus LoadFile(CompileResult program, Ram ram, Func<long, int, byte>? buttons)
+    {
+        ram.Load((ushort)program.Platform.LoadAddress, program.File);
+        return ram;
+    }
+
     protected override IReadOnlyList<StandIn> Routines =>
     [
         new(0xFDED, "COUT", (cpu, ram, output) => { Print(cpu.A, ram, output); return null; }),
@@ -64,7 +74,7 @@ internal sealed class Apple2Machine(OverlayDisk disk) : Machine
 
     public override (int Address, int Columns, int Rows) Screen(Ram ram) => (ScreenAddress, Columns, Rows);
 
-    public override int RowAddress(Ram ram, int row) => Row(row);
+    protected override int RowAddress(Ram ram, int row) => Row(row);
 
     /// <summary>The address of text page 1's row <paramref name="row"/>.</summary>
     public static int Row(int row) => ScreenAddress + 128 * (row % 8) + 40 * (row / 8);
@@ -223,7 +233,7 @@ internal sealed class Apple2Machine(OverlayDisk disk) : Machine
     /// A screen code: normal text ($80-$FF) as its ASCII character ($E0-$FF as lower case, as the
     /// enhanced IIe shows them); inverse ($00-$3F) and flashing ($40-$7F) as the plain characters.
     /// </summary>
-    public override char ScreenChar(byte code)
+    protected override char ScreenChar(byte code)
     {
         int c = code & 0x7F;
         if (code < 0x80) c &= 0x3F;

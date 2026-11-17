@@ -68,6 +68,11 @@ public sealed class Platform
     public string BinaryExtension => Format == OutputFormat.System ? ".bin" : FileExtension;
     /// <summary>The label file's format: the one the platform's main emulator loads (question 138).</summary>
     public required LabelFormat Labels { get; init; }
+    /// <summary>
+    /// The machine <c>tern run</c> models (<see cref="Tools.Machine"/>), given the platform and the build's
+    /// overlay files; null for a platform it has no model of, which <c>tern run</c> then reports.
+    /// </summary>
+    internal Func<Platform, IReadOnlyList<OverlayFile>, Tools.Machine>? NewMachine { get; init; }
     /// <summary>ROM and I/O, where <c>tern run</c> finds no program code: first and last address, inclusive.</summary>
     public required (int First, int Last)[] Rom { get; init; }
 
@@ -153,6 +158,8 @@ public sealed class Platform
         DefaultEncoding = CharEncoding.Petscii,
         Format = OutputFormat.Prg,
         Labels = LabelFormat.Vice,
+        // The KERNAL's file names have no extension: "LEVEL1" is level1.prg.
+        NewMachine = (_, overlays) => new Tools.C64Machine(new Tools.OverlayDisk(overlays, "")),
         Rom =
         [
             (0xA000, 0xBFFF),   // BASIC
@@ -182,6 +189,7 @@ public sealed class Platform
         DefaultEncoding = CharEncoding.Atascii,
         Format = OutputFormat.Xex,
         Labels = LabelFormat.Mads,
+        NewMachine = (p, overlays) => new Tools.AtariMachine(new Tools.OverlayDisk(overlays, p.BinaryExtension)),
         Rom =
         [
             (0xC000, 0xFFFF),   // OS ROM (from $C000 on the XL/XE), I/O at $D000-$D7FF
@@ -208,6 +216,7 @@ public sealed class Platform
         DefaultEncoding = CharEncoding.Apple2,
         Format = OutputFormat.System,
         Labels = LabelFormat.AppleWin,
+        NewMachine = (p, overlays) => new Tools.Apple2Machine(new Tools.OverlayDisk(overlays, p.BinaryExtension)),
         Rom =
         [
             (0xBF00, 0xBFFF),   // ProDOS's global page: the MLI's entry at $BF00
@@ -236,6 +245,7 @@ public sealed class Platform
         DefaultEncoding = null,
         Format = OutputFormat.Nes,
         Labels = LabelFormat.Mesen,
+        NewMachine = (_, _) => new Tools.NesMachine(),
         Rom = [],
         Boards = [Board.Nrom, Board.Uxrom],
     };

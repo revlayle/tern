@@ -8,9 +8,9 @@ public class NoinitTests
     /// <summary>Runs the program with every byte after the image (and zero page) set to $AA first, as leftovers would be.</summary>
     private static Run RunOverGarbage(string source)
     {
-        var compiled = TernCompiler.Compile(source);
+        var compiled = Run.Compile(source);
         int end = compiled.LoadAddress + compiled.Image.Length;
-        return Run.Program(source, setup: ram =>
+        return Run.Of(compiled, setup: ram =>
         {
             for (int a = end; a < 0xA000; a++) ram.Bytes[a] = 0xAA;
             for (int a = 0x02; a < 0x90; a++) ram.Bytes[a] = 0xAA;

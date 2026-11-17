@@ -58,11 +58,11 @@ public sealed record RunResult(
     string Output, Profile Profile, IReadOnlyList<FunctionTime> Functions, IReadOnlyList<IndexError> IndexErrors)
 {
     /// <summary>The machine the program ran on.</summary>
-    public Platform Platform { get; init; } = Platform.C64;
+    public required Platform Platform { get; init; }
+    /// <summary>The machine the program ran on, which holds its screen and chips.</summary>
+    internal Machine Machine { get; init; } = null!;
     /// <summary>On the NES: the PPU's memory, OAM and frames (<see cref="NesBus"/>); null elsewhere.</summary>
-    public NesBus? Nes { get; init; }
-    /// <summary>The program's text encoding, for the NES's nametable as text.</summary>
-    public CharEncoding? TextEncoding { get; init; }
+    public NesBus? Nes => (Machine as NesMachine)?.Bus;
 }
 
 
@@ -84,24 +84,22 @@ public static class Runner
         options ??= new RunOptions();
         if (program.HaltAddress < 0)
             throw new RunError("A binary without main cannot be run on its own: run the program that loads and calls it");
-        var (machine, ram, nes, cpu) = Start(program, options);
+        var (machine, ram, cpu) = Start(program, options);
 
         var inProgram = program.Sections.Select(s => (s.Address, End: s.Address + s.Size)).ToList();
         bool InProgram(int pc) => inProgram.Any(s => pc >= s.Address && pc < s.End);
         bool InRom(int pc) => program.Platform.Rom.Any(r => pc >= r.First && pc <= r.Last);
-        // By place: code in two banks may share an address (spec 8.5).
-        int PlaceOf(int pc) => nes is null ? pc : program.PlaceOf(pc, nes.SelectedBank);
         int main = program.Symbols.GetValueOrDefault("main", -1);
 
         var profile = new Profile();
         var output = new StringBuilder();
-        var calls = new CallTimes(program, cpu, PlaceOf);
+        var calls = new CallTimes(program, cpu, machine.PlaceOf);
         long? mainStart = null;
         long nextIrq = options.IrqEvery;
         int interrupts = 0;
         string stop;
         bool returned = false;
-        var checker = new IndexChecker(program, options.MainFile, nes is null ? null : PlaceOf);
+        var checker = new IndexChecker(program, options.MainFile, machine.PlaceOf);
 
         while (true)
         {
@@ -131,11 +129,8 @@ public static class Runner
                 stop = $"reached ${pc:X4} in ROM, which the emulator does not have (stand-ins: {machine.StandIns})";
                 break;
             }
-            // The NES's RAM is mirrored up to $1FFF.
-            byte opcode = ram.Bytes[nes is not null && pc < 0x2000 ? pc & 0x07FF : pc];
-            // On the NES a program that sets the IRQ vector gets brk's interrupt; the other machines run without
-            // their ROMs, so a brk there stops the run (decision 2026-11-15, review code-quality-tools 12).
-            if (opcode == 0x00 && !(nes is not null && program.SetsIrqVector))
+            byte opcode = machine.Peek(ram, pc);
+            if (opcode == 0x00 && !machine.RunsBrk)
             {
                 stop = $"brk at ${pc:X4} (often a jump into empty memory)";
                 break;
@@ -143,19 +138,15 @@ public static class Runner
             if (pc == main && mainStart is null) mainStart = cpu.Cycles;
             if (checker.Before(cpu)) { stop = "stopped at an 'indexed match' value outside its span (see the index check)"; break; }
             long before = cpu.Cycles;
-            int place = PlaceOf(pc);
+            int place = machine.PlaceOf(pc);
             try { cpu.Step(); }
             catch (IllegalOpcodeException e) { stop = $"illegal opcode ${e.Opcode:X2} at ${e.Address:X4}"; break; }
             // The instruction's cycles; an NMI the NES takes after it is counted apart.
             profile.Add(place, cpu.Cycles - before);
-            if (nes is not null)
-            {
-                int nmis = nes.Nmis;
-                long beforeNmi = cpu.Cycles;
-                nes.Tick(cpu);
-                profile.InterruptCycles += cpu.Cycles - beforeNmi;
-                if (nes.Nmis > nmis) { interrupts++; calls.Entered(cpu.PC); }
-            }
+            long beforeNmi = cpu.Cycles;
+            bool interrupted = machine.AfterStep(cpu);
+            profile.InterruptCycles += cpu.Cycles - beforeNmi;
+            if (interrupted) { interrupts++; calls.Entered(cpu.PC); }
             if (opcode is 0x20 or 0x00) calls.Entered(cpu.PC);   // jsr, or brk into the IRQ handler
             calls.Left();
         }
@@ -165,27 +156,22 @@ public static class Runner
         return new RunResult(returned, stop, cpu.Cycles, mainCycles, interrupts, ram, cpu, output.ToString(), profile, calls.Times(), checker.Errors)
         {
             Platform = program.Platform,
-            Nes = nes,
-            TextEncoding = program.TextEncoding,
+            Machine = machine,
         };
     }
 
     /// <summary>The machine at the program's start: its stand-ins and memory, the program loaded, the CPU at the entry.</summary>
-    private static (Machine Machine, Ram Ram, NesBus? Nes, Cpu6502 Cpu) Start(CompileResult program, RunOptions options)
+    private static (Machine Machine, Ram Ram, Cpu6502 Cpu) Start(CompileResult program, RunOptions options)
     {
         var machine = Machine.For(program.Platform, program);
         var ram = new Ram();
         StartState.Fill(ram);
         machine.Start(ram);
-        // An Apple II system file is one block at $2000, which its startup code moves into place.
-        NesBus? nes = null;
-        if (program.Platform.Format == OutputFormat.System) ram.Load((ushort)program.Platform.LoadAddress, program.File);
-        else if (program.Platform.Format == OutputFormat.Nes) nes = new NesBus(ram, program.File) { Buttons = options.Buttons };
-        else ram.Load((ushort)program.LoadAddress, program.Image);
+        var bus = machine.Load(program, ram, options.Buttons);
         foreach (var set in options.Sets) ram.Bytes[set.Address] = set.Value;
-        var cpu = new Cpu6502(nes is null ? ram : nes, program.Platform.Cpu) { PC = (ushort)program.Entry, SP = 0xFF, I = true };
+        var cpu = new Cpu6502(bus, program.Platform.Cpu) { PC = (ushort)program.Entry, SP = 0xFF, I = true };
         StartState.Set(cpu);
-        return (machine, ram, nes, cpu);
+        return (machine, ram, cpu);
     }
 
     /// <summary>The calls of each function and the cycles spent in them, from where it is entered until its frame ends.</summary>
@@ -232,13 +218,8 @@ public static class Runner
     }
 
     /// <summary>The text screen's address, columns and rows after a run (the C64's at $0400, the Atari's at SAVMSC, the NES's nametable at $2000 in PPU memory).</summary>
-    public static (int Address, int Columns, int Rows) Screen(RunResult run) =>
-        run.Nes is not null ? (0x2000, 32, 30) : Machine.For(run.Platform).Screen(run.Ram);
+    public static (int Address, int Columns, int Rows) Screen(RunResult run) => run.Machine.Screen(run.Ram);
 
-    /// <summary>The lines of the text screen after a run, without trailing spaces. On the NES: nametable 0 (<see cref="NesMachine.Text"/>).</summary>
-    public static IReadOnlyList<string> ScreenText(RunResult run) =>
-        run.Nes is not null ? NesMachine.Text(run.Nes, run.TextEncoding) : Machine.For(run.Platform).ScreenText(run.Ram);
-
-    /// <summary>The lines of the C64's screen at $0400 in <paramref name="ram"/>, without trailing spaces.</summary>
-    public static IReadOnlyList<string> ScreenText(Ram ram) => Machine.For(Platform.C64).ScreenText(ram);
+    /// <summary>The lines of the text screen after a run, without trailing spaces.</summary>
+    public static IReadOnlyList<string> ScreenText(RunResult run) => run.Machine.ScreenText(run.Ram);
 }

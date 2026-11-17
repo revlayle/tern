@@ -4,7 +4,12 @@ using Tern.Cpu;
 
 namespace Tern.Compiler.Tests;
 
-/// <summary>Compiles a program and runs it in the emulator until main returns.</summary>
+/// <summary>
+/// Compiles a program and runs it in the emulator until main returns. <c>Program(source, ...)</c> compiles and
+/// runs; <see cref="Compile"/> and <see cref="Of"/> do the two apart (review code-quality-tests 13), so a test can
+/// read a symbol's address before the run. The machine is <c>tern run</c>'s (<see cref="Machine"/>): it loads the
+/// file, gives the bus and ticks its chips; its stand-ins for ROM routines are used when asked for.
+/// </summary>
 public sealed class Run
 {
     public CompileResult Result { get; }
@@ -18,7 +23,7 @@ public sealed class Run
     public int Interrupts { get; }
 
     /// <summary>On the NES: the PPU's memory, OAM, frames and banks (<see cref="Tools.NesBus"/>); null elsewhere.</summary>
-    public Tools.NesBus? Nes { get; }
+    public Tools.NesBus? Nes => (_machine as NesMachine)?.Bus;
 
     /// <summary>Array indexes and indexed match values outside their tables (M20). A run with any fails, unless checkIndexes is false.</summary>
     public IReadOnlyList<Tools.IndexError> IndexErrors { get; }
@@ -26,49 +31,51 @@ public sealed class Run
     /// <summary>The reads and writes of the watched addresses; null when the run watches none.</summary>
     public BusLog? Log { get; }
 
-    private Run(string source, long maxCycles, string? sourcePath, Action<Ram>? setup, string? libraryDirectory, long irqEvery,
-        IReadOnlyDictionary<int, Action<Run>>? traps, bool checkIndexes, Platform? platform, Func<long, int, byte>? buttons, bool zeroStart,
-        Func<CompileResult, IEnumerable<int>>? watch, bool comparePlain, bool standIns = false, bool optimize = true)
+    private readonly Machine _machine;
+
+    /// <summary>How a run goes; see the parameters of <c>Program</c>.</summary>
+    /// <param name="Source">The program's source, for the comparison with a plain build; null: no comparison.</param>
+    private sealed record Settings(string? Source, long MaxCycles, string? SourcePath, Action<Ram>? Setup, string? LibraryDirectory, long IrqEvery,
+        IReadOnlyDictionary<int, Action<Run>>? Traps, bool CheckIndexes, Func<long, int, byte>? Buttons, bool ZeroStart,
+        Func<CompileResult, IEnumerable<int>>? Watch, bool ComparePlain, bool StandIns);
+
+    private Run(CompileResult result, Settings s)
     {
-        Result = TernCompiler.Compile(source, platform, sourcePath: sourcePath, libraryDirectory: libraryDirectory, optimize: optimize);
-        if (!zeroStart) StartState.Fill(Ram);
-        // tern run's machine: its stand-ins for ROM routines and memory as the machine starts (review
-        // code-quality-tests 12). An Apple II program always has it, since its startup code calls the ROM
-        // (SETNORM, INIT, SETVID, SETKBD, HOME) and the MLI (GET_PREFIX); a test's traps take its place.
-        var machine = standIns || Result.Platform.Format == OutputFormat.System ? Machine.For(Result.Platform, Result) : null;
-        machine?.Start(Ram);
-        // An Apple II system file loads at $2000, and its startup code moves the areas into place.
-        if (Result.Platform.Format == OutputFormat.System) Ram.Load((ushort)Result.Platform.LoadAddress, Result.File);
-        else if (Result.Platform.Format == OutputFormat.Nes) Nes = new Tools.NesBus(Ram, Result.File) { Buttons = buttons };
-        else Ram.Load((ushort)Result.LoadAddress, Result.Image);
-        setup?.Invoke(Ram);
+        Result = result;
+        if (!s.ZeroStart) StartState.Fill(Ram);
+        // tern run's machine. Its stand-ins for ROM routines and memory as the machine starts come when asked
+        // for (review code-quality-tests 12), and always where the startup code calls the ROM (the Apple II's
+        // SETNORM, INIT, SETVID, SETKBD, HOME and GET_PREFIX); a test's traps take their place.
+        _machine = Machine.For(Result.Platform, Result);
+        bool standIns = s.StandIns || _machine.StartupCallsRom;
+        if (standIns) _machine.Start(Ram);
+        IBus bus = _machine.Load(Result, Ram, s.Buttons);
+        s.Setup?.Invoke(Ram);
+        if (s.Watch is not null) bus = Log = new BusLog(bus, s.Watch(Result));
         // As after reset: no IRQ until the program enables it.
-        IBus bus = Nes is null ? Ram : Nes;
-        if (watch is not null) bus = Log = new BusLog(bus, watch(Result));
         Cpu = new Cpu6502(bus, Result.Platform.Cpu) { PC = (ushort)Result.Entry, SP = 0xFF, I = true };
-        if (!zeroStart) StartState.Set(Cpu);
-        long nextIrq = irqEvery;
-        var checker = new Tools.IndexChecker(Result, sourcePath is null ? "program.tern" : Path.GetFileName(sourcePath),
-            Nes is null ? null : pc => Result.PlaceOf(pc, Nes.SelectedBank));
+        if (!s.ZeroStart) StartState.Set(Cpu);
+        long nextIrq = s.IrqEvery;
+        var checker = new Tools.IndexChecker(Result, s.SourcePath is null ? "program.tern" : Path.GetFileName(s.SourcePath), _machine.PlaceOf);
         IndexErrors = checker.Errors;
         Action<Run>? trap = null;
         while (Cpu.PC != Result.HaltAddress)
         {
-            if (irqEvery > 0 && Cpu.Cycles >= nextIrq)
+            if (s.IrqEvery > 0 && Cpu.Cycles >= nextIrq)
             {
                 // The IRQ line stays raised until the CPU takes it, as a VIC-II raster interrupt does.
                 if (Cpu.Irq())
                 {
                     Interrupts++;
-                    nextIrq = Cpu.Cycles + irqEvery;
+                    nextIrq = Cpu.Cycles + s.IrqEvery;
                 }
             }
-            bool trapped = traps is not null && traps.TryGetValue(Cpu.PC, out trap);
-            if (trapped || machine is not null && machine.Has(Cpu.PC))
+            bool trapped = s.Traps is not null && s.Traps.TryGetValue(Cpu.PC, out trap);
+            if (trapped || standIns && _machine.Has(Cpu.PC))
             {
                 // A stand-in for a ROM routine: do its work, then return as an rts would.
                 if (trapped) trap!(this);
-                else if (machine!.Call(Cpu.PC, Cpu, Ram, Output) is { } stop)
+                else if (_machine.Call(Cpu.PC, Cpu, Ram, Output) is { } stop)
                     throw new Xunit.Sdk.XunitException($"The run stopped: {stop}");
                 ushort low = Ram.Bytes[0x100 + (byte)(Cpu.SP + 1)], high = Ram.Bytes[0x100 + (byte)(Cpu.SP + 2)];
                 Cpu.SP += 2;
@@ -77,19 +84,19 @@ public sealed class Run
             }
             if (checker.Before(Cpu)) break;   // an indexed match value outside its span: the jump goes nowhere chosen
             Cpu.Step();
-            Nes?.Tick(Cpu);
-            if (Cpu.Cycles > maxCycles)
-                throw new Xunit.Sdk.XunitException($"Program did not finish within {maxCycles} cycles (PC=${Cpu.PC:X4})\n{Result.Listing}");
+            _machine.AfterStep(Cpu);
+            if (Cpu.Cycles > s.MaxCycles)
+                throw new Xunit.Sdk.XunitException($"Program did not finish within {s.MaxCycles} cycles (PC=${Cpu.PC:X4})\n{Result.Listing}");
         }
-        if (checkIndexes && checker.Errors.Count > 0)
+        if (s.CheckIndexes && checker.Errors.Count > 0)
             throw new Xunit.Sdk.XunitException("The emulator's index check reported:\n" + string.Join("\n", checker.Errors));
         // A run whose inputs do not depend on the layout or on timing is repeated without the optimizer,
         // and every global must end with the same value (review code-quality-tests, finding 8).
         // Addresses and noinit memory differ with the layout, so programs that hold them are left out.
-        if (optimize && comparePlain && setup is null && traps is null && !standIns && irqEvery == 0 && buttons is null
+        if (s is { ComparePlain: true, Source: { } source, Setup: null, Traps: null, StandIns: false, IrqEvery: 0, Buttons: null }
             && !source.Contains("addr(") && !source.Contains("noinit"))
-            CompareWithPlain(new Run(source, maxCycles * 4, sourcePath, null, libraryDirectory, 0, null, checkIndexes, platform, null,
-                zeroStart, null, comparePlain: false, optimize: false));
+            CompareWithPlain(new Run(Compile(source, s.SourcePath, s.LibraryDirectory, Result.Platform, optimize: false),
+                s with { MaxCycles = s.MaxCycles * 4, ComparePlain = false, Watch = null }));
     }
 
     /// <summary>Fails when a global ends with another value in the run of the same program compiled without the optimizer.</summary>
@@ -109,6 +116,11 @@ public sealed class Run
                 + string.Join("\n", differences) + "\n\nOptimized:\n" + Result.Listing + "\nWithout the optimizer:\n" + plain.Result.Listing);
     }
 
+    /// <summary>Compiles a program for a run with <see cref="Of"/>.</summary>
+    /// <param name="platform">The target; the C64 if null.</param>
+    public static CompileResult Compile(string source, string? sourcePath = null, string? libraryDirectory = null, Platform? platform = null, bool optimize = true) =>
+        TernCompiler.Compile(source, platform, sourcePath: sourcePath, libraryDirectory: libraryDirectory, optimize: optimize);
+
     /// <param name="setup">Prepares memory after loading the program, e.g. with stand-ins for ROM routines.</param>
     /// <param name="irqEvery">If set, raises an IRQ this many cycles after the last one was taken (taken once interrupts are enabled).</param>
     /// <param name="traps">Stand-ins for ROM routines: when the CPU reaches the address, the action runs and the routine returns without executing.</param>
@@ -125,7 +137,13 @@ public sealed class Run
         string? libraryDirectory = null, long irqEvery = 0, IReadOnlyDictionary<int, Action<Run>>? traps = null, bool checkIndexes = true,
         Platform? platform = null, Func<long, int, byte>? buttons = null, bool zeroStart = false,
         Func<CompileResult, IEnumerable<int>>? watch = null, bool comparePlain = true, bool standIns = false) =>
-        new(source, maxCycles, sourcePath, setup, libraryDirectory, irqEvery, traps, checkIndexes, platform, buttons, zeroStart, watch, comparePlain, standIns);
+        new(Compile(source, sourcePath, libraryDirectory, platform),
+            new Settings(source, maxCycles, sourcePath, setup, libraryDirectory, irqEvery, traps, checkIndexes, buttons, zeroStart, watch, comparePlain, standIns));
+
+    /// <summary>Runs a program compiled with <see cref="Compile"/>, as <c>Program</c> does, without the comparison with a plain build.</summary>
+    public static Run Of(CompileResult result, long maxCycles = 5_000_000, Action<Ram>? setup = null, long irqEvery = 0,
+        IReadOnlyDictionary<int, Action<Run>>? traps = null, bool checkIndexes = true, Func<long, int, byte>? buttons = null, bool standIns = false) =>
+        new(result, new Settings(null, maxCycles, null, setup, null, irqEvery, traps, checkIndexes, buttons, false, null, false, standIns));
 
     public int Address(string name) =>
         Result.Symbols.TryGetValue(name, out var a) ? a : throw new KeyNotFoundException($"No symbol '{name}'");
@@ -139,7 +157,6 @@ public sealed class Run
     public ushort U16At(string name, int i, int length) => (ushort)(U8(name, i) | (U8(name, length + i) << 8));
 }
 
-/// <summary>Command lines for <see cref="Tools.Cli.Run"/>.</summary>
 /// <summary>The bytes memory starts with (<see cref="StartState"/>), for checking that a run left a byte as it was.</summary>
 public static class Seeded
 {
@@ -155,6 +172,7 @@ public static class Seeded
     public static byte At(int address) => Bytes[address];
 }
 
+/// <summary>Command lines for <see cref="Tools.Cli.Run"/>.</summary>
 public static class Command
 {
     /// <summary>A tern command line built for the C64: <c>--target c64</c> after the subcommand (run, bench), or first.</summary>
