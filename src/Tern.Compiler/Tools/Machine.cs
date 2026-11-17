@@ -16,7 +16,7 @@ internal abstract class Machine
     /// <exception cref="RunError">The platform has no model in <c>tern run</c>.</exception>
     public static Machine For(Platform platform, CompileResult? program = null) =>
         platform.NewMachine?.Invoke(platform, program?.Overlays ?? [])
-        ?? throw new RunError($"tern run has no model of the {platform.Name}. Use an emulator to run the program");
+        ?? throw new RunError($"tern run has no model of the {platform.Title}. Use an emulator to run the program");
 
     /// <summary>
     /// A ROM routine with a stand-in (review code-quality-tools 6): its address, its name, what it

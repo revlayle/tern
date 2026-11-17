@@ -58,11 +58,11 @@ public sealed class MemoryLayout
 
     /// <summary>
     /// The platform's map: one program area from the load address to the end of usable RAM; on a
-    /// platform with boards, the first board's ROM, with the variables in <see cref="Platform.VariableRam"/>.
+    /// platform where every program is a cartridge, the first board's ROM, with the variables in <see cref="Platform.VariableRam"/>.
     /// </summary>
     public static MemoryLayout Default(Platform platform) => new()
     {
-        Program = platform.Boards.Count > 0 ? [.. platform.Boards[0].CodeAreas] : [new AddressRange(platform.LoadAddress, platform.RamEnd)],
+        Program = platform.CartridgeRequired ? [.. platform.Boards[0].CodeAreas] : [new AddressRange(platform.LoadAddress, platform.RamEnd)],
         Variables = platform.VariableRam is var (first, last) ? [new AddressRange(first, last)] : [],
         ZeroPage = PlatformZeroPage(platform),
     };
@@ -71,12 +71,12 @@ public sealed class MemoryLayout
     private static Cartridge BuildCartridge(Platform platform, CartridgeLine line)
     {
         if (platform.Boards.Count == 0)
-            throw new CompileError(line.Pos, platform.Name == "apple2"
-                ? "The Apple II has no cartridges. Remove the 'cartridge' line"
+            throw new CompileError(line.Pos, !platform.CartridgesPlanned
+                ? $"The {platform.Title} has no cartridges. Remove the 'cartridge' line"
                 : $"'cartridge' is not supported yet for the {platform.Name}: cartridge images are built only for the NES so far. Remove the 'cartridge' line");
         var board = platform.Boards.FirstOrDefault(b => b.Name == line.Board)
             ?? throw new CompileError(line.BoardPos,
-                $"The {platform.Name.ToUpperInvariant()} has no board '{line.Board}'. Use one of: {string.Join(", ", platform.Boards.Select(b => b.Name))}");
+                $"The {platform.Title} has no board '{line.Board}'. Use one of: {string.Join(", ", platform.Boards.Select(b => b.Name))}");
         foreach (var (name, pos) in line.Options)
             if (!Board.Mirroring.Contains(name))
                 throw new CompileError(pos, $"The board '{board.Name}' has no option '{name}'. Use one of: {string.Join(", ", Board.Mirroring)}");
@@ -96,7 +96,7 @@ public sealed class MemoryLayout
     public static MemoryLayout Build(Platform platform, IReadOnlyList<(MemoryLine Line, long First, long Last)> lines, CartridgeLine? cartridgeLine, SourcePos block)
     {
         var cartridge = cartridgeLine is null ? null : BuildCartridge(platform, cartridgeLine);
-        if (cartridge is null && platform.Boards.Count > 0)
+        if (cartridge is null && platform.CartridgeRequired)
             throw new CompileError(block, NeedsCartridge(platform));
         var areas = new BlockAreas();
         foreach (var (line, first, last) in lines)
@@ -195,7 +195,7 @@ public sealed class MemoryLayout
         // Decision 2026-11-14 (question 160): the board gives the code areas, so the line has no meaning.
         if (line.Kind == MemoryKind.Program)
             throw new CompileError(line.Pos,
-                $"A 'program' line has no meaning on the {platform.Name.ToUpperInvariant()}: the board '{board.Name}' gives the code areas ({List(board.CodeAreas)}), and the variables are in RAM, {ram}. Remove the line, or use 'reserved' or 'region' to take a range out of ROM or RAM");
+                $"A 'program' line has no meaning on the {platform.Title}: the board '{board.Name}' gives the code areas ({List(board.CodeAreas)}), and the variables are in RAM, {ram}. Remove the line, or use 'reserved' or 'region' to take a range out of ROM or RAM");
         if (line.Kind == MemoryKind.Overlay)
             throw new CompileError(line.Pos,
                 $"A cartridge has no disk to load an overlay from, and the board '{board.Name}' no RAM at {range} to load it into. " +
@@ -244,7 +244,7 @@ public sealed class MemoryLayout
 
     /// <summary>The error for a NES program without a <c>cartridge</c> line.</summary>
     public static string NeedsCartridge(Platform platform) =>
-        $"A {platform.Name.ToUpperInvariant()} program is a cartridge image, so its memory block names the board. " +
+        $"A {platform.Title} program is a cartridge image, so its memory block names the board. " +
         $"Write 'memory {{ cartridge {platform.Boards[0].Name} vertical }}' (boards: {string.Join(", ", platform.Boards.Select(b => b.Name))}; mirroring: vertical or horizontal)";
 
     private static string Describe(MemoryLine line) => line.Name is null ? line.Kind.Word() : $"{line.Kind.Word()} {line.Name}";

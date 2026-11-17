@@ -59,7 +59,7 @@ public sealed partial class Checker
     private CharEncoding DefaultEncodingFor(Module module, SourcePos pos) =>
         module.IsLibrary || _mainModule.Syntax.DefaultEncodings.Count == 0
             ? _platform.DefaultEncoding ?? throw new CompileError(pos,
-                $"The {_platform.Name.ToUpperInvariant()} has no default encoding: its text is tile numbers, which each game chooses (spec 2.1). " +
+                $"The {_platform.Title} has no default encoding: its text is tile numbers, which each game chooses (spec 2.1). " +
                 "Write a 'default encoding' line in the main file, or write an encoding's prefix before the quote")
             : ProgramDefault(pos);
 

@@ -54,15 +54,10 @@ public class RunModelTests
     [Fact]
     public void A_platform_with_no_machine_is_an_error_not_a_run_as_a_c64()
     {
-        var c64 = Platform.C64;
-        var other = new Platform
-        {
-            Name = "c128", Cpu = c64.Cpu, LoadAddress = c64.LoadAddress, Header = c64.Header, ZeroPage = c64.ZeroPage, RamEnd = c64.RamEnd,
-            VolatileAreas = c64.VolatileAreas, DefaultEncoding = c64.DefaultEncoding, Format = c64.Format, Labels = c64.Labels, Rom = c64.Rom,
-        };
+        var other = PlatformDataTests.Like(Platform.C64, "c128", machine: false);
         var program = TernCompiler.Compile("var x: u8\nfn main() { x = 1 }", other);
         var e = Assert.Throws<RunError>(() => Runner.Run(program));
-        Assert.Equal("tern run has no model of the c128. Use an emulator to run the program", e.Message);
+        Assert.Equal("tern run has no model of the C128. Use an emulator to run the program", e.Message);
     }
 
     /// <summary>The screen is read from the machine that ran, not a new one: the NES's from its PPU, the others' from RAM.</summary>

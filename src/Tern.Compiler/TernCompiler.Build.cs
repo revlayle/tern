@@ -191,7 +191,7 @@ public static partial class TernCompiler
             // The C64's BASIC line must be where the file loads; a .xex names its run address.
             if (!binary && platform.Header.Length > 0 && layout.Program[0].First != platform.LoadAddress)
                 throw new CompileError(program.Main.Pos,
-                    $"A program with 'main' starts at ${platform.LoadAddress:X4}, where the {platform.Name.ToUpperInvariant()} BASIC line goes, but its first program area begins at ${layout.Program[0].First:X4}. " +
+                    $"A program with 'main' starts at ${platform.LoadAddress:X4}, where the {platform.Title} BASIC line goes, but its first program area begins at ${layout.Program[0].First:X4}. " +
                     (layout.ProgramReplaced ? $"Start the first 'program' line of the memory block at ${platform.LoadAddress:X4}" : "Move the 'reserved' or 'region' range that covers it"));
             CheckFixedData(program, plan);
             if (program.ExportTableAddress is int tableAt)

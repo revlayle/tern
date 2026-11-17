@@ -24,7 +24,10 @@ public enum OutputFormat
 /// <summary>Everything the compiler needs to know about a target machine.</summary>
 public sealed class Platform
 {
+    /// <summary>The name <c>--target</c> takes, and the library's folder (<c>c64</c>, <c>apple2</c>).</summary>
     public required string Name { get; init; }
+    /// <summary>The machine's name in messages: "C64", "Apple II".</summary>
+    public required string Title { get; init; }
     public required CpuVariant Cpu { get; init; }
 
     /// <summary>The instructions of <see cref="Cpu"/>, which the checker, the backend and <c>tern run</c> use.</summary>
@@ -53,9 +56,16 @@ public sealed class Platform
     public string FileExtension => Format switch { OutputFormat.Prg => ".prg", OutputFormat.Xex => ".xex", OutputFormat.Nes => ".nes", _ => ".system" };
     /// <summary>
     /// The cartridge boards the <c>cartridge</c> line may name (spec 8.4, 12.2), the default first. On the
-    /// NES every program is a cartridge, so the line is required.
+    /// NES every program is a cartridge (<see cref="CartridgeRequired"/>).
     /// </summary>
     public IReadOnlyList<Board> Boards { get; init; } = [];
+    /// <summary>Every program is a cartridge, so the memory block must name a board (the NES).</summary>
+    public bool CartridgeRequired { get; init; }
+    /// <summary>
+    /// The machine takes cartridges, but the compiler builds none for it yet (spec 8.4: the C64's and the
+    /// Atari's): a <c>cartridge</c> line is "not supported yet" rather than an error about the machine.
+    /// </summary>
+    public bool CartridgesPlanned { get; init; }
     /// <summary>
     /// RAM for variables, when code is in ROM (the NES): the variables' block goes there instead of after
     /// the program, and initial values are copied from ROM. Null: variables follow the program.
@@ -130,6 +140,8 @@ public sealed class Platform
     public static readonly Platform C64 = new()
     {
         Name = "c64",
+        Title = "C64",
+        CartridgesPlanned = true,
         Cpu = CpuVariant.Nmos6502,
         LoadAddress = 0x0801,
         Header =
@@ -174,6 +186,8 @@ public sealed class Platform
     public static readonly Platform Atari = new()
     {
         Name = "atari",
+        Title = "Atari",
+        CartridgesPlanned = true,
         Cpu = CpuVariant.Nmos6502,
         LoadAddress = 0x2000,
         Header = [],
@@ -204,6 +218,7 @@ public sealed class Platform
     public static readonly Platform Apple2 = new()
     {
         Name = "apple2",
+        Title = "Apple II",
         Cpu = CpuVariant.Nmos6502,
         LoadAddress = 0x2000,
         Header = [],
@@ -232,6 +247,8 @@ public sealed class Platform
     public static readonly Platform Nes = new()
     {
         Name = "nes",
+        Title = "NES",
+        CartridgeRequired = true,
         Cpu = CpuVariant.Ricoh2A03,
         LoadAddress = 0x8000,
         Header = [],

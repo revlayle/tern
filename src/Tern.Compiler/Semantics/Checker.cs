@@ -183,7 +183,7 @@ public sealed partial class Checker
     private void CheckMemoryNames(Module mainModule)
     {
         // Every NES program is a cartridge, so its memory block names the board (spec 8.4).
-        if (_platform.Boards.Count > 0 && mainModule.Syntax.Memory is null && !mainModule.Syntax.HasSyntaxErrors)
+        if (_platform.CartridgeRequired && mainModule.Syntax.Memory is null && !mainModule.Syntax.HasSyntaxErrors)
             Recover(() => throw new CompileError(new SourcePos(1, 1, mainModule.Path), MemoryLayout.NeedsCartridge(_platform)));
 
         // "@ name" means a region or an address, never either depending on other declarations (spec 8.4).
