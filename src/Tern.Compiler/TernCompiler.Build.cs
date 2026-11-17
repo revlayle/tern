@@ -357,7 +357,7 @@ public static partial class TernCompiler
             foreach (var g in program.Globals)
             {
                 symbols[g.Name] = g.Address;
-                variables[g.Name] = new VariableInfo(g.Name, g.Address, g.Type.Size, g.Type.ToString(), null, g.IsData, g.InChr);
+                variables[g.Name] = new VariableInfo(g.Name, g.Address, g.Type.Size, g.Type.ToString(), null, g.IsData, g.InChr) { Of = g.Type };
             }
             foreach (var f in program.Functions)
             {
@@ -366,7 +366,7 @@ public static partial class TernCompiler
                 foreach (var v in f.FrameVariables.Where(v => v.Kind != VariableKind.Temp))
                 {
                     symbols[v.QualifiedName] = v.Address;
-                    variables[v.QualifiedName] = new VariableInfo(v.QualifiedName, v.Address, v.Type.Size, v.Type.ToString(), f.Name, false);
+                    variables[v.QualifiedName] = new VariableInfo(v.QualifiedName, v.Address, v.Type.Size, v.Type.ToString(), f.Name, false) { Of = v.Type };
                 }
             }
             return (symbols, variables);

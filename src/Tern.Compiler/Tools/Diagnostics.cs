@@ -1,5 +1,3 @@
-using System.Text.Encodings.Web;
-using System.Text.Json;
 using System.Text.Json.Serialization;
 using Tern.Compiler.Syntax;
 
@@ -9,8 +7,27 @@ namespace Tern.Compiler.Tools;
 /// One compiler message for tools (<c>tern --json</c>): where it is, what is wrong, and how to fix it.
 /// <see cref="Message"/> followed by <see cref="Suggestion"/> is the whole text of the error.
 /// </summary>
-public sealed record Diagnostic(string File, int Line, int Column, string Severity, string Message, string? Suggestion)
+/// <summary>Whether a <see cref="Diagnostic"/> stops the build. JSON writes it as "error" or "warning".</summary>
+public enum Severity { Error, Warning }
+
+public sealed record Diagnostic(string File, int Line, int Column, Severity Severity, string Message, string? Suggestion)
 {
+    /// <summary>
+    /// An error of the tool, not at a place in the source (a path, an option, a run): its text split into the
+    /// message and the suggestion as a compiler error's is (<see cref="Split"/>).
+    /// </summary>
+    public static Diagnostic Error(string file, string text)
+    {
+        var (message, suggestion) = Split(text);
+        return new Diagnostic(file, 0, 0, Severity.Error, message, suggestion);
+    }
+
+    /// <summary>The errors of a failed compile and the warnings found before it, sorted by place (spec 13): the one conversion for every tool.</summary>
+    public static List<Diagnostic> All(CompileError e, string defaultFile) => e.WithWarnings.Select(x => From(x, defaultFile)).ToList();
+
+    /// <summary>"error" or "warning", as the text output and JSON write it.</summary>
+    [JsonIgnore] public string SeverityWord => Severity == Severity.Error ? "error" : "warning";
+
     /// <summary>
     /// For an error in a const fn or in generated code: the line that called it (spec 4.1), also named
     /// in the message. Null for other errors.
@@ -34,7 +51,7 @@ public sealed record Diagnostic(string File, int Line, int Column, string Severi
     public static Diagnostic From(CompileError e, string defaultFile)
     {
         var (message, suggestion) = Split(e.Description);
-        return new Diagnostic(e.Pos.File ?? defaultFile, e.Pos.Line, e.Pos.Column, e.IsWarning ? "warning" : "error", message, suggestion)
+        return new Diagnostic(e.Pos.File ?? defaultFile, e.Pos.Line, e.Pos.Column, e.IsWarning ? Severity.Warning : Severity.Error, message, suggestion)
         {
             CalledFrom = e.CalledFrom is { } call ? new Location(call.File ?? defaultFile, call.Line, call.Column) : null,
         };
@@ -74,24 +91,10 @@ public sealed record Diagnostic(string File, int Line, int Column, string Severi
         return -1;
     }
 
-    private static readonly JsonSerializerOptions Options = new()
-    {
-        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-        WriteIndented = true,
-        Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
-        DefaultIgnoreCondition = JsonIgnoreCondition.Never,
-    };
-
     /// <summary>
     /// The output of <c>tern --json</c>: <c>ok</c>, the files written, the report's lines and the
     /// diagnostics (an empty list when the program compiled).
     /// </summary>
     public static string ToJson(bool ok, IReadOnlyList<string> files, string? report, IReadOnlyList<Diagnostic> diagnostics) =>
-        JsonSerializer.Serialize(new
-        {
-            ok,
-            files,
-            report = report?.Split('\n').Select(l => l.TrimEnd('\r')).Where(l => l.Length > 0).ToArray() ?? [],
-            diagnostics,
-        }, Options);
+        JsonOutput.Write(new CompileOutput(ok, files, report?.Split('\n').Select(l => l.TrimEnd('\r')).Where(l => l.Length > 0).ToArray() ?? [], diagnostics));
 }

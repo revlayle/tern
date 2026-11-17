@@ -123,7 +123,7 @@ public sealed class CheckTests : IDisposable
     public void Diagnostics_split_the_suggestion_from_the_message()
     {
         var d = Assert.Single(TernCompiler.Check("fn main() {\n    var temp: u8 = 3\n}\n").Diagnostics("main.tern"));
-        Assert.Equal(("main.tern", 2, "warning", "'temp' is never used."), (d.File, d.Line, d.Severity, d.Message));
+        Assert.Equal(("main.tern", 2, Tools.Severity.Warning, "'temp' is never used."), (d.File, d.Line, d.Severity, d.Message));
         Assert.Equal("Remove it, or start its name with '_' to keep it", d.Suggestion);
     }
 }

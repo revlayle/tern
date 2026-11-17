@@ -33,7 +33,7 @@ public static partial class Cli
         {
             // A bug in the compiler or the emulator: a message and a fixed exit code, never a stack trace (review code-quality-tools 2).
             string text = $"Internal error ({e.GetType().Name}): {e.Message}. Report it with the program that caused it";
-            if (jsonOut) output.WriteLine(Diagnostic.ToJson(false, [], null, [new Diagnostic("", 0, 0, "error", text, null)]));
+            if (jsonOut) output.WriteLine(Diagnostic.ToJson(false, [], null, [Diagnostic.Error("", text)]));
             else error.WriteLine(text);
             return InternalError;
         }

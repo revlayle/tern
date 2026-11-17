@@ -36,13 +36,15 @@ public sealed record MemorySet(int Address, byte Value)
 
         int Number(string s, int max, string what)
         {
-            bool ok = s.StartsWith('$')
-                ? int.TryParse(s[1..], System.Globalization.NumberStyles.HexNumber, System.Globalization.CultureInfo.InvariantCulture, out int n)
-                : int.TryParse(s, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out n);
-            if (!ok || n > max) throw new FormatException($"'{text}': '{s}' is not {what}; write $DC00=$FF or 56320=255");
+            if (!TryNumber(s, out int n) || n > max) throw new FormatException($"'{text}': '{s}' is not {what}; write $DC00=$FF or 56320=255");
             return n;
         }
     }
+
+    /// <summary>A number as the tools take it: decimal, or hex after <c>$</c>. The one parser of <c>--set</c> and <c>--dump</c>.</summary>
+    internal static bool TryNumber(string s, out int n) => s.StartsWith('$')
+        ? int.TryParse(s[1..], System.Globalization.NumberStyles.HexNumber, System.Globalization.CultureInfo.InvariantCulture, out n)
+        : int.TryParse(s, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out n);
 }
 
 /// <summary>Cycles spent inside one function, callees included, over a run.</summary>
@@ -83,7 +85,7 @@ public static class Runner
     {
         options ??= new RunOptions();
         if (program.HaltAddress < 0)
-            throw new RunError("A binary without main cannot be run on its own: run the program that loads and calls it");
+            throw new RunError("A binary without main cannot be run on its own. Call it from a program that loads it, and run that program");
         var (machine, ram, cpu) = Start(program, options);
 
         var inProgram = program.Sections.Select(s => (s.Address, End: s.Address + s.Size)).ToList();

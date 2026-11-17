@@ -15,7 +15,11 @@ public sealed record OverlayFile(string Name, string Area, int LoadAddress, byte
 
 /// <summary>A variable's place: its type as written (<c>u16</c>, <c>[u8; 10]</c>), and the function whose frame holds it (null for a global).</summary>
 /// <param name="InChr">Tile data in a NES chr area: <paramref name="Address"/> is in the PPU's memory, not the CPU's.</param>
-public sealed record VariableInfo(string Name, int Address, int Size, string Type, string? Function, bool IsData, bool InChr = false);
+public sealed record VariableInfo(string Name, int Address, int Size, string Type, string? Function, bool IsData, bool InChr = false)
+{
+    /// <summary>The type itself, which <see cref="Type"/> spells: read by the tools instead of the text (review code-quality-tools 7).</summary>
+    internal Semantics.TernType? Of { get; init; }
+}
 
 public sealed class CompileResult
 {
