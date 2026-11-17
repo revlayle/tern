@@ -110,7 +110,12 @@ public sealed partial class Checker
             throw new CompileError(e.Pos, $"Expected bool, found {source}. Compare instead, as in 'x != 0'");
         if (source.Kind == TypeKind.Bool && target.IsInteger)
             throw new CompileError(e.Pos, $"Expected {target}, found bool. Use 'if' to choose a number, as in 'if b {{ x = 1 }}'");
-        throw new CompileError(e.Pos, $"Expected {target}, found {source}. Use a {target} here");
+        // A whole array is never a value (spec 3.2): name what can be used instead (review R2, suggestion 4).
+        if (source.IsArray)
+            throw new CompileError(e.Pos, Describe(e) is { } array
+                ? $"Expected {target}, found {source}: '{array}' is a whole array, which is never a value. Use one element, as in {array}[0], or addr({array}) for its address"
+                : $"Expected {target}, found {source}, a whole array, which is never a value. Use one element of it, or its address with addr()");
+        throw new CompileError(e.Pos, $"Expected {target}, found {source}, which does not convert to {target}. Use a {target} here");
     }
 
     /// <summary>
