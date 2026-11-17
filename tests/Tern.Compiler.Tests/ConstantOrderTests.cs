@@ -7,12 +7,9 @@ namespace Tern.Compiler.Tests;
 /// any module, also across an import ring; <c>len()</c> and <c>sizeof()</c> of a global, <c>data</c> or a
 /// struct may be part of a constant. Only a value that depends on itself is an error.
 /// </summary>
-public sealed class ConstantOrderTests : IDisposable
+public sealed class ConstantOrderTests : TempFolderTest
 {
-    private readonly DirectoryInfo _dir = Directory.CreateTempSubdirectory("tern");
     private string Src => _dir.FullName;
-
-    public void Dispose() => _dir.Delete(recursive: true);
 
     private void Write(string name, string text) => File.WriteAllText(Path.Combine(Src, name), text);
 

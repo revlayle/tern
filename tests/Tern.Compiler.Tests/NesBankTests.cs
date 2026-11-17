@@ -6,11 +6,8 @@ namespace Tern.Compiler.Tests;
 /// Bank switching on UxROM (spec 8.5, 12.2, M27): bank areas, <c>import m @ area[n]</c>, the image's banks
 /// with the fixed bank last, <c>uxrom.select</c>, and the rules between banks.
 /// </summary>
-public class NesBankTests : IDisposable
+public class NesBankTests : TempFolderTest
 {
-    private readonly DirectoryInfo _dir = Directory.CreateTempSubdirectory("tern-banks-");
-
-    public void Dispose() => _dir.Delete(recursive: true);
 
     private const string Memory = "memory {\n    cartridge uxrom vertical\n    $8000..=$BFFF bank levels\n}\n";
 

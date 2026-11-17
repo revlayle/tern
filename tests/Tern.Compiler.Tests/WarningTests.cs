@@ -7,11 +7,8 @@ namespace Tern.Compiler.Tests;
 /// that is never reached. Names starting with '_', main, exports, fixed-address globals, parameters, public
 /// module declarations and library modules are never warned. Reported only when the checks found no error.
 /// </summary>
-public sealed class WarningTests : IDisposable
+public sealed class WarningTests : TempFolderTest
 {
-    private readonly DirectoryInfo _dir = Directory.CreateTempSubdirectory("tern");
-
-    public void Dispose() => _dir.Delete(recursive: true);
 
     private string MainPath => Path.Combine(_dir.FullName, "main.tern");
 

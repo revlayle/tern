@@ -3,9 +3,8 @@ using Tern.Compiler.Syntax;
 namespace Tern.Compiler.Tests;
 
 /// <summary>An <c>interrupt fn</c> called from another <c>interrupt fn</c> is a part (spec 6.3, decision 34).</summary>
-public sealed class InterruptPartTests : IDisposable
+public sealed class InterruptPartTests : TempFolderTest
 {
-    private readonly DirectoryInfo _dir = Directory.CreateTempSubdirectory("tern");
     private string Lib => Path.Combine(_dir.FullName, "lib");
     private string Src => Path.Combine(_dir.FullName, "src");
 
@@ -14,8 +13,6 @@ public sealed class InterruptPartTests : IDisposable
         Directory.CreateDirectory(Lib);
         Directory.CreateDirectory(Src);
     }
-
-    public void Dispose() => _dir.Delete(recursive: true);
 
     private void Write(string name, string text) => File.WriteAllText(Path.Combine(Src, name), text);
 

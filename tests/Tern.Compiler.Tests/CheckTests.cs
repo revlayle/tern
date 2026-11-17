@@ -7,11 +7,8 @@ namespace Tern.Compiler.Tests;
 /// <see cref="TernCompiler.Check"/>: the checks without a build, which return their errors instead of
 /// throwing them, for a language server (review code-quality-syntax 7, tools 7; roadmap R5).
 /// </summary>
-public sealed class CheckTests : IDisposable
+public sealed class CheckTests : TempFolderTest
 {
-    private readonly DirectoryInfo _dir = Directory.CreateTempSubdirectory("tern");
-
-    public void Dispose() => _dir.Delete(recursive: true);
 
     private string MainPath => Path.Combine(_dir.FullName, "main.tern");
 

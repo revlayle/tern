@@ -3,11 +3,8 @@ using Tern.Compiler.Syntax;
 namespace Tern.Compiler.Tests;
 
 /// <summary><c>offset(T.field)</c> (spec 10, decision 2026-11-11, question 95): a field's offset in bytes, an untyped constant.</summary>
-public sealed class OffsetTests : IDisposable
+public sealed class OffsetTests : TempFolderTest
 {
-    private readonly DirectoryInfo _dir = Directory.CreateTempSubdirectory("tern");
-
-    public void Dispose() => _dir.Delete(recursive: true);
 
     private static CompileError Error(string source) => Assert.Throws<CompileError>(() => TernCompiler.Compile(source));
 

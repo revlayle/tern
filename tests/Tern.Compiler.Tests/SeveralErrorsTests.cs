@@ -9,11 +9,8 @@ namespace Tern.Compiler.Tests;
 /// accepts every use. Errors are sorted by place (decision 108): the main file, then modules in the order
 /// first imported; by line and column within a file.
 /// </summary>
-public sealed class SeveralErrorsTests : IDisposable
+public sealed class SeveralErrorsTests : TempFolderTest
 {
-    private readonly DirectoryInfo _dir = Directory.CreateTempSubdirectory("tern");
-
-    public void Dispose() => _dir.Delete(recursive: true);
 
     /// <summary>Every error of the compile as "line: message", without the fix sentence (with the file name when it is not main.tern).</summary>
     private List<string> Errors(string source, int? maxErrors = null, params (string Name, string Text)[] modules)
@@ -507,12 +504,7 @@ public sealed class SeveralErrorsTests : IDisposable
         return path;
     }
 
-    private static (int Code, string Output, string Error) Tern(params string[] args)
-    {
-        var (output, error) = (new StringWriter(), new StringWriter());
-        int code = Cli.Run(Command.C64(args), output, error);
-        return (code, output.ToString(), error.ToString());
-    }
+    private static (int Code, string Output, string Error) Tern(params string[] args) => Command.Tern(Command.C64(args));
 
     [Fact]
     public void Tern_prints_every_error_then_their_number()

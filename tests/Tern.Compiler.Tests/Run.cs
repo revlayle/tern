@@ -181,4 +181,12 @@ public static class Command
     /// <summary>A tern command line built for the C64: <c>--target c64</c> after the subcommand (run, bench), or first.</summary>
     public static string[] C64(params string[] args) =>
         args.Length > 0 && args[0] is "run" or "bench" ? [args[0], "--target", "c64", .. args[1..]] : ["--target", "c64", .. args];
+
+    /// <summary>Runs tern with <paramref name="args"/> and returns its exit code, standard output and standard error (review code-quality-tests 7: one copy).</summary>
+    public static (int Code, string Output, string Error) Tern(params string[] args)
+    {
+        var (output, error) = (new StringWriter(), new StringWriter());
+        int code = Cli.Run(args, output, error);
+        return (code, output.ToString(), error.ToString());
+    }
 }

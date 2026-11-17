@@ -7,11 +7,8 @@ namespace Tern.Compiler.Tests;
 /// literal prefix; <c>encoding hud: screen { ... }</c> starts from another; <c>default encoding tiles</c> in the
 /// main file sets the encoding of the program's own unprefixed literals, never a library module's.
 /// </summary>
-public sealed class EncodingTests : IDisposable
+public sealed class EncodingTests : TempFolderTest
 {
-    private readonly DirectoryInfo _dir = Directory.CreateTempSubdirectory("tern");
-
-    public void Dispose() => _dir.Delete(recursive: true);
 
     private string MainPath => Path.Combine(_dir.FullName, "main.tern");
     private string LibPath => Path.Combine(_dir.FullName, "lib");

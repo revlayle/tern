@@ -3,10 +3,9 @@ using Tern.Compiler.Syntax;
 namespace Tern.Compiler.Tests;
 
 /// <summary>Modules and imports (spec 2.2): <c>import name</c>, qualified names, lookup, platform modules.</summary>
-public sealed class ModuleTests : IDisposable
+public sealed class ModuleTests : TempFolderTest
 {
     /// <summary>A temporary folder for the program's files, with a library folder inside it.</summary>
-    private readonly DirectoryInfo _dir = Directory.CreateTempSubdirectory("tern");
     private string Lib => Path.Combine(_dir.FullName, "lib");
     private string Src => Path.Combine(_dir.FullName, "src");
 
@@ -15,8 +14,6 @@ public sealed class ModuleTests : IDisposable
         Directory.CreateDirectory(Lib);
         Directory.CreateDirectory(Src);
     }
-
-    public void Dispose() => _dir.Delete(recursive: true);
 
     private void Write(string folder, string name, string text)
     {

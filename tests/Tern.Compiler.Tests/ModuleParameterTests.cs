@@ -3,9 +3,8 @@ using Tern.Compiler.Syntax;
 namespace Tern.Compiler.Tests;
 
 /// <summary>Module parameters (spec 2.2) and compile-time <c>assert</c> (spec 4.1).</summary>
-public sealed class ModuleParameterTests : IDisposable
+public sealed class ModuleParameterTests : TempFolderTest
 {
-    private readonly DirectoryInfo _dir = Directory.CreateTempSubdirectory("tern");
     private string Lib => Path.Combine(_dir.FullName, "lib");
     private string Src => Path.Combine(_dir.FullName, "src");
 
@@ -14,8 +13,6 @@ public sealed class ModuleParameterTests : IDisposable
         Directory.CreateDirectory(Lib);
         Directory.CreateDirectory(Src);
     }
-
-    public void Dispose() => _dir.Delete(recursive: true);
 
     private void Write(string name, string text) => File.WriteAllText(Path.Combine(Src, name), text);
 

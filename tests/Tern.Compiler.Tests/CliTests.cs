@@ -7,11 +7,8 @@ namespace Tern.Compiler.Tests;
 /// The command line's handling of paths and option values (review code-quality-tools 2, 3, 8 and 13): every
 /// problem is a message and a documented exit code, never a stack trace or a lost file.
 /// </summary>
-public sealed class CliTests : IDisposable
+public sealed class CliTests : TempFolderTest
 {
-    private readonly DirectoryInfo _dir = Directory.CreateTempSubdirectory("tern-cli-");
-
-    public void Dispose() => _dir.Delete(recursive: true);
 
     private const string Program = "var out: u8\nfn main() { out = 1 }\n";
 
@@ -24,9 +21,8 @@ public sealed class CliTests : IDisposable
 
     private static (int Code, string Output, string Error) Tern(params string[] args)
     {
-        var (output, error) = (new StringWriter(), new StringWriter());
-        int code = Cli.Run(args, output, error);
-        return (code, output.ToString(), error.ToString().Trim());
+        var (code, output, error) = Command.Tern(args);
+        return (code, output, error.Trim());
     }
 
     private static JsonElement OnlyDiagnostic(string output)

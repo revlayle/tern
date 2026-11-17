@@ -3,11 +3,8 @@ using Tern.Compiler.Syntax;
 namespace Tern.Compiler.Tests;
 
 /// <summary>Plug-ins against a fixed interface (spec 12.3): <c>export level_api</c> in a binary, <c>export f, g @ addr</c> in a program.</summary>
-public sealed class PluginTests : IDisposable
+public sealed class PluginTests : TempFolderTest
 {
-    private readonly DirectoryInfo _dir = Directory.CreateTempSubdirectory("tern");
-
-    public void Dispose() => _dir.Delete(recursive: true);
 
     private string PathOf(string name) => Path.Combine(_dir.FullName, name);
 

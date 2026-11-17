@@ -6,11 +6,8 @@ namespace Tern.Compiler.Tests;
 /// <c>const fn</c> and compile-time evaluation (spec 4.1): int, real, bool and arrays, lists built with
 /// <c>for</c>, what a const fn reads, the step limit, and the errors.
 /// </summary>
-public sealed class ConstFnTests : IDisposable
+public sealed class ConstFnTests : TempFolderTest
 {
-    private readonly DirectoryInfo _dir = Directory.CreateTempSubdirectory("tern");
-
-    public void Dispose() => _dir.Delete(recursive: true);
 
     private string MainPath => Path.Combine(_dir.FullName, "main.tern");
 

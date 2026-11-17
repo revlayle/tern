@@ -3,11 +3,8 @@ using Tern.Compiler.Syntax;
 namespace Tern.Compiler.Tests;
 
 /// <summary>Code generators (spec 4.1): <c>emit</c> in a const fn, called on a line of an asm block; <c>label()</c>.</summary>
-public sealed class GeneratorTests : IDisposable
+public sealed class GeneratorTests : TempFolderTest
 {
-    private readonly DirectoryInfo _dir = Directory.CreateTempSubdirectory("tern");
-
-    public void Dispose() => _dir.Delete(recursive: true);
 
     private string MainPath => Path.Combine(_dir.FullName, "main.tern");
 
