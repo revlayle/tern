@@ -121,7 +121,9 @@ public sealed class ModuleParameterTests : TempFolderTest
     [InlineData("import sprites(COUNT = true)\nfn main() { }", 1, 24, "Expected u8, found bool. Use 'if' to choose a number, as in 'if b { x = 1 }'")]
     [InlineData("import sprites(SIZE = 10)\nfn main() { }", 1, 16, "Module 'sprites' has no parameter 'SIZE'; its parameters are COUNT, WIDE, FLICKER, DELTA. Use one of those names")]
     [InlineData("import sprites(COUNT = 10, COUNT = 11)\nfn main() { }", 1, 28, "Parameter 'COUNT' is set twice. Remove one")]
-    [InlineData("import sprites(COUNT = x)\nvar x: u8\nfn main() { }", 1, 24, "'x' is not declared. Check the spelling, or declare it. A parameter value uses literals and the main file's constants that do not depend on imported modules. Write the value as a number")]
+    [InlineData("import sprites(COUNT = x)\nvar x: u8\nfn main() { }", 1, 24, "'x' is not a constant that a parameter value can use: a parameter value uses literals and the main file's constants that do not depend on imported modules. Write the value as a number, or check the spelling")]
+    [InlineData("import sprites(COUNT = MAXX)\nconst MAX = 9\nfn main() { }", 1, 24, "'MAXX' is not a constant that a parameter value can use: a parameter value uses literals and the main file's constants that do not depend on imported modules. Write the value as a number, or check the spelling")]
+    [InlineData("import sprites(COUNT = 2 + true)\nfn main() { }", 1, 26, "'+' needs numbers. Use '&&', '||' and '!' for bool values")]
     public void Wrong_parameter_values_are_errors_at_the_import_line(string source, int line, int column, string expected)
     {
         Write("sprites.tern", Sprites);
@@ -169,7 +171,7 @@ public sealed class ModuleParameterTests : TempFolderTest
     {
         Write("sprites.tern", Sprites);
         var e = Fail("import sprites(COUNT = S)\ndata t: [u8; 9] = [1, 2, 3, 4, 5, 6, 7, 8, 9]\nconst S = len(t)\nfn main() { }");
-        Expect.Message(e, 1, 24, "'S' cannot be used in a parameter value, since it does not check without the rest of the program: 't' is not declared. Check the spelling, or declare it. Write the value as a number");
+        Expect.Message(e, 1, 24, "'S' cannot be used in a parameter value, since it does not check without the rest of the program: 't' is not declared. Write the value as a number");
     }
 
     [Fact]
