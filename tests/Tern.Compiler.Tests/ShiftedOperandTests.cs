@@ -1,6 +1,6 @@
 namespace Tern.Compiler.Tests;
 
-/// <summary>M18 F8: a 16-bit shift by a constant as an operand keeps its low byte in A.</summary>
+/// <summary>M18 F8: a 16-bit shift by a constant as an operand keeps its low byte in A. Spec 11 (code shapes).</summary>
 public class ShiftedOperandTests
 {
     private static readonly ushort[] Values = [0, 1, 255, 256, 1000, 32768, 40000, 65535];

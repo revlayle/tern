@@ -4,6 +4,7 @@ namespace Tern.Compiler.Tests;
 /// M18 part 3, F7 and F11: a one-byte variable used in a loop with no call, asm, return or inner
 /// loop is held in a free index register for the loop, loaded before it and stored after it
 /// (CodeGen.HoldInRegister).
+/// Spec 11 (code shapes).
 /// </summary>
 public class HeldVariableTests
 {

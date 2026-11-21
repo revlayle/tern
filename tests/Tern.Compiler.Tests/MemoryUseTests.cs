@@ -7,7 +7,7 @@ using static Tern.Cpu.Mnemonic;
 
 namespace Tern.Compiler.Tests;
 
-/// <summary>What an instruction does to memory, the one answer the backend's passes use (review backend 8).</summary>
+/// <summary>What an instruction does to memory, the one answer the backend's passes use (review backend 8). Spec 13 (compiler design).</summary>
 public class MemoryUseTests
 {
     private static readonly FunctionSymbol F = new("f", default);

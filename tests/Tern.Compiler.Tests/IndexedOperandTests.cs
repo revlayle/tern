@@ -1,6 +1,6 @@
 namespace Tern.Compiler.Tests;
 
-/// <summary>M18 F1: an element is the operand of adc, sbc, cmp, and, ora, eor without a temporary.</summary>
+/// <summary>M18 F1: an element is the operand of adc, sbc, cmp, and, ora, eor without a temporary. Spec 11 (code shapes).</summary>
 public class IndexedOperandTests
 {
     private static readonly byte[] A = [0, 1, 255, 128, 127, 200, 56, 0, 255, 3, 100, 129, 64, 254, 2, 77];

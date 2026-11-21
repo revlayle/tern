@@ -10,6 +10,7 @@ namespace Tern.Compiler.Tests;
 /// <summary>
 /// M18 F18: a one-byte local that copies other memory is read from that memory while it is
 /// unchanged, and kept in a free register where the memory is overwritten (Optimizer.ReadCopiesFromSource).
+/// Spec 11 (code shapes).
 /// </summary>
 public class CopyFromSourceTests
 {

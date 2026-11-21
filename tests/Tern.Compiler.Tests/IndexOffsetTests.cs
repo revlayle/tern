@@ -1,6 +1,6 @@
 namespace Tern.Compiler.Tests;
 
-/// <summary>M9: a[i - c] is addressed as a-c,x where the u8 wrap-around cannot matter.</summary>
+/// <summary>M9: a[i - c] is addressed as a-c,x where the u8 wrap-around cannot matter. Spec 11 (code shapes).</summary>
 public class IndexOffsetTests
 {
     [Theory]

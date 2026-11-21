@@ -10,6 +10,7 @@ namespace Tern.Compiler.Tests;
 /// <summary>
 /// M18 F17: a write to one byte of a variable (<c>inc v+1</c>) leaves what the optimizer knows
 /// about its other bytes, so A still holds <c>v</c> after <c>sta v / bcc / inc v+1</c>.
+/// Spec 11 (code shapes).
 /// </summary>
 public class ByteWriteTests
 {

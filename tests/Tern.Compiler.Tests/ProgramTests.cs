@@ -1,5 +1,6 @@
 namespace Tern.Compiler.Tests;
 
+/// <summary>Small whole programs over spec 3 (types): globals, 8- and 16-bit arithmetic and its wrap-around, widening, compares and the logical operators.</summary>
 public class ProgramTests
 {
     [Fact]

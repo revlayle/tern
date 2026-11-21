@@ -6,6 +6,7 @@ namespace Tern.Compiler.Tests;
 /// Every expression, statement, type and assembly line lists its children (<see cref="Node.Children"/>),
 /// and the checker's walks go over <see cref="Node.Descendants"/> (review code-quality-semantics 14):
 /// a child that one hand-written walk left out, such as a struct literal's field, is reached by all.
+/// Spec 13 (compiler design).
 /// </summary>
 public class SyntaxTreeTests
 {

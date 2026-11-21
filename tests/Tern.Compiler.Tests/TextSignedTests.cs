@@ -1,6 +1,6 @@
 namespace Tern.Compiler.Tests;
 
-/// <summary>lib/text additions of M10: signed and fixed-width decimal.</summary>
+/// <summary>lib/text additions of M10: signed and fixed-width decimal. Spec 10 (built-ins and the standard library).</summary>
 public class TextSignedTests
 {
     private const int Buf = 0x4000;

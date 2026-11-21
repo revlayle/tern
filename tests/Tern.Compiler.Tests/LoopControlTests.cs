@@ -4,6 +4,7 @@ namespace Tern.Compiler.Tests;
 /// M18 part 3, F9: a <c>while</c> whose first test is known true has no entry jump; one that counts
 /// down to zero tests the Z flag of its decrement; a <c>for i in 0..v</c> at the start of a
 /// <c>while v &gt; 0</c> body has no empty-range test; unsigned <c>x &gt; 0</c> needs no <c>cmp</c>.
+/// Spec 11 (code shapes).
 /// </summary>
 public class LoopControlTests
 {

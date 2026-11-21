@@ -3,6 +3,7 @@ namespace Tern.Compiler.Tests;
 /// <summary>
 /// M20 follow-up, "done when": the Galaxy Stars port's workarounds for gaps 1, 3, 4, 5, 7, 8, 9 and
 /// 10 (galaxy-star/tern/gaps.md) compile and run in their plain form, taken from the port's code.
+/// Whole programs, the examples and the ports: they cover several spec sections.
 /// </summary>
 public class GalaxyStarsGapTests
 {

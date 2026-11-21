@@ -1,6 +1,6 @@
 namespace Tern.Compiler.Tests;
 
-/// <summary>M18 F21: an unsigned compare returned as a bool in the carry, without branches.</summary>
+/// <summary>M18 F21: an unsigned compare returned as a bool in the carry, without branches. Spec 7 (flags as values).</summary>
 public class CarryReturnTests
 {
     private static readonly int[] Edge = [0, 1, 2, 127, 128, 200, 201, 254, 255];

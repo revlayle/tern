@@ -4,6 +4,7 @@ namespace Tern.Compiler.Tests;
 /// M20 follow-up 2, "done when": the HOW TO PLAY lines of Galaxy Stars' <c>pages.p8</c> (<c>how_row</c>,
 /// <c>how_col</c>, <c>how_text</c>, three parallel tables) written as one array of struct literals give
 /// the same bytes as the parallel arrays: an array of structs is one table per record byte.
+/// Whole programs, the examples and the ports: they cover several spec sections.
 /// </summary>
 public class GalaxyStarsPagesTests
 {

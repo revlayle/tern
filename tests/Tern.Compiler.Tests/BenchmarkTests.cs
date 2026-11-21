@@ -7,6 +7,7 @@ namespace Tern.Compiler.Tests;
 /// cycle count must match <c>tests/benchmarks/baseline.txt</c>. A change in either fails the test,
 /// so that regressions are seen and improvements are recorded. To accept new numbers, run the
 /// tests with the environment variable <c>TERN_UPDATE_BENCHMARKS=1</c>, which rewrites the baseline.
+/// Spec 13.2 (testing approach: the benchmarks).
 /// </summary>
 public class BenchmarkTests
 {

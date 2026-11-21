@@ -6,6 +6,7 @@ namespace Tern.Compiler.Tests;
 /// <summary>
 /// The command line's handling of paths and option values (review code-quality-tools 2, 3, 8 and 13): every
 /// problem is a message and a documented exit code, never a stack trace or a lost file.
+/// Spec 13 (compiler design: the tools).
 /// </summary>
 public sealed class CliTests : TempFolderTest
 {

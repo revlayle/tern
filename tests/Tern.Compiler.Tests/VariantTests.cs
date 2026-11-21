@@ -7,6 +7,7 @@ namespace Tern.Compiler.Tests;
 /// gap analysis in <c>tests/benchmarks/analysis.md</c>. Each variant is checked against the task's C# result, so it
 /// does the same work. Its bytes and cycles are written to <c>variants.md</c> when <c>TERN_COMPARE=1</c>; they are
 /// measurements, not baselines, and a change in the compiler does not fail this test.
+/// Spec 13.2 (testing approach: the benchmarks).
 /// </summary>
 public class VariantTests
 {

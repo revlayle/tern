@@ -6,6 +6,7 @@ namespace Tern.Compiler.Tests;
 /// <summary>
 /// <c>tern run</c>'s model of the machines, as the code-quality review found it lacking (review
 /// code-quality-tools 9-12 and 16; decisions 2026-11-15).
+/// Spec 13 (compiler design: the tools).
 /// </summary>
 public class RunModelTests
 {

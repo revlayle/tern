@@ -3,6 +3,7 @@ namespace Tern.Compiler.Tests;
 /// <summary>
 /// M18 F16: a <c>using A</c> parameter compared at the start of the body is compared in A
 /// (<c>cmp top</c> with two branches), so it is never stored or reloaded.
+/// Spec 11 (code shapes).
 /// </summary>
 public class AParameterTests
 {

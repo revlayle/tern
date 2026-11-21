@@ -2,7 +2,7 @@ using System.Text;
 
 namespace Tern.Compiler.Tests;
 
-/// <summary>The Atari's device I/O library (lib/atari/io.tern), run against a stand-in for CIO.</summary>
+/// <summary>The Atari's device I/O library (lib/atari/io.tern), run against a stand-in for CIO. Spec 10 (built-ins and the standard library).</summary>
 public class AtariIoTests
 {
     private const int Ok = 1, Eof = 0x88, NotFound = 0xAA, AlreadyOpen = 0x81, NotOpen = 0x85, DiskFull = 0xA2;

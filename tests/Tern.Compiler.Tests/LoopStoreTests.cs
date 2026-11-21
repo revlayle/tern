@@ -10,6 +10,7 @@ namespace Tern.Compiler.Tests;
 /// M18 part 3, F7 and F15: a loop that stores a variable but never reads its memory keeps it in
 /// the register and stores it once at each exit (Optimizer.SinkStoresFromLoops); a jump to the
 /// label that follows it goes (Optimizer.RemoveJumpsToNext).
+/// Spec 11 (code shapes).
 /// </summary>
 public class LoopStoreTests
 {

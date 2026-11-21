@@ -4,7 +4,7 @@ using Tern.Compiler.Tools;
 
 namespace Tern.Compiler.Tests;
 
-/// <summary>M19: diagnostics for tools, the output of <c>tern --json</c>.</summary>
+/// <summary>M19: diagnostics for tools, the output of <c>tern --json</c>. Spec 13 (compiler design: the tools).</summary>
 public class DiagnosticTests
 {
     private static Diagnostic Error(string source, string file = "game.tern")

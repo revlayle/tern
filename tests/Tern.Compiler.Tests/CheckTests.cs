@@ -6,6 +6,7 @@ namespace Tern.Compiler.Tests;
 /// <summary>
 /// <see cref="TernCompiler.Check"/>: the checks without a build, which return their errors instead of
 /// throwing them, for a language server (review code-quality-syntax 7, tools 7; roadmap R5).
+/// Spec 13 (compiler design).
 /// </summary>
 public sealed class CheckTests : TempFolderTest
 {

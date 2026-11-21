@@ -8,6 +8,7 @@ namespace Tern.Compiler.Tests;
 /// <c>tests/benchmarks/analysis.md</c>. Both programs run the same driver and are checked against a C# computation. The
 /// plain versions are measurements and stay out of the library. With <c>TERN_COMPARE=1</c> the bytes (driver and routine, from
 /// <c>main</c> on) and cycles are written to <c>library.md</c>.
+/// Spec 13.2 (testing approach: the benchmarks).
 /// </summary>
 public class LibraryGapTests
 {

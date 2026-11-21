@@ -8,6 +8,7 @@ namespace Tern.Compiler.Tests;
 /// meet, such as a struct field as a <c>for</c> step or an <c>indexed match</c> inside a <c>using Y</c> loop.
 /// Each case runs a statement once, or twice inside a <c>using X</c> or <c>using Y</c> loop. A form a place
 /// does not allow must give an error. Every run is also compared with the program compiled without the optimizer.
+/// Spec 3 (types).
 /// </summary>
 public class OperandMatrixTests
 {

@@ -21,6 +21,7 @@ public class SkillCollection;
 /// <item>a <c>```lst</c> block's lines appear one after another in the listing of the last program compiled.</item>
 /// </list>
 /// The commands run in a new folder per file. <c>TERN_UPDATE_SKILL=1</c> writes the outputs into the files.
+/// Spec 13 (compiler design: the tools).
 /// </summary>
 [Collection("Skill")]
 public class SkillTests

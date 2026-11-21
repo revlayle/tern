@@ -1,5 +1,6 @@
 namespace Tern.Compiler.Tests;
 
+/// <summary>Pointers (spec 3.4): reads and writes through a pointer, indexes that cross pages, compound assignment, and the pointer errors.</summary>
 public class PointerTests
 {
     [Fact]

@@ -4,6 +4,7 @@ namespace Tern.Compiler.Tests;
 /// M18 part 3, F12: arrays the code reads through an index register are placed so that no such read
 /// crosses a page, when the program area has room (Allocator.PlaceByPage, Reserve.PageOffset);
 /// otherwise the variables follow each other as before.
+/// Spec 8 (memory model).
 /// </summary>
 public class PagePlacementTests
 {

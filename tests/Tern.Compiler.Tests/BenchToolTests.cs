@@ -3,7 +3,7 @@ using Tern.Compiler.Tools;
 
 namespace Tern.Compiler.Tests;
 
-/// <summary>M19: <c>tern bench</c>, comparing ways of writing the same code (<see cref="Bench"/>).</summary>
+/// <summary>M19: <c>tern bench</c>, comparing ways of writing the same code (<see cref="Bench"/>). Spec 13 (compiler design: the tools).</summary>
 public class BenchToolTests
 {
     private static readonly string[] Decl = ["var a: [u8; 16]"];

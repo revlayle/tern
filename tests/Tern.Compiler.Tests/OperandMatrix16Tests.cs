@@ -7,6 +7,7 @@ namespace Tern.Compiler.Tests;
 /// operand in each place where a 16-bit value can stand (operators, compares, assignments, a pointer
 /// store into a ptr u16, an argument, a return, a loop end), compared with the result computed in C#.
 /// It guards the 16-bit fixes of review code-quality-backend 3 and 5.
+/// Spec 3 (types).
 /// </summary>
 public class OperandMatrix16Tests
 {

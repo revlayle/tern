@@ -1,6 +1,6 @@
 namespace Tern.Compiler.Tests;
 
-/// <summary>M18 F10: small code shapes, each checked against C# at edge values and in the listing.</summary>
+/// <summary>M18 F10: small code shapes, each checked against C# at edge values and in the listing. Spec 11 (code shapes).</summary>
 public class SmallShapeTests
 {
     [Trait("Shape", "nmos6502")]

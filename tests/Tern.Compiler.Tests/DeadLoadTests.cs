@@ -11,6 +11,7 @@ namespace Tern.Compiler.Tests;
 /// M18 F10 (review M18, finding 2): Optimizer.RemoveDeadLoads, run on hand-written code so that each
 /// rule is reached exactly: a load whose register is loaded again before it is read goes; what
 /// rts returns, fixed and volatile memory, branches and calls keep it.
+/// Spec 13 (compiler design).
 /// </summary>
 public class DeadLoadTests
 {

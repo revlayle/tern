@@ -2,6 +2,7 @@ using Tern.Compiler.Syntax;
 
 namespace Tern.Compiler.Tests;
 
+/// <summary><c>data</c> and initial values (spec 4): tables read by index, char and string literals in the platform's encoding and with a prefix, and lengths written as <c>_</c>.</summary>
 public class DataTests
 {
     private static byte[] Bytes(Run r, string name, int count) => r.Ram.Bytes.AsSpan(r.Address(name), count).ToArray();

@@ -2,6 +2,7 @@ using Tern.Compiler.Syntax;
 
 namespace Tern.Compiler.Tests;
 
+/// <summary>Inline assembly (spec 9): asm blocks, asm fn with register and memory parameters, the rts added at the end, and the operands the assembler takes.</summary>
 public class AsmTests
 {
     private static byte[] Bytes(Run r, string name, int n) => r.Ram.Bytes.AsSpan(r.Address(name), n).ToArray();

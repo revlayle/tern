@@ -5,6 +5,7 @@ namespace Tern.Compiler.Tests;
 /// <summary>
 /// What a language server (M28) needs from the front end: where tokens and nodes end, doc comments,
 /// declarations in source order (review code-quality-syntax 8).
+/// Spec 13 (compiler design).
 /// </summary>
 public class LanguageServerTests
 {

@@ -3,7 +3,7 @@ using Tern.Compiler.Tools;
 
 namespace Tern.Compiler.Tests;
 
-/// <summary>M19: <c>tern run</c>, the emulator run tool (<see cref="Runner"/>, <see cref="MemoryDump"/>, <see cref="RunReport"/>).</summary>
+/// <summary>M19: <c>tern run</c>, the emulator run tool (<see cref="Runner"/>, <see cref="MemoryDump"/>, <see cref="RunReport"/>). Spec 13 (compiler design: the tools).</summary>
 public class RunToolTests
 {
     private static (CompileResult Program, RunResult Run) RunSource(string source, RunOptions? options = null)

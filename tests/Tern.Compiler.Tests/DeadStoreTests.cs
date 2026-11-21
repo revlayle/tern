@@ -10,6 +10,7 @@ namespace Tern.Compiler.Tests;
 /// <summary>
 /// M18 F3: a store into the function's own local, parameter or temporary that no path reads
 /// before it is stored again or the function ends is removed (Optimizer.RemoveDeadStores).
+/// Spec 11 (code shapes).
 /// </summary>
 public class DeadStoreTests
 {

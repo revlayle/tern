@@ -1,6 +1,6 @@
 namespace Tern.Compiler.Tests;
 
-/// <summary>M18 F4: x > c as cmp #c+1, keeping x in A; every value against edge constants.</summary>
+/// <summary>M18 F4: x > c as cmp #c+1, keeping x in A; every value against edge constants. Spec 11 (code shapes).</summary>
 public class ConstantCompareTests
 {
     private static string Program(string type, string c) => $$"""

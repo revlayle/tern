@@ -1,6 +1,6 @@
 namespace Tern.Compiler.Tests;
 
-/// <summary>lib/math additions of M10 (abs, signed multiply and divide, min/max/clamp, sin8/cos8) and mem.copy_back.</summary>
+/// <summary>lib/math additions of M10 (abs, signed multiply and divide, min/max/clamp, sin8/cos8) and mem.copy_back. Spec 10 (built-ins and the standard library).</summary>
 public class SignedMathTests
 {
     private static readonly Library Math = new("import math\nimport mem", """

@@ -4,7 +4,7 @@ using Tern.Cpu;
 
 namespace Tern.Compiler.Tests;
 
-/// <summary>The assembler on hand-built items, for cases no source program reaches.</summary>
+/// <summary>The assembler on hand-built items, for cases no source program reaches. Spec 13 (compiler design).</summary>
 public class AssemblerTests
 {
     [Fact]

@@ -2,7 +2,7 @@ using System.Text;
 
 namespace Tern.Compiler.Tests;
 
-/// <summary>The C64 device I/O library (lib/c64/io.tern), run against stand-ins for the KERNAL.</summary>
+/// <summary>The C64 device I/O library (lib/c64/io.tern), run against stand-ins for the KERNAL. Spec 10 (built-ins and the standard library).</summary>
 public class IoTests
 {
     private const int Eof = 0x40;

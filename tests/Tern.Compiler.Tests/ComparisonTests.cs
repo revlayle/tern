@@ -12,6 +12,7 @@ namespace Tern.Compiler.Tests;
 ///
 /// It needs Java and the Prog8 jar, 64tass, cc65 and llvm-mos, so it only runs when <c>TERN_COMPARE=1</c>.
 /// Paths can be set with <c>PROG8_JAR</c>, <c>TASS64</c>, <c>CL65</c> and <c>MOS_CLANG</c>.
+/// Spec 13.2 (testing approach: the benchmarks).
 /// </summary>
 public class ComparisonTests
 {

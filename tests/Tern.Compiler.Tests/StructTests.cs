@@ -2,6 +2,7 @@ using Tern.Compiler.Syntax;
 
 namespace Tern.Compiler.Tests;
 
+/// <summary>Structs (spec 3.3): sizes and field offsets, struct variables and their fields, arrays of structs, and the struct errors.</summary>
 public class StructTests
 {
     // ---------- Declarations and layout ----------

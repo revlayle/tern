@@ -2,6 +2,7 @@ using Tern.Compiler.Syntax;
 
 namespace Tern.Compiler.Tests;
 
+/// <summary>Errors with no feature file of their own (spec 13): lexer, parser and general type errors, habits from other languages, and nesting limits.</summary>
 public class ErrorTests
 {
     [Theory]

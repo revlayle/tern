@@ -10,6 +10,7 @@ namespace Tern.Compiler.Tests;
 /// given to <c>new CompileError(pos, ...)</c> or the interpreter's <c>Error(pos, ...)</c>, with each
 /// branch of a <c>?:</c> as its own message and the values put in (<c>{...}</c>) shown as <c>{}</c>.
 /// A message with no fix sentence is listed in <see cref="NoFix"/> with the reason.
+/// Spec 13 (compiler design).
 /// </summary>
 public class FixSentenceTests
 {

@@ -10,6 +10,7 @@ namespace Tern.Compiler.Tests;
 /// <summary>
 /// M18 F5: after <c>sta e,x</c> (or <c>lda e,x</c>) the optimizer knows the register holds the
 /// element, until the index register or the array changes.
+/// Spec 11 (code shapes).
 /// </summary>
 public class ElementValueTests
 {

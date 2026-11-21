@@ -3,6 +3,7 @@ namespace Tern.Compiler.Tests;
 /// <summary>
 /// The optimizer (roadmap M7): unreachable code and loads of values a register already holds are
 /// removed; volatile memory, calls, pointer writes and assembly blocks are respected.
+/// Spec 11 (code shapes).
 /// </summary>
 public class OptimizerTests
 {

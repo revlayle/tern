@@ -3,7 +3,7 @@ using Tern.Compiler.Tools;
 
 namespace Tern.Compiler.Tests;
 
-/// <summary>M19: the source map (<see cref="CompileResult.Instructions"/>) and the bytes and cycles per source line.</summary>
+/// <summary>M19: the source map (<see cref="CompileResult.Instructions"/>) and the bytes and cycles per source line. Spec 13 (compiler design: the tools).</summary>
 public class LineTableTests
 {
     [Fact]

@@ -6,6 +6,7 @@ namespace Tern.Compiler.Tests;
 /// Platform facts as data (R6; review code-quality-semantics 16, syntax 6): each rule follows a property
 /// of the platform's description, not its name or whether it has boards. The tests make platforms
 /// that differ from the four in one property, as a new platform (a C64 with cartridges, the C128) would.
+/// Spec 12 (targets).
 /// </summary>
 public class PlatformDataTests
 {

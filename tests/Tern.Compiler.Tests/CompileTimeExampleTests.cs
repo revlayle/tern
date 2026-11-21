@@ -3,6 +3,7 @@ namespace Tern.Compiler.Tests;
 /// <summary>
 /// examples/sine.tern and examples/speedcode.tern (roadmap M22 follow-up 2): a sine table built by a
 /// const fn, and a generator that unrolls a per-frame loop, run on the stand-in VIC-II frame by frame.
+/// Whole programs, the examples and the ports: they cover several spec sections.
 /// </summary>
 public sealed class CompileTimeExampleTests
 {

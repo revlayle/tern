@@ -4,6 +4,7 @@ namespace Tern.Compiler.Tests;
 /// M18 part 3, F13: the counter of a loop with loops inside goes in a register, Y if nothing else
 /// needs it, leaving X to the inner loops (CodeGen.ChooseOuterCounterRegister, and
 /// ChooseCounterRegister beside a held register).
+/// Spec 11 (code shapes).
 /// </summary>
 public class OuterCounterTests
 {
