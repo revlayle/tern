@@ -1113,3 +1113,9 @@ Roadmap R8. Changes "R6 goes to review; its three test findings become R8" and "
 Roadmap R8 (review R6, suggestion 7).
 
 - **As built: a bool variable or expression gets "Convert with 'b as u8' (0 or 1), or use 'if' to choose another number"; the literal `true` or `false` gets "Write 1 for true, 0 for false".** Reason: `true as u8` is 1 and `false as u8` is 0 (3.1), folded to the same code as the number, so converting a literal is correct but roundabout; writing the number is what the user means. The skill's example (`total = true`) shows the literal's message.
+
+## 2026-11-21: no number-to-bool conversion
+
+Spec 3 and 3.1, as written. Records the reason for a rule the spec already states.
+
+- **A number is not a condition, and `u8 as bool` stays an error; write `x != 0`.** Reason: the compare costs nothing over a truthiness rule (`if x != 0` is `lda x` / `beq skip`; a u16 is `lda x` / `ora x+1` / `beq skip`), so truthiness would save typing, not code; `if x` beside `if x != 0` would be two spellings of one meaning (rule 3), and `if flags & 4` would hide which test is meant; storing a bool needs 0 or 1, so `x as bool` would hide the normalizing instructions that `b = x != 0` shows (rule 1). `x != 0`, not `x > 0`, is the general spelling: they differ for a negative `i8` or `i16`.
