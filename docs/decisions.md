@@ -1084,3 +1084,9 @@ Roadmap V1 and the first release. Changes the second point of question 174 (same
 - **The real-emulator checks (`TERN_REAL`) are part of V1, not after the release.** Reason: a validation that runs only in `tern run` cannot find errors in its models of the ROMs and chips (as tools 9 and 11 were), and these programs are the set such a script needs.
 - **Programs are written from the `tern` skill, in sessions that do not change the compiler.** Reason: the skill is how agents write Tern; where a session gets stuck is a finding.
 
+## 2026-11-21: the horizontal shooter is not a V1 program
+
+Roadmap V1 and "Not scheduled". Changes the second point of "validation programs before the release (V1)" (same day).
+
+- **V1's first program is smashy smashy alone; the shooter is not scheduled.** Reason (the developer's): the shooter has taken about ten phases in Prog8 and is about half done, too big for one of about 24 validation programs; even one frame of it as its own program needs its whole frame engine. It is ported when the developer wants to finish it in Tern.
+
