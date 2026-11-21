@@ -492,7 +492,7 @@ public sealed class SeveralErrorsTests : TempFolderTest
         Assert.Single(e.All);
         Expect.Message(e, 1, 1, "Recursion is not allowed: a -> b -> a. Use a loop instead, with an array as the stack if needed");
         e = Assert.Throws<CompileError>(() => TernCompiler.Compile("var x: u8\nfn a() { b() }\nfn b() { a() }\nfn main() {\n a()\n x = true\n}"));
-        Assert.Equal(["Expected u8, found bool. Use 'if' to choose a number, as in 'if b { x = 1 }'"], e.All.Select(x => x.Description));
+        Assert.Equal(["Expected u8, found bool. Write 1 for true, 0 for false"], e.All.Select(x => x.Description));
     }
 
     // ---------- The tools ----------
@@ -513,7 +513,7 @@ public sealed class SeveralErrorsTests : TempFolderTest
         var (code, _, error) = Tern(path);
         Assert.Equal(1, code);
         Assert.Equal([
-            $"{path}:3:9: error: Expected u8, found bool. Use 'if' to choose a number, as in 'if b {{ x = 1 }}'",
+            $"{path}:3:9: error: Expected u8, found bool. Write 1 for true, 0 for false",
             $"{path}:4:9: error: 300 does not fit in u8 (0 to 255). Use a value in that range, or a wider type",
             $"{path}:5:9: error: Expected an expression, found ')'",
             "3 errors",

@@ -184,7 +184,7 @@ fn main() {
 
 ```text
 broken.tern:6:13: error: Expected u8, found u16. Convert with 'as u8'
-broken.tern:7:13: error: Expected u16, found bool. Use 'if' to choose a number, as in 'if b { x = 1 }'
+broken.tern:7:13: error: Expected u16, found bool. Write 1 for true, 0 for false
 2 errors
 ```
 
@@ -210,7 +210,7 @@ $ tern --target c64 --json broken.tern
       "column": 13,
       "severity": "error",
       "message": "Expected u16, found bool.",
-      "suggestion": "Use 'if' to choose a number, as in 'if b { x = 1 }'",
+      "suggestion": "Write 1 for true, 0 for false",
       "calledFrom": null
     }
   ]

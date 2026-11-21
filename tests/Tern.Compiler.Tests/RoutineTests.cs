@@ -274,7 +274,7 @@ public class RoutineTests
     [InlineData("asm fn f(1 using X) { }\nfn main() { }", 1, 10, "Fixed inputs are only for routines at a fixed address. An asm fn sets up its inputs in its own code. Remove it")]
     [InlineData("var m: u8\nfn f(m using X) @ $C000\nfn main() { }", 2, 6, "A fixed input must be a constant. Use a number, true, false or a const")]
     [InlineData("fn f(1 using carry) @ $C000\nfn main() { }", 1, 6, "The carry takes true or false. Write 'true using carry' or 'false using carry'")]
-    [InlineData("fn f(true using X) @ $C000\nfn main() { }", 1, 6, "Expected u8, found bool. Use 'if' to choose a number, as in 'if b { x = 1 }'")]
+    [InlineData("fn f(true using X) @ $C000\nfn main() { }", 1, 6, "Expected u8, found bool. Write 1 for true, 0 for false")]
     [InlineData("fn f(256 using X) @ $C000\nfn main() { }", 1, 6, "256 does not fit in u8 (0 to 255). Use a value in that range, or a wider type")]
     [InlineData("fn f(1 using AX) @ $C000\nfn main() { }", 1, 6, "A fixed input goes in A, X, Y or the carry, not AX. Use one of those")]
     [InlineData("fn f(true using zero) @ $C000\nfn main() { }", 1, 6, "A fixed input goes in A, X, Y or the carry, not Zero. Use one of those")]

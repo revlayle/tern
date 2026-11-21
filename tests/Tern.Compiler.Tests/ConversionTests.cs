@@ -222,4 +222,39 @@ public class ConversionTests
         var e = Assert.Throws<CompileError>(() => TernCompiler.Compile(source));
         Assert.Equal(message, e.Description);
     }
+
+    /// <summary>A bool where a number is expected: the fix is 'as', written with the expression (review R6, suggestion 7).</summary>
+    [Theory]
+    [InlineData("var b: bool\nvar x: u8\nfn main() { x = b }", 3, 17,
+        "Expected u8, found bool. Convert with 'b as u8' (0 or 1), or use 'if' to choose another number")]
+    [InlineData("var y: u8\nvar w: u16\nfn main() { w = y > 3 }", 3, 19,
+        "Expected u16, found bool. Convert with '(y > 3) as u16' (0 or 1), or use 'if' to choose another number")]
+    [InlineData("var flags: [bool; 4]\nvar i: i8\nfn main() { i = flags[2] }", 3, 22,
+        "Expected i8, found bool. Convert with 'flags[2] as i8' (0 or 1), or use 'if' to choose another number")]
+    [InlineData("var b: bool\nvar x: u8\nfn main() { x = !b }", 3, 17,
+        "Expected u8, found bool. Convert with 'as u8' (0 or 1), or use 'if' to choose another number")]
+    [InlineData("var x: u8\nfn main() { x = true }", 2, 17,
+        "Expected u8, found bool. Write 1 for true, 0 for false")]
+    public void A_bool_where_a_number_is_expected_names_the_conversion(string source, int line, int column, string message) =>
+        Expect.Error(source, line, column, message);
+
+    [Fact]
+    public void The_conversions_the_bool_error_suggests_give_0_or_1()
+    {
+        var r = Run.Program("""
+            var y: u8 = 5
+            var flags: [bool; 4] = [false, false, true, false]
+            var w: u16
+            var i: i8
+            var z: u16 = 7
+            fn main() {
+                w = (y > 3) as u16
+                i = flags[2] as i8
+                z = (y < 3) as u16
+            }
+            """);
+        Assert.Equal(1, r.U16("w"));
+        Assert.Equal(1, r.I8("i"));
+        Assert.Equal(0, r.U16("z"));
+    }
 }

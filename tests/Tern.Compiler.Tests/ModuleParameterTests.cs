@@ -118,7 +118,7 @@ public sealed class ModuleParameterTests : TempFolderTest
     [InlineData("import sprites(DELTA = 128)\nfn main() { }", 1, 24, "128 does not fit in i8 (-128 to 127). Use a value in that range, or a wider type")]
     [InlineData("import sprites(WIDE = -1)\nfn main() { }", 1, 23, "-1 does not fit in u16 (0 to 65535). Use a value in that range, or a wider type")]
     [InlineData("import sprites(FLICKER = 1)\nfn main() { }", 1, 26, "Expected bool, found a number. Write true or false, or compare, as in 'x != 0'")]
-    [InlineData("import sprites(COUNT = true)\nfn main() { }", 1, 24, "Expected u8, found bool. Use 'if' to choose a number, as in 'if b { x = 1 }'")]
+    [InlineData("import sprites(COUNT = true)\nfn main() { }", 1, 24, "Expected u8, found bool. Write 1 for true, 0 for false")]
     [InlineData("import sprites(SIZE = 10)\nfn main() { }", 1, 16, "Module 'sprites' has no parameter 'SIZE'; its parameters are COUNT, WIDE, FLICKER, DELTA. Use one of those names")]
     [InlineData("import sprites(COUNT = 10, COUNT = 11)\nfn main() { }", 1, 28, "Parameter 'COUNT' is set twice. Remove one")]
     [InlineData("import sprites(COUNT = x)\nvar x: u8\nfn main() { }", 1, 24, "'x' is not a constant that a parameter value can use: a parameter value uses literals and the main file's constants that do not depend on imported modules. Write the value as a number, or check the spelling")]

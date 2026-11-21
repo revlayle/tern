@@ -468,7 +468,7 @@ public class PointerTests
     // Review code-quality-semantics 12: every type mismatch says how to fix it, with a fix that compiles.
     [InlineData("var b: bool = 1\nfn main() { }", 1, 15, "Expected bool, found a number. Write true or false, or compare, as in 'x != 0'")]
     [InlineData("var b: bool\nvar x: u8\nfn main() { b = x }", 3, 17, "Expected bool, found u8. Compare instead, as in 'x != 0'")]
-    [InlineData("var b: bool\nvar x: u8\nfn main() { x = b }", 3, 17, "Expected u8, found bool. Use 'if' to choose a number, as in 'if b { x = 1 }'")]
+    [InlineData("var b: bool\nvar x: u8\nfn main() { x = b }", 3, 17, "Expected u8, found bool. Convert with 'b as u8' (0 or 1), or use 'if' to choose another number")]
     [InlineData("var p: ptr u8\nvar x: u8\nfn main() { p = x }", 3, 17, "Expected ptr u8, found u8. Convert with 'as u16' first, then 'as ptr u8'")]
     [InlineData("var p: ptr u8\nvar x: u8\nfn main() { x = p }", 3, 17, "Expected u8, found ptr u8. Convert with 'as u16' first, then take .lo or .hi")]
     [InlineData("var p: ptr u8\nvar s: i16\nfn main() { s = p }", 3, 17, "Expected i16, found ptr u8. Convert with 'as u16' first, then 'as i16'")]
