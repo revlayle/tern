@@ -48,6 +48,7 @@ public sealed class InterruptPartTests : TempFolderTest
         Expect.Message(e, 2, 11, "Recursion is not allowed: a -> b -> a. Use a loop instead, with an array as the stack if needed");
     }
 
+    [Trait("Platform", "c64")]
     [Trait("Shape", "nmos6502")]
     [Fact]
     public void A_part_with_parameters_and_a_flag_return_runs_inside_the_handler()
@@ -86,6 +87,7 @@ public sealed class InterruptPartTests : TempFolderTest
         Assert.Contains(frame, i => i.StartsWith("jsr") && i.EndsWith("add"));
     }
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void Two_module_parts_share_private_state_with_their_modules_main_side_functions()
     {

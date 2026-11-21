@@ -85,6 +85,7 @@ public class ImplementsTests
 
     // ---------- Calls through the interface ----------
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void Calls_through_the_interface_reach_the_overlay_that_is_loaded()
     {
@@ -123,6 +124,7 @@ public class ImplementsTests
         Assert.Matches(@"20 00 60 +jsr \$6000", Listing.Text(r));
     }
 
+    [Trait("Platform", "c64")]
     [Trait("Shape", "nmos6502")]
     [Fact]
     public void Each_overlay_file_has_a_jmp_at_each_routine_address_to_its_own_function()
@@ -144,6 +146,7 @@ public class ImplementsTests
         Assert.All(r.Result.Instructions.Where(i => i.Section == "level_api.update"), i => Assert.Equal(0x6003, i.Address));
     }
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void The_module_code_goes_around_table_entries_with_gaps_between_them()
     {
@@ -174,6 +177,7 @@ public class ImplementsTests
         Assert.True(r.Address("level1.init") < 0x6010 || r.Address("level1.update") < 0x6010);
     }
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void A_plain_call_to_one_module_next_to_a_call_through_the_interface()
     {
@@ -192,6 +196,7 @@ public class ImplementsTests
         Assert.Equal(14, r.U8("b"));
     }
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void Implementations_are_compiled_even_when_nothing_calls_the_interface()
     {
@@ -212,6 +217,7 @@ public class ImplementsTests
         Assert.Contains("level1.update", r.Result.Symbols.Keys);
     }
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void Frames_of_the_implementations_are_shared_with_other_code()
     {
@@ -260,6 +266,7 @@ public class ImplementsTests
         Assert.Single(frames.Distinct());
     }
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void An_implementation_does_not_share_memory_with_the_function_that_calls_the_interface()
     {
@@ -300,6 +307,7 @@ public class ImplementsTests
             Assert.True(r.Result.Variables.Values.Where(v => v.Function == level).Min(v => v.Address) >= play, level);
     }
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void A_function_called_from_both_an_implementation_and_main_does_not_share_its_frame_with_it()
     {
@@ -366,6 +374,7 @@ public class ImplementsTests
             """)));
     }
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void Volatile_data_of_the_interface_is_provided_by_each_module()
     {
@@ -402,6 +411,7 @@ public class ImplementsTests
         Assert.Equal(5 + use[..use.IndexOf("level_api.header")].Count(c => c == '\n'), e.Pos.Line);   // at the name
     }
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void Resident_code_and_the_interface_own_functions_name_the_interface_variable()
     {
@@ -425,6 +435,7 @@ public class ImplementsTests
         Assert.Equal(41, r.U8("c"));
     }
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void A_module_implements_two_interfaces()
     {
@@ -452,6 +463,7 @@ public class ImplementsTests
         Assert.Equal(77, r.U8("b"));
     }
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void A_routine_that_promises_to_keep_a_register_can_rely_on_an_implementation_that_keeps_it()
     {

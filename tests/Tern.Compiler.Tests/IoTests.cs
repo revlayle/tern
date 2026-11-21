@@ -153,6 +153,7 @@ public class IoTests
 
     // ---------- Whole files ----------
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void Load_sets_the_name_and_the_device_and_loads_to_the_given_address()
     {
@@ -166,6 +167,7 @@ public class IoTests
         Assert.Equal([1, 2, 3, 4, 5], Bytes(r, "buf", 5));
     }
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void Load_returns_the_carry()
     {
@@ -177,6 +179,7 @@ public class IoTests
         Assert.False(r.U8("failed") != 0);
     }
 
+    [Trait("Platform", "c64")]
     [Theory]
     [InlineData(0x2000, 0x2000)]          // one byte
     [InlineData(0x2000, 0x20FF)]
@@ -195,6 +198,7 @@ public class IoTests
         Assert.Equal(last - first + 1, k.Files["SCORES"].Length);
     }
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void Save_returns_the_carry()
     {
@@ -202,6 +206,7 @@ public class IoTests
         Assert.True(r.U8("failed") != 0);
     }
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void A_saved_file_loads_back()
     {
@@ -224,6 +229,7 @@ public class IoTests
 
     // ---------- Sequential files ----------
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void Open_sets_the_name_then_the_file_then_opens()
     {
@@ -233,6 +239,7 @@ public class IoTests
         Assert.Equal(["SETNAM SCORES,S,W", "SETLFS 3,8,4", "OPEN"], k.Calls);
     }
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void Open_returns_the_carry()
     {
@@ -240,6 +247,7 @@ public class IoTests
         Assert.True(r.U8("failed") != 0);
     }
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void Write_selects_the_channel_sends_every_byte_and_restores_the_default_channels()
     {
@@ -258,6 +266,7 @@ public class IoTests
         Assert.Equal([10, 0, 255, 13], k.Files["SCORES"]);
     }
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void Write_of_nothing_sends_nothing()
     {
@@ -270,6 +279,7 @@ public class IoTests
         Assert.Empty(k.Written);
     }
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void Write_to_a_file_that_is_not_open_returns_true_without_sending()
     {
@@ -280,6 +290,7 @@ public class IoTests
         Assert.Equal(["CHKOUT 5"], k.Calls);
     }
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void Write_returns_true_when_the_status_shows_an_error()
     {
@@ -300,6 +311,7 @@ public class IoTests
         Assert.True(r.U8("failed") != 0);
     }
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void Read_stops_at_the_end_of_the_file_and_the_status_shows_it()
     {
@@ -317,6 +329,7 @@ public class IoTests
         Assert.Equal(["SETNAM SCORES,S,R", "SETLFS 2,8,2", "OPEN", "CHKIN 2", "CLRCHN", "CLOSE 2"], k.Calls);
     }
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void Read_stops_at_max_and_continues_where_it_left_off()
     {
@@ -333,6 +346,7 @@ public class IoTests
         Assert.Equal(0, k.Status);                                  // not at the end yet
     }
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void Read_of_zero_bytes_and_of_a_file_that_is_not_open()
     {
@@ -348,6 +362,7 @@ public class IoTests
         Assert.Equal(0, r.U8("buf"));
     }
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void Read_stops_on_a_timeout_without_counting_the_byte()
     {
@@ -361,6 +376,7 @@ public class IoTests
         Assert.Equal(0, r.U8("buf"));                               // and no junk byte stored
     }
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void A_missing_file_gives_no_error_at_open_and_no_bytes_at_read()
     {
@@ -376,6 +392,7 @@ public class IoTests
         Assert.Equal(0, r.U8("buf"));
     }
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void A_missing_file_shows_in_the_status_message()
     {
@@ -390,6 +407,7 @@ public class IoTests
 
     // ---------- Command channel ----------
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void Command_open_opens_channel_15_without_a_name_and_close_closes_it()
     {
@@ -402,6 +420,7 @@ public class IoTests
         Assert.Equal(["SETNAM ", "SETLFS 15,9,15", "OPEN", "CLOSE 15"], k.Calls);
     }
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void Command_open_returns_the_carry()
     {
@@ -409,6 +428,7 @@ public class IoTests
         Assert.True(r.U8("failed") != 0);
     }
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void Command_sends_the_text_and_a_carriage_return_on_channel_15()
     {
@@ -427,6 +447,7 @@ public class IoTests
         Assert.False(k.Files.ContainsKey("SCORES"));
     }
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void Command_returns_true_when_the_channel_is_not_open()
     {
@@ -436,6 +457,7 @@ public class IoTests
         Assert.Empty(k.Commands);
     }
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void Drive_status_leaves_the_channel_and_the_other_files_open()
     {
@@ -453,6 +475,7 @@ public class IoTests
         Assert.Equal(1, k.Calls.Count(c => c == "CLOSE 15"));       // only the last call closes the channel
     }
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void Closing_the_command_channel_closes_the_other_files_too()
     {
@@ -468,6 +491,7 @@ public class IoTests
         Assert.Empty(k.Files["SCORES"]);
     }
 
+    [Trait("Platform", "c64")]
     [Theory]
     [InlineData("00, OK,00,00", 20, 12)]
     [InlineData("62, FILE NOT FOUND,00,00", 20, 20)]            // cut at max
@@ -485,6 +509,7 @@ public class IoTests
         Assert.Equal(["SETNAM ", "SETLFS 15,8,15", "OPEN", "CHKIN 15", "CLRCHN"], k.Calls);
     }
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void Drive_status_gives_zero_when_the_channel_is_not_open()
     {
@@ -494,6 +519,7 @@ public class IoTests
         Assert.Equal(["CHKIN 15"], k.Calls);
     }
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void Drive_status_gives_zero_when_the_device_is_not_present()
     {
@@ -505,6 +531,7 @@ public class IoTests
         Assert.Equal(0, r.U8("n"));
     }
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void Command_once_opens_sends_and_closes()
     {
@@ -516,6 +543,7 @@ public class IoTests
         Assert.Equal(["SETNAM ", "SETLFS 15,8,15", "OPEN", "CHKOUT 15", "CLRCHN", "CLOSE 15"], k.Calls);
     }
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void Command_once_does_not_close_a_channel_it_failed_to_open()
     {
@@ -527,6 +555,7 @@ public class IoTests
 
     // ---------- Example ----------
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void The_highscore_example_saves_loads_and_prints_the_status()
     {
@@ -539,6 +568,7 @@ public class IoTests
 
     // ---------- Code shape ----------
 
+    [Trait("Platform", "c64")]
     [Trait("Shape", "nmos6502")]
     [Fact]
     public void KERNAL_routines_are_direct_calls()
@@ -554,6 +584,7 @@ public class IoTests
         Assert.Contains("jsr $FFB7", main);
     }
 
+    [Trait("Platform", "c64")]
     [Trait("Shape", "nmos6502")]
     [Fact]
     public void Unused_functions_cost_nothing()

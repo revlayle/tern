@@ -22,6 +22,7 @@ public class MemLibraryTests
 
     private static readonly int[] Counts = [0, 1, 2, 255, 256, 257, 511, 512, 513, 1000];
 
+    [Trait("Platform", "c64")]
     [Theory]
     [InlineData(Dst)]
     [InlineData(Dst + 0xFF)]
@@ -44,6 +45,7 @@ public class MemLibraryTests
             }
     }
 
+    [Trait("Platform", "c64")]
     [Theory]
     [InlineData(Dst, Src)]
     [InlineData(Dst + 0x80, Src + 0x01)]
@@ -67,6 +69,7 @@ public class MemLibraryTests
             }
     }
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void Cycles()
     {
@@ -121,6 +124,7 @@ public class TextLibraryTests
         return cycles;
     }
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void Dec8_for_every_value()
     {
@@ -130,6 +134,7 @@ public class TextLibraryTests
         Assert.Equal((63, 290), Range(cycles));
     }
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void Dec16_on_edge_values()
     {
@@ -141,6 +146,7 @@ public class TextLibraryTests
         Assert.Equal((285, 1521), Range(cycles));
     }
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void Hex8_for_every_value()
     {
@@ -150,6 +156,7 @@ public class TextLibraryTests
         Assert.Equal((56, 56), Range(cycles));
     }
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void Hex16_on_edge_values()
     {
@@ -160,6 +167,7 @@ public class TextLibraryTests
         Assert.Equal((100, 100), Range(cycles));
     }
 
+    [Trait("Platform", "c64")]
     [Theory]
     [InlineData(0)]
     [InlineData(1)]
@@ -184,6 +192,7 @@ public class TextLibraryTests
         }
     }
 
+    [Trait("Platform", "c64")]
     [Theory]
     [InlineData("HELLO", "HELLO", 5, true)]
     [InlineData("HELLO", "JELLO", 5, false)]
@@ -204,6 +213,7 @@ public class TextLibraryTests
         }
     }
 
+    [Trait("Platform", "c64")]
     [Theory]
     [InlineData("HELLO", 5, 'H', 0)]
     [InlineData("HELLO", 5, 'L', 2)]
@@ -224,6 +234,7 @@ public class TextLibraryTests
         }
     }
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void Writing_a_number_to_the_screen()
     {
@@ -275,6 +286,7 @@ public class C64LibraryTests
         ]);
     }
 
+    [Trait("Platform", "c64")]
     [Trait("Shape", "nmos6502")]
     [Fact]
     public void Kernal_routines()
@@ -300,6 +312,7 @@ public class C64LibraryTests
         Assert.Matches(@"ldx #\$0C\|ldy #\$1E\|clc\|jsr \$FFF0", Listing.Code(r));
     }
 
+    [Trait("Platform", "c64")]
     [Trait("Shape", "nmos6502")]
     [Fact]
     public void Library_example_prints_and_writes_to_the_screen()
@@ -323,6 +336,7 @@ public class C64LibraryTests
         Assert.Contains("jsr $FFD2", Listing.Instructions(r, "c64.print"));
     }
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void Constants()
     {
@@ -353,6 +367,7 @@ public class C64LibraryTests
         Assert.Equal(without.Report, with.Report);
     }
 
+    [Trait("Platform", "c64")]
     [Trait("Shape", "nmos6502")]
     [Fact]
     public void Register_structs_are_at_the_chip_addresses()
@@ -392,6 +407,7 @@ public class C64LibraryTests
         Assert.Contains("8D 20 D0", Listing.Text(r));
     }
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void Register_struct_fields_in_assembly()
     {
@@ -410,6 +426,7 @@ public class C64LibraryTests
         Assert.Equal(0xD0, r.Ram.Bytes[0xD02A]);
     }
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void Structs_example_moves_both_lists_the_same()
     {
@@ -433,6 +450,7 @@ public class C64LibraryTests
         Assert.Equal(1, m[0xD015]);
     }
 
+    [Trait("Platform", "c64")]
     [Trait("Shape", "nmos6502")]
     [Fact]
     public void Interrupts_on_and_off_are_inline_without_a_call()
@@ -447,6 +465,7 @@ public class C64LibraryTests
         Assert.Equal(["sei", "cli", "rts"], Listing.Instructions(r));
     }
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void Interrupt_handlers_are_installed_with_the_kernal_off()
     {
@@ -496,6 +515,7 @@ public class C64LibraryTests
         ram.Bytes[0x0315] = 0xEA;
     }
 
+    [Trait("Platform", "c64")]
     [Trait("Shape", "nmos6502")]
     [Fact]
     public void An_interrupt_handler_is_installed_with_the_kernal_in()
@@ -548,6 +568,7 @@ public class C64LibraryTests
         Assert.Contains("jmp (c64.kernal_handler)", Listing.Instructions(result, "c64.kernal_entry"));
     }
 
+    [Trait("Platform", "c64")]
     [Trait("Shape", "nmos6502")]
     [Fact]
     public void Cia_irqs_off_turns_off_both_cias_and_clears_what_is_pending()
@@ -572,6 +593,7 @@ public class C64LibraryTests
         Assert.Contains("lda c64.cia2+13", body);
     }
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void Sprite_positions_are_an_array_over_the_vic_registers()
     {

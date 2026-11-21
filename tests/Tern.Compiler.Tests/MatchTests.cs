@@ -391,6 +391,7 @@ public class MatchTests
         Assert.Contains("cmp #$07", Listing.Instructions(r));
     }
 
+    [Trait("Platform", "c64")]
     [Trait("Shape", "nmos6502")]
     [Fact]
     public void A_match_with_only_a_default_still_reads_a_volatile_value()

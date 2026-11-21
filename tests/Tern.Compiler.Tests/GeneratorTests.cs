@@ -32,6 +32,7 @@ public sealed class GeneratorTests : TempFolderTest
 
     // ---------- Done when (roadmap M22, part 2) ----------
 
+    [Trait("Platform", "c64")]
     [Trait("Shape", "nmos6502")]
     [Fact]
     public void An_unrolled_screen_copy_that_skips_given_rows_runs_and_its_listing_shows_each_instructions_source()

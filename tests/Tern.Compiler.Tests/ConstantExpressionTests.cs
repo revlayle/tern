@@ -75,6 +75,7 @@ public class ConstantExpressionTests
         Assert.Equal((x * 200 + 13) & 0xFFFF, r.U16("wide"));
     }
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void A_constant_expression_converts_to_a_pointer()
     {

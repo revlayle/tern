@@ -61,6 +61,7 @@ public class GalaxyStarsGapTests
         }
         """;
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void The_workarounds_for_gaps_3_to_10_are_written_plainly()
     {
@@ -237,6 +238,7 @@ public class GalaxyStarsGapTests
         return result;
     }
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void The_workarounds_for_gaps_11_to_24_are_written_plainly()
     {
@@ -266,6 +268,7 @@ public class GalaxyStarsGapTests
         finally { dir.Delete(recursive: true); }
     }
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void Gap_1_the_frame_interrupt_with_the_kernal_left_in()
     {

@@ -144,6 +144,7 @@ public sealed class EncodingTests : TempFolderTest
         Assert.Equal([1, 0xFE, 2, 3, 4, 0, 0x80], Bytes(r, "out", 7));
     }
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void A_byte_may_be_a_constant_and_a_constant_may_use_the_encoding()
     {
@@ -243,6 +244,7 @@ public sealed class EncodingTests : TempFolderTest
         Assert.Equal([0x80, 1], Bytes(r, "out", 2));
     }
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void The_default_encoding_applies_to_the_main_file_and_program_modules_but_not_library_modules()
     {

@@ -58,6 +58,7 @@ public class BcdTests
         Assert.False(Bcd.Cpu.D, "decimal mode left on");
     }
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void Add_and_sub_for_every_pair_of_two_digit_numbers()
     {
@@ -73,6 +74,7 @@ public class BcdTests
             }
     }
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void Add_and_sub_on_edge_values_for_every_width()
     {
@@ -91,6 +93,7 @@ public class BcdTests
             }
     }
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void Less_equal_and_is_zero()
     {
@@ -118,6 +121,7 @@ public class BcdTests
             }
     }
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void Add_byte_sub_byte_inc_and_dec()
     {
@@ -153,6 +157,7 @@ public class BcdTests
             }
     }
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void Clear_digits_and_text()
     {
@@ -181,6 +186,7 @@ public class BcdTests
             }
     }
 
+    [Trait("Platform", "c64")]
     [Trait("Shape", "nmos6502")]
     [Fact]
     public void A_bcd_add_in_main_survives_an_interrupt_handler_that_adds_in_binary()

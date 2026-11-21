@@ -345,6 +345,7 @@ public sealed class SpriteTests
         Assert.Contains("jsr sprites.build_flicker", Listing.Instructions(flicker, "sprites.update"));
     }
 
+    [Trait("Platform", "c64")]
     /// <summary>Cycle counts for docs/status.md; the limits are generous so only a large slowdown fails.</summary>
     [Fact]
     public void Update_of_32_sprites_with_flicker_costs()
@@ -362,6 +363,7 @@ public sealed class SpriteTests
         Assert.True(again < 16000, $"{again} cycles");
     }
 
+    [Trait("Platform", "c64")]
     [Theory]
     [InlineData(false, 9500)]
     [InlineData(true, 21000)]

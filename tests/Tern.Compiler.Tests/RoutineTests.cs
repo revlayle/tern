@@ -58,6 +58,7 @@ public class RoutineTests
 
     private static byte[] Logged(Run r) => r.Ram.Bytes.AsSpan(0xC500, r.Ram.Bytes[0xC5FF]).ToArray();
 
+    [Trait("Platform", "c64")]
     [Trait("Shape", "nmos6502")]
     [Fact]
     public void Calls_are_a_direct_jsr()
@@ -77,6 +78,7 @@ public class RoutineTests
         Assert.Contains("al C:c040 .log", r.Result.Labels);
     }
 
+    [Trait("Platform", "c64")]
     [Theory]
     [InlineData(0)]
     [InlineData(99)]
@@ -101,6 +103,7 @@ public class RoutineTests
         Assert.Equal(v >= 100 ? 1 : 0, r.U8("big"));
     }
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void Parameters_in_several_registers()
     {
@@ -114,6 +117,7 @@ public class RoutineTests
         Assert.Equal([0, 0, 0, 0xAB, 0, 0xCD], r.Ram.Bytes.AsSpan(0xC400, 6).ToArray());
     }
 
+    [Trait("Platform", "c64")]
     [Trait("Shape", "nmos6502")]
     [Fact]
     public void A_one_byte_argument_for_A_is_computed_straight_into_A()
@@ -129,6 +133,7 @@ public class RoutineTests
         Assert.Matches(@"lda msg,[xy]\|clc\|adc #\$01\|jsr \$C040", main);
     }
 
+    [Trait("Platform", "c64")]
     [Trait("Shape", "nmos6502")]
     [Fact]
     public void Loops_using_x_or_y_may_call_routines_that_keep_the_register()
@@ -144,6 +149,7 @@ public class RoutineTests
         Assert.Matches(@"BD [0-9A-F]{2} [0-9A-F]{2} +lda msg,x", Listing.Text(r));
     }
 
+    [Trait("Platform", "c64")]
     [Trait("Shape", "nmos6502")]
     [Fact]
     public void Routines_in_assembly()
@@ -171,6 +177,7 @@ public class RoutineTests
         Assert.Contains("jsr log", Listing.Instructions(r));
     }
 
+    [Trait("Platform", "c64")]
     [Trait("Shape", "nmos6502")]
     [Fact]
     public void Fixed_inputs_in_the_carry()
@@ -192,6 +199,7 @@ public class RoutineTests
         Assert.Equal(["ldx row", "ldy #$0A", "clc", "jsr $C060", "sec", "jsr $C060", "stx pos", "sty pos+1", "rts"], Listing.Instructions(r));
     }
 
+    [Trait("Platform", "c64")]
     [Trait("Shape", "nmos6502")]
     [Theory]
     [InlineData(0)]

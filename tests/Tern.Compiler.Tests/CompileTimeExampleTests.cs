@@ -99,6 +99,7 @@ public sealed class CompileTimeExampleTests
         Assert.Equal(" SPEEDCODE:", string.Concat(rig.Ram.Bytes.AsSpan(0x0401, 11).ToArray().Select(b => (char)(b < 32 ? b + 64 : b))));
     }
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void Speedcode_example_unrolled_matches_the_plain_loop()
     {

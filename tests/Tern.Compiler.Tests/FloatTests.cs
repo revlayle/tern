@@ -106,6 +106,7 @@ public class FloatTests
                 $"found {Show(actual)}{(Overflow ? " overflow" : "")}");
     }
 
+    [Trait("Platform", "c64")]
     [Theory, MemberData(nameof(Operations))]
     public void Arithmetic_matches_the_model(string name)
     {
@@ -115,6 +116,7 @@ public class FloatTests
                 Check(name, a, b);
     }
 
+    [Trait("Platform", "c64")]
     [Theory, MemberData(nameof(Operations))]
     public void Arithmetic_matches_the_model_on_random_values(string name)
     {
@@ -129,6 +131,7 @@ public class FloatTests
             }
     }
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void Ties_round_away_from_zero()
     {
@@ -162,6 +165,7 @@ public class FloatTests
         }
     }
 
+    [Trait("Platform", "c64")]
     /// <summary>The result pointer may be the operand pointer: each routine reads both before it stores (review M24).</summary>
     [Theory, MemberData(nameof(Operations))]
     public void An_operand_may_be_the_result(string name)
@@ -179,6 +183,7 @@ public class FloatTests
             }
     }
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void Overflow_gives_the_largest_value_and_results_too_small_become_0()
     {
@@ -217,6 +222,7 @@ public class FloatTests
         }
     }
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void Neg_abs_copy_and_is_zero()
     {
@@ -240,6 +246,7 @@ public class FloatTests
             }
     }
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void Cmp_orders_values()
     {
@@ -253,6 +260,7 @@ public class FloatTests
             }
     }
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void From_u16_and_from_i16_are_exact()
     {
@@ -281,6 +289,7 @@ public class FloatTests
         -32768.4, -32768.5, -32769, 65534.5, 65535.4, 65535.5, 65536, -65535, 1e10, -1e10, 1e-10, 255.5, 256.5,
     }.Select(B)).ToArray();
 
+    [Trait("Platform", "c64")]
     [Theory]
     [InlineData("to_u16", false, 0, 65535)]
     [InlineData("round_u16", true, 0, 65535)]
@@ -298,6 +307,7 @@ public class FloatTests
             }
     }
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void Trunc_and_floor()
     {
@@ -325,6 +335,7 @@ public class FloatTests
     private static string Text(int count) =>
         new(Float.Ram.Bytes[Out..(Out + count)].Select(c => (char)c).ToArray());
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void Dec_writes_fixed_point_text()
     {
@@ -348,6 +359,7 @@ public class FloatTests
         Assert.Equal("39", FloatModel.Dec(Largest, 0).Length.ToString());
     }
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void Dec_examples()
     {
@@ -406,6 +418,7 @@ public class FloatTests
         Assert.Equal(2, e.CalledFrom!.Value.Line);
     }
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void A_constant_in_a_var_and_in_code()
     {
@@ -426,6 +439,7 @@ public class FloatTests
         Assert.Equal("-58.86", new string(r.Ram.Bytes[r.Address("text")..(r.Address("text") + r.U8("n"))].Select(c => (char)c).ToArray()));
     }
 
+    [Trait("Platform", "c64")]
     /// <summary>
     /// Best and worst cycles of each routine over the test values, including jsr and rts: the numbers in
     /// docs/status.md ("Library cycle counts"). A change in any of them fails here.
@@ -471,6 +485,7 @@ public class FloatTests
             " dec below 65536 1262-7651, from_u16 102-509, from_i16 106-524", actual);
     }
 
+    [Trait("Platform", "c64")]
     /// <summary>
     /// examples/floats.tern: the screen holds the values the model computes with the same steps, each
     /// placed so that its point is in the column the example gives.

@@ -81,6 +81,7 @@ public class WideTests
         Assert.False(Wide.Cpu.D, "decimal mode left on");
     }
 
+    [Trait("Platform", "c64")]
     [Theory, MemberData(nameof(Widths))]
     public void Set_and_copy(int w)
     {
@@ -105,6 +106,7 @@ public class WideTests
         }
     }
 
+    [Trait("Platform", "c64")]
     [Theory, MemberData(nameof(Widths))]
     public void Add_and_sub(int w)
     {
@@ -120,6 +122,7 @@ public class WideTests
             }
     }
 
+    [Trait("Platform", "c64")]
     [Theory, MemberData(nameof(Widths))]
     public void Add_and_sub_a_u16(int w)
     {
@@ -140,6 +143,7 @@ public class WideTests
             }
     }
 
+    [Trait("Platform", "c64")]
     [Theory, MemberData(nameof(Widths))]
     public void Inc(int w)
     {
@@ -153,6 +157,7 @@ public class WideTests
             }
     }
 
+    [Trait("Platform", "c64")]
     [Theory, MemberData(nameof(Widths))]
     public void Less_equal_and_is_zero(int w)
     {
@@ -182,6 +187,7 @@ public class WideTests
         }
     }
 
+    [Trait("Platform", "c64")]
     [Theory, MemberData(nameof(Widths))]
     public void Mul_gives_the_low_bits_of_the_product(int w)
     {
@@ -195,6 +201,7 @@ public class WideTests
             }
     }
 
+    [Trait("Platform", "c64")]
     [Theory, MemberData(nameof(Widths))]
     public void Div_gives_quotient_and_remainder(int w)
     {
@@ -208,6 +215,7 @@ public class WideTests
             }
     }
 
+    [Trait("Platform", "c64")]
     [Theory, MemberData(nameof(Widths))]
     public void Dec_and_hex(int w)
     {

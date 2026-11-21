@@ -27,6 +27,7 @@ public class VolatileTests
         return r.Log!.Reads(i);
     }
 
+    [Trait("Platform", "c64")]
     [Theory]
     [InlineData("var i: u8", 1)]
     [InlineData("var i: u8 @ $C000", 1)]                  // fixed-address RAM is ordinary memory
@@ -47,6 +48,7 @@ public class VolatileTests
         Assert.Equal(reads, IndexReads(declaration));
     }
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void A_volatile_struct_makes_every_field_volatile()
     {
@@ -61,6 +63,7 @@ public class VolatileTests
         Assert.Equal(0, r.Log.Reads(0xC000));
     }
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void A_global_used_by_main_and_a_handler_is_volatile()
     {
@@ -68,6 +71,7 @@ public class VolatileTests
         Assert.Equal(1, IndexReads("var i: u8", "var j: u8\ninterrupt fn h() { j += 1 }"));
     }
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void A_global_used_by_two_handlers_is_volatile()
     {
@@ -98,6 +102,7 @@ public class VolatileTests
         Assert.Equal(2, r.Log!.Reads(r.Address("i")));
     }
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void A_global_used_through_an_address_and_by_main_is_volatile()
     {
@@ -106,6 +111,7 @@ public class VolatileTests
         Assert.Equal(1, IndexReads("var i: u8", "var j: u8\nfn f() { j += 1 }\nvar w: u16 = addr(f)"));
     }
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void A_main_loop_sees_a_flag_set_by_a_handler()
     {
@@ -128,6 +134,7 @@ public class VolatileTests
         Assert.True(r.U8("waited") > 0);
     }
 
+    [Trait("Platform", "c64")]
     [Theory]
     [InlineData("var b: [u8; 16] @ $0810\nfn main() { b[0] = 1 }", 1, 1, "'b' at $0810-$081F overlaps the program and its variables at $0801-$0819. Move 'b', or make the program smaller")]
     [InlineData("var b: u8 @ $0801\nfn main() { b = 1 }", 1, 1, "'b' at $0801 overlaps the program and its variables at $0801-$0819. Move 'b', or make the program smaller")]
@@ -145,6 +152,7 @@ public class VolatileTests
         Expect.Error(source, line, column, expected);
     }
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void Fixed_address_variables_may_overlap_each_other_and_sit_after_the_program()
     {

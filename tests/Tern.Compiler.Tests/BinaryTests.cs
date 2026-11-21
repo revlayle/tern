@@ -301,6 +301,7 @@ public class BinaryTests
         finally { dir.Delete(recursive: true); }
     }
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void A_Tern_host_imports_the_interface_module_and_reserves_the_binarys_memory()
     {
@@ -337,6 +338,7 @@ public class BinaryTests
         Assert.All(run.Result.Sections.Where(s => s.Size > 0), s => Assert.False(s.Address is >= 0xC000 and <= 0xC0FF));
     }
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void A_host_calls_the_binary_from_its_raster_handler()
     {
@@ -447,6 +449,7 @@ public class BinaryTests
 
     // ---------- Errors ----------
 
+    [Trait("Platform", "c64")]
     [Theory]
     [InlineData("fn main() { }\nfn f() { }\nexport f", 3, 8, "A program with 'main' cannot export functions without an address: 'export' alone builds a binary for another program to call, which has no 'main'. Give the table an address for plug-ins to call ('export f @ $0900'), or remove 'main'")]
     [InlineData("fn f() { }\nexport f, f", 2, 11, "'f' is exported twice. Remove one")]

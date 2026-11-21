@@ -203,6 +203,7 @@ public class StructTests
 
     // ---------- Structs at a fixed address ----------
 
+    [Trait("Platform", "c64")]
     [Trait("Shape", "nmos6502")]
     [Fact]
     public void A_struct_at_a_fixed_address_uses_the_field_offsets()
@@ -226,6 +227,7 @@ public class StructTests
         Assert.Contains("8D 20 D0", Listing.Text(r)); // sta $D020
     }
 
+    [Trait("Platform", "c64")]
     [Trait("Shape", "nmos6502")]
     [Fact]
     public void Fields_at_a_fixed_address_are_volatile()
@@ -408,6 +410,7 @@ public class StructTests
 
     // ---------- Arrays of structs: one table per field ----------
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void Each_field_of_an_array_of_structs_is_its_own_table()
     {
@@ -607,6 +610,7 @@ public class StructTests
 
     // ---------- addr() of fields ----------
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void Addr_of_a_field_points_into_the_struct_variable()
     {
@@ -685,6 +689,7 @@ public class StructTests
         Assert.Equal(new byte[] { 1, 2, 3 }, r.Ram.Bytes[r.Address("out")..(r.Address("out") + 3)]);
     }
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void Addr_of_a_field_in_a_module()
     {

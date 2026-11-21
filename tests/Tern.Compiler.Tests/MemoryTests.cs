@@ -25,6 +25,7 @@ public class MemoryTests
 
     // ---------- Program areas ----------
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void Functions_are_placed_whole_in_the_program_areas_and_never_in_reserved_memory()
     {
@@ -46,6 +47,7 @@ public class MemoryTests
         Assert.Contains("Program areas:", r.Result.Report);
     }
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void Reserved_memory_alone_keeps_the_platforms_areas_around_it()
     {
@@ -57,6 +59,7 @@ public class MemoryTests
         Assert.Equal(new[] { new AddressRange(0x0801, 0x08FF), new AddressRange(0x1000, 0x9FFF) }, r.Result.Areas.Select(a => a.Free));
     }
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void Constants_may_be_used_in_ranges_even_when_declared_below_the_block()
     {
@@ -71,6 +74,7 @@ public class MemoryTests
         Assert.Equal(0x2000, r.Address("s"));
     }
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void Constants_may_come_before_the_block_and_ranges_may_use_them()
     {
@@ -87,6 +91,7 @@ public class MemoryTests
         Assert.Equal(0x2000, r.Address("s"));
     }
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void Ranges_may_use_constants_from_imports()
     {
@@ -107,6 +112,7 @@ public class MemoryTests
         finally { dir.Delete(recursive: true); }
     }
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void Program_lines_replace_the_platforms_areas()
     {
@@ -118,6 +124,7 @@ public class MemoryTests
         Assert.Equal(171, r.U8("a"));
     }
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void Variables_go_in_the_first_area_with_room_after_its_code()
     {
@@ -135,6 +142,7 @@ public class MemoryTests
 
     // ---------- Data at a fixed address ----------
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void Data_is_placed_at_its_address_and_gaps_in_the_file_are_zeros()
     {
@@ -153,6 +161,7 @@ public class MemoryTests
         Assert.Contains($"({r.Result.Image.Length} bytes)", r.Result.Report);
     }
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void Data_below_the_BASIC_line_moves_the_load_address_down()
     {
@@ -168,6 +177,7 @@ public class MemoryTests
         Assert.Equal(new byte[] { 0x00, 0x04 }, r.Result.File[..2]);
     }
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void Data_inside_a_program_area_is_a_hole_the_code_goes_around()
     {
@@ -183,6 +193,7 @@ public class MemoryTests
         Assert.Equal(new byte[] { 1, 2, 3, 4 }, r.Ram.Bytes[0x0830..0x0834]);
     }
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void Data_with_function_addresses_can_sit_at_a_fixed_address()
     {
@@ -200,6 +211,7 @@ public class MemoryTests
 
     // ---------- Regions ----------
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void Variables_and_data_in_a_region_are_placed_there_and_variables_are_zeroed()
     {
@@ -234,6 +246,7 @@ public class MemoryTests
         Assert.Contains("region buffers $C000-$C0FF: 206 of 256 bytes used", r.Result.Report);
     }
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void A_large_region_is_cleared_page_by_page()
     {
@@ -254,6 +267,7 @@ public class MemoryTests
         Assert.Equal(0xEE, r.Ram.Bytes[0xC000 + 600]);     // one byte past the variable: untouched
     }
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void A_declaration_at_an_offset_from_a_regions_start_is_there_and_the_others_go_in_order()
     {
@@ -300,6 +314,7 @@ public class MemoryTests
         Assert.Equal((line, column), (e.Pos.Line, e.Pos.Column));
     }
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void A_region_is_not_used_by_the_program_areas()
     {
@@ -312,6 +327,7 @@ public class MemoryTests
 
     // ---------- Zero page ----------
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void Zeropage_lines_replace_the_platforms_free_zero_page()
     {
@@ -328,6 +344,7 @@ public class MemoryTests
         Assert.Equal(3, r.U8("c"));
     }
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void Zero_page_can_be_several_ranges()
     {
@@ -345,6 +362,7 @@ public class MemoryTests
         Assert.Equal(3, r.U16("c"));
     }
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void Reserved_memory_is_taken_out_of_the_platforms_zero_page()
     {
@@ -385,6 +403,7 @@ public class MemoryTests
 
     // ---------- Errors ----------
 
+    [Trait("Platform", "c64")]
     [Theory]
     [InlineData("memory { $2000..=$1000 reserved }\nfn main() { }", 1, 24, "The range starts at $2000 and ends at $1000, before its start. Write the lower address first")]
     [InlineData("memory { $2000..$2FFF reserved }\nfn main() { }", 1, 15, "A memory range includes its last address. Write first..=last")]
@@ -443,6 +462,7 @@ public class MemoryTests
         finally { dir.Delete(recursive: true); }
     }
 
+    [Trait("Platform", "c64")]
     /// <summary>Review code-quality-semantics 3, decision 2026-11-15: a module places declarations in the main file's regions by name.</summary>
     [Fact]
     public void A_module_places_declarations_in_a_region_of_the_main_file()

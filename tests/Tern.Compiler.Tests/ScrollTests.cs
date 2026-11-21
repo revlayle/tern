@@ -75,6 +75,7 @@ public sealed class ScrollTests
         }
     }
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void Draw_shows_the_map_window_and_sets_the_registers()
     {
@@ -91,6 +92,7 @@ public sealed class ScrollTests
     public static IEnumerable<object[]> Directions() =>
         new[] { (1, 0), (-1, 0), (0, 1), (0, -1), (1, 1), (-1, -1), (1, -1), (-1, 1) }.Select(d => new object[] { d.Item1, d.Item2 });
 
+    [Trait("Platform", "c64")]
     [Theory]
     [MemberData(nameof(Directions))]
     public void Every_move_in_each_of_eight_directions_leaves_the_right_screen(int dx, int dy)
@@ -119,6 +121,7 @@ public sealed class ScrollTests
         }
     }
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void A_diagonal_that_starts_aligned_moves_both_axes_every_frame()
     {
@@ -137,6 +140,7 @@ public sealed class ScrollTests
         }
     }
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void A_diagonal_that_has_to_align_first_prepares_the_diagonal_screen_and_never_holds_the_camera()
     {
@@ -154,6 +158,7 @@ public sealed class ScrollTests
         }
     }
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void Turning_around_in_the_middle_of_a_phase_and_stopping_keep_the_screen_right()
     {
@@ -168,6 +173,7 @@ public sealed class ScrollTests
         }
     }
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void A_random_walk_of_500_moves()
     {
@@ -187,6 +193,7 @@ public sealed class ScrollTests
         }
     }
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void Move_cycles_for_a_straight_move_at_one_pixel_per_frame()
     {
@@ -198,6 +205,7 @@ public sealed class ScrollTests
         Assert.True(costs.Max() < 12000, $"max {costs.Max()}");
     }
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void A_turn_costs_no_more_than_a_few_steps_in_any_one_call()
     {
@@ -216,6 +224,7 @@ public sealed class ScrollTests
         Assert.True(max < 9000, $"{max} cycles");
     }
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void Colors_are_redrawn_from_the_color_map_at_each_coarse_step()
     {
@@ -236,6 +245,7 @@ public sealed class ScrollTests
         }
     }
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void Without_COLORS_the_color_RAM_is_left_alone()
     {
@@ -246,6 +256,7 @@ public sealed class ScrollTests
         for (int i = 0; i < 1000; i++) Assert.Equal(5, r.Lib.Ram.Bytes[0xD800 + i]);
     }
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void Top_writes_the_scroll_registers_and_keeps_the_other_bits()
     {

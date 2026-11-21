@@ -122,6 +122,7 @@ public class StructLiteralTests
         Assert.Equal(Tables(records), Memory(r, "es", 15));
     }
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void Addresses_in_fields_are_filled_in_when_the_program_is_placed()
     {
@@ -149,6 +150,7 @@ public class StructLiteralTests
         Assert.Equal(new[] { (byte)(main - 1), (byte)((main - 1) >> 8), (byte)main, (byte)(main >> 8) }, Memory(r, "jump", 4));
     }
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void Array_fields_from_a_list_and_a_string()
     {

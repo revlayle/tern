@@ -20,6 +20,7 @@ public class InterruptTests
         }
         """;
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void A_handler_running_during_main_changes_nothing_main_uses()
     {
@@ -120,6 +121,7 @@ public class InterruptTests
         Assert.Equal(expected, Listing.Code(r, "handler"));
     }
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void A_return_in_a_handler_restores_the_registers()
     {
@@ -184,6 +186,7 @@ public class InterruptTests
     private static Run RunWithModules(string main, (string Name, string Text)[] modules, long irqEvery = 0) =>
         WithModules(modules, path => Run.Program(main, sourcePath: path, irqEvery: irqEvery));
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void A_module_handler_may_share_the_modules_private_variable()
     {
@@ -219,6 +222,7 @@ public class InterruptTests
         }
         """;
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void A_helper_called_only_from_the_modules_handler_is_on_the_handler_side()
     {
@@ -309,6 +313,7 @@ public class InterruptTests
         Expect.Message(e, 2, 11, "'b.peek' (called from main) and 'b.poke' (called from the interrupt handler 'a.h') both use 'b.n', a private variable of its module. An interrupt could change it while the other is using it. Call functions of this module from only main or only one interrupt handler");
     }
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void Functions_with_no_memory_may_be_shared_with_a_handler()
     {
@@ -371,6 +376,7 @@ public class InterruptTests
         Assert.Equal(3, r.U8("cells", 0));
     }
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void Public_variables_and_private_data_may_be_shared_with_a_handler()
     {
@@ -469,6 +475,7 @@ public class InterruptTests
         AssertFrameOverlapsNoOther(result, "s");
     }
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void A_function_shared_with_a_handler_goes_on_with_the_handlers_values()
     {

@@ -194,6 +194,7 @@ public class InlineAsmTests
         Assert.Equal(1, r.U8("yes"));
     }
 
+    [Trait("Platform", "c64")]
     [Trait("Shape", "nmos6502")]
     [Fact]
     public void The_library_interrupt_switches_are_inline_asm()

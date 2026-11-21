@@ -33,6 +33,7 @@ public class LongBufferTests
         }
         """;
 
+    [Trait("Platform", "c64")]
     [Theory]
     [InlineData("var buf: [u8; 2048]")]
     [InlineData("noinit var buf: [u8; 2048]")]
@@ -49,6 +50,7 @@ public class LongBufferTests
             Assert.Equal((byte)((k & 0xFF) + (k >> 8)), r.U8("buf", k));
     }
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void A_long_buffer_is_zeroed_at_startup_unless_noinit()
     {

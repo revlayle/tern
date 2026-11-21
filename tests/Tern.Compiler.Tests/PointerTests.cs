@@ -125,6 +125,7 @@ public class PointerTests
         Assert.Equal(0x1235, r.U16At("ws", 2, 3));
     }
 
+    [Trait("Platform", "c64")]
     [Theory]
     [InlineData(0x10FF, 0)]
     [InlineData(0x10FF, 1)]     // crosses into the next page
@@ -212,6 +213,7 @@ public class PointerTests
         Assert.Equal(expected < 256 ? 1 : 0, r.U8("near"));
     }
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void Walks_a_buffer_across_a_page_boundary()
     {
@@ -268,6 +270,7 @@ public class PointerTests
         Assert.Equal(0x99, r.U8("raw", 1));
     }
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void Sixteen_bit_element_at_largest_index()
     {
@@ -307,6 +310,7 @@ public class PointerTests
         Assert.Equal(3, r.U8("count"));
     }
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void Indexing_a_computed_pointer_uses_a_zero_page_temporary()
     {
@@ -326,6 +330,7 @@ public class PointerTests
         Assert.Equal(7, r.Ram.Bytes[0x3000 + 300]);
     }
 
+    [Trait("Platform", "c64")]
     [Trait("Shape", "nmos6502")]
     [Fact]
     public void Fixed_address_pointers()

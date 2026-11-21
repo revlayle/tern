@@ -5,6 +5,7 @@ namespace Tern.Compiler.Tests;
 /// <summary>A '{' may go on the line after a block header (spec 2); anywhere else a line break before it is an error.</summary>
 public class BraceTests
 {
+    [Trait("Platform", "c64")]
     [Fact]
     public void Every_block_header_accepts_a_brace_on_the_next_line()
     {

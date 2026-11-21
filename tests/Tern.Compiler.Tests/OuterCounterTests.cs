@@ -58,6 +58,7 @@ public class OuterCounterTests
         Assert.Contains("|iny|cpy #$08|", code);
     }
 
+    [Trait("Platform", "c64")]
     [Trait("Shape", "nmos6502")]
     [Fact]
     public void Beside_an_inner_using_y_loop_the_outer_counter_is_in_x()

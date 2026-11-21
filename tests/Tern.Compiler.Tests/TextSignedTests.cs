@@ -17,6 +17,7 @@ public class TextSignedTests
 
     private static void Clear() => Array.Fill(Text.Ram.Bytes, (byte)0xEE, Buf, 16);
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void Dec8s_for_every_value()
     {
@@ -34,6 +35,7 @@ public class TextSignedTests
             }
     }
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void Dec16s_on_edge_values()
     {
@@ -52,6 +54,7 @@ public class TextSignedTests
             }
     }
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void Dec16z_writes_exactly_width_digits_with_leading_zeros()
     {
@@ -71,6 +74,7 @@ public class TextSignedTests
             }
     }
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void Dec8z_writes_exactly_width_digits_with_leading_zeros()
     {

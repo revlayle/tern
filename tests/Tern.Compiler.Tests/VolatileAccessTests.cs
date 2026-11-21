@@ -64,6 +64,7 @@ public class VolatileAccessTests
         _ => (0xC021, 0xC022),
     };
 
+    [Trait("Platform", "c64")]
     [Theory]
     [MemberData(nameof(Cases))]
     public void A_volatile_target_is_read_and_written_once(string type, string target, string statement)
@@ -98,6 +99,7 @@ public class VolatileAccessTests
         Assert.Equal(s.Reads, r.Log.Reads(hi));
     }
 
+    [Trait("Platform", "c64")]
     [Theory]
     [InlineData("u8", "w = v", 1)]
     [InlineData("u8", "w = v + v", 2)]

@@ -188,6 +188,7 @@ public class SignedMathTests
         Assert.Contains("math.SINE", Listing.Sections(with));
     }
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void Copy_back_copies_overlapping_blocks_with_dst_above_src()
     {

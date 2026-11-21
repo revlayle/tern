@@ -44,6 +44,7 @@ public sealed class ModuleTests : TempFolderTest
         }
         """;
 
+    [Trait("Platform", "c64")]
     [Trait("Shape", "nmos6502")]
     [Fact]
     public void A_program_in_several_files()
@@ -128,6 +129,7 @@ public sealed class ModuleTests : TempFolderTest
         Assert.Single(r.Result.Symbols.Keys, k => k == "shared.total");
     }
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void Constants_of_an_imported_module_can_be_used_in_declarations()
     {
@@ -175,6 +177,7 @@ public sealed class ModuleTests : TempFolderTest
         Assert.Equal(11, r.U8("v"));
     }
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void Platform_modules_load_only_on_their_platform()
     {
@@ -335,6 +338,7 @@ public sealed class ModuleTests : TempFolderTest
         Assert.Equal("Rename your file, e.g. to my_random.tern, and import it by its new name", d.Suggestion);
     }
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void Library_modules_import_each_other_whatever_is_in_their_folders()
     {

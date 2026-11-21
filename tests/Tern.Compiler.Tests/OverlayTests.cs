@@ -77,6 +77,7 @@ public class OverlayTests
 
     // ---------- Loading and running ----------
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void Two_overlays_in_one_area_are_loaded_in_turn_and_find_their_variables_at_their_initial_values()
     {
@@ -117,6 +118,7 @@ public class OverlayTests
         Assert.Equal(1, r.U8("h2"));
     }
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void Each_overlay_has_a_file_that_loads_at_the_start_of_its_area_and_overlays_share_memory()
     {
@@ -138,6 +140,7 @@ public class OverlayTests
         Assert.Contains("level2.prg", r.Result.Report);
     }
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void An_overlay_file_holds_its_variables_with_initial_values_zeros_included()
     {
@@ -154,6 +157,7 @@ public class OverlayTests
         Assert.Equal(10, one.Image[r.Address("level1.score") - one.LoadAddress]);
     }
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void Overlay_code_calls_resident_modules_which_stay_out_of_the_files()
     {
@@ -167,6 +171,7 @@ public class OverlayTests
         Assert.DoesNotContain(r.Result.Overlays, o => o.Name == "util");
     }
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void Overlays_in_different_areas_may_call_each_other()
     {
@@ -192,6 +197,7 @@ public class OverlayTests
         Assert.Equal(0x5000, r.Result.Overlays.Single(o => o.Name == "level2").LoadAddress);
     }
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void An_overlay_that_nothing_uses_has_no_file()
     {
@@ -202,6 +208,7 @@ public class OverlayTests
         Assert.Equal(["level2"], r.Result.Overlays.Select(o => o.Name));
     }
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void Resident_variables_are_set_up_by_the_startup_code_and_not_by_loading()
     {
@@ -260,6 +267,7 @@ public class OverlayTests
         }
         """;
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void C64_load_calls_the_KERNAL_and_returns_its_carry()
     {
@@ -275,6 +283,7 @@ public class OverlayTests
         Assert.Equal(0, kernal.LoadA);         // LOAD, not VERIFY
     }
 
+    [Trait("Platform", "c64")]
     [Trait("Shape", "nmos6502")]
     [Fact]
     public void C64_load_is_a_direct_sequence_of_KERNAL_calls()
@@ -286,6 +295,7 @@ public class OverlayTests
         Assert.Contains("jsr $FFD5", load);
     }
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void The_levels_example_loads_two_levels_in_turn_and_a_reload_resets_the_variables()
     {
@@ -428,6 +438,7 @@ public class OverlayTests
         Assert.Contains("bytes of code, data and variables, plus 4 bytes of fixed data", message);
     }
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void Resident_code_may_take_addresses_in_any_overlay_and_so_may_an_overlay_in_another_area()
     {
@@ -512,6 +523,7 @@ public class OverlayTests
         Assert.Contains("calls the inline function 'level2.five', which is copied into it and calls 'level2.real'", message);
     }
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void An_inline_function_of_another_overlay_that_uses_nothing_of_its_module_is_fine()
     {
@@ -562,6 +574,7 @@ public class OverlayTests
     private static int OvAddress(string name) =>
         With(Ov, path => Run.Program($"{OvHeader}\nfn main() {{ load(1); ov.put(ov.get()) }}", 100_000, sourcePath: path, traps: Loader).Address(name));
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void A_volatile_fixed_variable_over_an_overlay_reads_and_writes_the_overlays_memory()
     {
@@ -591,6 +604,7 @@ public class OverlayTests
         Assert.Equal(12, r.U8("d"));
     }
 
+    [Trait("Platform", "c64")]
     [Trait("Shape", "nmos6502")]
     [Theory]
     [InlineData("")]
@@ -619,6 +633,7 @@ public class OverlayTests
         Assert.Contains("lda ov.x", lines.Skip(inc + 1).Take(2));
     }
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void A_volatile_fixed_variable_over_the_first_byte_of_an_overlays_code_reads_the_loaded_file()
     {
@@ -655,6 +670,7 @@ public class OverlayTests
         Assert.Contains("'first' at $0801 overlaps the program", message);
     }
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void A_volatile_fixed_variable_in_an_overlay_area_no_file_covers_needs_no_overlap_check()
     {
@@ -685,6 +701,7 @@ public class OverlayTests
         ["lv2"] = "data header: [u8; 3] @ $6000 = [10, 20, 30]\ndata late: [u8; 2] @ $6010 = [7, 8]\nfn go() -> u8 using A { return late[1] + header[0] }\n" + lv2Extra,
     };
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void Two_levels_each_with_a_header_at_the_areas_start_and_code_after_it()
     {
@@ -727,6 +744,7 @@ public class OverlayTests
         Assert.True(r.Address("lv2.go") is >= 0x6003 and < 0x6010 || r.Address("lv2.go") >= 0x6012);
     }
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void Code_goes_around_fixed_data_in_the_middle_of_an_overlay()
     {
@@ -746,6 +764,7 @@ public class OverlayTests
         Assert.True(r.Address("lv1.go") is 0x6000 || r.Address("lv1.go") >= 0x6005);
     }
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void Fixed_data_of_two_overlays_may_share_an_address()
     {
@@ -867,6 +886,7 @@ public class OverlayTests
         Assert.Contains("Only the program's main file places modules in overlay areas", message);
     }
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void A_fixed_zero_page_pointer_in_an_overlay_works_is_not_in_the_file_and_is_shared_with_the_main_program()
     {
@@ -908,6 +928,7 @@ public class OverlayTests
         Assert.Contains("local variable", message);
     }
 
+    [Trait("Platform", "c64")]
     [Trait("Shape", "nmos6502")]
     [Fact]
     public void The_listing_shows_the_overlay_code_at_the_area_address()
@@ -922,6 +943,7 @@ public class OverlayTests
 
     // ---------- Addresses in initial values (M20 follow-up, spec 4) ----------
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void Resident_data_holds_the_address_of_an_overlays_data_and_function()
     {
@@ -942,6 +964,7 @@ public class OverlayTests
         Assert.InRange(r.Address("level1.TABLE"), 0x6000, 0x6FFF);
     }
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void An_overlay_holds_addresses_of_its_own_data_and_of_resident_data()
     {

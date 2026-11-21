@@ -342,6 +342,7 @@ public class DeadStoreTests
         Assert.Equal("lda #$01", Optimize(Imm(Lda, 1), Abs(Sta, T)));
     }
 
+    [Trait("Platform", "c64")]
     [Trait("Shape", "nmos6502")]
     [Fact]
     public void An_interrupt_handler_with_locals_runs_beside_main()

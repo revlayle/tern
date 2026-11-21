@@ -216,6 +216,7 @@ public class ErrorTests
         Expect.Message(e, 2, 1, "Zero page is full: '@ zp' variables, dereferenced pointers and zero-page assembly operands need 148 bytes, 146 are free. Users: big (142), p (2), q (2), r (2). Remove '@ zp' from some of them");
     }
 
+    [Trait("Platform", "c64")]
     // Review code-quality-syntax 3: the C64's free zero page is $02-$8F and $FB-$FE (spec 12.2).
     [Fact]
     public void The_c64_uses_fb_to_fe_after_02_to_8f()

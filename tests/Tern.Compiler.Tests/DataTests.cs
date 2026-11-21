@@ -30,6 +30,7 @@ public class DataTests
         Assert.Equal([1000 & 0xFF, 2000 & 0xFF, 0xFF, 1000 >> 8, 2000 >> 8, 0xFF], Bytes(r, "big", 6));
     }
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void Char_literals_are_petscii()
     {
@@ -49,6 +50,7 @@ public class DataTests
         Assert.Equal([0x41, 0x5A, 0x20, 0x30, 0x0D, 0x00, 0x93, 0x27], Bytes(r, "c", 8));
     }
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void Char_literals_compare_with_numbers()
     {
@@ -64,6 +66,7 @@ public class DataTests
         Assert.Equal(2, r.U8("letters"));
     }
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void Strings_in_petscii_and_screen_codes()
     {
@@ -170,6 +173,7 @@ public class DataTests
         Assert.Equal([0x61, 0x10], Bytes(r, "c", 2));
     }
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void Encoding_prefixes_on_strings_and_chars()
     {
@@ -195,6 +199,7 @@ public class DataTests
         Assert.Equal([0x41, 0x41, 0xC1, 0x01, 0x01, 0x80], Bytes(r, "c", 6));
     }
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void A_keyword_before_a_quote_is_not_an_encoding_prefix()
     {
@@ -217,6 +222,7 @@ public class DataTests
         Assert.Equal([26, 2], Bytes(r, "c", 2));
     }
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void Strings_initialize_global_arrays()
     {
@@ -326,6 +332,7 @@ public class DataTests
         + "0123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789"
         + "0123456789012345678901234567890123456789012345678901234567890123456789\"\nvar c: u8\nfn main() { c = d[0] }",
         3, 18, "'d' has 270 elements, too many for a u8 index. Read it through a pointer: addr(d)")]
+    [Trait("Platform", "c64")]
     public void Reports_errors(string source, int line, int column, string expected)
     {
         Expect.Error(source, line, column, expected);
@@ -418,6 +425,7 @@ public class DataTests
         Assert.Equal(299 & 0xFF, r.U8("at"));
     }
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void Underscore_length_from_a_string()
     {
@@ -441,6 +449,7 @@ public class DataTests
         Assert.Equal((byte)'Y', r.U8("written", 1));
     }
 
+    [Trait("Platform", "c64")]
     [Theory]
     [InlineData("data d: [u8; _] = 5\nfn main() { }", 1, 9, "The length '_' is taken from a list or string initial value, a list built with 'for' or a const fn's array, so it works only on a global var or data with one, as in 'data t: [u8; _] = [1, 2, 3]'. Write the length here")]
     [InlineData("var d: [u8; _]\nfn main() { }", 1, 8, "The length '_' is taken from a list or string initial value, a list built with 'for' or a const fn's array, so it works only on a global var or data with one, as in 'data t: [u8; _] = [1, 2, 3]'. Write the length here")]

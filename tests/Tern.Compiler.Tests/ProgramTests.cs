@@ -391,6 +391,7 @@ public class ProgramTests
         Assert.Equal(1, r.U8("stored"));
     }
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void Fixed_address_and_zero_page_variables()
     {

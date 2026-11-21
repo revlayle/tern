@@ -10,6 +10,7 @@ public class AlignTests
 
     private static CompileError Error(string source) => Assert.Throws<CompileError>(() => TernCompiler.Compile(source));
 
+    [Trait("Platform", "c64")]
     [Theory]
     [InlineData(2)]
     [InlineData(64)]
@@ -64,6 +65,7 @@ public class AlignTests
         Assert.Equal(5, r.U8("table", 9));
     }
 
+    [Trait("Platform", "c64")]
     [Trait("Shape", "nmos6502")]
     [Fact]
     public void A_long_noinit_buffer_starts_the_block_and_the_zeroed_variables_follow_it()
@@ -94,6 +96,7 @@ public class AlignTests
         Assert.Equal($"Aligned buffer: ${at:X4} (@ align(256)), {padding} bytes of padding before it", line.TrimEnd());
     }
 
+    [Trait("Platform", "c64")]
     [Trait("Shape", "nmos6502")]
     [Fact]
     public void The_report_counts_the_padding_before_a_variable()
@@ -117,6 +120,7 @@ public class AlignTests
         Assert.Equal(2, r.U8("b"));
     }
 
+    [Trait("Platform", "c64")]
     [Trait("Shape", "nmos6502")]
     [Theory]
     [InlineData(2)]
@@ -175,6 +179,7 @@ public class AlignTests
         Assert.Equal(7, r.U8("x"));
     }
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void Aligned_data_in_a_program_area_of_the_memory_block()
     {
@@ -319,6 +324,7 @@ public class AlignTests
         Expect.Message(e, 1, 1, "'BIG' needs 2503 bytes, and no program area has room for them in one piece (code is never split across areas). Areas: $0801-$0FFF: 20 of 2047 bytes used (startup, main). Make an area larger, or split the code into smaller functions");
     }
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void Aligned_data_does_not_move_the_variables_after_the_program()
     {
@@ -342,6 +348,7 @@ public class AlignTests
         Assert.Equal(0, r.Ram.Bytes[0xC000]);     // buf[0]
     }
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void Aligned_data_with_only_frames_after_the_program_compiles()
     {

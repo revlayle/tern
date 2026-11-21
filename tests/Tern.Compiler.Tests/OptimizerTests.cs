@@ -39,6 +39,7 @@ public class OptimizerTests
         Assert.Equal(9, r.U8("b", 2));
     }
 
+    [Trait("Platform", "c64")]
     [Trait("Shape", "nmos6502")]
     [Fact]
     public void An_indexed_write_changes_only_its_array()
@@ -78,6 +79,7 @@ public class OptimizerTests
         Assert.Equal(3, r.U8("y"));
     }
 
+    [Trait("Platform", "c64")]
     [Trait("Shape", "nmos6502")]
     [Fact]
     public void Volatile_memory_is_read_every_time()
@@ -93,6 +95,7 @@ public class OptimizerTests
         Assert.Equal("lda #$01 / sta reg / lda reg / sta v / rts", Listing.Code(r, separator: " / "));
     }
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void Fixed_address_variables_may_overlap_so_a_write_to_one_forgets_the_others()
     {
@@ -109,6 +112,7 @@ public class OptimizerTests
         Assert.Equal(2, r.U8("v"));
     }
 
+    [Trait("Platform", "c64")]
     [Trait("Shape", "nmos6502")]
     [Theory]
     [InlineData("f()")]
@@ -698,6 +702,7 @@ public class RegisterParameterTests
         Assert.Contains("sta a,x", main);
     }
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void A_function_whose_only_parameter_stays_in_a_register_may_be_shared_with_a_handler()
     {
@@ -743,6 +748,7 @@ public class LoopRegisterTests
         for (int i = 0; i < 8; i++) Assert.Equal(i + 1, r.U8("a", i));
     }
 
+    [Trait("Platform", "c64")]
     [Trait("Shape", "nmos6502")]
     [Fact]
     public void A_loop_that_only_indexes_a_pointer_by_its_counter_counts_in_y()

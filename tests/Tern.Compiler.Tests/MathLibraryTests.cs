@@ -53,6 +53,7 @@ public class MathLibraryTests
         Assert.Equal((65, 73), Range(cycles));
     }
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void Div8_for_every_input()
     {
@@ -86,6 +87,7 @@ public class MathLibraryTests
         Assert.Equal((17, 1800), Range(right));
     }
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void Mul16_on_edge_values()
     {
@@ -103,6 +105,7 @@ public class MathLibraryTests
         Assert.Equal((38, 870), Range(cycles));
     }
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void Div16_on_edge_values()
     {

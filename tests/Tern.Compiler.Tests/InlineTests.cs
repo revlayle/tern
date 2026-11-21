@@ -72,6 +72,7 @@ public class InlineTests
         Assert.Equal(1, r.U8("n"));
     }
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void Inline_functions_call_other_functions_and_use_loops_and_match()
     {
@@ -112,6 +113,7 @@ public class InlineTests
         Assert.Equal(expected, r.U16("total"));
     }
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void A_return_in_an_inline_copy_inside_a_handler_stays_in_the_handler()
     {

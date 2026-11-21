@@ -115,6 +115,7 @@ public class PagePlacementTests
         Assert.Equal(r.Address("a") + 200, r.Address("b"));
     }
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void Without_room_the_variables_follow_each_other()
     {
@@ -138,6 +139,7 @@ public class PagePlacementTests
         Assert.Equal(r.Address("b") + 200, r.Address("c"));
     }
 
+    [Trait("Platform", "c64")]
     // Review M18 part 3, finding 1.
     [Fact]
     public void A_fixed_address_variable_where_the_placed_block_would_go_keeps_the_variables_together()
@@ -158,6 +160,7 @@ public class PagePlacementTests
         Assert.True(a + 250 <= 0x0980, $"arr at ${a:X4}");
     }
 
+    [Trait("Platform", "c64")]
     // Review M18 part 3, suggestion 2.
     [Trait("Shape", "nmos6502")]
     [Fact]

@@ -163,6 +163,7 @@ public class AsmTests
         Assert.Equal("jmp (vec)", Listing.Code(result, "ends_with_jmp"));
     }
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void Constants_chars_and_addresses_as_operands()
     {
@@ -252,6 +253,7 @@ public class AsmTests
         Assert.Equal(r.Address("main"), r.U16("target"));
     }
 
+    [Trait("Platform", "c64")]
     [Trait("Shape", "nmos6502")]
     [Fact]
     public void Other_addressing_modes()
@@ -305,6 +307,7 @@ public class AsmTests
         Assert.Matches(@"96 [0-9A-F]{2} +stx zx,y", main);
     }
 
+    [Trait("Platform", "c64")]
     [Trait("Shape", "nmos6502")]
     [Fact]
     public void Fixed_address_variables_and_volatile_registers()
@@ -507,6 +510,7 @@ public class AsmTests
     [InlineData("data t: [u8; 4] = [1, 2, 3, 4]\nfn main() { asm {\n ldx #0\n lda (t,x)\n } }", 4, 7, "'lda (address,x)' needs a pointer in zero page, but 't' is data, not a pointer. Declare one, as in 'var p: ptr u8 = addr(t)', and use (p),y")]
     [InlineData("data t: [u8; 4] = [1, 2, 3, 4]\nfn main() { asm {\n ldy #0\n stx t,y\n } }",
         4, 6, "'stx address,y' needs a zero-page address, but 't' is data, which is never in zero page. Use another addressing mode, or a variable in zero page")]
+    [Trait("Platform", "c64")]
     [InlineData("fn main() { asm {\n stx $12,x\n } }", 2, 2, "'stx' has no address,x mode. Use another addressing mode or instruction")]
     [InlineData("fn main() { asm {\n lda $12,z\n } }", 2, 10, "Expected x or y after ',', found 'z'. Write ',x' or ',y'")]
     [InlineData("fn main() { asm {\n lda ($12,y)\n } }", 2, 11, "Expected x in (address,x), found 'y'. Write (address,x)")]
@@ -554,6 +558,7 @@ public class AsmTests
         Expect.Error(source, line, column, expected);
     }
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void A_byte_of_an_address_past_memory_is_allowed()
     {
@@ -592,6 +597,7 @@ public class AsmTests
         Assert.Equal(new SourcePos(5, 13), e.Pos);
     }
 
+    [Trait("Platform", "c64")]
     [Trait("Shape", "nmos6502")]
     [Fact]
     public void Kernal_example_prints_through_chrout()
@@ -650,6 +656,7 @@ public class AsmTests
         throw new FileNotFoundException($"examples/{platform}/{name} not found above {AppContext.BaseDirectory}");
     }
 
+    [Trait("Platform", "c64")]
     /// <summary>
     /// The NMOS 6502 reads the high byte of jmp ($xxFF) from $xx00 (the emulator does too). The
     /// compiler places a vector it allocates so that it never starts at $xxFF. Zero page is full,

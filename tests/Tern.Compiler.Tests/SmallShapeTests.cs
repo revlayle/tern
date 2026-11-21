@@ -392,6 +392,7 @@ public class SmallShapeTests
         Assert.Equal("lda #$7B|sta mul.a|lda #$2D|sta mul.b|lda #$00|sta mul.a+1|sta mul.b+1|jsr mul|sta out|stx out+1|rts", Listing.Code(r));
     }
 
+    [Trait("Platform", "c64")]
     [Trait("Shape", "nmos6502")]
     [Fact]
     public void Volatile_stores_keep_their_order()

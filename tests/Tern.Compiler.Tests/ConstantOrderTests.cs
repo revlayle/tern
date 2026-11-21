@@ -33,6 +33,7 @@ public sealed class ConstantOrderTests : TempFolderTest
         Assert.Equal(41, r.Result.Variables["buf"].Size);
     }
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void Len_and_sizeof_in_a_constant_in_the_same_file()
     {
@@ -119,6 +120,7 @@ public sealed class ConstantOrderTests : TempFolderTest
         Assert.Equal(240, r.Result.Variables["explode.cover"].Size);
     }
 
+    [Trait("Platform", "c64")]
     [Theory]
     [InlineData("const N = len(map)\nvar map: [u8; 2048] @ buffers")]
     [InlineData("var map: [u8; 2048] @ buffers\nconst N = len(map)")]
@@ -135,6 +137,7 @@ public sealed class ConstantOrderTests : TempFolderTest
         Assert.InRange(r.Address("map"), 0xC000, 0xC800);
     }
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void A_constant_address_does_not_need_the_memory_block()
     {

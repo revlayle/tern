@@ -28,6 +28,7 @@ public class InlineLocalsTests
         return (byte)(((u ^ t) + 3) & 255);
     }
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void One_inline_function_with_locals_is_used_from_main_and_from_a_handler()
     {
@@ -114,6 +115,7 @@ public class InlineLocalsTests
         Assert.Equal(one, Variables("out = f(1)\nout += f(2)\nout += f(f(3))"));
     }
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void Inline_functions_calling_inline_functions_work_from_two_roots()
     {
@@ -165,6 +167,7 @@ public class InlineLocalsTests
                 Assert.Contains($"{root}.{name}", s.Keys);
     }
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void Loop_counters_and_pointer_parameters_of_an_inline_function_are_per_caller()
     {
@@ -231,6 +234,7 @@ public class InlineLocalsTests
         Assert.NotEqual(s["main.mix.t"], s["helper.mix.t"]);
     }
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void An_inline_asm_fn_with_var_lines_works_from_main_and_a_handler()
     {

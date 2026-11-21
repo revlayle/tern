@@ -241,6 +241,7 @@ public sealed class PluginTests : TempFolderTest
 
     // ---------- Done when (roadmap M21): the example ----------
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void The_example_game_loads_two_levels_built_separately_into_one_slot_and_they_call_its_table()
     {
@@ -312,6 +313,7 @@ public sealed class PluginTests : TempFolderTest
         export add_score, beep @ $0900
         """;
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void Several_export_lines_form_one_table_in_order()
     {
@@ -321,6 +323,7 @@ public sealed class PluginTests : TempFolderTest
         Assert.Equal(6, run.U8("score"));
     }
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void An_export_table_may_be_in_a_reserved_area()
     {
@@ -334,6 +337,7 @@ public sealed class PluginTests : TempFolderTest
         Assert.Equal(0xC006 - 0x0801, run.Result.Image.Length);
     }
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void A_program_puts_its_export_table_at_the_address()
     {

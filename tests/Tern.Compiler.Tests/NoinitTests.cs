@@ -17,6 +17,7 @@ public class NoinitTests
         });
     }
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void Noinit_globals_keep_what_was_in_memory()
     {
@@ -55,6 +56,7 @@ public class NoinitTests
         Assert.Contains("clear0", Listing.Text(without, Listing.Startup));
     }
 
+    [Trait("Platform", "c64")]
     [Fact]
     public void Noinit_works_with_structs_linear_arrays_and_private()
     {
