@@ -19,7 +19,7 @@ public sealed class Run
     /// <summary>Text tern run's stand-ins printed: in a run with <c>standIns</c>, and in every Apple II run.</summary>
     public System.Text.StringBuilder Output { get; } = new();
 
-    /// <summary>The number of IRQs the CPU took.</summary>
+    /// <summary>The number of interrupts the CPU took: the IRQs of <c>irqEvery</c>, and the NES's NMIs.</summary>
     public int Interrupts { get; }
 
     /// <summary>On the NES: the PPU's memory, OAM, frames and banks (<see cref="Tools.NesBus"/>); null elsewhere.</summary>
@@ -84,7 +84,7 @@ public sealed class Run
             }
             if (checker.Before(Cpu)) break;   // an indexed match value outside its span: the jump goes nowhere chosen
             Cpu.Step();
-            _machine.AfterStep(Cpu);
+            if (_machine.AfterStep(Cpu)) Interrupts++;   // the NES's NMI, counted as tern run counts it
             if (Cpu.Cycles > s.MaxCycles)
                 throw new Xunit.Sdk.XunitException($"Program did not finish within {s.MaxCycles} cycles (PC=${Cpu.PC:X4})\n{Result.Listing}");
         }

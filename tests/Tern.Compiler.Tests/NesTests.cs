@@ -193,6 +193,7 @@ public class NesTests
         var path = Path.Combine(dir.FullName, "main.tern");
         var r = Run.Program("import vectors\n" + Nrom + "fn main() {\n    asm {\n        lda #$80\n        sta $2000\n    }\n    while vectors.frames < 2 { }\n}", sourcePath: path, platform: Platform.Nes);
         Assert.Equal(2, r.U8("vectors.frames"));
+        Assert.Equal(2, r.Interrupts);   // the run counts the NMIs, as tern run does (review R6, suggestion 4)
     }
 
     // ---------- The cartridge line ----------

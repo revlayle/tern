@@ -3,13 +3,13 @@ using Tern.Compiler.Syntax;
 
 namespace Tern.Compiler.Tools;
 
+/// <summary>Whether a <see cref="Diagnostic"/> stops the build. JSON writes it as "error" or "warning".</summary>
+public enum Severity { Error, Warning }
+
 /// <summary>
 /// One compiler message for tools (<c>tern --json</c>): where it is, what is wrong, and how to fix it.
 /// <see cref="Message"/> followed by <see cref="Suggestion"/> is the whole text of the error.
 /// </summary>
-/// <summary>Whether a <see cref="Diagnostic"/> stops the build. JSON writes it as "error" or "warning".</summary>
-public enum Severity { Error, Warning }
-
 public sealed record Diagnostic(string File, int Line, int Column, Severity Severity, string Message, string? Suggestion)
 {
     /// <summary>

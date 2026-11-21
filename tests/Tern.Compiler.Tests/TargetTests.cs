@@ -1,5 +1,3 @@
-using Tern.Compiler.Tools;
-
 namespace Tern.Compiler.Tests;
 
 /// <summary><c>--target</c> (spec 12.2): every command names the machine it builds for.</summary>
@@ -13,47 +11,40 @@ public sealed class TargetTests : TempFolderTest
         return path;
     }
 
-    private static (int Code, string Output, string Error) Tern(params string[] args)
-    {
-        var (output, error) = (new StringWriter(), new StringWriter());
-        int code = Cli.Run(args, output, error);
-        return (code, output.ToString(), error.ToString().Trim());
-    }
-
     [Theory]
     [InlineData]
     [InlineData("run")]
     [InlineData("bench")]
     public void Every_command_needs_a_target(params string[] command)
     {
-        var (code, _, error) = Tern([.. command, Write("var n: u8\nfn main() { n = 1 }\n")]);
+        var (code, _, error) = Command.Tern([.. command, Write("var n: u8\nfn main() { n = 1 }\n")]);
         Assert.Equal(1, code);
-        Assert.Equal($"No target given: write {Platform.Choices}. Run 'tern --help' for the options.", error);
+        Assert.Equal($"No target given: write {Platform.Choices}. Run 'tern --help' for the options.", error.Trim());
     }
 
     [Fact]
     public void An_unknown_target_lists_the_known_ones()
     {
-        var (code, _, error) = Tern("--target", "vic20", Write("fn main() { }\n"));
+        var (code, _, error) = Command.Tern("--target", "vic20", Write("fn main() { }\n"));
         Assert.Equal(1, code);
-        Assert.Equal($"Unknown target 'vic20': write {Platform.Choices}. Run 'tern --help' for the options.", error);
+        Assert.Equal($"Unknown target 'vic20': write {Platform.Choices}. Run 'tern --help' for the options.", error.Trim());
     }
 
     [Fact]
     public void A_second_target_is_an_error()
     {
         // Review M25, note 7.
-        var (code, _, error) = Tern("--target", "c64", "--target", "atari", Write("fn main() { }\n"));
+        var (code, _, error) = Command.Tern("--target", "c64", "--target", "atari", Write("fn main() { }\n"));
         Assert.Equal(1, code);
-        Assert.Equal("--target is given more than once: give one target. Run 'tern --help' for the options.", error);
+        Assert.Equal("--target is given more than once: give one target. Run 'tern --help' for the options.", error.Trim());
     }
 
     [Fact]
     public void The_target_may_come_anywhere_in_the_command()
     {
         var path = Write("var n: u8\nfn main() { n = 7 }\n");
-        Assert.Equal(0, Tern(path, "--target", "c64").Code);
-        var (code, output, _) = Tern("run", path, "--dump", "n", "--target", "c64");
+        Assert.Equal(0, Command.Tern(path, "--target", "c64").Code);
+        var (code, output, _) = Command.Tern("run", path, "--dump", "n", "--target", "c64");
         Assert.Equal(0, code);
         Assert.Contains("u8 = 7", output);
     }
