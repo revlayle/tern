@@ -550,6 +550,7 @@ public class Apple2IoTests
         Assert.Empty(set);
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void A_program_without_io_has_no_prefix_code()
     {
@@ -560,6 +561,7 @@ public class Apple2IoTests
         Assert.DoesNotContain("io:", result.Report);
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void A_program_with_io_has_the_prefix_code_and_the_report_counts_it_under_io()
     {

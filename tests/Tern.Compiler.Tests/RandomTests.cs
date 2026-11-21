@@ -153,7 +153,7 @@ public class RandomTests
             interrupt fn h() { b = random.next8() }
             fn main() { a = random.next8() }
             """));
-        Assert.Contains("a private variable of its module", e.Description);
+        Expect.Message(e, 4, 11, "'random.next8' (called from main) and 'random.next8' (called from the interrupt handler 'h') both use 'random.state8', a private variable of its module. An interrupt could change it while the other is using it. Call functions of this module from only main or only one interrupt handler");
     }
 
     [Fact]

@@ -106,6 +106,7 @@ public class StructTests
         Assert.Equal(-2, r.I16("neg"));
     }
 
+    [Trait("Shape", "nmos6502")]
     [Theory]
     // Spec 3.3: player.hp is lda player+2.
     [InlineData("x = player.hp", "lda player+2|sta x|rts")]
@@ -129,6 +130,7 @@ public class StructTests
         Assert.Equal(expected, Listing.Code(r));
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void Sixteen_bit_operations_between_fields_need_no_temporary()
     {
@@ -185,6 +187,7 @@ public class StructTests
         Assert.Equal(7, r.U8("out"));
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void A_struct_variable_in_zero_page()
     {
@@ -200,6 +203,7 @@ public class StructTests
 
     // ---------- Structs at a fixed address ----------
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void A_struct_at_a_fixed_address_uses_the_field_offsets()
     {
@@ -222,6 +226,7 @@ public class StructTests
         Assert.Contains("8D 20 D0", r.Result.Listing); // sta $D020
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void Fields_at_a_fixed_address_are_volatile()
     {
@@ -289,6 +294,7 @@ public class StructTests
         Assert.True(r.Address("main.e") < 0x100, "a pointer used for fields must be in zero page");
     }
 
+    [Trait("Shape", "nmos6502")]
     [Theory]
     // Spec 3.3.
     [InlineData("e.hp -= 1", "ldy #$02|lda (e),y|sec|sbc #$01|sta (e),y|rts")]
@@ -442,6 +448,7 @@ public class StructTests
         Assert.Contains("Variables after the program: 44 bytes", r.Result.Report); // 4 records of 11 bytes
     }
 
+    [Trait("Shape", "nmos6502")]
     [Theory]
     // Spec 3.3: enemies[i].x is a single lda enemies_x,x. Byte k of the record is the table at k * 8.
     [InlineData("x = enemies[i].x", "ldx i|lda enemies,x|sta x|rts")]
@@ -539,64 +546,63 @@ public class StructTests
 
     [Theory]
     // Declarations
-    [InlineData("fn main() { struct S { x: u8 } }", "A struct must be declared outside functions")]
-    [InlineData("struct S { x: u8 y: u8 }\nfn main() { }", "Expected ',' or a line break after the field")]
-    [InlineData("struct S { x: u8\nfn main() { }", "Expected a field 'name: type', found 'fn'")]
-    [InlineData("struct S {", "Struct 'S' is not closed with '}'")]
-    [InlineData("struct u8 { x: u8 }\nfn main() { }", "'u8' is a built-in type")]
-    [InlineData("struct S { }\nfn main() { }", "Struct 'S' has no fields")]
-    [InlineData("struct S { x: u8, x: u16 }\nfn main() { }", "Field 'x' is declared twice in 'S'")]
-    [InlineData("struct S { inner: S }\nfn main() { }", "Struct 'S' contains itself")]
-    [InlineData("struct A { b: B }\nstruct B { a: A }\nfn main() { }", "contains itself")]
-    [InlineData(P + "struct S { ps: [Point; 2] }\nfn main() { }", "A field that is an array of structs is not supported yet")]
-    [InlineData("struct S { x: u8 @ -1 }\nfn main() { }", "Field offset -1 is outside memory")]
-    [InlineData("struct S { a: u16 @ $FFFF }\nfn main() { }", "Struct 'S' is 65537 bytes, more than memory")]
-    [InlineData("struct S { a: u16, b: u8 @ 1 }\nfn main() { }", "Field 'b' (offset 1, 1 byte(s)) overlaps field 'a' (offset 0, 2 byte(s))")]
-    [InlineData("var x: foo\nfn main() { }", "Unknown type 'foo'")]
-    [InlineData("var y: u8\nvar x: y\nfn main() { }", "'y' is not a type")]
-    [InlineData(P + "fn main() { var n: u8 = sizeof(3) }", "sizeof() takes one type name")]
+    [InlineData("fn main() { struct S { x: u8 } }", 1, 13, "A struct must be declared outside functions. Move it to the top level of the file")]
+    [InlineData("struct S { x: u8 y: u8 }\nfn main() { }", 1, 18, "Expected ',' or a line break after the field, found 'y'. Separate the fields with ',' or a line break")]
+    [InlineData("struct S { x: u8\nfn main() { }", 2, 1, "Expected a field 'name: type', found 'fn'")]
+    [InlineData("struct S {", 1, 1, "Struct 'S' is not closed with '}'. Add '}' after its last field")]
+    [InlineData("struct u8 { x: u8 }\nfn main() { }", 1, 1, "'u8' is a built-in type; choose another name")]
+    [InlineData("struct S { }\nfn main() { }", 1, 1, "Struct 'S' has no fields. Add at least one field")]
+    [InlineData("struct S { x: u8, x: u16 }\nfn main() { }", 1, 19, "Field 'x' is declared twice in 'S' (first at 1:12). Rename one of them")]
+    [InlineData("struct S { inner: S }\nfn main() { }", 1, 1, "Struct 'S' contains itself, so its size would be endless. Use a pointer: ptr S")]
+    [InlineData("struct A { b: B }\nstruct B { a: A }\nfn main() { }", 1, 1, "Struct 'A' contains itself, so its size would be endless. Use a pointer: ptr A")]
+    [InlineData(P + "struct S { ps: [Point; 2] }\nfn main() { }", 2, 12, "A field that is an array of structs is not supported yet. Use an array of structs outside the struct, or a pointer")]
+    [InlineData("struct S { x: u8 @ -1 }\nfn main() { }", 1, 20, "Field offset -1 is outside memory. Use an offset from 0 to $FFFF")]
+    [InlineData("struct S { a: u16 @ $FFFF }\nfn main() { }", 1, 1, "Struct 'S' is 65537 bytes, more than memory. Make its fields smaller")]
+    [InlineData("struct S { a: u16, b: u8 @ 1 }\nfn main() { }", 1, 20, "Field 'b' (offset 1, 1 byte(s)) overlaps field 'a' (offset 0, 2 byte(s)). Move one with '@ offset'")]
+    [InlineData("var x: foo\nfn main() { }", 1, 8, "Unknown type 'foo'. Check the spelling, or declare a struct of that name")]
+    [InlineData("var y: u8\nvar x: y\nfn main() { }", 2, 8, "'y' is not a type. Use a number type, bool, ptr, an array or a struct")]
+    [InlineData(P + "fn main() { var n: u8 = sizeof(3) }", 2, 25, "sizeof() takes one type name. Write e.g. sizeof(Enemy)")]
     // Variables
-    [InlineData(P + "var p: Point = 3\nfn main() { }", "A Point is initialized with a struct literal. Write 'Point { x = ... }'")]
-    [InlineData(P + "fn main() { var p: Point = 3 }", "A struct cannot have an initial value")]
-    [InlineData(P + "var ps: [Point; 2] = [1, 2]\nfn main() { }", "A Point is initialized with a struct literal")]
-    [InlineData(P + "data ps: [Point; 2] = [1, 2]\nfn main() { }", "A Point is initialized with a struct literal")]
-    [InlineData("linear var a: u8\nfn main() { }", "'linear' is for arrays of 16-bit values or structs")]
-    [InlineData("linear fn main() { }", "'linear' goes before 'var' or 'data'")]
-    [InlineData(P + "fn main() { var n: u8 = Point }", "'Point' is a struct type, not a value")]
+    [InlineData(P + "var p: Point = 3\nfn main() { }", 2, 16, "A Point is initialized with a struct literal. Write 'Point { x = ... }'")]
+    [InlineData(P + "fn main() { var p: Point = 3 }", 2, 28, "A struct cannot have an initial value. Assign its fields")]
+    [InlineData(P + "var ps: [Point; 2] = [1, 2]\nfn main() { }", 2, 23, "A Point is initialized with a struct literal. Write 'Point { x = ... }'")]
+    [InlineData(P + "data ps: [Point; 2] = [1, 2]\nfn main() { }", 2, 24, "A Point is initialized with a struct literal. Write 'Point { x = ... }'")]
+    [InlineData("linear var a: u8\nfn main() { }", 1, 1, "'linear' is for arrays of 16-bit values or structs, e.g. 'linear var pts: [u16; 32]' or 'linear var list: [Enemy; 8]'. Remove 'linear'")]
+    [InlineData("linear fn main() { }", 1, 8, "'linear' goes before 'var' or 'data', e.g. 'linear var list: [Enemy; 8]'; found 'fn'. Write 'linear var' or remove 'linear'")]
+    [InlineData(P + "fn main() { var n: u8 = Point }", 2, 25, "'Point' is a struct type, not a value. Use sizeof(Point) for its size, or a variable of the type")]
     // Structs are never copied
-    [InlineData(P + "var a: Point\nvar b: Point\nfn main() { a = b }", "a struct cannot be assigned")]
-    [InlineData(P + "var a: Point\nvar b: Point\nfn main() { if a == b { } }", "Structs cannot be compared")]
-    [InlineData(P + "var a: Point\nvar n: u8\nfn main() { n = a }", "A struct cannot be used as a value")]
-    [InlineData(P + "fn f(p: Point) { }\nfn main() { }", "A struct cannot be passed to a function")]
-    [InlineData(P + "fn f() -> Point { }\nfn main() { }", "A function cannot return a struct")]
-    [InlineData(P + "var ps: [Point; 4]\nvar n: u8\nfn main() { n = ps[1] }", "A struct cannot be used as a value")]
+    [InlineData(P + "var a: Point\nvar b: Point\nfn main() { a = b }", 4, 13, "Structs are never copied, so a struct cannot be assigned. Assign its fields one by one, or copy the memory with mem.copy")]
+    [InlineData(P + "var a: Point\nvar b: Point\nfn main() { if a == b { } }", 4, 18, "Structs cannot be compared; compare their fields, e.g. a.x == b.x")]
+    [InlineData(P + "var a: Point\nvar n: u8\nfn main() { n = a }", 4, 17, "A struct cannot be used as a value, since structs are never copied. Use one of its fields, or a pointer: addr(...) gives a ptr Point")]
+    [InlineData(P + "fn f(p: Point) { }\nfn main() { }", 2, 6, "A struct cannot be passed to a function, since structs are never copied. Pass a pointer (ptr Point) or an index")]
+    [InlineData(P + "fn f() -> Point { }\nfn main() { }", 2, 11, "A function cannot return a struct, since structs are never copied. Return a pointer (ptr Point) or an index")]
+    [InlineData(P + "var ps: [Point; 4]\nvar n: u8\nfn main() { n = ps[1] }", 4, 19, "A struct cannot be used as a value, since structs are never copied. Use one of its fields, or a pointer: addr(...) gives a ptr Point")]
     // Fields
-    [InlineData(P + "var a: Point\nfn main() { a.z = 1 }", "Struct 'Point' has no field 'z'. Use one of its fields: x, y")]
-    [InlineData(P + "var p: ptr Point\nfn main() { p.z = 1 }", "Struct 'Point' has no field 'z'")]
-    [InlineData(P + "var p: ptr u8\nfn main() { p.x = 1 }", "Unknown member '.x'")]
-    [InlineData(E + "var a: Enemy\nfn main() { a.name[4] = 1 }", "Index 4 is past the end of 'a.name'")]
-    [InlineData(E + "var p: ptr Enemy\nfn main() { p.name[4] = 1 }", "Index 4 is past the end of 'p.name'")]
-    [InlineData("struct Big { pad: [u8; 255], w: u16 }\nvar p: ptr Big\nvar n: u16\nfn main() { n = p.w }", "'p.w' is at offset 256 of the struct")]
-    [InlineData("struct Big { pad: [u8; 250], a: [u8; 8] }\nvar p: ptr Big\nvar n: u8\nvar i: u8\nfn main() { n = p.a[i] }", "'p.a' reaches offset 257 of the struct")]
+    [InlineData(P + "var a: Point\nfn main() { a.z = 1 }", 3, 14, "Struct 'Point' has no field 'z'. Use one of its fields: x, y")]
+    [InlineData(P + "var p: ptr Point\nfn main() { p.z = 1 }", 3, 14, "Struct 'Point' has no field 'z'. Use one of its fields: x, y")]
+    [InlineData(P + "var p: ptr u8\nfn main() { p.x = 1 }", 3, 14, "Unknown member '.x'. Use .lo or .hi, or a field of a struct")]
+    [InlineData(E + "var a: Enemy\nfn main() { a.name[4] = 1 }", 4, 20, "Index 4 is past the end of 'a.name' (length 4). Use an index below 4")]
+    [InlineData(E + "var p: ptr Enemy\nfn main() { p.name[4] = 1 }", 4, 20, "Index 4 is past the end of 'p.name' (length 4). Use an index below 4")]
+    [InlineData("struct Big { pad: [u8; 255], w: u16 }\nvar p: ptr Big\nvar n: u16\nfn main() { n = p.w }", 4, 18, "'p.w' is at offset 256 of the struct; through a pointer, (p),y reaches offsets 0 to 255. Move the pointer to the field first: p + offset(T.field)")]
+    [InlineData("struct Big { pad: [u8; 250], a: [u8; 8] }\nvar p: ptr Big\nvar n: u8\nvar i: u8\nfn main() { n = p.a[i] }", 5, 20, "'p.a' reaches offset 257 of the struct; through a pointer, (p),y reaches offsets 0 to 255. Move the pointer to the field first: p + offset(T.field)")]
     // Pointers and arrays of structs
-    [InlineData(P + "var p: ptr Point\nvar n: u8\nfn main() { n = p[1].x }", "A pointer to a struct cannot be indexed")]
-    [InlineData(E + "var es: [Enemy; 4]\nvar i: u8\nvar n: u8\nfn main() { n = es[0].name[i] }", "An array field in an array of structs needs a constant index")]
-    [InlineData(E + "var es: [Enemy; 4]\nvar n: u8\nfn main() { n = es[0].name[4] }", "Index 4 is past the end of 'es.name'")]
-    [InlineData(P + "var ps: [Point; 4]\nfn main() { ps[4].x = 1 }", "Index 4 is past the end of 'ps'")]
-    [InlineData(P + "var ps: [Point; 4]\nvar p: ptr Point\nfn main() { p = addr(ps) }", "Declare it 'linear var'")]
-    [InlineData(E + "var p: ptr Enemy\nfn main() { for i in 0..4 using Y { p.name[i] = 0 } }", "p[i] needs the Y register, which holds a loop variable")]
+    [InlineData(P + "var p: ptr Point\nvar n: u8\nfn main() { n = p[1].x }", 4, 18, "A pointer to a struct cannot be indexed: p[i] would need a multiply by the struct size. Move the pointer instead: p = p + sizeof(Point)")]
+    [InlineData(E + "var es: [Enemy; 4]\nvar i: u8\nvar n: u8\nfn main() { n = es[0].name[i] }", 6, 28, "An array field in an array of structs needs a constant index, since a variable one would need a multiply. Declare the array 'linear' and step through it with a pointer")]
+    [InlineData(E + "var es: [Enemy; 4]\nvar n: u8\nfn main() { n = es[0].name[4] }", 5, 28, "Index 4 is past the end of 'es.name' (length 4). Use an index below 4")]
+    [InlineData(P + "var ps: [Point; 4]\nfn main() { ps[4].x = 1 }", 3, 16, "Index 4 is past the end of 'ps' (length 4). Use an index below 4")]
+    [InlineData(P + "var ps: [Point; 4]\nvar p: ptr Point\nfn main() { p = addr(ps) }", 4, 22, "'ps' is stored as one table per field, so there is no record to point to. Declare it 'linear var' to store whole records")]
+    [InlineData(E + "var p: ptr Enemy\nfn main() { for i in 0..4 using Y { p.name[i] = 0 } }", 4, 43, "p[i] needs the Y register, which holds a loop variable. Use 'using X' for that loop")]
     // Review M5, findings 1 and 2.
-    [InlineData(P + "var s: Point\nfn main() { s.x() }", "'s.x' is a field, not a function; only functions can be called")]
-    [InlineData(P + "var p: ptr Point\nfn main() { p.x() }", "'p.x' is a field, not a function")]
-    [InlineData("var v: u8\nfn main() { v.x() }", "'v.x' is not a function: 'v' is a variable, not a module")]
-    [InlineData(P + "var s: Point\nvar n: u8\nfn main() { n = s + 1 }", "A struct is not a number; use one of its fields, e.g. s.x + 1")]
-    [InlineData(P + "var s: Point\nvar n: u8\nfn main() { n = s << 1 }", "A struct is not a number; use one of its fields, e.g. s.x << 1")]
-    [InlineData(P + "var s: Point\nfn main() { var x = s }", "A struct cannot be used as a value")]
-    [InlineData(P + "var s: Point\nvar x = s\nfn main() { }", "A struct cannot be used as a value")]
-    public void Reports_errors(string source, string expected)
+    [InlineData(P + "var s: Point\nfn main() { s.x() }", 3, 13, "'s.x' is a field, not a function; only functions can be called. Remove the ()")]
+    [InlineData(P + "var p: ptr Point\nfn main() { p.x() }", 3, 13, "'p.x' is a field, not a function; only functions can be called. Remove the ()")]
+    [InlineData("var v: u8\nfn main() { v.x() }", 2, 13, "'v.x' is not a function: 'v' is a variable, not a module. Check the spelling of the module name")]
+    [InlineData(P + "var s: Point\nvar n: u8\nfn main() { n = s + 1 }", 4, 19, "A struct is not a number; use one of its fields, e.g. s.x + 1")]
+    [InlineData(P + "var s: Point\nvar n: u8\nfn main() { n = s << 1 }", 4, 19, "A struct is not a number; use one of its fields, e.g. s.x << 1")]
+    [InlineData(P + "var s: Point\nfn main() { var x = s }", 3, 21, "A struct cannot be used as a value, since structs are never copied. Use one of its fields, or a pointer: addr(...) gives a ptr Point")]
+    [InlineData(P + "var s: Point\nvar x = s\nfn main() { }", 3, 9, "A struct cannot be used as a value, since structs are never copied. Use one of its fields, or a pointer: addr(...) gives a ptr Point")]
+    public void Reports_errors(string source, int line, int column, string expected)
     {
-        var e = Assert.Throws<CompileError>(() => TernCompiler.Compile(source));
-        Assert.Contains(expected, e.Description, StringComparison.OrdinalIgnoreCase);
+        Expect.Error(source, line, column, expected);
     }
 
     // ---------- addr() of fields ----------
@@ -647,6 +653,7 @@ public class StructTests
         Assert.Equal(player + 1, r.U16At("at", 5, 6));
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void Addr_of_a_field_is_a_constant_address()
     {
@@ -695,21 +702,20 @@ public class StructTests
     }
 
     [Theory]
-    [InlineData(E + "var p: ptr Enemy\nvar q: ptr u8\nfn main() { q = addr(p.hp) }", "'p.hp' is reached through a pointer, so it has no fixed address")]
-    [InlineData(E + "var p: ptr Enemy\nvar q: ptr u8\nfn main() { q = addr(p.name) }", "'p.name' is reached through a pointer")]
-    [InlineData(E + "var p: ptr Enemy\nvar q: ptr Point\nfn main() { q = addr(p.pos) }", "'p.pos' is reached through a pointer")]
-    [InlineData(E + "var a: Enemy\nvar q: ptr u8\nfn main() { q = addr(a.next.hp) }", "'a.next.hp' is reached through a pointer")]
-    [InlineData(E + "var es: [Enemy; 4]\nvar q: ptr u8\nfn main() { q = addr(es[1].hp) }", "'es.hp' is in an array of structs, which is stored as one table per field")]
-    [InlineData(E + "var es: [Enemy; 4]\nvar q: ptr u8\nfn main() { q = addr(es[1].name) }", "'es.name' is in an array of structs")]
-    [InlineData(E + "var es: [Enemy; 4]\nvar q: ptr Point\nfn main() { q = addr(es[1].pos) }", "'es.pos' is in an array of structs")]
-    [InlineData(E + "var a: Enemy\nvar q: ptr u8\nfn main() { q = addr(a.nope) }", "Struct 'Enemy' has no field 'nope'")]
-    [InlineData("var w: u16\nvar q: ptr u8\nfn main() { q = addr(w.lo) }", "addr() takes the name of a variable, array or data, or a field of a struct variable")]
-    [InlineData(E + "var a: Enemy\nvar q: ptr u8\nfn main() { q = addr(a.name[1]) }", "addr() takes the name of a variable, array or data, or a field of a struct variable")]
-    [InlineData(E + "var a: Enemy\nvar q: ptr u8\nfn main() { q = addr(a.pos) }", "Expected ptr u8, found ptr Point")]
-    public void Addr_of_a_field_reports_errors(string source, string expected)
+    [InlineData(E + "var p: ptr Enemy\nvar q: ptr u8\nfn main() { q = addr(p.hp) }", 5, 23, "'p.hp' is reached through a pointer, so it has no fixed address. addr() works on fields of struct variables. Add the field's offset to the pointer: p + offset(T.field)")]
+    [InlineData(E + "var p: ptr Enemy\nvar q: ptr u8\nfn main() { q = addr(p.name) }", 5, 23, "'p.name' is reached through a pointer, so it has no fixed address. addr() works on fields of struct variables. Add the field's offset to the pointer: p + offset(T.field)")]
+    [InlineData(E + "var p: ptr Enemy\nvar q: ptr Point\nfn main() { q = addr(p.pos) }", 5, 23, "'p.pos' is reached through a pointer, so it has no fixed address. addr() works on fields of struct variables. Add the field's offset to the pointer: p + offset(T.field)")]
+    [InlineData(E + "var a: Enemy\nvar q: ptr u8\nfn main() { q = addr(a.next.hp) }", 5, 28, "'a.next.hp' is reached through a pointer, so it has no fixed address. addr() works on fields of struct variables. Add the field's offset to the pointer: p + offset(T.field)")]
+    [InlineData(E + "var es: [Enemy; 4]\nvar q: ptr u8\nfn main() { q = addr(es[1].hp) }", 5, 27, "'es.hp' is in an array of structs, which is stored as one table per field, so the record has no address. addr() works on fields of struct variables. Declare the array 'linear' to keep each record in one piece")]
+    [InlineData(E + "var es: [Enemy; 4]\nvar q: ptr u8\nfn main() { q = addr(es[1].name) }", 5, 27, "'es.name' is in an array of structs, which is stored as one table per field, so the record has no address. addr() works on fields of struct variables. Declare the array 'linear' to keep each record in one piece")]
+    [InlineData(E + "var es: [Enemy; 4]\nvar q: ptr Point\nfn main() { q = addr(es[1].pos) }", 5, 27, "'es.pos' is in an array of structs, which is stored as one table per field, so the record has no address. addr() works on fields of struct variables. Declare the array 'linear' to keep each record in one piece")]
+    [InlineData(E + "var a: Enemy\nvar q: ptr u8\nfn main() { q = addr(a.nope) }", 5, 23, "Struct 'Enemy' has no field 'nope'. Use one of its fields: pos, hp, name, next")]
+    [InlineData("var w: u16\nvar q: ptr u8\nfn main() { q = addr(w.lo) }", 3, 17, "addr() takes the name of a variable, array or data, or a field of a struct variable. Write addr(name)")]
+    [InlineData(E + "var a: Enemy\nvar q: ptr u8\nfn main() { q = addr(a.name[1]) }", 5, 17, "addr() takes the name of a variable, array or data, or a field of a struct variable. Write addr(name)")]
+    [InlineData(E + "var a: Enemy\nvar q: ptr u8\nfn main() { q = addr(a.pos) }", 5, 17, "Expected ptr u8, found ptr Point. Convert with 'as ptr u8'")]
+    public void Addr_of_a_field_reports_errors(string source, int line, int column, string expected)
     {
-        var e = Assert.Throws<CompileError>(() => TernCompiler.Compile(source));
-        Assert.Contains(expected, e.Description);
+        Expect.Error(source, line, column, expected);
     }
 
     [Fact]

@@ -1,6 +1,4 @@
 using System.Text;
-using System.Text.Encodings.Web;
-using System.Text.Json;
 using Tern.Compiler.Syntax;
 
 namespace Tern.Compiler.Tools;
@@ -87,9 +85,8 @@ public static class Bench
         catch (CompileError e)
         {
             // Every error found (spec 13); a snippet's lines are its own.
-            var all = e.All.Select(x =>
+            var all = Diagnostic.All(e, variant.Name).Zip(e.WithWarnings, (d, x) =>
             {
-                var d = Diagnostic.From(x, variant.Name);
                 if (variant.Path is null && x.Pos.File is null)
                 {
                     var (file, line) = variant.Place(x.Pos.Line);
@@ -101,20 +98,20 @@ public static class Bench
         }
         var section = program.Sections.FirstOrDefault(s => s.Name == measured);
         if (section is null && program.DeclaredFunctions.Contains(measured))
-            return Failed(new Diagnostic(variant.Name, 0, 0, "error",
+            return Failed(new Diagnostic(variant.Name, 0, 0, Severity.Error,
                 $"The function '{measured}' has no code of its own (an inline function is copied into each caller, and a function nothing calls is left out).",
                 "Measure a function that calls it"));
         if (section is null)
         {
             // A module's function is named with its module: ship.move.
             var inModule = program.DeclaredFunctions.Where(f => f.EndsWith("." + measured)).Order(StringComparer.Ordinal).ToList();
-            return Failed(new Diagnostic(variant.Name, 0, 0, "error",
+            return Failed(new Diagnostic(variant.Name, 0, 0, Severity.Error,
                 $"There is no function '{measured}' in the program.",
                 inModule.Count == 0 ? null : "Use " + string.Join(" or ", inModule.Select(f => $"'{f}'")) + ": a module's function is named with its module"));
         }
 
         if (program.HaltAddress < 0)
-            return Failed(new Diagnostic(variant.Name, 0, 0, "error", "A binary without main cannot be run on its own.",
+            return Failed(new Diagnostic(variant.Name, 0, 0, Severity.Error, "A binary without main cannot be run on its own.",
                 "Measure the function in a program that loads and calls it"));
 
         var run = Runner.Run(program, (options ?? new RunOptions()) with { MainFile = variant.Name });
@@ -198,35 +195,6 @@ public static class Bench
         return sb.ToString();
     }
 
-    private static readonly JsonSerializerOptions Options = new()
-    {
-        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-        WriteIndented = true,
-        Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
-    };
-
     public static string Json(IReadOnlyList<BenchResult> results) =>
-        JsonSerializer.Serialize(new
-        {
-            ok = !results.Any(r => r.Failed),
-            variants = results.Select(r => new
-            {
-                variant = r.Variant,
-                error = r.Error,
-                errors = r.Errors,
-                function = r.Function,
-                programBytes = r.ProgramBytes,
-                functionBytes = r.FunctionBytes,
-                calls = r.Calls,
-                cycles = r.Cycles,
-                cyclesPerCall = r.CyclesPerCall,
-                returned = r.Returned,
-                stop = r.Stop,
-                zeroPageBytes = r.ZeroPageBytes,
-                otherBytes = r.OtherBytes,
-                memory = r.Memory.Select(v => new { name = v.Name, address = v.Address, size = v.Size, type = v.Type }),
-                results = r.Results.Select(x => new { what = x.What, value = x.Value }),
-                indexErrors = r.IndexErrors.Select(e => new { file = e.File, line = e.Line, source = e.Source, message = e.Message, cycle = e.Cycle, count = e.Count }),
-            }),
-        }, Options);
+        JsonOutput.Write(new BenchOutput(!results.Any(r => r.Failed), results.Select(BenchVariantOutput.From)));
 }

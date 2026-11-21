@@ -37,10 +37,7 @@ public sealed class ErrorList(int? max = null)
         var sorted = Sort(_errors);
         bool more = max is int m && sorted.Count > m;
         if (more) sorted.RemoveRange(max!.Value, sorted.Count - max.Value);
-        var first = sorted[0];
-        first.All = sorted;
-        first.MoreNotReported = more;
-        throw first;
+        throw sorted[0].Carrying(sorted.Skip(1).ToList(), more);
     }
 }
 

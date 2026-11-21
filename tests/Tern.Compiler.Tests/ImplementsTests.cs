@@ -112,6 +112,7 @@ public class ImplementsTests
         Assert.Equal(11, r.U8("d"));
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void A_call_to_an_interface_routine_is_a_jsr_to_its_address()
     {
@@ -122,6 +123,7 @@ public class ImplementsTests
         Assert.Matches(@"20 00 60 +jsr \$6000", r.Listing);
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void Each_overlay_file_has_a_jmp_at_each_routine_address_to_its_own_function()
     {
@@ -486,8 +488,7 @@ public class ImplementsTests
     [Fact]
     public void Implements_is_a_keyword()
     {
-        var e = Assert.Throws<CompileError>(() => TernCompiler.Compile("fn main() { var implements: u8 = 1 }"));
-        Assert.Contains("'implements', which is a keyword", e.Description);
+        Expect.Error(() => TernCompiler.Compile("fn main() { var implements: u8 = 1 }"), 1, 17, "Expected variable name, found 'implements', which is a keyword. Use another name");
     }
 
     [Fact]
@@ -680,8 +681,7 @@ public class ImplementsTests
     [Fact]
     public void Implements_with_no_name_is_a_parse_error()
     {
-        var e = Assert.Throws<CompileError>(() => TernCompiler.Compile("import level1 implements\nfn main() { }"));
-        Assert.Contains("the name of an interface module after 'implements'", e.Description);
+        Expect.Error(() => TernCompiler.Compile("import level1 implements\nfn main() { }"), 2, 1, "Expected the name of an interface module after 'implements', found 'fn'");
     }
 
     // ---------- Warnings ----------

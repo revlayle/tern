@@ -3,6 +3,7 @@ namespace Tern.Compiler.Tests;
 /// <summary>M18 F10: small code shapes, each checked against C# at edge values and in the listing.</summary>
 public class SmallShapeTests
 {
+    [Trait("Shape", "nmos6502")]
     [Theory]
     [InlineData(0)]
     [InlineData(1)]
@@ -45,6 +46,7 @@ public class SmallShapeTests
         Assert.Contains("adc #$03", Listing.Code(r));
     }
 
+    [Trait("Shape", "nmos6502")]
     [Theory]
     [InlineData(0)]
     [InlineData(255)]
@@ -76,6 +78,7 @@ public class SmallShapeTests
         Assert.Equal("inc a+1|dec b+1|lda c+1|clc|adc #$03|sta c+1|lda d+1|sec|sbc #$FF|sta d+1|inc p+1|rts", Listing.Code(r));
     }
 
+    [Trait("Shape", "nmos6502")]
     [Theory]
     [InlineData(0)]
     [InlineData(127)]
@@ -98,6 +101,7 @@ public class SmallShapeTests
         Assert.Contains("inc a+1,x", Listing.Code(r));
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void An_element_indexed_by_y_is_incremented_through_a()
     {
@@ -117,6 +121,7 @@ public class SmallShapeTests
         Assert.DoesNotContain("inc a,y", r.Result.Listing);
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void A_value_in_X_is_transferred_instead_of_loaded()
     {
@@ -134,6 +139,7 @@ public class SmallShapeTests
         Assert.Equal("lda #$05|ldx n|sta a,x|txa|asl a|sta m|rts", Listing.Code(r));
     }
 
+    [Trait("Shape", "nmos6502")]
     [Theory]
     [InlineData(0)]
     [InlineData(255)]
@@ -158,6 +164,7 @@ public class SmallShapeTests
         Assert.Contains("dey", code);
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void Y_is_known_to_be_zero_after_a_loop_over_256_values()
     {
@@ -174,6 +181,7 @@ public class SmallShapeTests
         Assert.Equal(1, Listing.Code(r).Split('|').Count(s => s == "ldy #$00"));
     }
 
+    [Trait("Shape", "nmos6502")]
     [Theory]
     [InlineData(0)]
     [InlineData(5)]
@@ -190,6 +198,7 @@ public class SmallShapeTests
         Assert.Equal("lda x|bne main.endif0|sta y|rts", Listing.Code(r));
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void Negation_subtracts_from_zero()
     {
@@ -215,6 +224,7 @@ public class SmallShapeTests
         Assert.DoesNotContain("eor #$FF", Listing.Code(r));
     }
 
+    [Trait("Shape", "nmos6502")]
     [Theory]
     [InlineData(0)]
     [InlineData(1)]
@@ -238,6 +248,7 @@ public class SmallShapeTests
         Assert.Contains("cmp #$01", Listing.Code(r));
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void No_clc_when_the_carry_is_known_clear()
     {
@@ -262,6 +273,7 @@ public class SmallShapeTests
         Assert.Equal(1, Listing.Code(r).Split('|').Count(s => s == "clc"));
     }
 
+    [Trait("Shape", "nmos6502")]
     [Theory]
     [InlineData(0)]
     [InlineData(127)]
@@ -279,6 +291,7 @@ public class SmallShapeTests
         Assert.Contains("clc", Listing.Code(r));
     }
 
+    [Trait("Shape", "nmos6502")]
     [Theory]
     [InlineData(0x0100)]
     [InlineData(0x0005)]
@@ -298,6 +311,7 @@ public class SmallShapeTests
         Assert.DoesNotContain("_t0", Listing.Code(r, "fill"));
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void Stores_of_0_at_the_start_of_main_into_cleared_globals_go()
     {
@@ -337,6 +351,7 @@ public class SmallShapeTests
         Assert.Contains("sta e|", code);          // noinit
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void Stores_of_0_stay_after_a_label_a_call_or_in_another_function()
     {
@@ -363,6 +378,7 @@ public class SmallShapeTests
         Assert.Contains("sta y", Listing.Code(r, "f"));
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void Constants_stored_together()
     {
@@ -375,6 +391,7 @@ public class SmallShapeTests
         Assert.Equal("lda #$7B|sta mul.a|lda #$2D|sta mul.b|lda #$00|sta mul.a+1|sta mul.b+1|jsr mul|sta out|stx out+1|rts", Listing.Code(r));
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void Volatile_stores_keep_their_order()
     {
@@ -402,6 +419,7 @@ public class SmallShapeTests
         Assert.Equal("lda #$05|sta x|lda #$00|sta border|lda #$05|sta y|rts", Listing.Code(r2));
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void Grouped_stores_keep_each_source_line_in_front_of_its_code()
     {

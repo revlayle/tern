@@ -94,6 +94,7 @@ public class VariableStepTests
         Assert.Equal(1 + (255 - 10) / 6, r.U8("count"));
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void An_inclusive_255_loop_ends_on_the_carry_with_no_compare()
     {
@@ -116,14 +117,13 @@ public class VariableStepTests
     }
 
     [Theory]
-    [InlineData("var n: i8 = 2\nfor i in 0..=255 step n { }", "cannot be negative")]
-    [InlineData("var n: u16 = 2\nfor i in 0..=255 step n { }", "must be a u8")]
-    [InlineData("var n: u8 = 2\nfor i in 0..=1000 step n { }", "needs a u8 loop counter")]
-    [InlineData("var n: u8 = 2\nfor i in 255..=0 step n { }", "'255..=0' counts up, so it never runs. Use a constant negative step to count down")]
-    [InlineData("var n: u8 = 2\nvar a: u8 = 9\nfor i in a..0 step n { }", "'a..0' counts up, so it never runs")]
-    public void Variable_step_errors(string body, string message)
+    [InlineData("var n: i8 = 2\nfor i in 0..=255 step n { }", 3, 23, "A variable step must be a u8, but this is i8: a variable step cannot be negative. Use a constant negative step to count down")]
+    [InlineData("var n: u16 = 2\nfor i in 0..=255 step n { }", 3, 23, "A variable step must be a u8, but this is u16. Convert with 'as u8' if it always fits")]
+    [InlineData("var n: u8 = 2\nfor i in 0..=1000 step n { }", 3, 24, "A variable step needs a u8 loop counter, but the bounds are u16. Use a constant step, or u8 bounds")]
+    [InlineData("var n: u8 = 2\nfor i in 255..=0 step n { }", 3, 23, "'255..=0' counts up, so it never runs. Use a constant negative step to count down")]
+    [InlineData("var n: u8 = 2\nvar a: u8 = 9\nfor i in a..0 step n { }", 4, 20, "'a..0' counts up, so it never runs. Use a constant negative step to count down")]
+    public void Variable_step_errors(string body, int line, int column, string message)
     {
-        var e = Assert.Throws<CompileError>(() => TernCompiler.Compile($"fn main() {{\n{body}\n}}"));
-        Assert.Contains(message, e.Message);
+        Expect.Error(() => TernCompiler.Compile($"fn main() {{\n{body}\n}}"), line, column, message);
     }
 }

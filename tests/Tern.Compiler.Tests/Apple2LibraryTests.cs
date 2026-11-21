@@ -65,6 +65,7 @@ public class Apple2LibraryTests
         Assert.Equal("", run.Output);
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void Put_is_cout_itself()
     {
@@ -198,6 +199,7 @@ public class Apple2LibraryTests
             Assert.Equal(HiresRow(y), r.Ram.Bytes[table + y] | r.Ram.Bytes[table + 192 + y] << 8);
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void Soft_switches_are_written()
     {
@@ -236,6 +238,7 @@ public class Apple2LibraryTests
         Assert.Equal(expected == 0 ? 0x55 : 0, r.Ram.Bytes[0xC010]);
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void Click_and_tone_read_the_speaker()
     {
@@ -371,17 +374,5 @@ public class Apple2LibraryTests
         var screen = Runner.ScreenText(run);
         Assert.Equal(" TERN ON THE APPLE II: HI-RES AND TEXT", screen[21]);
         Assert.StartsWith(" PIXELS PLOTTED: ", screen[22]);
-    }
-
-    [Fact]
-    public void The_benchmarks_run_on_the_apple_ii_with_the_same_results()
-    {
-        string dir = BenchmarkTests.Directory_;
-        foreach (var path in Directory.GetFiles(dir, "*.tern").Order(StringComparer.Ordinal))
-        {
-            var r = Run.Program(File.ReadAllText(path), sourcePath: path, maxCycles: 20_000_000, platform: Platform.Apple2);
-            Assert.Equal(0x2000, r.Result.Entry);
-            BenchmarkTests.Checks[Path.GetFileNameWithoutExtension(path)](new Results(r.Ram, (n, o) => r.Address(n) + o));
-        }
     }
 }

@@ -449,6 +449,7 @@ public class ProgramTests
         Assert.Equal(0x0F, r.U8("mask"));
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void Branches_longer_than_127_bytes_are_rewritten()
     {

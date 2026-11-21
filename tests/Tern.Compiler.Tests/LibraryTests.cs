@@ -275,6 +275,7 @@ public class C64LibraryTests
         ]);
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void Kernal_routines()
     {
@@ -299,6 +300,7 @@ public class C64LibraryTests
         Assert.Matches(@"ldx #\$0C.*\n.*ldy #\$1E.*\n.*clc.*\n.*jsr \$FFF0", r.Result.Listing);
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void Library_example_prints_and_writes_to_the_screen()
     {
@@ -351,6 +353,7 @@ public class C64LibraryTests
         Assert.Equal(without.Report, with.Report);
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void Register_structs_are_at_the_chip_addresses()
     {
@@ -430,6 +433,7 @@ public class C64LibraryTests
         Assert.Equal(1, m[0xD015]);
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void Interrupts_on_and_off_are_inline_without_a_call()
     {
@@ -494,6 +498,7 @@ public class C64LibraryTests
         ram.Bytes[0x0315] = 0xEA;
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void An_interrupt_handler_is_installed_with_the_kernal_in()
     {
@@ -531,6 +536,7 @@ public class C64LibraryTests
         Assert.Equal(0xFF, r.Cpu.SP);   // every interrupt left the stack as it found it
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void Kernal_irq_example_installs_its_handler_through_0314()
     {
@@ -543,6 +549,7 @@ public class C64LibraryTests
         Assert.Contains("jsr c64.cia_irqs_off", result.Listing);
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void Cia_irqs_off_turns_off_both_cias_and_clears_what_is_pending()
     {

@@ -7,11 +7,8 @@ namespace Tern.Compiler.Tests;
 /// The command line's handling of paths and option values (review code-quality-tools 2, 3, 8 and 13): every
 /// problem is a message and a documented exit code, never a stack trace or a lost file.
 /// </summary>
-public sealed class CliTests : IDisposable
+public sealed class CliTests : TempFolderTest
 {
-    private readonly DirectoryInfo _dir = Directory.CreateTempSubdirectory("tern-cli-");
-
-    public void Dispose() => _dir.Delete(recursive: true);
 
     private const string Program = "var out: u8\nfn main() { out = 1 }\n";
 
@@ -24,9 +21,8 @@ public sealed class CliTests : IDisposable
 
     private static (int Code, string Output, string Error) Tern(params string[] args)
     {
-        var (output, error) = (new StringWriter(), new StringWriter());
-        int code = Cli.Run(args, output, error);
-        return (code, output.ToString(), error.ToString().Trim());
+        var (code, output, error) = Command.Tern(args);
+        return (code, output, error.Trim());
     }
 
     private static JsonElement OnlyDiagnostic(string output)
@@ -37,6 +33,27 @@ public sealed class CliTests : IDisposable
     }
 
     // ---------- Paths (tools 2) ----------
+
+    // Found by the coverage run of R6 (review code-quality-tests, finding 4): no test reached these two.
+    [Fact]
+    public void A_read_only_output_cannot_be_written()
+    {
+        string a = Write("a.tern"), prg = Write("a.prg", "old");
+        File.SetAttributes(prg, FileAttributes.ReadOnly);
+        var (code, _, error) = Tern("--target", "c64", a);
+        File.SetAttributes(prg, FileAttributes.Normal);
+        Assert.Equal(1, code);
+        Assert.Equal($"Cannot write {prg}: access is denied (it may be a folder or read-only)", error);
+        Assert.Equal("old", File.ReadAllText(prg));
+    }
+
+    [Fact]
+    public void Run_with_a_bad_dump_is_an_error()
+    {
+        var (code, _, error) = Tern("run", "--target", "c64", Write("a.tern"), "--dump", "nosuch");
+        Assert.Equal(1, code);
+        Assert.Equal("--dump No variable 'nosuch'. Locals are written 'function.name'", error);
+    }
 
     [Fact]
     public void An_output_in_a_missing_folder_is_an_error_before_compiling()
@@ -79,7 +96,10 @@ public sealed class CliTests : IDisposable
         string missing = Path.Combine(_dir.FullName, "none.tern");
         var (code, output, _) = Tern("--target", "c64", "--json", missing);
         Assert.Equal(1, code);
-        Assert.Equal($"Cannot read {missing}: the file does not exist. Check the path", OnlyDiagnostic(output).GetProperty("message").GetString());
+        // The fix is the suggestion, as for a compiler error (R6; before, the whole text was the message).
+        var d = OnlyDiagnostic(output);
+        Assert.Equal($"Cannot read {missing}: the file does not exist.", d.GetProperty("message").GetString());
+        Assert.Equal("Check the path", d.GetProperty("suggestion").GetString());
     }
 
     [Fact]
@@ -105,7 +125,19 @@ public sealed class CliTests : IDisposable
         string lib = Write("lib2.tern", "var n: u8\nfn bump() { n += 1 }\nexport bump\n");
         var (code, _, error) = Tern("run", "--target", "c64", lib);
         Assert.Equal(1, code);
-        Assert.Contains("A binary without main cannot be run on its own: run the program that loads and calls it", error);
+        Assert.Contains("A binary without main cannot be run on its own. Call it from a program that loads it, and run that program", error);
+    }
+
+    /// <summary>A run error's fix is its suggestion in JSON (R6; review R7 fixes, suggestion 1: before, there was none).</summary>
+    [Fact]
+    public void A_run_error_has_its_suggestion_in_json()
+    {
+        string lib = Write("lib3.tern", "var n: u8\nfn bump() { n += 1 }\nexport bump\n");
+        var (code, output, _) = Tern("run", "--target", "c64", "--json", lib);
+        Assert.Equal(1, code);
+        var d = OnlyDiagnostic(output);
+        Assert.Equal("A binary without main cannot be run on its own.", d.GetProperty("message").GetString());
+        Assert.Equal("Call it from a program that loads it, and run that program", d.GetProperty("suggestion").GetString());
     }
 
     /// <summary>Throws on its first write, then works: a bug inside a command that the last catch must report.</summary>

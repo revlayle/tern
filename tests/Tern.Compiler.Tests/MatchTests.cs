@@ -76,6 +76,7 @@ public class MatchTests
         }
         """;
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void A_plain_match_of_8_or_more_compares_stays_a_chain()
     {
@@ -93,6 +94,7 @@ public class MatchTests
         Assert.Contains("cmp #$0A|beq", Listing.CodeWithLabels(r, "f"));
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void An_indexed_match_with_gaps_and_ranges_and_no_default_uses_a_jump_table()
     {
@@ -109,6 +111,7 @@ public class MatchTests
         Assert.Matches(@"Jump table of the indexed match at 4:\d+ in f: \$[0-9A-F]{4}-\$[0-9A-F]{4}, 22 bytes for 11 values", r.Result.Report);
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void An_indexed_match_from_zero_with_a_default_and_gaps()
     {
@@ -149,6 +152,7 @@ public class MatchTests
         for (int v = 0; v < 256; v++) Assert.Equal((v & 7) switch { 0 => 10, 1 => 11, 2 or 3 => 12, 7 => 14, _ => 13 }, res[v]);
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void Signed_values_in_an_indexed_match_with_a_negative_lowest_value()
     {
@@ -328,6 +332,7 @@ public class MatchTests
         Assert.Equal(5, r.U8("none"));
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void An_indexed_match_inside_a_loop_using_x_uses_y()
     {
@@ -353,6 +358,7 @@ public class MatchTests
         Assert.Matches(@"tay\|lda main\.jumphi\d+,y", Listing.CodeWithLabels(r));
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void A_long_plain_match_inside_loops_using_x_and_y_is_a_compare_chain()
     {
@@ -382,6 +388,7 @@ public class MatchTests
         Assert.DoesNotContain("jumphi", r.Result.Listing);
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void A_match_with_only_a_default_still_reads_a_volatile_value()
     {
@@ -455,32 +462,31 @@ public class MatchTests
     }
 
     [Theory]
-    [InlineData("var w: u16\nfn main() { match w { 0 => w = 1 } }", "'match' on a 16-bit value is not supported yet")]
-    [InlineData("var b: bool\nfn main() { match b { _ => b = true } }", "'match' needs a u8 or i8 value, not bool")]
-    [InlineData("var x: u8\nvar y: u8\nfn main() { match x { y => x = 1 } }", "A match pattern must be a constant")]
-    [InlineData("var x: u8\nfn main() { match x {\n 1 => x = 1\n 0, 1 => x = 2\n } }", "1 is already matched at 3:2; each value may appear in one pattern only")]
-    [InlineData("var x: u8\nfn main() { match x {\n 1..=5 => x = 1\n 5..=9 => x = 2\n } }", "5 is already matched at 3:2")]
-    [InlineData("var x: u8\nfn main() { match x {\n _ => x = 1\n 0 => x = 2\n } }", "This arm can never run: '_' above it matches every value. Put '_' last")]
-    [InlineData("var x: u8\nfn main() { match x { 1, _ => x = 1 } }", "'_' matches every value, so it must be alone in its arm")]
-    [InlineData("var x: u8\nfn main() { match x { _, 1 => x = 1 } }", "'_' matches every value, so it must be alone in its arm")]
-    [InlineData("var x: u8\nfn main() { match x { 0..5 => x = 1 } }", "A range in a match includes its end. Write 'low..=high'")]
-    [InlineData("var x: u8\nfn main() { match x { 5..=3 => x = 1 } }", "The range 5..=3 is empty; write the smaller value first")]
-    [InlineData("var x: u8\nfn main() { match x { 300 => x = 1 } }", "300 does not fit in u8 (0 to 255)")]
-    [InlineData("var x: u8\nfn main() { match x { -1 => x = 1 } }", "-1 does not fit in u8")]
-    [InlineData("var s: i8\nfn main() { match s { 200 => s = 1 } }", "200 does not fit in i8 (-128 to 127)")]
-    [InlineData("var x: u8\nfn main() { match x { 0 x = 1 } }", "Expected '=>' after the match pattern")]
-    [InlineData("var x: u8\nfn main() { match x { 0 => } }", "Expected a statement or '{ }' after '=>'")]
-    [InlineData("var x: u8\nfn main() { match x {\n 0 => x = 1\n", "'match' is not closed with '}'")]
-    [InlineData("var x: u8\nfn main() { match x 0 => x = 1 }", "Expected '{' after the match value")]
-    [InlineData("var x: u8\nfn main() { match x { 0 => break } }", "'break' and 'continue' must be inside a loop")]
-    [InlineData("var x: u8\nfn main() { match x { 0 => { var y: u8 = 1 }\n 1 => x = y } }", "'y' is not declared")]
-    [InlineData("var x: u8\nfn main() { indexed match x { _ => x = 1 } }", "An 'indexed match' needs at least one pattern besides '_'")]
-    [InlineData("var x: u8\nfn main() { indexed match x { } }", "An 'indexed match' needs at least one pattern besides '_'")]
+    [InlineData("var w: u16\nfn main() { match w { 0 => w = 1 } }", 2, 19, "'match' on a 16-bit value is not supported yet. Match on .lo or .hi, or use if / else if")]
+    [InlineData("var b: bool\nfn main() { match b { _ => b = true } }", 2, 19, "'match' needs a u8 or i8 value, not bool. Convert it with 'as u8', or use if / else if")]
+    [InlineData("var x: u8\nvar y: u8\nfn main() { match x { y => x = 1 } }", 3, 23, "A match pattern must be a constant: a number, a character or a const. Use if / else if to compare with a variable")]
+    [InlineData("var x: u8\nfn main() { match x {\n 1 => x = 1\n 0, 1 => x = 2\n } }", 4, 5, "1 is already matched at 3:2; each value may appear in one pattern only. Remove it from one of the patterns")]
+    [InlineData("var x: u8\nfn main() { match x {\n 1..=5 => x = 1\n 5..=9 => x = 2\n } }", 4, 2, "5 is already matched at 3:2; each value may appear in one pattern only. Remove it from one of the patterns")]
+    [InlineData("var x: u8\nfn main() { match x {\n _ => x = 1\n 0 => x = 2\n } }", 4, 2, "This arm can never run: '_' above it matches every value. Put '_' last")]
+    [InlineData("var x: u8\nfn main() { match x { 1, _ => x = 1 } }", 2, 26, "'_' matches every value, so it must be alone in its arm. Write '_ => ...' on its own")]
+    [InlineData("var x: u8\nfn main() { match x { _, 1 => x = 1 } }", 2, 23, "'_' matches every value, so it must be alone in its arm. Write '_ => ...' on its own")]
+    [InlineData("var x: u8\nfn main() { match x { 0..5 => x = 1 } }", 2, 24, "A range in a match includes its end. Write 'low..=high'")]
+    [InlineData("var x: u8\nfn main() { match x { 5..=3 => x = 1 } }", 2, 23, "The range 5..=3 is empty; write the smaller value first")]
+    [InlineData("var x: u8\nfn main() { match x { 300 => x = 1 } }", 2, 23, "300 does not fit in u8 (0 to 255). Use a value in that range, or a wider type")]
+    [InlineData("var x: u8\nfn main() { match x { -1 => x = 1 } }", 2, 23, "-1 does not fit in u8 (0 to 255). Use a value in that range, or a wider type")]
+    [InlineData("var s: i8\nfn main() { match s { 200 => s = 1 } }", 2, 23, "200 does not fit in i8 (-128 to 127). Use a value in that range, or a wider type")]
+    [InlineData("var x: u8\nfn main() { match x { 0 x = 1 } }", 2, 25, "Expected '=>' after the match pattern, found 'x'")]
+    [InlineData("var x: u8\nfn main() { match x { 0 => } }", 2, 28, "Expected a statement or '{ }' after '=>'. Write what the arm does, or '{ }' to do nothing")]
+    [InlineData("var x: u8\nfn main() { match x {\n 0 => x = 1\n", 2, 21, "'match' is not closed with '}'. Add '}' after its last arm")]
+    [InlineData("var x: u8\nfn main() { match x 0 => x = 1 }", 2, 21, "Expected '{' after the match value, found '0'")]
+    [InlineData("var x: u8\nfn main() { match x { 0 => break } }", 2, 28, "'break' and 'continue' must be inside a loop. Use 'return' to leave the function")]
+    [InlineData("var x: u8\nfn main() { match x { 0 => { var y: u8 = 1 }\n 1 => x = y } }", 3, 11, "'y' is not declared. Check the spelling, or declare it")]
+    [InlineData("var x: u8\nfn main() { indexed match x { _ => x = 1 } }", 2, 21, "An 'indexed match' needs at least one pattern besides '_': its table covers the values from the lowest pattern to the highest. Add a pattern, or remove 'indexed'")]
+    [InlineData("var x: u8\nfn main() { indexed match x { } }", 2, 21, "An 'indexed match' needs at least one pattern besides '_': its table covers the values from the lowest pattern to the highest. Add a pattern, or remove 'indexed'")]
     [InlineData("var x: u8\nvar o: [u8; 4]\nfn main() { for i in 0..2 using X {\n for j in 0..2 using Y {\n indexed match x {\n 0 => o[0] = 1\n 1 => o[1] = 1\n }\n }\n } }",
-        "An 'indexed match' needs X or Y to index its table, but both hold loop variables here")]
-    public void Reports_errors(string source, string expected)
+        5, 10, "An 'indexed match' needs X or Y to index its table, but both hold loop variables here. Use a plain 'match', or free a register")]
+    public void Reports_errors(string source, int line, int column, string expected)
     {
-        var e = Assert.Throws<CompileError>(() => TernCompiler.Compile(source));
-        Assert.Contains(expected, e.Description);
+        Expect.Error(source, line, column, expected);
     }
 }

@@ -163,6 +163,7 @@ public class RecordIndexTests
         Assert.Equal(Enumerable.Range(0, 8).Sum(i => i + 50) & 0xFF, r.U8("total"));
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void Constant_indexes_are_fixed_addresses_and_work_on_any_struct_size()
     {
@@ -249,6 +250,7 @@ public class RecordIndexTests
         Assert.Equal(3, r.Ram.Bytes[r.Address("c") + 10]);
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void The_table_is_left_out_when_no_variable_index_uses_it()
     {
@@ -278,6 +280,7 @@ public class RecordIndexTests
         Assert.Equal(1, r.U8("arr", 2));
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void A_user_name_cannot_clash_with_the_offset_table()
     {
@@ -294,25 +297,23 @@ public class RecordIndexTests
 
     [Theory]
     [InlineData("linear var list: [Odd; 4]\nvar i: u8\nfn main() { i = list[i].a }",
-        "'list' has records of 5 bytes, and a variable index into a linear array needs 1, 2, 4 or 8. Add '_' fields to Odd to make it 8 bytes (e.g. _: [u8; 3]), or declare the array 'indexed var list' to use a table of 4 bytes")]
-    [InlineData("linear var list: [Pair; 130]\nvar i: u8\nfn main() { i = list[i].x }", "more than the 256 an 8-bit offset reaches")]
-    [InlineData("linear var list: [Pair; 130]\nvar i: u8\nfn main() { i = list[i].x }", "Use a pointer to step through it: p = p + sizeof(Pair)")]
-    [InlineData("linear var list: [Pair; 4]\nvar i: u8\nfn main() { i = list[4].x }", "Index 4 is past the end of 'list'")]
-    [InlineData("indexed var list: [Pair; 130]\nfn main() { }", "An indexed array is at most 256 bytes")]
-    [InlineData("indexed var list: [u8; 10]\nfn main() { }", "'indexed' is for arrays of structs")]
-    [InlineData("indexed var n: u8\nfn main() { }", "'indexed' is for arrays of structs")]
-    [InlineData("indexed linear var list: [Pair; 4]\nfn main() { }", "'indexed' replaces 'linear'")]
-    [InlineData("linear indexed var list: [Pair; 4]\nfn main() { }", "'indexed' replaces 'linear'")]
-    [InlineData("indexed data list: [u8; 4] = [1, 2, 3, 4]\nfn main() { }", "'indexed' is for arrays of structs, which cannot be data")]
-    [InlineData("indexed var list: [Pair; 4]\nvar i: u8\nfn main() { var p: ptr u8 = addr(list[i].x) }", "variable index, so its address is not known")]
-    [InlineData("struct A { x: u8, _: u8 }\nvar a: A\nfn main() { a._ = 1 }", "'_' is padding in struct 'A'")]
-    [InlineData("struct A { x: u8, _: u8 }\nvar a: A\nvar n: u8\nfn main() { n = a._ }", "'_' is padding in struct 'A'")]
-    [InlineData("struct A { x: u8, _: u8 @ 0 }\nfn main() { }", "overlaps")]
+        12, 21, "'list' has records of 5 bytes, and a variable index into a linear array needs 1, 2, 4 or 8. Add '_' fields to Odd to make it 8 bytes (e.g. _: [u8; 3]), or declare the array 'indexed var list' to use a table of 4 bytes")]
+    [InlineData("linear var list: [Pair; 130]\nvar i: u8\nfn main() { i = list[i].x }", 12, 21, "'list' is 260 bytes, more than the 256 an 8-bit offset reaches, so it cannot be indexed with a variable. Use a pointer to step through it: p = p + sizeof(Pair)")]
+    [InlineData("linear var list: [Pair; 4]\nvar i: u8\nfn main() { i = list[4].x }", 12, 22, "Index 4 is past the end of 'list' (length 4). Use an index below 4")]
+    [InlineData("indexed var list: [Pair; 130]\nfn main() { }", 10, 1, "An indexed array is at most 256 bytes, so that every byte is reachable with an 8-bit offset; 'list' is 260 (130 records of 2). Use fewer records, or step through it with a pointer")]
+    [InlineData("indexed var list: [u8; 10]\nfn main() { }", 10, 1, "'indexed' is for arrays of structs, e.g. 'indexed var list: [Enemy; 20]'. Arrays of numbers are indexed directly. Remove 'indexed'")]
+    [InlineData("indexed var n: u8\nfn main() { }", 10, 1, "'indexed' is for arrays of structs, e.g. 'indexed var list: [Enemy; 20]'. Arrays of numbers are indexed directly. Remove 'indexed'")]
+    [InlineData("indexed linear var list: [Pair; 4]\nfn main() { }", 10, 1, "'indexed' replaces 'linear': it stores records the same way. Write 'indexed var', not 'indexed linear var'")]
+    [InlineData("linear indexed var list: [Pair; 4]\nfn main() { }", 10, 8, "'indexed' replaces 'linear': it stores records the same way. Write 'indexed var', not 'linear indexed var'")]
+    [InlineData("indexed data list: [u8; 4] = [1, 2, 3, 4]\nfn main() { }", 10, 1, "'indexed' is for arrays of structs, which cannot be data. Write 'indexed var list: [Enemy; 8]'")]
+    [InlineData("indexed var list: [Pair; 4]\nvar i: u8\nfn main() { var p: ptr u8 = addr(list[i].x) }", 12, 41, "'list.x' has a variable index, so its address is not known at compile time. Use a constant index, or add the record's offset to the array's address")]
+    [InlineData("struct A { x: u8, _: u8 }\nvar a: A\nfn main() { a._ = 1 }", 12, 14, "'_' is padding in struct 'A': it takes space but has no name, so it cannot be read or written. Give the field a name to use it")]
+    [InlineData("struct A { x: u8, _: u8 }\nvar a: A\nvar n: u8\nfn main() { n = a._ }", 13, 18, "'_' is padding in struct 'A': it takes space but has no name, so it cannot be read or written. Give the field a name to use it")]
+    [InlineData("struct A { x: u8, _: u8 @ 0 }\nfn main() { }", 10, 19, "Field '_' (offset 0, 1 byte(s)) overlaps field 'x' (offset 0, 1 byte(s)). Move one with '@ offset'")]
     [InlineData("struct A { n: [u8; 3], w: u8 }\nindexed var list: [A; 4]\nvar i: u8\nvar j: u8\nfn main() { j = list[i].n[j] }",
-        "needs a constant index, since the record's offset is already in the index register")]
-    public void Reports_errors(string body, string expected)
+        14, 27, "An array field in an array of structs needs a constant index, since the record's offset is already in the index register. Use a pointer to step through the array")]
+    public void Reports_errors(string body, int line, int column, string expected)
     {
-        var e = Assert.Throws<CompileError>(() => Run.Program(Header + body));
-        Assert.Contains(expected, e.Message);
+        Expect.Error(() => Run.Program(Header + body), line, column, expected);
     }
 }

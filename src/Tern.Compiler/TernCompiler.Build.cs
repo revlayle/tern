@@ -15,15 +15,12 @@ public static partial class TernCompiler
     private static CompileResult Build(CheckedProgram program, Platform platform, string? sourcePath, bool optimize) =>
         new Builder(program, platform, sourcePath, optimize).Run();
 
-    /// <summary>The assembled program: the variables' plan, the items it was assembled from, and what the platform's startup needed.</summary>
-    /// <param name="Moves">Apple II: the copies the startup code makes (spec 12.2).</param>
-    /// <param name="SystemFile">Apple II: the system file, built with those copies; null on other platforms.</param>
-    private sealed record Assembled(RamPlan Plan, List<AsmItem> Items, AssembledCode Code, (bool Nmi, bool Irq) Vectors,
-        List<AreaMove> Moves, byte[]? SystemFile);
+    /// <summary>The assembled program: the variables' plan and the items it was assembled from.</summary>
+    private sealed record Assembled(RamPlan Plan, List<AsmItem> Items, AssembledCode Code);
 
     /// <summary>The program file and its image: every byte from <see cref="LoadAddress"/> to <see cref="End"/>, gaps as zeros.</summary>
     /// <param name="Banks">The modules in banks, in the order the main file imports them (the order a bank is filled in, spec 8.5).</param>
-    private sealed record ProgramFile(byte[] File, byte[] Image, int LoadAddress, int End, int PrgSize, int PrgFirst, int BankCount, List<Module> Banks);
+    private sealed record ProgramFile(byte[] File, byte[] Image, int LoadAddress, int End, List<Module> Banks);
 
     /// <summary>One entry of a binary's or a program's table: its routine, its address, and the registers it changes.</summary>
     private sealed record TableEntry(string Name, FunctionSymbol? Function, int Address, CpuState Changed);
@@ -37,18 +34,17 @@ public static partial class TernCompiler
         private readonly CodeGen gen = new(program, platform.InstructionSet, optimize);
         private readonly MemoryLayout layout = program.Layout;
         private readonly bool binary = program.IsBinary;
-        // Apple II: the copies the startup code makes (spec 12.2). They are known only once the program
-        // is assembled, and the copying code moves what follows it, so assembly repeats until they agree.
-        private bool System => platform.Format == OutputFormat.System && !binary;
-        // The prefix code comes with io (question 150).
-        private bool WithIo => System && program.Modules.Any(m => m.IsLibrary && m.Name == "io");
-        // A cartridge (the NES): code in ROM, variables in RAM, initial values copied from ROM (spec 12.2).
-        private Cartridge? Cartridge => layout.Cartridge;
 
         private readonly Label start = new("start"), halt = new("halt"), bss = new("bss"), setup = new("setup");
-        private readonly Label moved = new("moved"), quit = new("quit");
-        private Label? prefix;
-        private readonly Label initial = new("initial"), rti = new("rti"), bankZero = new("bank_zero");
+        private readonly Label initial = new("initial");
+
+        private OutputBuild? output;
+        /// <summary>
+        /// What the program's kind of file adds to the build (<see cref="OutputFormat"/>): the platform's, or for a
+        /// binary without main the plain one, with no startup code of its own.
+        /// </summary>
+        private OutputBuild Output => output ??= (binary ? platform.Format.Plain : platform.Format)
+            .Begin(new OutputBuild.Inputs(program, platform, binary ? platform.Format.Plain : platform.Format, gen.LabelOf, start));
 
         private RegisterUse? use;
         /// <summary>The registers each function changes, made once the code is generated.</summary>
@@ -56,7 +52,6 @@ public static partial class TernCompiler
 
         public CompileResult Run()
         {
-            prefix = WithIo ? new Label("prefix_parameters") : null;
             var functionCode = gen.GenerateFunctions();
             var assembled = AssembleWithRetries(functionCode);
             var binaryTable = binary ? BinaryTable(assembled.Items) : null;
@@ -64,8 +59,7 @@ public static partial class TernCompiler
             var file = WriteFile(assembled);
             var (symbols, variables) = SymbolTables();
             // The emulators accept dots inside labels, so names stay as in the listing and cannot clash (util.bump, util_bump).
-            string labels = platform.Labels.Write(symbols, Cartridge is null ? null
-                : NesLabelMap(file.PrgFirst, file.BankCount, file.Banks.ToDictionary(m => m.Name, m => m.Bank!.Value), program.Globals.Where(g => g.InChr).Select(g => g.Name).ToHashSet()));
+            string labels = platform.Labels.Write(symbols, Output.LabelPlaces(file.Banks));
             var (entries, apiName, apiModule) = InterfaceModule(binaryTable, assembled, file);
             var overlayFiles = OverlayFiles(assembled.Code);
             var code = assembled.Code;
@@ -76,9 +70,9 @@ public static partial class TernCompiler
                 Segments = code.Segments,
                 LoadAddress = file.LoadAddress,
                 Platform = platform,
-                Entry = System ? platform.LoadAddress : start.Address,
+                Entry = Output.Entry,
                 HaltAddress = halt.Address,
-                SetsIrqVector = assembled.Vectors.Irq,
+                SetsIrqVector = Output.SetsIrqVector,
                 SourceFiles = program.Modules.Where(m => m.Path is not null).Select(m => m.Path!).ToList(),
                 Listing = code.Listing,
                 Symbols = symbols,
@@ -94,78 +88,69 @@ public static partial class TernCompiler
                 Variables = variables,
                 DeclaredFunctions = program.Modules.SelectMany(m => m.Scope.Values.OfType<FunctionSymbol>()).Select(f => f.Name).ToHashSet(),
                 TextEncoding = program.TextEncoding,
-                BankWindow = layout.Banks.Count > 0 ? Cartridge?.Board.BankArea : null,
+                BankWindow = layout.Banks.Count > 0 ? layout.Cartridge?.Board.BankArea : null,
             };
         }
 
         /// <summary>
         /// Allocates the variables and assembles the program, again until it fits. It repeats for three reasons:
-        /// the variables placed by page did not fit (then one after another), NROM's two areas must be joined,
-        /// or the Apple II's startup copies changed.
+        /// the variables placed by page did not fit (then one after another), the output joins its program areas
+        /// (NROM's two), or the output's startup code depends on where the code went (the Apple II's copies).
         /// </summary>
         private Assembled AssembleWithRetries(List<AsmItem> functionCode)
         {
             // Indexed arrays placed so that they do not cross a page, with the variables starting on one;
             // if the program areas have no room for that, the variables are placed one after another (F12).
             var indexed = IndexedReads(functionCode);
-            List<AreaMove> moves = [];
-            int passes = 0;
-            // NROM fills $C000-$FFFF first, so a small program is NROM-128; one that does not fit there is
-            // laid out again in one area, $8000-$FFFF, so that a function or table may be larger than 16 KB
-            // (review M27, finding 4).
-            var codeAreas = layout.Program;
-            bool CanJoin() => Cartridge is { Board.BankArea: null } && Joined(codeAreas).Count < codeAreas.Count;
+            IReadOnlyList<AddressRange> codeAreas = layout.Program;
             for (bool byPage = true; ;)
             {
                 var plan = Allocator.Allocate(program, byPage, indexed);
                 CheckPlan(plan);
-                var vectors = Cartridge is null ? default : CheckVectors(plan);
-                var (items, imageLabels) = Items(functionCode, plan, vectors, moves, exact: passes < 4);
+                Output.Planned(plan);
+                var (items, imageLabels) = Items(functionCode, plan);
                 // Each overlay, and each bank (its modules together), is laid out from its area's start.
                 var overlayAreas = program.Modules.Where(m => m.OverlayArea is not null).GroupBy(m => m.Unit!)
                     .ToDictionary(g => g.Key, g => layout.PlacedArea(g.First().OverlayArea!)!.Value);
                 // Placed by page, the variables may not fit, or may now overlap a fixed-address variable
                 // (review M18 part 3, finding 1): then place them one after another. That try reports
-                // any error as before.
+                // any error as before. Only errors whose reason says they depend on the layout are retried
+                // (review code-quality-backend 15); any other is the program's, whatever the layout.
+                bool retryPlain = byPage && plan.PageArrays.Count > 0;
+                AssembledCode? code;
                 try
                 {
-                    var code = Assembler.Assemble(items, codeAreas, platform.InstructionSet, () =>
+                    code = Assembler.Assemble(items, codeAreas, platform.InstructionSet, () =>
                     {
                         foreach (var (g, label) in imageLabels) g.Address = label.Address;
                         foreach (var (v, offset) in plan.ZeroedGlobals.Concat(plan.NoinitGlobals).Concat(plan.CopiedGlobals)) v.Address = bss.Address + offset;
                         foreach (var (v, offset) in plan.FrameVariables) v.Address = bss.Address + offset;
                     }, overlayAreas, program.Modules.Where(m => m.ImportedBy is not null && m.OverlayArea is not null).GroupBy(m => m.Unit!).ToDictionary(g => g.Key, g => g.First().ImportedBy!.Pos),
                     layout.Variables);
-                    CheckFixedAddresses(program, platform, code, plan);
-                    byte[]? systemFile = null;
-                    if (System)
-                    {
-                        var (built, needed) = SystemFile(platform, code.Segments, start.Address, moves.Count > 0 ? moved.Address - start.Address : 0,
-                            program.Main.Pos, program.Modules[^1].Syntax.Memory?.Pos ?? program.Main.Pos);
-                        if (!needed.SequenceEqual(moves))
-                        {
-                            if (++passes > 8) throw new InvalidOperationException("The Apple II's startup copies did not settle");
-                            moves = needed;
-                            continue;
-                        }
-                        systemFile = built;
-                    }
-                    return new Assembled(plan, items, code, vectors, moves, systemFile);
+                    if (code is not null) CheckFixedAddresses(program, platform, code, plan);
                 }
-                catch (CompileError) when (CanJoin())
+                catch (CompileError e) when (e.Reason is AreasFull && Output.Rejoined(codeAreas) is { } joined)
                 {
-                    codeAreas = Joined(codeAreas);
+                    codeAreas = joined;
                     byPage = true;
+                    continue;
                 }
-                catch (Exception e) when (byPage && plan.PageArrays.Count > 0 && e is Assembler.NoPageStart or CompileError) { byPage = false; }
-                catch (Assembler.NoPageStart)
+                catch (CompileError e) when (e.Reason is AreasFull or OverlapsPlaced && retryPlain)
                 {
-                    // Only aligned variables are left to place the block for.
+                    byPage = false;
+                    continue;
+                }
+                if (code is null)
+                {
+                    // The variables placed by page have no start: one after another, unless only aligned variables are left to place the block for.
+                    if (retryPlain) { byPage = false; continue; }
                     var widest = plan.ZeroedGlobals.Concat(plan.NoinitGlobals).Concat(plan.CopiedGlobals).Select(e => e.Var).MaxBy(v => v.Alignment)!;
                     throw new CompileError(widest.Pos,
                         $"The variables after the program ({plan.TotalSize} bytes) must start where '{widest.Name}' is at a multiple of ${widest.Alignment:X}, and no program area has room for them there. " +
                         "Make a program area larger, or use a smaller alignment");
                 }
+                if (!Output.Settled(code)) continue;
+                return new Assembled(plan, items, code);
             }
         }
 
@@ -191,7 +176,7 @@ public static partial class TernCompiler
             // The C64's BASIC line must be where the file loads; a .xex names its run address.
             if (!binary && platform.Header.Length > 0 && layout.Program[0].First != platform.LoadAddress)
                 throw new CompileError(program.Main.Pos,
-                    $"A program with 'main' starts at ${platform.LoadAddress:X4}, where the {platform.Name.ToUpperInvariant()} BASIC line goes, but its first program area begins at ${layout.Program[0].First:X4}. " +
+                    $"A program with 'main' starts at ${platform.LoadAddress:X4}, where the {platform.Title} {platform.HeaderName} goes, but its first program area begins at ${layout.Program[0].First:X4}. " +
                     (layout.ProgramReplaced ? $"Start the first 'program' line of the memory block at ${platform.LoadAddress:X4}" : "Move the 'reserved' or 'region' range that covers it"));
             CheckFixedData(program, plan);
             if (program.ExportTableAddress is int tableAt)
@@ -202,26 +187,23 @@ public static partial class TernCompiler
         /// What the assembler places: the startup code or the jump table, the functions, the tables after them,
         /// the globals' bytes, and the block of variables after the program. The labels are those of the globals in the image.
         /// </summary>
-        private (List<AsmItem> Items, Dictionary<VariableSymbol, Label> ImageLabels) Items(List<AsmItem> functionCode, RamPlan plan,
-            (bool Nmi, bool Irq) vectors, List<AreaMove> moves, bool exact)
+        private (List<AsmItem> Items, Dictionary<VariableSymbol, Label> ImageLabels) Items(List<AsmItem> functionCode, RamPlan plan)
         {
-            var items = binary ? JumpTable(plan) : Startup(plan, moves, exact);
+            var items = binary ? JumpTable(plan) : Startup(plan);
             items.AddRange(functionCode);
-            if (Cartridge is not null)
-            {
-                items.AddRange(NesVectors(start, rti, vectors));
-                if (plan.CopiedSize > 0) items.AddRange(InitialValues(plan, initial, gen.LabelOf));
-            }
+            items.AddRange(Output.AfterCode());
+            // Code in ROM (Platform.VariableRam): the initial values the startup code copies to RAM.
+            if (plan.CopiedSize > 0) items.AddRange(InitialValues(plan, initial, gen.LabelOf));
             // implements (spec 8.5): a jmp at each interface routine's address, in the overlay's file; its code goes around them.
             foreach (var entry in program.Implementations)
             {
-                items.Add(new SectionStart($"{entry.Interface.Name}.{entry.Name}", entry.Routine.FixedAddress, Overlay: entry.Module.Unit));
+                items.Add(new SectionStart($"{entry.Interface.Name}.{entry.Name}", entry.Routine.FixedAddress, Overlay: entry.Module.Unit, Module: entry.Module.Name));
                 items.Add(new Instr(Jmp, Absolute, new LabelOperand(gen.LabelOf(entry.Function))));
             }
             if (program.ExportTableAddress is int table)
             {
                 // A program's export table: one jmp per function, in the order listed (spec 12.3).
-                items.Add(new SectionStart("export table", table));
+                items.Add(new SectionStart("export table", table, Kind: SectionKind.ExportTable));
                 foreach (var export in program.Exports)
                     items.Add(new Instr(Jmp, Absolute, new LabelOperand(gen.LabelOf(export))));
             }
@@ -240,30 +222,16 @@ public static partial class TernCompiler
         }
 
         /// <summary>A program's startup code: the platform's first steps and the variables' setup, then <c>jsr main</c> and the halt loop.</summary>
-        private List<AsmItem> Startup(RamPlan plan, List<AreaMove> moves, bool exact)
+        private List<AsmItem> Startup(RamPlan plan)
         {
-            var cartridge = Cartridge;
-            List<AsmItem> items = [new SectionStart("startup"), new DataBytes(platform.Header), new LabelDef(start), new Comment("startup")];
-            if (cartridge is not null) items.Add(new Instr(Sei));
-            items.AddRange(TernCompiler.Startup(plan, bss, gen.LabelOf,
-                System ? Apple2Start(moves, moved, quit, prefix, exact) : cartridge is not null ? NesStart(cartridge.Board.BankArea is null ? null : bankZero) : [],
-                ramCleared: cartridge is not null, initial));
+            var title = platform.HeaderName is { } header ? $"{header} and startup code" : "startup code";
+            List<AsmItem> items = [new SectionStart("startup", Kind: SectionKind.Head, Title: title), new DataBytes(platform.Header), new LabelDef(start), new Comment("startup")];
+            items.AddRange(Output.BeforeStartup());
+            items.AddRange(TernCompiler.Startup(plan, bss, gen.LabelOf, Output.Prelude(), Output.RamCleared, initial));
             items.Add(new Instr(Jsr, Absolute, new LabelOperand(gen.LabelOf(program.Main))));
             items.Add(new LabelDef(halt));
             items.Add(new Instr(Jmp, Absolute, new LabelOperand(halt)));
-            if (System) items.AddRange(Apple2Quit(quit, prefix));
-            if (cartridge is not null)
-            {
-                items.Add(new Comment("an interrupt vector the program does not set"));
-                items.Add(new LabelDef(rti));
-                items.Add(new Instr(Rti));
-                if (cartridge.Board.BankArea is not null)
-                {
-                    // The latch also sees this byte (bus conflicts): writing 0 over a 0 selects bank 0.
-                    items.Add(new LabelDef(bankZero));
-                    items.Add(new DataBytes([0]));
-                }
-            }
+            items.AddRange(Output.AfterHalt());
             return items;
         }
 
@@ -273,7 +241,7 @@ public static partial class TernCompiler
         /// </summary>
         private List<AsmItem> JumpTable(RamPlan plan)
         {
-            List<AsmItem> items = [new SectionStart("jump table"), new LabelDef(start), new Instr(Jmp, Absolute, new LabelOperand(setup))];
+            List<AsmItem> items = [new SectionStart("jump table", Kind: SectionKind.Head), new LabelDef(start), new Instr(Jmp, Absolute, new LabelOperand(setup))];
             int at = layout.Program[0].First + 3;
             foreach (var export in program.Exports)
             {
@@ -301,8 +269,8 @@ public static partial class TernCompiler
                 var label = new Label(g.Name);
                 imageLabels[g] = label;
                 // A bank's data is in the bank, with its code (spec 8.5).
-                items.Add(new SectionStart(g.Name, Overlay: g.Module?.InBank == true ? g.OverlayUnit : null));
-                if (ImagePadding(g, Cartridge is null ? (byte)0 : (byte)0xFF) is { } padding) items.Add(padding);
+                items.Add(new SectionStart(g.Name, Overlay: g.Module?.InBank == true ? g.OverlayUnit : null, Module: g.Module?.Name));
+                if (ImagePadding(g, Output.Padding) is { } padding) items.Add(padding);
                 items.Add(new LabelDef(label));
                 items.AddRange(ImageBytes(g, gen.LabelOf));
             }
@@ -366,7 +334,7 @@ public static partial class TernCompiler
                 $"'{name}' changes {reg}, which '{routine}' promises to keep. Change the function so that it leaves {reg} alone, or remove {reg} from the routine's 'keeps' list";
         }
 
-        /// <summary>The program file in the platform's format: a cartridge, an Apple II system file, or the image in the platform's file.</summary>
+        /// <summary>The program file in its kind (<see cref="OutputBuild.File"/>), and the image it was made from.</summary>
         private ProgramFile WriteFile(Assembled assembled)
         {
             var segments = assembled.Code.Segments;
@@ -375,14 +343,10 @@ public static partial class TernCompiler
             int fileEnd = segments.Max(s => s.Address + s.Bytes.Length);
             var image = new byte[fileEnd - loadAddress];
             foreach (var (address, bytes) in segments) bytes.CopyTo(image, address - loadAddress);
-            byte[] file;
-            int prgSize = 0, prgFirst = 0, bankCount = 0;
             // In the order the main file imports them, which is the order a bank is filled in (spec 8.5).
             var banks = program.Modules.Where(m => m.InBank).OrderBy(m => m.ImportedBy!.Pos.Line).ThenBy(m => m.ImportedBy!.Pos.Column).ToList();
-            if (Cartridge is { } cartridge)
-                (file, prgSize, prgFirst, bankCount) = NesFile(cartridge, segments, assembled.Plan, banks.GroupBy(m => m.Unit!).ToDictionary(g => g.Key, g => g.First().Bank!.Value), assembled.Code.Overlays);
-            else file = assembled.SystemFile ?? platform.FileOf(loadAddress, image, segments, binary ? null : start.Address);
-            return new ProgramFile(file, image, loadAddress, fileEnd, prgSize, prgFirst, bankCount, banks);
+            var file = Output.File(assembled.Code, assembled.Plan, loadAddress, image, banks);
+            return new ProgramFile(file, image, loadAddress, fileEnd, banks);
         }
 
         /// <summary>The addresses of the globals, functions and locals (locals as "function.name"), and the variables' places.</summary>
@@ -393,7 +357,7 @@ public static partial class TernCompiler
             foreach (var g in program.Globals)
             {
                 symbols[g.Name] = g.Address;
-                variables[g.Name] = new VariableInfo(g.Name, g.Address, g.Type.Size, g.Type.ToString(), null, g.IsData, g.InChr);
+                variables[g.Name] = new VariableInfo(g.Name, g.Address, g.Type.Size, g.Type.ToString(), null, g.IsData, g.InChr) { Of = g.Type };
             }
             foreach (var f in program.Functions)
             {
@@ -402,7 +366,7 @@ public static partial class TernCompiler
                 foreach (var v in f.FrameVariables.Where(v => v.Kind != VariableKind.Temp))
                 {
                     symbols[v.QualifiedName] = v.Address;
-                    variables[v.QualifiedName] = new VariableInfo(v.QualifiedName, v.Address, v.Type.Size, v.Type.ToString(), f.Name, false);
+                    variables[v.QualifiedName] = new VariableInfo(v.QualifiedName, v.Address, v.Type.Size, v.Type.ToString(), f.Name, false) { Of = v.Type };
                 }
             }
             return (symbols, variables);
@@ -479,7 +443,7 @@ public static partial class TernCompiler
                 var overlayImage = new byte[segments.Max(s => s.Address + s.Bytes.Length) - first];
                 foreach (var (address, bytes) in segments) bytes.CopyTo(overlayImage, address - first);
                 overlayFiles.Add(new OverlayFile(module.Name, module.OverlayArea!, first, overlayImage,
-                    platform.FileOf(first, overlayImage, [(first, overlayImage)], null)));
+                    platform.Format.Plain.FileOf(first, overlayImage, [(first, overlayImage)], null)));
             }
             return overlayFiles;
         }

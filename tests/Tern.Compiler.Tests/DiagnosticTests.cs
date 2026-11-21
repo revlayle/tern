@@ -20,7 +20,7 @@ public class DiagnosticTests
         Assert.Equal("game.tern", d.File);
         Assert.Equal(3, d.Line);
         Assert.Equal(9, d.Column);
-        Assert.Equal("error", d.Severity);
+        Assert.Equal(Severity.Error, d.Severity);
         Assert.Equal("300 does not fit in u8 (0 to 255).", d.Message);
         Assert.Equal("Use a value in that range, or a wider type", d.Suggestion);
     }

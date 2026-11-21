@@ -5,6 +5,7 @@ namespace Tern.Compiler.Tests;
 /// <summary>M9: <c>inline asm fn</c> (spec 6.2, 7).</summary>
 public class InlineAsmTests
 {
+    [Trait("Shape", "nmos6502")]
     [Theory]
     [InlineData(0)]
     [InlineData(1)]
@@ -29,6 +30,7 @@ public class InlineAsmTests
         Assert.DoesNotContain("twice_plus_one:", r.Result.Listing);
     }
 
+    [Trait("Shape", "nmos6502")]
     [Theory]
     [InlineData(0, 5)]
     [InlineData(4, 5)]
@@ -168,6 +170,7 @@ public class InlineAsmTests
         Assert.Equal(runs, r.U8("n"));
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void An_empty_body_costs_only_the_branch()
     {
@@ -188,6 +191,7 @@ public class InlineAsmTests
         Assert.Equal(1, r.U8("yes"));
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void The_library_interrupt_switches_are_inline_asm()
     {
@@ -205,15 +209,14 @@ public class InlineAsmTests
     }
 
     [Theory]
-    [InlineData("inline asm fn f() {\n rts\n}\nfn main() { }", "would end the function that calls it")]
-    [InlineData("inline asm fn f() {\n nop\n rti\n}\nfn main() { }", "would end the function that calls it")]
-    [InlineData("inline asm fn f(x: u8) {\n nop\n}\nfn main() { }", "must be passed in a register")]
-    [InlineData("inline asm fn f(true using carry) {\n nop\n}\nfn main() { }", "Fixed inputs are only for routines at a fixed address")]
-    [InlineData("inline asm fn f() @ $1000\nfn main() { }", "not supported yet")]
-    [InlineData("inline asm fn f() { nop }\nfn main() { asm {\n jsr f\n } }", "is inline")]
-    public void Reports_errors(string source, string expected)
+    [InlineData("inline asm fn f() {\n rts\n}\nfn main() { }", 2, 2, "'rts' in an inline asm fn would end the function that calls it, since the code is copied there. Remove it: the code simply runs on after the copy")]
+    [InlineData("inline asm fn f() {\n nop\n rti\n}\nfn main() { }", 3, 2, "'rti' in an inline asm fn would end the function that calls it, since the code is copied there. Remove it: the code simply runs on after the copy")]
+    [InlineData("inline asm fn f(x: u8) {\n nop\n}\nfn main() { }", 1, 17, "Parameter 'x' of an inline asm fn must be passed in a register (using A, X, Y, AX, AY or XY): it is copied into each caller, which has no memory for it. Add 'using A', 'using X' or 'using Y'")]
+    [InlineData("inline asm fn f(true using carry) {\n nop\n}\nfn main() { }", 1, 17, "Fixed inputs are only for routines at a fixed address. An asm fn sets up its inputs in its own code. Remove it")]
+    [InlineData("inline asm fn f() @ $1000\nfn main() { }", 1, 19, "An asm fn at a fixed address is not supported yet. Remove 'asm' and the body to declare a routine that is already there, or remove the address")]
+    [InlineData("inline asm fn f() { nop }\nfn main() { asm {\n jsr f\n } }", 3, 6, "'f' is inline: it is copied into each Tern caller and has no address of its own. Call it from Tern, or remove 'inline'")]
+    public void Reports_errors(string source, int line, int column, string expected)
     {
-        var e = Assert.Throws<CompileError>(() => TernCompiler.Compile(source));
-        Assert.Contains(expected, e.Description);
+        Expect.Error(source, line, column, expected);
     }
 }

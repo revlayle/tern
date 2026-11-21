@@ -13,6 +13,7 @@ public sealed class CompileTimeExampleTests
     private static int Wave(int i, int mid, double amplitude) =>
         (int)Math.Round(mid + amplitude * Math.Sin(i * 2 * Math.PI / 256), MidpointRounding.AwayFromZero);
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void Sine_example_moves_the_ball_along_the_tables_once_per_frame()
     {
@@ -124,6 +125,7 @@ public sealed class CompileTimeExampleTests
         Assert.True(plain.Cpu.Cycles - unrolled.Cpu.Cycles > 15_000, $"{plain.Cpu.Cycles} and {unrolled.Cpu.Cycles} cycles");
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void Speedcode_listing_shows_each_generated_instruction_under_its_emit_line()
     {

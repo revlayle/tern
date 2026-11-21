@@ -74,13 +74,12 @@ public class BraceTests
     }
 
     [Theory]
-    [InlineData("var x: u8\nfn main()\n\n  x = 1\n}", "Expected '{'")]
-    [InlineData("var x: u8\nfn main() { x = 1 }\n{ x = 2 }", "")]
-    [InlineData("var x: u8 = 1\n{\nfn main() { }", "")]
-    [InlineData("var x: u8\nfn f() @ $E000\n{ }\nfn main() { }", "")]    // a routine at a fixed address has no body
-    public void A_brace_after_a_line_break_where_no_block_is_expected_is_an_error(string source, string message)
+    [InlineData("var x: u8\nfn main()\n\n  x = 1\n}", 2, 10, "Expected '{', found end of line")]
+    [InlineData("var x: u8\nfn main() { x = 1 }\n{ x = 2 }", 3, 1, "Expected 'const', 'var', 'data', 'struct' or 'fn', found '{'. Check that statements are inside a function, and that each '{' has its '}'")]
+    [InlineData("var x: u8 = 1\n{\nfn main() { }", 2, 1, "Expected 'const', 'var', 'data', 'struct' or 'fn', found '{'. Check that statements are inside a function, and that each '{' has its '}'")]
+    [InlineData("var x: u8\nfn f() @ $E000\n{ }\nfn main() { }", 3, 1, "Expected 'const', 'var', 'data', 'struct' or 'fn', found '{'. Check that statements are inside a function, and that each '{' has its '}'")]    // a routine at a fixed address has no body
+    public void A_brace_after_a_line_break_where_no_block_is_expected_is_an_error(string source, int line, int column, string message)
     {
-        var ex = Assert.Throws<CompileError>(() => Run.Program(source));
-        Assert.Contains(message, ex.Message);
+        Expect.Error(() => Run.Program(source), line, column, message);
     }
 }

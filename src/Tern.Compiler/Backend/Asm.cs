@@ -126,7 +126,21 @@ public sealed record Comment(string Text) : AsmItem;
 /// <paramref name="FixedAddress"/> goes there instead (<c>data x @ $2000</c>).
 /// </summary>
 /// <param name="Overlay">The module whose overlay file the section goes into (spec 8.5); it is placed in that module's area.</param>
-public sealed record SectionStart(string Name, int? FixedAddress = null, string? Overlay = null) : AsmItem;
+/// <param name="Kind">What the section is, where the layout treats it apart (review code-quality-backend 13: not read from its name).</param>
+/// <param name="Title">The section in messages ("the BASIC line and startup code"); its name if null.</param>
+/// <param name="Module">The module the section belongs to, for the sizes of a bank that does not fit.</param>
+public sealed record SectionStart(string Name, int? FixedAddress = null, string? Overlay = null, SectionKind Kind = SectionKind.Plain,
+    string? Title = null, string? Module = null) : AsmItem;
+
+/// <summary>What a <see cref="SectionStart"/> is, where the layout treats it apart.</summary>
+public enum SectionKind
+{
+    Plain,
+    /// <summary>The startup code or a binary's jump table: it must be at the start of the first program area.</summary>
+    Head,
+    /// <summary>A program's export table, at the address the program gives it (spec 12.3).</summary>
+    ExportTable,
+}
 
 /// <summary>
 /// Room for the variables the compiler places in the program's areas. The assembler picks the first

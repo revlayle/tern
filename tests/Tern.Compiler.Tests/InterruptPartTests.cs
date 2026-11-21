@@ -3,9 +3,8 @@ using Tern.Compiler.Syntax;
 namespace Tern.Compiler.Tests;
 
 /// <summary>An <c>interrupt fn</c> called from another <c>interrupt fn</c> is a part (spec 6.3, decision 34).</summary>
-public sealed class InterruptPartTests : IDisposable
+public sealed class InterruptPartTests : TempFolderTest
 {
-    private readonly DirectoryInfo _dir = Directory.CreateTempSubdirectory("tern");
     private string Lib => Path.Combine(_dir.FullName, "lib");
     private string Src => Path.Combine(_dir.FullName, "src");
 
@@ -14,8 +13,6 @@ public sealed class InterruptPartTests : IDisposable
         Directory.CreateDirectory(Lib);
         Directory.CreateDirectory(Src);
     }
-
-    public void Dispose() => _dir.Delete(recursive: true);
 
     private void Write(string name, string text) => File.WriteAllText(Path.Combine(Src, name), text);
 
@@ -48,9 +45,10 @@ public sealed class InterruptPartTests : IDisposable
              a() }
             fn main() { out = 1 }
             """);
-        Assert.Contains("Recursion is not allowed: a -> b -> a", e.Message);
+        Expect.Message(e, 2, 11, "Recursion is not allowed: a -> b -> a. Use a loop instead, with an array as the stack if needed");
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void A_part_with_parameters_and_a_flag_return_runs_inside_the_handler()
     {
@@ -140,6 +138,7 @@ public sealed class InterruptPartTests : IDisposable
     }
 
     /// <summary>Handlers clear decimal mode first, unless they run no adc, sbc or jsr (spec 6.3).</summary>
+    [Trait("Shape", "nmos6502")]
     [Theory]
     [InlineData("var x: u8\nvar y: u8\ninterrupt fn frame() { x += y }", true)]
     [InlineData("var x: u8\nvar y: u8\ninterrupt fn frame() { x = y - 1 }", true)]
@@ -157,6 +156,7 @@ public sealed class InterruptPartTests : IDisposable
         Assert.Equal("rti", code[^1]);
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void A_part_ends_with_rts_and_its_handler_with_rti()
     {
@@ -171,16 +171,16 @@ public sealed class InterruptPartTests : IDisposable
     }
 
     [Theory]
-    [InlineData("interrupt fn p() { }\nfn main() { p() }", "'p' is an interrupt fn, which only the CPU or another interrupt fn calls")]
-    [InlineData("interrupt fn p() { }\nfn helper() { p() }\ninterrupt fn h() { helper() }\nfn main() { }", "'p' is an interrupt fn, which only the CPU or another interrupt fn calls")]
-    [InlineData("interrupt fn p(a: u8) { }\nfn main() { }", "'p' has parameters, so it can only be called as a part")]
-    [InlineData("interrupt fn p() -> u8 { return 1 }\nfn main() { }", "'p' has a return value, so it can only be called as a part")]
-    [InlineData("interrupt fn p() { }\ninterrupt fn h() { p() }\nfn main() { asm {\n lda #p.lo\n } }", "is called by another interrupt fn")]
-    [InlineData("interrupt fn p() { h() }\ninterrupt fn h() { p() }\ninterrupt fn r() { p() }\nfn main() { }", "recursion")]
-    public void Part_errors(string source, string expected)
+    [InlineData("interrupt fn p() { }\nfn main() { p() }", 2, 13, "'p' is an interrupt fn, which only the CPU or another interrupt fn calls. Install its address in the interrupt vector, or call it from an interrupt fn")]
+    [InlineData("interrupt fn p() { }\nfn helper() { p() }\ninterrupt fn h() { helper() }\nfn main() { }", 2, 15, "'p' is an interrupt fn, which only the CPU or another interrupt fn calls. Install its address in the interrupt vector, or call it from an interrupt fn")]
+    [InlineData("interrupt fn p(a: u8) { }\nfn main() { }", 1, 11, "'p' has parameters, so it can only be called as a part of another interrupt fn. An interrupt handler takes no parameters and returns no value: the CPU calls it, not your code. Remove them, or call it only from an interrupt fn")]
+    [InlineData("interrupt fn p() -> u8 { return 1 }\nfn main() { }", 1, 11, "'p' has a return value, so it can only be called as a part of another interrupt fn. An interrupt handler takes no parameters and returns no value: the CPU calls it, not your code. Remove them, or call it only from an interrupt fn")]
+    [InlineData("interrupt fn p() { }\ninterrupt fn h() { p() }\nfn main() { asm {\n lda #p.lo\n } }", 1, 11, "'p' is called by another interrupt fn (so it is compiled as a part, ending with rts) and its address is also used to install it (which needs rti). Use it one way, or write a second interrupt fn for the other")]
+    [InlineData("interrupt fn p() { h() }\ninterrupt fn h() { p() }\ninterrupt fn r() { p() }\nfn main() { }", 1, 11, "Recursion is not allowed: p -> h -> p. Use a loop instead, with an array as the stack if needed")]
+    public void Part_errors(string source, int line, int column, string expected)
     {
         var e = Fail(source);
-        Assert.Contains(expected, e.Description, StringComparison.OrdinalIgnoreCase);
+        Expect.Message(e, line, column, expected);
     }
 
     [Fact]
@@ -216,6 +216,7 @@ public sealed class InterruptPartTests : IDisposable
             """), "p");
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void A_handler_called_only_by_an_uncompiled_module_handler_is_still_a_handler()
     {
@@ -248,7 +249,7 @@ public sealed class InterruptPartTests : IDisposable
                 }
             }
             """);
-        Assert.Contains("is called by another interrupt fn", e.Description);
+        Expect.Message(e, 2, 11, "'timer.tick' is called by another interrupt fn (so it is compiled as a part, ending with rts) and its address is also used to install it (which needs rti). Use it one way, or write a second interrupt fn for the other");
     }
 
     [Fact]
@@ -265,6 +266,6 @@ public sealed class InterruptPartTests : IDisposable
             interrupt fn h() { m.bump() }
             fn main() { s = m.read() }
             """);
-        Assert.Contains("a private variable of its module", e.Description);
+        Expect.Message(e, 3, 11, "'m.read' (called from main) and 'm.bump' (called from the interrupt handler 'h') both use 'm.n', a private variable of its module. An interrupt could change it while the other is using it. Call functions of this module from only main or only one interrupt handler");
     }
 }

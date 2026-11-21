@@ -123,8 +123,33 @@ public class BenchmarkTests
         },
     };
 
+    /// <summary>The benchmarks' names, each with every platform.</summary>
+    public static TheoryData<string, string> OnEveryPlatform()
+    {
+        var data = new TheoryData<string, string>();
+        foreach (var path in Directory.GetFiles(Directory_, "*.tern").Order(StringComparer.Ordinal))
+            foreach (var platform in Platform.All)
+                // copy.tern copies 1000 bytes from $4000 to $5000: RAM the NES does not have (2 KB; $4000 is its APU).
+                if (!(Path.GetFileName(path) == "copy.tern" && platform == Platform.Nes)) data.Add(Path.GetFileNameWithoutExtension(path), platform.Name);
+        return data;
+    }
+
+    /// <summary>
+    /// A benchmark's results, on every platform (review code-quality-tests 5), one case per program so that a wrong
+    /// result does not hide the others (14). Before R6 the Atari and the Apple II each had a copy, and the NES none.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(OnEveryPlatform))]
+    public void A_benchmark_gives_the_right_results(string name, string target)
+    {
+        var path = Path.Combine(Directory_, name + ".tern");
+        var r = Run.Program(File.ReadAllText(path), sourcePath: path, maxCycles: 20_000_000, platform: Platform.ByName(target));
+        Checks[name](new Results(r.Ram, (n, o) => r.Address(n) + o));
+    }
+
+    /// <summary>The bytes and cycles of each benchmark on the C64, against the baseline.</summary>
     [Fact]
-    public void Benchmarks_give_the_right_results_with_the_recorded_size_and_speed()
+    public void The_benchmarks_have_the_recorded_size_and_speed()
     {
         string dir = Directory_;
         var names = Directory.GetFiles(dir, "*.tern").Select(Path.GetFileNameWithoutExtension).Order(StringComparer.Ordinal).ToList();
@@ -134,8 +159,7 @@ public class BenchmarkTests
         foreach (var name in names)
         {
             var path = Path.Combine(dir, name + ".tern");
-            var r = Run.Program(File.ReadAllText(path), sourcePath: path, maxCycles: 20_000_000);
-            Checks[name!](new Results(r.Ram, (n, o) => r.Address(n) + o));
+            var r = Run.Program(File.ReadAllText(path), sourcePath: path, maxCycles: 20_000_000, platform: Platform.C64);
             measured.Add((name!, r.Result.Image.Length, r.Cpu.Cycles));
         }
 
@@ -174,6 +198,7 @@ public class BenchmarkTests
     }
 
     /// <summary>The instructions of main between a label and the next, as mnemonics (M9: same as the assembly).</summary>
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void The_sieve_inner_loop_is_the_loop_of_the_assembly_version()
     {

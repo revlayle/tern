@@ -275,6 +275,7 @@ public class InlineLocalsTests
         Assert.NotEqual(s["main.swap_nibbles.t"], s["h.swap_nibbles.t"]);
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void An_inline_asm_fn_with_a_local_compiles_to_its_instructions_only()
     {

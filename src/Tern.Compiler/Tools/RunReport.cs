@@ -1,7 +1,4 @@
-using System.Globalization;
 using System.Text;
-using System.Text.Encodings.Web;
-using System.Text.Json;
 
 namespace Tern.Compiler.Tools;
 
@@ -48,9 +45,7 @@ public sealed record MemoryDump(string What, int Address, int Size, VariableInfo
 
     private static int Number(string s, string whole)
     {
-        bool ok = s.StartsWith('$')
-            ? int.TryParse(s[1..], NumberStyles.HexNumber, CultureInfo.InvariantCulture, out int n)
-            : int.TryParse(s, NumberStyles.None, CultureInfo.InvariantCulture, out n);
+        bool ok = MemorySet.TryNumber(s, out int n);
         if (!ok || n < 0 || n > 0xFFFF) throw new FormatException($"'{whole}': '{s}' is not an address or count (write $C000 or 49152)");
         return n;
     }
@@ -58,17 +53,10 @@ public sealed record MemoryDump(string What, int Address, int Size, VariableInfo
     /// <summary>The value of a one- or two-byte variable as its type reads it; null for other dumps.</summary>
     public long? Value(byte[] memory)
     {
-        if (Variable is null || Size != Variable.Size) return null;
-        int lo = memory[Address];
-        return Variable.Type switch
-        {
-            "u8" or "bool" => lo,
-            "i8" => (sbyte)lo,
-            "u16" => lo | memory[Address + 1] << 8,
-            "i16" => (short)(lo | memory[Address + 1] << 8),
-            _ when Variable.Type.StartsWith("ptr ") => lo | memory[Address + 1] << 8,
-            _ => null,
-        };
+        if (Variable?.Of is not { } type || Size != Variable.Size) return null;
+        if (!(type.IsInteger || type.IsPointer || type.Kind == Semantics.TypeKind.Bool) || type.Size > 2) return null;
+        int value = type.Size == 1 ? memory[Address] : memory[Address] | memory[Address + 1] << 8;
+        return !type.IsSigned ? value : type.Size == 1 ? (sbyte)value : (short)value;
     }
 }
 
@@ -125,45 +113,14 @@ public static class RunReport
         return sb.ToString();
     }
 
-    private static readonly JsonSerializerOptions Options = new()
-    {
-        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-        WriteIndented = true,
-        Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
-    };
-
     /// <param name="warnings">The program's warnings (spec 13).</param>
     public static string Json(RunResult run, IReadOnlyList<MemoryDump> dumps, bool screen, IReadOnlyList<LineTable.Row>? profile, IReadOnlyList<Diagnostic>? warnings = null) =>
-        JsonSerializer.Serialize(new
-        {
-            ok = true,
-            returned = run.Returned,
-            stop = run.Stop,
-            cycles = run.Cycles,
-            mainCycles = run.MainCycles,
-            interrupts = run.Interrupts,
-            interruptCycles = run.Profile.InterruptCycles,
-            registers = new { a = run.Cpu.A, x = run.Cpu.X, y = run.Cpu.Y, sp = run.Cpu.SP, pc = run.Cpu.PC },
-            output = run.Output,
-            indexErrors = run.IndexErrors.Select(e => new { file = e.File, line = e.Line, source = e.Source, message = e.Message, cycle = e.Cycle, count = e.Count }),
-            memory = dumps.Select(d => new
-            {
-                what = d.What,
-                address = d.Address,
-                size = d.Size,
-                type = d.Variable?.Type,
-                value = d.Value(run.Ram.Bytes),
-                bytes = run.Ram.Bytes.AsSpan(d.Address, d.Size).ToArray().Select(b => (int)b).ToArray(),
-            }),
-            screen = screen ? Runner.ScreenText(run) : null,
-            functions = profile is null ? null : run.Functions,
-            lines = profile?.Select(r => new
-            {
-                file = r.File, line = r.Line, source = r.Source, bytes = r.Bytes, cycles = r.Cycles, moreCycles = r.MoreCycles,
-                runs = r.Runs, runCycles = r.Executed,
-            }),
-            diagnostics = warnings ?? [],
-        }, Options);
+        JsonOutput.Write(new RunOutput(true, run.Returned, run.Stop, run.Cycles, run.MainCycles, run.Interrupts, run.Profile.InterruptCycles,
+            new RegistersOutput(run.Cpu.A, run.Cpu.X, run.Cpu.Y, run.Cpu.SP, run.Cpu.PC), run.Output,
+            run.IndexErrors.Select(IndexErrorOutput.From),
+            dumps.Select(d => new MemoryOutput(d.What, d.Address, d.Size, d.Variable?.Type, d.Value(run.Ram.Bytes),
+                run.Ram.Bytes.AsSpan(d.Address, d.Size).ToArray().Select(b => (int)b).ToArray())),
+            screen ? Runner.ScreenText(run) : null, profile is null ? null : run.Functions, profile?.Select(LineOutput.From), warnings ?? []));
 
     private static string Capitalize(string s) => s.Length == 0 ? s : char.ToUpperInvariant(s[0]) + s[1..];
 }

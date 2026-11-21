@@ -72,6 +72,7 @@ public class ByteShiftTests
         Assert.Equal((ushort)((v >> k) - 1000), r.U16("r12"));
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void The_code_moves_a_byte_as_spec_11_shows()
     {

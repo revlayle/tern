@@ -3,9 +3,8 @@ using Tern.Compiler.Syntax;
 namespace Tern.Compiler.Tests;
 
 /// <summary>Module parameters (spec 2.2) and compile-time <c>assert</c> (spec 4.1).</summary>
-public sealed class ModuleParameterTests : IDisposable
+public sealed class ModuleParameterTests : TempFolderTest
 {
-    private readonly DirectoryInfo _dir = Directory.CreateTempSubdirectory("tern");
     private string Lib => Path.Combine(_dir.FullName, "lib");
     private string Src => Path.Combine(_dir.FullName, "src");
 
@@ -14,8 +13,6 @@ public sealed class ModuleParameterTests : IDisposable
         Directory.CreateDirectory(Lib);
         Directory.CreateDirectory(Src);
     }
-
-    public void Dispose() => _dir.Delete(recursive: true);
 
     private void Write(string name, string text) => File.WriteAllText(Path.Combine(Src, name), text);
 
@@ -115,21 +112,21 @@ public sealed class ModuleParameterTests : IDisposable
     }
 
     [Theory]
-    [InlineData("import sprites(COUNT = 7)\nfn main() { }", "sprites.COUNT must be 8 to 64")]
-    [InlineData("import sprites(COUNT = 65)\nfn main() { }", "sprites.COUNT must be 8 to 64")]
-    [InlineData("import sprites(COUNT = 256)\nfn main() { }", "256 does not fit in u8")]
-    [InlineData("import sprites(DELTA = 128)\nfn main() { }", "128 does not fit in i8")]
-    [InlineData("import sprites(WIDE = -1)\nfn main() { }", "-1 does not fit in u16")]
-    [InlineData("import sprites(FLICKER = 1)\nfn main() { }", "Expected bool, found a number")]
-    [InlineData("import sprites(COUNT = true)\nfn main() { }", "Expected u8, found bool")]
-    [InlineData("import sprites(SIZE = 10)\nfn main() { }", "Module 'sprites' has no parameter 'SIZE'; its parameters are COUNT, WIDE, FLICKER, DELTA")]
-    [InlineData("import sprites(COUNT = 10, COUNT = 11)\nfn main() { }", "Parameter 'COUNT' is set twice")]
-    [InlineData("import sprites(COUNT = x)\nvar x: u8\nfn main() { }", "'x' is not declared")]
-    public void Wrong_parameter_values_are_errors_at_the_import_line(string source, string expected)
+    [InlineData("import sprites(COUNT = 7)\nfn main() { }", 1, 8, "sprites.COUNT must be 8 to 64 (assert at sprites.tern:2:1)")]
+    [InlineData("import sprites(COUNT = 65)\nfn main() { }", 1, 8, "sprites.COUNT must be 8 to 64 (assert at sprites.tern:2:1)")]
+    [InlineData("import sprites(COUNT = 256)\nfn main() { }", 1, 24, "256 does not fit in u8 (0 to 255). Use a value in that range, or a wider type")]
+    [InlineData("import sprites(DELTA = 128)\nfn main() { }", 1, 24, "128 does not fit in i8 (-128 to 127). Use a value in that range, or a wider type")]
+    [InlineData("import sprites(WIDE = -1)\nfn main() { }", 1, 23, "-1 does not fit in u16 (0 to 65535). Use a value in that range, or a wider type")]
+    [InlineData("import sprites(FLICKER = 1)\nfn main() { }", 1, 26, "Expected bool, found a number. Write true or false, or compare, as in 'x != 0'")]
+    [InlineData("import sprites(COUNT = true)\nfn main() { }", 1, 24, "Expected u8, found bool. Use 'if' to choose a number, as in 'if b { x = 1 }'")]
+    [InlineData("import sprites(SIZE = 10)\nfn main() { }", 1, 16, "Module 'sprites' has no parameter 'SIZE'; its parameters are COUNT, WIDE, FLICKER, DELTA. Use one of those names")]
+    [InlineData("import sprites(COUNT = 10, COUNT = 11)\nfn main() { }", 1, 28, "Parameter 'COUNT' is set twice. Remove one")]
+    [InlineData("import sprites(COUNT = x)\nvar x: u8\nfn main() { }", 1, 24, "'x' is not declared. Check the spelling, or declare it. A parameter value uses literals and the main file's constants that do not depend on imported modules. Write the value as a number")]
+    public void Wrong_parameter_values_are_errors_at_the_import_line(string source, int line, int column, string expected)
     {
         Write("sprites.tern", Sprites);
         var e = Fail(source);
-        Assert.Contains(expected, e.Description);
+        Expect.Message(e, line, column, expected);
         Assert.Equal(1, e.Pos.Line);
         Assert.Equal(Path.Combine(Src, "main.tern"), e.Pos.File);
     }
@@ -140,8 +137,7 @@ public sealed class ModuleParameterTests : IDisposable
         Write("sprites.tern", Sprites);
         var e = Fail("\n\nimport sprites(COUNT = 70)\nfn main() { }");
         Assert.Equal(3, e.Pos.Line);
-        Assert.Contains("sprites.COUNT must be 8 to 64", e.Description);
-        Assert.Contains("sprites.tern:2", e.Description);
+        Expect.Message(e, 3, 8, "sprites.COUNT must be 8 to 64 (assert at sprites.tern:2:1)");
     }
 
     [Fact]
@@ -151,7 +147,7 @@ public sealed class ModuleParameterTests : IDisposable
         var e = Fail("\nimport sized(COUNT = 40)\nfn main() { }");
         Assert.Equal(2, e.Pos.Line);
         Assert.Equal(Path.Combine(Src, "main.tern"), e.Pos.File);
-        Assert.Contains("sized.COUNT must be 32 or less", e.Description);
+        Expect.Message(e, 2, 8, "sized.COUNT must be 32 or less (assert at sized.tern:4:1)");
     }
 
     [Fact]
@@ -173,14 +169,13 @@ public sealed class ModuleParameterTests : IDisposable
     {
         Write("sprites.tern", Sprites);
         var e = Fail("import sprites(COUNT = S)\ndata t: [u8; 9] = [1, 2, 3, 4, 5, 6, 7, 8, 9]\nconst S = len(t)\nfn main() { }");
-        Assert.Contains("'S' cannot be used in a parameter value", e.Description);
-        Assert.Contains("'t'", e.Description);
+        Expect.Message(e, 1, 24, "'S' cannot be used in a parameter value, since it does not check without the rest of the program: 't' is not declared. Check the spelling, or declare it. Write the value as a number");
     }
 
     [Fact]
     public void Assert_inside_a_function_says_where_it_goes()
     {
-        Assert.Contains("Write it at the top level or in a const fn", Fail("fn main() {\n assert true, \"x\"\n}").Description);
+        Expect.Message(Fail("fn main() {\n assert true, \"x\"\n}"), 2, 2, "An assert is checked at compile time. Write it at the top level or in a const fn");
     }
 
     [Fact]
@@ -211,26 +206,26 @@ public sealed class ModuleParameterTests : IDisposable
     [Fact]
     public void An_assert_condition_must_be_a_constant_bool()
     {
-        Assert.Contains("known at compile time", Fail("var x: u8\nassert x == 1, \"m\"\nfn main() { }").Description);
-        Assert.Contains("is a bool", Fail("assert 1 + 1, \"m\"\nfn main() { }").Description);
-        Assert.Contains("message string", Fail("assert true\nfn main() { }").Description);
-        Assert.Contains("message string", Fail("assert true, 5\nfn main() { }").Description);
+        Expect.Message(Fail("var x: u8\nassert x == 1, \"m\"\nfn main() { }"), 2, 10, "An assert condition must be known at compile time. Use constants, sizeof and len");
+        Expect.Message(Fail("assert 1 + 1, \"m\"\nfn main() { }"), 1, 10, "An assert condition is a bool. Write a comparison, e.g. COUNT <= 64");
+        Expect.Message(Fail("assert true\nfn main() { }"), 1, 12, "Expected ',' and a message string after the condition, found end of line");
+        Expect.Message(Fail("assert true, 5\nfn main() { }"), 1, 14, "Expected a message string, found '5'");
     }
 
     [Fact]
     public void Header_errors()
     {
         Write("other.tern", "module wrong(A: u8 = 1)\nfn f() { }");
-        Assert.Contains("says 'wrong' but the file is other.tern", Fail("import other\nfn main() { }").Description);
-        Assert.Contains("main file has no module header", Fail("module main(A: u8 = 1)\nfn main() { }").Description);
+        Expect.Message(Fail("import other\nfn main() { }"), 1, 1, "The module header says 'wrong' but the file is other.tern; the name must match the file. Rename one of them");
+        Expect.Message(Fail("module main(A: u8 = 1)\nfn main() { }"), 1, 1, "The main file has no module header; 'module' is only for modules that have parameters. Remove the header");
         Write("plain.tern", "fn f() { }");
-        Assert.Contains("has no parameters", Fail("import plain(A = 1)\nfn main() { }").Description);
+        Expect.Message(Fail("import plain(A = 1)\nfn main() { }"), 1, 14, "Module 'plain' has no parameters (it has no 'module plain(...)' header). Remove the arguments from the import");
         Write("p.tern", "module p(A: u8)\nfn f() { }");
-        Assert.Contains("every module parameter has a default", Fail("import p\nfn main() { }").Description);
+        Expect.Message(Fail("import p\nfn main() { }"), 1, 15, "Expected '= default value' (every module parameter has a default), found ')'");
         Write("q.tern", "module q(A: [u8; 2] = 1)\nfn f() { }");
-        Assert.Contains("integer type or bool", Fail("import q\nfn main() { }").Description);
+        Expect.Message(Fail("import q\nfn main() { }"), 1, 13, "A module parameter is an integer type or bool. Use u8, i8, u16, i16 or bool");
         Write("r.tern", "import p\nmodule r(A: u8 = 1)\nfn f() { }");
-        Assert.Contains("must be the first line", Fail("import r\nfn main() { }").Description);
+        Expect.Message(Fail("import r\nfn main() { }"), 2, 1, "'module' must be the first line of the file, before the imports. Move it there");
     }
 
     [Fact]
@@ -239,7 +234,7 @@ public sealed class ModuleParameterTests : IDisposable
         Write("sprites.tern", Sprites);
         Write("user.tern", "import sprites(COUNT = 10)\nfn get() -> u8 { return sprites.COUNT }");
         var e = Fail("import user\nfn main() { }");
-        Assert.Contains("Only the program's main file can set the parameters", e.Description);
+        Expect.Message(e, 1, 16, "Only the program's main file can set the parameters of 'sprites', since a module is loaded once. Import it plainly here and set COUNT in the main file");
         Assert.EndsWith("user.tern", e.Pos.File);
     }
 

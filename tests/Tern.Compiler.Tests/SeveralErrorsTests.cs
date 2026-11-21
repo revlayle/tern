@@ -9,11 +9,8 @@ namespace Tern.Compiler.Tests;
 /// accepts every use. Errors are sorted by place (decision 108): the main file, then modules in the order
 /// first imported; by line and column within a file.
 /// </summary>
-public sealed class SeveralErrorsTests : IDisposable
+public sealed class SeveralErrorsTests : TempFolderTest
 {
-    private readonly DirectoryInfo _dir = Directory.CreateTempSubdirectory("tern");
-
-    public void Dispose() => _dir.Delete(recursive: true);
 
     /// <summary>Every error of the compile as "line: message", without the fix sentence (with the file name when it is not main.tern).</summary>
     private List<string> Errors(string source, int? maxErrors = null, params (string Name, string Text)[] modules)
@@ -493,7 +490,7 @@ public sealed class SeveralErrorsTests : IDisposable
         // Recursion is found in the call graph, which needs a program without errors.
         var e = Assert.Throws<CompileError>(() => TernCompiler.Compile("fn a() { b() }\nfn b() { a() }\nfn main() { a() }"));
         Assert.Single(e.All);
-        Assert.Contains("Recursion is not allowed", e.Description);
+        Expect.Message(e, 1, 1, "Recursion is not allowed: a -> b -> a. Use a loop instead, with an array as the stack if needed");
         e = Assert.Throws<CompileError>(() => TernCompiler.Compile("var x: u8\nfn a() { b() }\nfn b() { a() }\nfn main() {\n a()\n x = true\n}"));
         Assert.Equal(["Expected u8, found bool. Use 'if' to choose a number, as in 'if b { x = 1 }'"], e.All.Select(x => x.Description));
     }
@@ -507,12 +504,7 @@ public sealed class SeveralErrorsTests : IDisposable
         return path;
     }
 
-    private static (int Code, string Output, string Error) Tern(params string[] args)
-    {
-        var (output, error) = (new StringWriter(), new StringWriter());
-        int code = Cli.Run(Command.C64(args), output, error);
-        return (code, output.ToString(), error.ToString());
-    }
+    private static (int Code, string Output, string Error) Tern(params string[] args) => Command.Tern(Command.C64(args));
 
     [Fact]
     public void Tern_prints_every_error_then_their_number()

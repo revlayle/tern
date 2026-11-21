@@ -11,25 +11,14 @@ public static partial class TernCompiler
     {
         private string Report(Assembled assembled, ProgramFile file, List<(string Name, int Address)> entries, List<OverlayFile> overlayFiles)
         {
-            var (plan, code, moves, systemFile) = (assembled.Plan, assembled.Code, assembled.Moves, assembled.SystemFile);
-            var cartridge = Cartridge;
+            var (plan, code) = (assembled.Plan, assembled.Code);
             var report = new StringBuilder();
             // A .prg holds the gaps between areas; a .xex and a system file hold only the runs of bytes.
-            report.AppendLine(platform.Format == OutputFormat.Prg
+            report.AppendLine(platform.Format.HoldsGaps
                 ? $"Code and data: ${file.LoadAddress:X4}-${file.End - 1:X4} ({file.Image.Length} bytes)"
                 : $"Code and data: {string.Join(", ", code.Segments.Select(s => $"${s.Address:X4}-${s.Address + s.Bytes.Length - 1:X4}"))} ({code.Segments.Sum(s => s.Bytes.Length)} bytes)");
-            if (systemFile is not null)
-                report.AppendLine($"System file: {systemFile.Length} bytes, loaded at ${platform.LoadAddress:X4}-${platform.LoadAddress + systemFile.Length - 1:X4}"
-                    + (moves.Count > 0 ? $"; the startup code copies {Plural(moves.Count, "area", "areas")} into place: {string.Join(", ", moves.Select(m => $"${m.From:X4} to ${m.To:X4}, {m.Count} bytes"))}" : ""));
-            if (WithIo)
-                report.AppendLine($"io: {PrefixSize} bytes of startup code, which set an empty prefix to the program's folder");
-            if (cartridge is not null)
-                report.AppendLine($"Cartridge: {cartridge.Board.Name} (mapper {cartridge.Board.Mapper}), {(cartridge.VerticalMirroring ? "vertical" : "horizontal")} mirroring, " +
-                    (cartridge.Board.BankArea is null ? $"{file.PrgSize / 1024} KB of PRG ROM at ${file.PrgFirst:X4}-$FFFF, "
-                        : $"{file.PrgSize / 1024} KB of PRG ROM in {Plural(file.BankCount, "bank", "banks")} of 16 KB, the last fixed at $C000-$FFFF, ") +
-                    (cartridge.Board.ChrRom ? $"{ChrBank / 1024} KB of CHR ROM" : "CHR RAM") +
-                    (plan.CopiedSize > 0 ? $"; the startup code copies {Plural(plan.CopiedSize, "byte", "bytes")} of initial values to RAM" : ""));
-            string variablesAt = cartridge is null ? "after the program" : "in RAM";
+            foreach (var line in Output.ReportLines(plan)) report.AppendLine(line);
+            string variablesAt = platform.VariableRam is null ? "after the program" : "in RAM";
             report.AppendLine(code.Variables is { } vars
                 ? $"Variables {variablesAt}: {plan.TotalSize} bytes, up to ${vars.Last:X4}"
                   + (plan.PageArrays.Count > 0

@@ -48,6 +48,27 @@ public class RunModelTests
         Assert.Equal($"The cartridge has mapper {mapper}, which tern run does not model: it runs mappers 0 (NROM) and 2 (UxROM). Use an emulator such as Mesen to run it", e.Message);
     }
 
+    // ---------- Each platform names its machine (tools 1) ----------
+
+    /// <summary>A platform with no machine in tern run, as a new one starts: before R6 it ran with the C64's stand-ins and screen.</summary>
+    [Fact]
+    public void A_platform_with_no_machine_is_an_error_not_a_run_as_a_c64()
+    {
+        var other = PlatformDataTests.Like(Platform.C64, "c128", machine: false);
+        var program = TernCompiler.Compile("var x: u8\nfn main() { x = 1 }", other);
+        var e = Assert.Throws<RunError>(() => Runner.Run(program));
+        Assert.Equal("tern run has no model of the C128. Use an emulator to run the program", e.Message);
+    }
+
+    /// <summary>The screen is read from the machine that ran, not a new one: the NES's from its PPU, the others' from RAM.</summary>
+    [Fact]
+    public void The_screen_is_the_machine_that_ran()
+    {
+        var run = Runner.Run(TernCompiler.Compile(Nrom + "encoding tiles { 'A' = 1 }\ndefault encoding tiles\nfn main() {\n    nes.ppu_fill($2000, 'A', 1)\n}", Platform.Nes));
+        Assert.Equal("A", Runner.ScreenText(run)[0]);
+        Assert.Equal((0x2000, 32, 30), Runner.Screen(run));
+    }
+
     // ---------- OAM DMA through the bus (tools 15) ----------
 
     [Theory]

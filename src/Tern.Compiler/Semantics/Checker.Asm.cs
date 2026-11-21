@@ -66,7 +66,7 @@ public sealed partial class Checker
             case AsmLabelExpr l:
                 return labels.TryGetValue(l.Name, out var label)
                     ? new AsmValue(0, Label: label)
-                    : throw new CompileError(l.Pos, $"Label '{l.Name}' is not defined in this asm block. Define it with '.{l.Name}:' on a line of the block");
+                    : throw new CompileError(l.Pos, $"Label '{l.Name}' is not defined in this asm block. Define it with '{l.Name}:' on a line of the block");
 
             case NameExpr n:
                 switch (Named(n.Bound, n.Name) ?? Lookup(n.Name))
@@ -338,7 +338,7 @@ public sealed partial class Checker
         {
             // On a cartridge, data is ROM: a store leaves it as it is and reaches the board's latch, as
             // uxrom.select's bus-conflict table needs (provisional, question 159).
-            if (variable.IsData && _platform.Boards.Count > 0) return;
+            if (variable.IsData && _layout.Cartridge is not null) return;
             if (variable.IsData) throw new CompileError(ins.Operand!.Pos, $"'{variable.Name}' is data, which is read-only. Declare it with 'var' to change it");
             if (variable.ReadOnly)
                 throw new CompileError(ins.Operand!.Pos, $"Loop variable '{variable.Name}' cannot be changed inside the loop. Use a 'while' loop to change the counter yourself");

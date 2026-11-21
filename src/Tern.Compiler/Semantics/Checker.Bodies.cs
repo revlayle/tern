@@ -197,7 +197,7 @@ public sealed partial class Checker
             if (a.Value.Type.IsPointer && target.Type.Kind == TypeKind.U16)
                 throw new CompileError(a.Value.Pos, $"Expected {target.Type}, found {a.Value.Type}. Convert with 'as u16'");
             try { Coerce(a.Value, target.Type); }
-            catch (CompileError error) when (a.Value.ConstValue is long v && error.Description.Contains(" does not fit in "))
+            catch (CompileError error) when (error.Reason is DoesNotFit && a.Value.ConstValue is long v)
             {
                 var wider = WiderFor(v, target.Type);
                 var written = Describe(target);
@@ -344,8 +344,10 @@ public sealed partial class Checker
         from is not null && to is not null ? from > to : to == 0 && !f.Inclusive && !counter.IsSigned;
 
     /// <summary>A loop that counts up from a larger start, so it never runs.</summary>
-    internal static CompileError CountsUp(string range, SourcePos pos, string fix) =>
-        new(pos, $"'{range}' counts up, so it never runs. {fix}");
+    internal static CompileError CountsUp(string range, SourcePos pos, string fix) => new(pos, CountsUpText(range, fix));
+
+    /// <summary>The text of <see cref="CountsUp"/>, for the interpreter, which adds where the evaluation started.</summary>
+    internal static string CountsUpText(string range, string fix) => $"'{range}' counts up, so it never runs. {fix}";
 
     /// <summary>A step that is not a constant (spec 5.1): a u8 value, in a loop that counts up with a u8 counter.</summary>
     private static void CheckVariableStep(ForStmt f, TernType counter, long? from, long? to)
@@ -485,6 +487,7 @@ public sealed partial class Checker
     private void CheckCondition(Expr cond)
     {
         CheckExpr(cond);
+        RequireValue(cond);
         if (cond.Type.Kind != TypeKind.Bool)
             throw new CompileError(cond.Pos, $"A condition must be bool, not {cond.Type}. Compare it, e.g. 'x != 0'");
     }

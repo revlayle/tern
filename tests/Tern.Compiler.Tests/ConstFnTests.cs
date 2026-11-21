@@ -6,11 +6,8 @@ namespace Tern.Compiler.Tests;
 /// <c>const fn</c> and compile-time evaluation (spec 4.1): int, real, bool and arrays, lists built with
 /// <c>for</c>, what a const fn reads, the step limit, and the errors.
 /// </summary>
-public sealed class ConstFnTests : IDisposable
+public sealed class ConstFnTests : TempFolderTest
 {
-    private readonly DirectoryInfo _dir = Directory.CreateTempSubdirectory("tern");
-
-    public void Dispose() => _dir.Delete(recursive: true);
 
     private string MainPath => Path.Combine(_dir.FullName, "main.tern");
 
@@ -121,23 +118,23 @@ public sealed class ConstFnTests : IDisposable
     }
 
     [Theory]
-    [InlineData("data t: [u8; 4] = [i for i in 0..5]", "Expected 4 values, found 5")]
-    [InlineData("data t: [u8; _] = [i * 100 for i in 0..4]", "Element 3 is 300, which does not fit in u8 (0 to 255)")]
-    [InlineData("data t: [i8; _] = [i - 200 for i in 0..4]", "Element 0 is -200, which does not fit in i8 (-128 to 127)")]
-    [InlineData("data t: [u8; _] = [i * 0.5 for i in 0..4]", "Element 0 is the real number 0.0, which needs rounding to fit in u8. Use round(x), floor(x), ceil(x) or trunc(x)")]
-    [InlineData("data t: [u8; _] = [i < 2 for i in 0..4]", "Element 0 is a bool, but the table holds u8")]
-    [InlineData("data t = [i for i in 0..4]", "Data arrays need a written type. Write data t: [u8; _] = [...]")]
-    [InlineData("data t: [u8; _] = [i for i in 0..4 for j in 0..2]", "A list built with 'for' has one 'for'. Write a const fn with nested loops for more")]
-    [InlineData("data t: [u8; _] = [i for i in 0..4 if i > 1]", "A list built with 'for' has no filter. Write a const fn with a loop and an 'if' for that")]
-    [InlineData("data t: [u8; _] = [i for i in 0..10 step 0]", "The step is 0, so the loop would never end. Use a step other than 0")]
-    [InlineData("data t: [u16; _] = [i for i in 0..1000]", "An array of u16 has at most 256 elements")]
-    [InlineData("const N = [i for i in 0..4]", "'N' is an array, which a const cannot hold. Use data, e.g. 'data N: [u8; _] = ...'")]
-    [InlineData("data t: [u8; _] = [1, 2.5]", "This value is the real number 2.5, but an int is expected here")]
-    [InlineData("data t: [u8; _] = [i for i in 0..4]\nfn main2() { t[0] = 1 }", "'t' is data, which is read-only")]
-    public void List_errors(string source, string expected)
+    [InlineData("data t: [u8; 4] = [i for i in 0..5]", 1, 19, "Expected 4 values, found 5. Change the length to 5, or write '_' to take it from the value")]
+    [InlineData("data t: [u8; _] = [i * 100 for i in 0..4]", 1, 19, "Element 3 is 300, which does not fit in u8 (0 to 255). Use '& $FF' to keep the low byte, or a wider element type")]
+    [InlineData("data t: [i8; _] = [i - 200 for i in 0..4]", 1, 19, "Element 0 is -200, which does not fit in i8 (-128 to 127). Use '& $FF' to keep the low byte, or a wider element type")]
+    [InlineData("data t: [u8; _] = [i * 0.5 for i in 0..4]", 1, 19, "Element 0 is the real number 0.0, which needs rounding to fit in u8. Use round(x), floor(x), ceil(x) or trunc(x)")]
+    [InlineData("data t: [u8; _] = [i < 2 for i in 0..4]", 1, 19, "Element 0 is a bool, but the table holds u8. Use round() or floor() for a real number")]
+    [InlineData("data t = [i for i in 0..4]", 1, 1, "Data arrays need a written type. Write data t: [u8; _] = [...], where '_' takes the length from the list")]
+    [InlineData("data t: [u8; _] = [i for i in 0..4 for j in 0..2]", 1, 36, "A list built with 'for' has one 'for'. Write a const fn with nested loops for more")]
+    [InlineData("data t: [u8; _] = [i for i in 0..4 if i > 1]", 1, 36, "A list built with 'for' has no filter. Write a const fn with a loop and an 'if' for that")]
+    [InlineData("data t: [u8; _] = [i for i in 0..10 step 0]", 1, 42, "The step is 0, so the loop would never end. Use a step other than 0")]
+    [InlineData("data t: [u16; _] = [i for i in 0..1000]", 1, 9, "An array of u16 has at most 256 elements. Only a global var or data of u8 or i8 may be longer (spec 3.2), and it is used through a pointer. Split it into arrays of at most 256")]
+    [InlineData("const N = [i for i in 0..4]", 1, 11, "'N' is an array, which a const cannot hold. Use data, e.g. 'data N: [u8; _] = ...'")]
+    [InlineData("data t: [u8; _] = [1, 2.5]", 1, 23, "This value is the real number 2.5, but an int is expected here. Use round(x), floor(x), ceil(x) or trunc(x) to make it an int")]
+    [InlineData("data t: [u8; _] = [i for i in 0..4]\nfn main2() { t[0] = 1 }", 2, 15, "'t' is data, which is read-only. Declare it with 'var' to change it")]
+    public void List_errors(string source, int line, int column, string expected)
     {
         var e = Error(source + "\nfn main() { }");
-        Assert.Contains(expected, e.Description);
+        Expect.Message(e, line, column, expected);
     }
 
     [Fact]
@@ -241,28 +238,28 @@ public sealed class ConstFnTests : IDisposable
     }
 
     [Theory]
-    [InlineData("const K: u8 = 1.5 * 2", "'K' is the real number 3.0, which has no runtime type. Remove the type to keep a real constant, or use round(x), floor(x), ceil(x) or trunc(x)")]
-    [InlineData("const K = [1, 2]", "'K' is an array, which a const cannot hold. Use data")]
-    [InlineData("const K = 1 / 0.0", "Division by zero")]
-    [InlineData("const K = round(1.0 / 0)", "Division by zero")]
-    [InlineData("const K = round(sqrt(-1))", "sqrt() of a negative number (-1) has no real value. Use a number of 0 or more")]
-    [InlineData("const K = round(log(0))", "log() of 0 has no real value. Use a number above 0")]
-    [InlineData("const K = round(log2(-2.5))", "log2() of -2.5 has no real value. Use a number above 0")]
-    [InlineData("const K = round(pow(0, -1))", "pow() gives a real too large for 64 bits. Use smaller values")]
-    [InlineData("const K = round(1e300 * 1e300)", "'*' gives a real too large for 64 bits")]
-    [InlineData("const K = round(1e30)", "round() gives 1E+30, outside the signed 64-bit range of int. Use a smaller value")]
-    [InlineData("const K = round(5.5 % 2)", "'%' works on ints, not reals")]
-    [InlineData("const K = round(1.5 & 1)", "'&' works on ints, not reals")]
-    [InlineData("const K = round(true)", "round() needs a number, not a bool")]
-    [InlineData("const K = sin(1, 2)", "sin() takes 1 argument, not 2")]
-    [InlineData("const K = round(min(1.5))", "min() takes two or more numbers")]
-    [InlineData("const K = round(2e400)", "The real number 2e400 is too large. Use a value below 1.7e308")]
-    [InlineData("const K = label()", "A label() value is only for emit in a generator")]
-    [InlineData("const K = round(\"a\")", "A string is not a compile-time value")]
-    public void Real_errors(string source, string expected)
+    [InlineData("const K: u8 = 1.5 * 2", 1, 10, "'K' is the real number 3.0, which has no runtime type. Remove the type to keep a real constant, or use round(x), floor(x), ceil(x) or trunc(x)")]
+    [InlineData("const K = [1, 2]", 1, 11, "'K' is an array, which a const cannot hold. Use data, e.g. 'data K: [u8; _] = ...'")]
+    [InlineData("const K = 1 / 0.0", 1, 13, "Division by zero. Check the divisor")]
+    [InlineData("const K = round(1.0 / 0)", 1, 21, "Division by zero. Check the divisor")]
+    [InlineData("const K = round(sqrt(-1))", 1, 17, "sqrt() of a negative number (-1) has no real value. Use a number of 0 or more")]
+    [InlineData("const K = round(log(0))", 1, 17, "log() of 0 has no real value. Use a number above 0")]
+    [InlineData("const K = round(log2(-2.5))", 1, 17, "log2() of -2.5 has no real value. Use a number above 0")]
+    [InlineData("const K = round(pow(0, -1))", 1, 17, "pow() gives a real too large for 64 bits. Use smaller values")]
+    [InlineData("const K = round(1e300 * 1e300)", 1, 23, "'*' gives a real too large for 64 bits. Use smaller values")]
+    [InlineData("const K = round(1e30)", 1, 11, "round() gives 1E+30, outside the signed 64-bit range of int. Use a smaller value")]
+    [InlineData("const K = round(5.5 % 2)", 1, 21, "'%' works on ints, not reals. Use round(x), floor(x), ceil(x) or trunc(x) to make an int first")]
+    [InlineData("const K = round(1.5 & 1)", 1, 21, "'&' works on ints, not reals. Use round(x), floor(x), ceil(x) or trunc(x) to make an int first")]
+    [InlineData("const K = round(true)", 1, 17, "round() needs a number, not a bool")]
+    [InlineData("const K = sin(1, 2)", 1, 11, "sin() takes 1 argument, not 2. Pass 1")]
+    [InlineData("const K = round(min(1.5))", 1, 17, "min() takes two or more numbers. Pass at least two")]
+    [InlineData("const K = round(2e400)", 1, 17, "The real number 2e400 is too large. Use a value below 1.7e308")]
+    [InlineData("const K = label()", 1, 11, "A label() value is only for emit in a generator. Use it in a const fn that emits assembly")]
+    [InlineData("const K = round(\"a\")", 1, 17, "A string is not a compile-time value. Use a list of numbers, or read the bytes from data")]
+    public void Real_errors(string source, int line, int column, string expected)
     {
         var e = Error(source + "\nfn main() { }");
-        Assert.Contains(expected, e.Description);
+        Expect.Message(e, line, column, expected);
     }
 
     // ---------- Real constants (decision 2026-11-11, question 94) ----------
@@ -300,36 +297,36 @@ public sealed class ConstFnTests : IDisposable
     }
 
     [Theory]
-    [InlineData("x = SCALE", "'SCALE' is a real number, which exists only at compile time. Use it in a constant or a const fn, e.g. 'const SCALE_40 = round(SCALE * 40)'")]
-    [InlineData("x = x * SCALE", "'SCALE' is a real number, which exists only at compile time")]
-    [InlineData("asm { lda #SCALE }", "'SCALE' is a real number, which exists only at compile time")]
-    [InlineData("const L = 0.25\n    x = L", "'L' is a real number, which exists only at compile time")]
-    public void A_real_constant_in_runtime_code_is_an_error(string statement, string expected)
+    [InlineData("x = SCALE", 4, 9, "'SCALE' is a real number, which exists only at compile time. Use it in a constant or a const fn, e.g. 'const SCALE_40 = round(SCALE * 40)'")]
+    [InlineData("x = x * SCALE", 4, 13, "'SCALE' is a real number, which exists only at compile time. Use it in a constant or a const fn, e.g. 'const SCALE_40 = round(SCALE * 40)'")]
+    [InlineData("asm { lda #SCALE }", 4, 16, "'SCALE' is a real number, which exists only at compile time. Use it in a constant or a const fn, e.g. 'const SCALE_40 = round(SCALE * 40)'")]
+    [InlineData("const L = 0.25\n    x = L", 5, 9, "'L' is a real number, which exists only at compile time. Use it in a constant or a const fn, e.g. 'const L_40 = round(L * 40)'")]
+    public void A_real_constant_in_runtime_code_is_an_error(string statement, int line, int column, string expected)
     {
         var e = Error($"const SCALE = 1.5\nfn main() {{\n    var x: u8 = 1\n    {statement}\n}}");
-        Assert.StartsWith(expected, e.Description);
+        Expect.Message(e, line, column, expected);
     }
 
     [Fact]
     public void A_real_constant_in_a_global_initial_value_needs_rounding()
     {
         var e = Error("const SCALE = 1.5\nvar x: u8 = SCALE\nfn main() { }");
-        Assert.StartsWith("This value is the real number 1.5, but an int is expected here. Use round(x)", e.Description);
+        Expect.Message(e, 2, 13, "This value is the real number 1.5, but an int is expected here. Use round(x), floor(x), ceil(x) or trunc(x) to make it an int");
         Assert.Equal(3, Run.Program("const SCALE = 1.5\nvar x: u8 = round(SCALE * 2)\nfn main() { }").U8("x"));
     }
 
     [Theory]
-    [InlineData("var x: u8 = 1.5", "1.5 is a real number, which exists only at compile time. Use a constant or a const fn to compute the value, e.g. 'const K = round(1.5 * 40)'")]
-    [InlineData("var x: u8 = round(2.5)", "round() works only at compile time. Use it in a constant, in data, in a global's initial value or in a const fn")]
-    [InlineData("var x: u8 = 3\n    x = x * PI", "'PI' is a real number, which exists only at compile time")]
-    [InlineData("var x: u8 = f(2)", "'f' is a const fn, which runs only at compile time. Use it in a constant, in data or in a global's initial value")]
-    [InlineData("var a: [u8; 3] = repeat(1, 3)", "'repeat' builds an array at compile time. Use a 'for' loop to fill the array at runtime")]
-    [InlineData("var x: u8 = len(repeat(1, 3))", "'repeat' builds an array at compile time")]
-    [InlineData("asm { lda #round(1.5) }", "round() works only at compile time")]
-    public void Compile_time_code_in_a_function_body_is_an_error(string statement, string expected)
+    [InlineData("var x: u8 = 1.5", 3, 17, "1.5 is a real number, which exists only at compile time. Use a constant or a const fn to compute the value, e.g. 'const K = round(1.5 * 40)'")]
+    [InlineData("var x: u8 = round(2.5)", 3, 17, "round() works only at compile time. Use it in a constant, in data, in a global's initial value or in a const fn")]
+    [InlineData("var x: u8 = 3\n    x = x * PI", 4, 13, "'PI' is a real number, which exists only at compile time. Use it in a constant or a const fn, e.g. 'const PI_40 = round(PI * 40)'")]
+    [InlineData("var x: u8 = f(2)", 3, 17, "'f' is a const fn, which runs only at compile time. Use it in a constant, in data or in a global's initial value")]
+    [InlineData("var a: [u8; 3] = repeat(1, 3)", 3, 22, "'repeat' builds an array at compile time. Use a 'for' loop to fill the array at runtime")]
+    [InlineData("var x: u8 = len(repeat(1, 3))", 3, 21, "'repeat' builds an array at compile time. Use a 'for' loop to fill the array at runtime")]
+    [InlineData("asm { lda #round(1.5) }", 3, 16, "round() works only at compile time. Use it in a constant, in data, in a global's initial value or in a const fn")]
+    public void Compile_time_code_in_a_function_body_is_an_error(string statement, int line, int column, string expected)
     {
         var e = Error($"const fn f(n: int) -> int {{ return n }}\nfn main() {{\n    {statement}\n}}");
-        Assert.StartsWith(expected, e.Description);
+        Expect.Message(e, line, column, expected);
     }
 
     // ---------- repeat(value, count) (decision 2026-11-11, question 97) ----------
@@ -363,20 +360,20 @@ public sealed class ConstFnTests : IDisposable
     }
 
     [Theory]
-    [InlineData("data t: [u8; 4] = [7; 4]", "'[7; 4]' is not an array in Tern, where [T; n] is only an array type. Write repeat(7, 4)")]
-    [InlineData("data t: [u8; _] = [N + 1; f(N)]", "'[N + 1; f(N)]' is not an array in Tern, where [T; n] is only an array type. Write repeat(N + 1, f(N))")]
-    [InlineData("data t: [u8; _] = ['A'; 4]", "'['A'; 4]' is not an array in Tern, where [T; n] is only an array type. Write repeat('A', 4)")]
-    [InlineData("const fn g() -> [int; _] { return [0; -1] }", "'[0; -1]' is not an array in Tern")]
-    [InlineData("data t: [u8; _] = repeat(1, 0)", "Array length must be 1 to 256, not 0")]
-    [InlineData("data t: [u8; 4] = repeat(1, 5)", "Expected 4 values, found 5")]
-    [InlineData("data t: [u8; _] = repeat(300, 2)", "Element 0 is 300, which does not fit in u8")]
-    [InlineData("data t: [u8; _] = repeat(1)", "repeat() takes 2 arguments, not 1")]
-    [InlineData("data t: [u8; _] = repeat(1, 1.5)", "The count of repeat() is a real here, but needs an int")]
-    [InlineData("data t: [u8; _] = repeat(1, 70000)", "An array has 0 to 65536 elements, not 70000. Use a smaller count")]
-    public void Repeat_errors(string source, string expected)
+    [InlineData("data t: [u8; 4] = [7; 4]", 3, 19, "'[7; 4]' is not an array in Tern, where [T; n] is only an array type. Write repeat(7, 4)")]
+    [InlineData("data t: [u8; _] = [N + 1; f(N)]", 3, 19, "'[N + 1; f(N)]' is not an array in Tern, where [T; n] is only an array type. Write repeat(N + 1, f(N))")]
+    [InlineData("data t: [u8; _] = ['A'; 4]", 3, 19, "'['A'; 4]' is not an array in Tern, where [T; n] is only an array type. Write repeat('A', 4)")]
+    [InlineData("const fn g() -> [int; _] { return [0; -1] }", 3, 35, "'[0; -1]' is not an array in Tern, where [T; n] is only an array type. Write repeat(0, -1)")]
+    [InlineData("data t: [u8; _] = repeat(1, 0)", 3, 9, "Array length must be 1 to 256, not 0. Use a length in that range")]
+    [InlineData("data t: [u8; 4] = repeat(1, 5)", 3, 19, "Expected 4 values, found 5. Change the length to 5, or write '_' to take it from the value")]
+    [InlineData("data t: [u8; _] = repeat(300, 2)", 3, 19, "Element 0 is 300, which does not fit in u8 (0 to 255). Use '& $FF' to keep the low byte, or a wider element type")]
+    [InlineData("data t: [u8; _] = repeat(1)", 3, 19, "repeat() takes 2 arguments, not 1. Pass 2")]
+    [InlineData("data t: [u8; _] = repeat(1, 1.5)", 3, 29, "The count of repeat() is a real here, but needs an int. Use round(x), floor(x), ceil(x) or trunc(x)")]
+    [InlineData("data t: [u8; _] = repeat(1, 70000)", 3, 29, "An array has 0 to 65536 elements, not 70000. Use a smaller count")]
+    public void Repeat_errors(string source, int line, int column, string expected)
     {
         var e = Error("const N = 2\nconst fn f(n: int) -> int { return n }\n" + source + "\nfn main() { }");
-        Assert.Contains(expected, e.Description);
+        Expect.Message(e, line, column, expected);
     }
 
     [Fact]
@@ -623,69 +620,80 @@ public sealed class ConstFnTests : IDisposable
     }
 
     [Theory]
-    [InlineData("var score: u8 = 3\nconst fn f() -> int { return score }\nconst K = f()", "'score' is a variable, which a const fn cannot read (called from line 3). Use a const or data")]
-    [InlineData("var score: u8 = 3\nconst K = round(score * 1.5)", "'score' is a variable, whose value is not known at compile time. Use a const or data")]
-    [InlineData("data t: [u16; 1] = [addr(t)]\nconst fn f() -> int { return t[0] }\nconst K = f()", "'t' holds addresses, which are decided after compile-time evaluation (called from line 3). Read a table without addr()")]
-    [InlineData("var x: u8\nconst fn f() -> int { return addr(x) }\nconst K = f()", "The value 'f' returns is a label, but an int is expected")]
-    [InlineData("const fn f() -> label { return addr(x) }\nvar x: u8\nconst K = f()", "This value is a label, an address decided when the program is placed, so a constant cannot hold it. Use addr() in the initial value of a var or data, or pass the label to a generator")]
-    [InlineData("fn g() { }\nconst fn f() -> label { return addr(g) }\nconst K = f()", "addr(g) is a label, decided when the program is placed, so it cannot be part of a constant (called from line 3). Use it in a generator's emit")]
-    [InlineData("struct P { x: u8 }\ndata p = P { x = 1 }\nconst fn f() -> int { return p[0] }\nconst K = f()", "'p' holds structs, which are not compile-time values (called from line 4). Read a table of numbers")]
-    [InlineData("fn g() -> u8 { return 1 }\nconst fn f() -> int { return g() }\nconst K = f()", "'g' runs on the 6502, so compile-time code cannot call it (called from line 3). Use a const fn")]
-    [InlineData("const fn f() -> int { return K }\nconst K = f()", "'K' depends on itself: K -> K")]
-    [InlineData("data t: [u8; _] = f()\nconst fn f() -> [int; _] { return [t[0]] }", "'t' depends on itself: t -> t")]
-    [InlineData("const fn f() -> int { return nope }\nconst K = f()", "'nope' is not declared")]
-    [InlineData("const fn f() -> int { return nope() }\nconst K = f()", "'nope' is not declared")]
-    [InlineData("const fn f() -> int { return f }\nconst K = f()", "'f' is a const fn; call it with ()")]
-    [InlineData("const fn f() -> int { var x = 1\n return x() }\nconst K = f()", "'x' is a variable, not a function")]
-    [InlineData("const fn f() -> int { return [1, 2][5] }\nconst K = f()", "Index 5 is outside the array (length 2) (called from line 2). Use an index from 0 to 1")]
-    [InlineData("const fn f() -> int { return 1 / (2 - 2) }\nconst K = f()", "Division by zero (called from line 2)")]
-    [InlineData("const fn f() -> int { return 1 << 64 }\nconst K = f()", "The shift count is 64 (called from line 2). Use a count from 0 to 63")]
-    [InlineData("const fn f() -> int { return $7FFF_FFFF_FFFF_FFFF + 1 }\nconst K = f()", "goes outside the signed 64-bit range")]
-    [InlineData("const fn f() -> int { return 1 as u8 }\nconst K = f()", "'as' converts runtime types, which a const fn does not have")]
-    [InlineData("const fn f(n: int) -> int { return n }\nconst K = f(1.5)", "The argument 'n' of 'f' is a real, but an int is expected. Use round(x), floor(x), ceil(x) or trunc(x)")]
-    [InlineData("const fn f(n: int) -> int { return n }\nconst K = f(1, 2)", "'f' takes 1 argument, not 2. Pass 1 argument")]
-    [InlineData("const fn f(n: int) -> int { return n }\nconst K = f(true)", "The argument 'n' of 'f' is a bool, but an int is expected")]
-    [InlineData("const fn f() -> int { var x = 1\n x = 1.5\n return x }\nconst K = f()", "The value of 'x' is a real, but an int is expected")]
-    [InlineData("const fn f() -> int { for i in 0..3 { i = 2 }\n return 0 }\nconst K = f()", "'i' is the loop variable, which cannot be changed (called from line 3). Declare a variable with 'var' for a value that changes")]
-    [InlineData("const fn f() -> int { WIDTH = 2\n return 0 }\nconst WIDTH = 1\nconst K = f()", "'WIDTH' is not a variable of this const fn, which changes only its own variables")]
-    [InlineData("const fn f() -> int { if 1 { return 1 }\n return 0 }\nconst K = f()", "An 'if' condition needs a bool, not an int (called from line 3). Compare instead, e.g. 'n != 0'")]
-    [InlineData("const fn f(n: int) -> int { if n > 0 { return 1 } }\nconst K = f(0)", "'f' ends without returning a value (called from line 2). Add a 'return' at its end")]
-    [InlineData("const fn f() { }\nconst K = f()", "'f' returns no value. Give it a return type, or call it on a line of its own")]
-    [InlineData("const fn f(n: int) -> int { return f(n + 1) }\nconst K = f(0)", "Const fn calls are nested more than 200 deep here, through 'f'")]
-    [InlineData("const fn f() -> real { return 1.5 }\nconst K: i8 = f()", "'K' is the real number 1.5, which has no runtime type")]
-    [InlineData("const fn f() -> [int; _] { return [1] }\nconst T = f()", "'T' is an array, which a const cannot hold. Use data")]
-    [InlineData("const fn f() -> int { return [1, true][0] }\nconst K = f()", "This element is a bool, but the list's first one is an int (called from line 2). Use one kind of value in a list")]
-    [InlineData("struct P { x: u8 }\nconst fn f() -> int { var p = P { x = 1 }\n return 0 }\nconst K = f()", "A struct literal is not a compile-time value")]
-    [InlineData("const fn f() -> int { return round(!1.5) }\nconst K = f()", "'!' needs a bool, not a real")]
-    [InlineData("const fn f() -> int { return ~1.5 }\nconst K = f()", "'~' needs an int, not a real")]
-    [InlineData("const fn f() -> int { return -true }\nconst K = f()", "'-' needs a number, not a bool")]
-    [InlineData("const fn f() -> int { return 1 + true }\nconst K = f()", "'+' needs numbers, not a bool")]
-    [InlineData("const fn f() -> bool { return true & false }\nconst K = f()", "'&' works on the bits of ints (called from line 2). Use '&&' for bools")]
-    [InlineData("const fn f() -> int { return 5.x }\nconst K = f()", "Unknown member '.x'")]
-    [InlineData("data d: [u8; 1] = [1]\nconst fn f() -> int { return len(1) }\nconst K = f()", "len() needs an array")]
-    [InlineData("const fn f() -> int { return sizeof(1) }\nconst K = f()", "sizeof() takes one type name")]
-    [InlineData("const fn f() -> int { return len(include_bytes(\"x.bin\")) }\nconst K = f()", "include_bytes() can only be the value of data")]
-    [InlineData("const fn f() -> int { return len(repeat(0, -1)) }\nconst K = f()", "An array has 0 to 65536 elements, not -1")]
-    [InlineData("const fn f() -> int { var t: [int; 70000]\n return 0 }\nconst K = f()", "An array has 0 to 65536 elements, not 70000")]
-    [InlineData("const fn f() -> int { return len([0 for i in 0..70000]) }\nconst K = f()", "An array has at most 65536 elements (called from line 2). Use a shorter range")]
-    [InlineData("const fn f() -> int { const C = 1\n C = 2\n return C }\nconst K = f()", "'C' is a constant, which cannot be changed")]
-    [InlineData("const fn g() -> [int; _] { return [1] }\nconst fn f() -> int { g()[0] = 1\n return 0 }\nconst K = f()", "A const fn assigns only its own variables and their elements")]
-    [InlineData("const fn f() -> int { match 1.5 { _ => { } }\n return 0 }\nconst K = f()", "A match value is a real here, but needs an int")]
-    [InlineData("struct P { x: u8 }\nconst fn f() -> int { return P }\nconst K = f()", "'P' is a struct type, not a value")]
-    [InlineData("fn g() { }\nconst fn f() -> int { return g }\nconst K = f()", "'g' is a function, not a value")]
-    [InlineData("const C = 1\nconst fn f() -> int { return C() }\nconst K = f()", "'C' is a constant, not a function")]
-    [InlineData("const fn f(b: bool) -> int { return 1 }\nconst K = f(1)", "The argument 'b' of 'f' is an int, but a bool is expected")]
-    [InlineData("const fn f(t: [int; _]) -> int { return t[0] }\nconst K = f([1.5])", "An element of the argument 't' of 'f' is a real, but an int is expected")]
-    [InlineData("const fn f(t: [int; _]) -> int { return t[0] }\nconst K = f(2)", "The argument 't' of 'f' is an int, but an array is expected")]
-    [InlineData("const fn f() -> int { return round(pow(-8, 1 / 3.0)) }\nconst K = f()", "pow() has no real value for these numbers (called from line 2). Use other values")]
-    [InlineData("const fn f() -> real { return 1 }\nconst K: u8 = f()", "'K' is the real number 1.0, which has no runtime type")]
-    [InlineData("const fn f(a: int, b: int) -> int { return a }\nconst K = f(1)", "'f' takes 2 arguments, not 1. Pass 2 arguments")]
-    [InlineData("const fn f() -> int { return -$7FFF_FFFF_FFFF_FFFF - 1 + abs(-$7FFF_FFFF_FFFF_FFFF - 1) }\nconst K = f()", "(called from line 2). Use smaller values")]
-    public void Errors_while_running(string source, string expected)
+    [InlineData("var score: u8 = 3\nconst fn f() -> int { return score }\nconst K = f()", 2, 30, "'score' is a variable, which a const fn cannot read (called from line 3). Use a const or data")]
+    [InlineData("var score: u8 = 3\nconst K = round(score * 1.5)", 2, 17, "'score' is a variable, whose value is not known at compile time. Use a const or data")]
+    [InlineData("data t: [u16; 1] = [addr(t)]\nconst fn f() -> int { return t[0] }\nconst K = f()", 2, 30, "'t' holds addresses, which are decided after compile-time evaluation (called from line 3). Read a table without addr()")]
+    [InlineData("var x: u8\nconst fn f() -> int { return addr(x) }\nconst K = f()", 2, 17, "The value 'f' returns is a label, but an int is expected (called from line 3). Change the value, or the declared type")]
+    [InlineData("const fn f() -> label { return addr(x) }\nvar x: u8\nconst K = f()", 3, 11, "This value is a label, an address decided when the program is placed, so a constant cannot hold it. Use addr() in the initial value of a var or data, or pass the label to a generator")]
+    [InlineData("fn g() { }\nconst fn f() -> label { return addr(g) }\nconst K = f()", 2, 37, "addr(g) is a label, decided when the program is placed, so it cannot be part of a constant (called from line 3). Use it in a generator's emit")]
+    [InlineData("struct P { x: u8 }\ndata p = P { x = 1 }\nconst fn f() -> int { return p[0] }\nconst K = f()", 3, 30, "'p' holds structs, which are not compile-time values (called from line 4). Read a table of numbers")]
+    [InlineData("fn g() -> u8 { return 1 }\nconst fn f() -> int { return g() }\nconst K = f()", 2, 30, "'g' runs on the 6502, so compile-time code cannot call it (called from line 3). Use a const fn")]
+    [InlineData("const fn f() -> int { return K }\nconst K = f()", 2, 1, "'K' depends on itself: K -> K (called from line 2). Give one of them a value that does not use the others")]
+    [InlineData("data t: [u8; _] = f()\nconst fn f() -> [int; _] { return [t[0]] }", 1, 1, "'t' depends on itself: t -> t (called from line 1). Give one of them a value that does not use the others")]
+    [InlineData("const fn f() -> int { return nope }\nconst K = f()", 1, 30, "'nope' is not declared (called from line 2). Check the spelling, or declare it")]
+    [InlineData("const fn f() -> int { return nope() }\nconst K = f()", 1, 30, "'nope' is not declared (called from line 2). Check the spelling, or declare it as a const fn")]
+    [InlineData("const fn f() -> int { return f }\nconst K = f()", 1, 30, "'f' is a const fn (called from line 2); call it with ()")]
+    [InlineData("const fn f() -> int { var x = 1\n return x() }\nconst K = f()", 2, 9, "'x' is a variable, not a function (called from line 3). Remove the ()")]
+    [InlineData("const fn f() -> int { return [1, 2][5] }\nconst K = f()", 1, 37, "Index 5 is outside the array (length 2) (called from line 2). Use an index from 0 to 1")]
+    [InlineData("const fn f() -> int { return 1 / (2 - 2) }\nconst K = f()", 1, 32, "Division by zero (called from line 2). Check the divisor")]
+    [InlineData("const fn f() -> int { return 1 << 64 }\nconst K = f()", 1, 32, "The shift count is 64 (called from line 2). Use a count from 0 to 63")]
+    [InlineData("const fn f() -> int { return $7FFF_FFFF_FFFF_FFFF + 1 }\nconst K = f()", 1, 51, "This constant expression goes outside the signed 64-bit range of constant arithmetic (-9223372036854775808 to 9223372036854775807) (called from line 2). Use smaller values")]
+    [InlineData("const fn f() -> int { return 1 as u8 }\nconst K = f()", 1, 32, "'as' converts runtime types, which a const fn does not have (called from line 2). Use '& $FF' for 8-bit behavior, or round(x), floor(x), ceil(x) or trunc(x) for a real")]
+    [InlineData("const fn f(n: int) -> int { return n }\nconst K = f(1.5)", 2, 13, "The argument 'n' of 'f' is a real, but an int is expected. Use round(x), floor(x), ceil(x) or trunc(x)")]
+    [InlineData("const fn f(n: int) -> int { return n }\nconst K = f(1, 2)", 2, 11, "'f' takes 1 argument, not 2. Pass 1 argument")]
+    [InlineData("const fn f(n: int) -> int { return n }\nconst K = f(true)", 2, 13, "The argument 'n' of 'f' is a bool, but an int is expected. Change the value, or the declared type")]
+    [InlineData("const fn f() -> int { var x = 1\n x = 1.5\n return x }\nconst K = f()", 2, 6, "The value of 'x' is a real, but an int is expected (called from line 4). Use round(x), floor(x), ceil(x) or trunc(x)")]
+    [InlineData("const fn f() -> int { for i in 0..3 { i = 2 }\n return 0 }\nconst K = f()", 1, 39, "'i' is the loop variable, which cannot be changed (called from line 3). Declare a variable with 'var' for a value that changes")]
+    [InlineData("const fn f() -> int { WIDTH = 2\n return 0 }\nconst WIDTH = 1\nconst K = f()", 1, 23, "'WIDTH' is not a variable of this const fn, which changes only its own variables (called from line 4). Declare a local copy: 'var my_WIDTH = WIDTH'")]
+    [InlineData("const fn f() -> int { if 1 { return 1 }\n return 0 }\nconst K = f()", 1, 26, "An 'if' condition needs a bool, not an int (called from line 3). Compare instead, e.g. 'n != 0'")]
+    [InlineData("const fn f(n: int) -> int { if n > 0 { return 1 } }\nconst K = f(0)", 1, 1, "'f' ends without returning a value (called from line 2). Add a 'return' at its end")]
+    [InlineData("const fn f() { }\nconst K = f()", 2, 11, "'f' returns no value. Give it a return type, or call it on a line of its own")]
+    [InlineData("const fn f(n: int) -> int { return f(n + 1) }\nconst K = f(0)", 1, 36, "Const fn calls are nested more than 200 deep here, through 'f' (called from line 2). Use a loop instead of calling 'f' from itself")]
+    [InlineData("const fn f() -> real { return 1.5 }\nconst K: i8 = f()", 2, 10, "'K' is the real number 1.5, which has no runtime type. Remove the type to keep a real constant, or use round(x), floor(x), ceil(x) or trunc(x)")]
+    [InlineData("const fn f() -> [int; _] { return [1] }\nconst T = f()", 2, 11, "'T' is an array, which a const cannot hold. Use data, e.g. 'data T: [u8; _] = ...'")]
+    [InlineData("const fn f() -> int { return [1, true][0] }\nconst K = f()", 1, 34, "This element is a bool, but the list's first one is an int (called from line 2). Use one kind of value in a list")]
+    [InlineData("struct P { x: u8 }\nconst fn f() -> int { var p = P { x = 1 }\n return 0 }\nconst K = f()", 2, 31, "A struct literal is not a compile-time value (called from line 4). Use the value of each field, e.g. a list of numbers")]
+    [InlineData("const fn f() -> int { return round(!1.5) }\nconst K = f()", 1, 36, "'!' needs a bool, not a real (called from line 2). Use '~' to flip the bits of an int")]
+    [InlineData("const fn f() -> int { return ~1.5 }\nconst K = f()", 1, 30, "'~' needs an int, not a real (called from line 2). Use round() or floor() to make a real an int")]
+    [InlineData("const fn f() -> int { return -true }\nconst K = f()", 1, 30, "'-' needs a number, not a bool (called from line 2). Use '!' to negate a bool")]
+    [InlineData("const fn f() -> int { return 1 + true }\nconst K = f()", 1, 32, "'+' needs numbers, not a bool (called from line 2). Use an int or a real")]
+    [InlineData("const fn f() -> bool { return true & false }\nconst K = f()", 1, 36, "'&' works on the bits of ints (called from line 2). Use '&&' for bools")]
+    [InlineData("const fn f() -> int { return 5.x }\nconst K = f()", 1, 31, "Unknown member '.x' (called from line 2). Use .lo and .hi of a number in a const fn")]
+    [InlineData("data d: [u8; 1] = [1]\nconst fn f() -> int { return len(1) }\nconst K = f()", 2, 30, "len() needs an array (called from line 3). Use sizeof() for the size of a type")]
+    [InlineData("const fn f() -> int { return sizeof(1) }\nconst K = f()", 1, 30, "sizeof() takes one type name (called from line 2). Write e.g. sizeof(Enemy)")]
+    [InlineData("const fn f() -> int { return len(include_bytes(\"x.bin\")) }\nconst K = f()", 1, 34, "include_bytes() can only be the value of data (called from line 2). Declare the data, and read it in the const fn")]
+    [InlineData("const fn f() -> int { return len(repeat(0, -1)) }\nconst K = f()", 1, 44, "An array has 0 to 65536 elements, not -1 (called from line 2). Use a smaller count")]
+    [InlineData("const fn f() -> int { var t: [int; 70000]\n return 0 }\nconst K = f()", 1, 36, "An array has 0 to 65536 elements, not 70000 (called from line 3). Use a smaller length")]
+    [InlineData("const fn f() -> int { return len([0 for i in 0..70000]) }\nconst K = f()", 1, 34, "An array has at most 65536 elements (called from line 2). Use a shorter range")]
+    [InlineData("const fn f() -> int { const C = 1\n C = 2\n return C }\nconst K = f()", 2, 2, "'C' is a constant, which cannot be changed (called from line 4). Declare a variable with 'var' for a value that changes")]
+    [InlineData("const fn g() -> [int; _] { return [1] }\nconst fn f() -> int { g()[0] = 1\n return 0 }\nconst K = f()", 2, 26, "A const fn assigns only its own variables and their elements (called from line 4). Declare a variable in the const fn, and return its value")]
+    [InlineData("const fn f() -> int { match 1.5 { _ => { } }\n return 0 }\nconst K = f()", 1, 29, "A match value is a real here, but needs an int (called from line 3). Use round(x), floor(x), ceil(x) or trunc(x)")]
+    [InlineData("struct P { x: u8 }\nconst fn f() -> int { return P }\nconst K = f()", 2, 30, "'P' is a struct type, not a value (called from line 3). Use sizeof(P) for its size")]
+    [InlineData("fn g() { }\nconst fn f() -> int { return g }\nconst K = f()", 2, 30, "'g' is a function, not a value (called from line 3). Use addr(g) for its address")]
+    [InlineData("const C = 1\nconst fn f() -> int { return C() }\nconst K = f()", 2, 30, "'C' is a constant, not a function (called from line 3). Remove the ()")]
+    [InlineData("const fn f(b: bool) -> int { return 1 }\nconst K = f(1)", 2, 13, "The argument 'b' of 'f' is an int, but a bool is expected. Change the value, or the declared type")]
+    [InlineData("const fn f(t: [int; _]) -> int { return t[0] }\nconst K = f([1.5])", 2, 13, "An element of the argument 't' of 'f' is a real, but an int is expected. Use round(x), floor(x), ceil(x) or trunc(x)")]
+    [InlineData("const fn f(t: [int; _]) -> int { return t[0] }\nconst K = f(2)", 2, 13, "The argument 't' of 'f' is an int, but an array is expected. Change the value, or the declared type")]
+    [InlineData("const fn f() -> int { return round(pow(-8, 1 / 3.0)) }\nconst K = f()", 1, 36, "pow() has no real value for these numbers (called from line 2). Use other values")]
+    [InlineData("const fn f() -> real { return 1 }\nconst K: u8 = f()", 2, 10, "'K' is the real number 1.0, which has no runtime type. Remove the type to keep a real constant, or use round(x), floor(x), ceil(x) or trunc(x)")]
+    [InlineData("const fn f(a: int, b: int) -> int { return a }\nconst K = f(1)", 2, 11, "'f' takes 2 arguments, not 1. Pass 2 arguments")]
+    [InlineData("const fn f() -> int { return -$7FFF_FFFF_FFFF_FFFF - 1 + abs(-$7FFF_FFFF_FFFF_FFFF - 1) }\nconst K = f()", 1, 58, "This constant expression goes outside the signed 64-bit range of constant arithmetic (-9223372036854775808 to 9223372036854775807) (called from line 2). Use smaller values")]
+    public void Errors_while_running(string source, int line, int column, string expected)
     {
         var e = Error(source + "\nfn main() { }");
-        Assert.Contains(expected, e.Description);
+        Expect.Message(e, line, column, expected);
     }
+
+    /// <summary>
+    /// The note goes right before the fix (review code-quality-syntax 11), where <c>--json</c> splits the
+    /// suggestion off, not after the first ". ": before R6 a first sentence with "e.g." was cut in two.
+    /// </summary>
+    [Theory]
+    [InlineData("A value, e.g. 5, is wrong. Use another", "A value, e.g. 5, is wrong (called from line 2). Use another")]
+    [InlineData("It is wrong; use another", "It is wrong (called from line 2); use another")]
+    [InlineData("It is wrong. It cannot be fixed", "It is wrong. It cannot be fixed (called from line 2)")]
+    public void The_called_from_note_goes_before_the_fix(string message, string expected) =>
+        Assert.Equal(expected, CompileTime.Interpreter.WithNote(message, "called from line 2"));
 
     // Review code-quality-syntax 2: an error two or three const fn calls deep names the line that started the evaluation too.
     [Theory]
@@ -712,37 +720,37 @@ public sealed class ConstFnTests : IDisposable
     }
 
     [Theory]
-    [InlineData("const fn f(n: u8) -> int { return n }", "'u8' is a runtime type. Use int; the value is checked when it leaves the const fn")]
-    [InlineData("const fn f() -> u16 { return 1 }", "'u16' is a runtime type. Use int; the value is checked when it leaves the const fn")]
-    [InlineData("const fn f() -> int { var x: i8 = 1\n return x }", "'i8' is a runtime type")]
-    [InlineData("const fn f(p: ptr u8) -> int { return 1 }", "A pointer is a runtime type. Use int for an address")]
-    [InlineData("struct E { x: u8 }\nconst fn f(e: E) -> int { return 1 }", "'E' is not a compile-time type. Use int, real, bool, label or an array of them")]
-    [InlineData("const fn f(t: [int; 4]) -> int { return 1 }", "A const fn takes and returns arrays of any length. Write '_' for the length, e.g. '[int; _]'")]
-    [InlineData("const fn f(n: int using A) -> int { return n }", "A const fn runs at compile time, so 'n' is in no register. Remove 'using A'")]
-    [InlineData("const fn f() -> int using A { return 1 }", "Remove 'using A'")]
-    [InlineData("const fn f() -> int @ $1000", "A const fn runs at compile time and has no address")]
-    [InlineData("const fn f() -> int { var x: int @ $1000 = 1\n return x }", "'x' exists only at compile time, so it has no address. Remove the '@'")]
-    [InlineData("const fn f() -> int { asm { nop }\n return 1 }", "A const fn runs at compile time, so it cannot run assembly. Use 'emit { ... }' to generate assembly where the const fn is called")]
-    [InlineData("const fn f() -> int { emit { nop }\n return 1 }", "'f' returns a value, so it cannot emit assembly")]
-    [InlineData("const fn f() { return 1 }", "'f' returns no value. Remove the value, or give it a return type, e.g. 'const fn f(...) -> int'")]
-    [InlineData("const fn f() -> int { return }", "'f' must return an int value")]
-    [InlineData("const fn f() -> int { break }", "'break' and 'continue' must be inside a loop")]
-    [InlineData("const fn f() -> int { for i in 0..3 using X { }\n return 1 }", "Remove 'using X'")]
-    [InlineData("const fn f(n: int) -> int { var n = 1\n return n }", "'n' is already declared at")]
-    [InlineData("const W = 1\nconst fn f() -> int { var W = 1\n return W }", "'W' is already declared at")]
-    [InlineData("const fn f() -> int { 1 + 2\n return 1 }", "Only a function call can be used as a statement")]
-    [InlineData("const fn f(n: int, n: int) -> int { return n }", "Parameter 'n' is declared twice")]
-    [InlineData("const fn len(n: int) -> int { return n }", "'len' is a built-in function; choose another name")]
-    [InlineData("const fn f() -> int { return 1 }\nfn f() { }", "'f' is already declared at")]
-    [InlineData("fn g() { const fn f() -> int { return 1 } }", "'const fn' must be declared outside functions")]
-    [InlineData("const fn f(true using carry) -> int { return 1 }", "A const fn's parameter is a name and a compile-time type. Write 'n: int'")]
-    [InlineData("const fn f() -> int { linear var t: [int; 2]\n return 1 }", "Remove 'linear' or 'indexed'")]
-    [InlineData("const fn f() -> int { var x\n return 1 }", "'x' needs an initial value. Write 'var x = ...'")]
-    [InlineData("const fn f() -> int { var x: int\n return x }\nconst K = f()", "'x' needs an initial value (called from line 3). Write 'var x: int = ...'")]
-    public void Errors_in_the_declaration(string source, string expected)
+    [InlineData("const fn f(n: u8) -> int { return n }", 1, 15, "'u8' is a runtime type. Use int; the value is checked when it leaves the const fn")]
+    [InlineData("const fn f() -> u16 { return 1 }", 1, 17, "'u16' is a runtime type. Use int; the value is checked when it leaves the const fn")]
+    [InlineData("const fn f() -> int { var x: i8 = 1\n return x }", 1, 30, "'i8' is a runtime type. Use int; the value is checked when it leaves the const fn")]
+    [InlineData("const fn f(p: ptr u8) -> int { return 1 }", 1, 15, "A pointer is a runtime type. Use int for an address; the value is checked when it leaves the const fn")]
+    [InlineData("struct E { x: u8 }\nconst fn f(e: E) -> int { return 1 }", 2, 15, "'E' is not a compile-time type. Use int, real, bool, label or an array of them")]
+    [InlineData("const fn f(t: [int; 4]) -> int { return 1 }", 1, 21, "A const fn takes and returns arrays of any length. Write '_' for the length, e.g. '[int; _]'")]
+    [InlineData("const fn f(n: int using A) -> int { return n }", 1, 12, "A const fn runs at compile time, so 'n' is in no register. Remove 'using A'")]
+    [InlineData("const fn f() -> int using A { return 1 }", 1, 17, "A const fn runs at compile time, so its value is in no register. Remove 'using A'")]
+    [InlineData("const fn f() -> int @ $1000", 1, 7, "A const fn runs at compile time and has no address. Remove '@' and the address, and give it a body")]
+    [InlineData("const fn f() -> int { var x: int @ $1000 = 1\n return x }", 1, 23, "'x' exists only at compile time, so it has no address. Remove the '@'")]
+    [InlineData("const fn f() -> int { asm { nop }\n return 1 }", 1, 27, "A const fn runs at compile time, so it cannot run assembly. Use 'emit { ... }' to generate assembly where the const fn is called")]
+    [InlineData("const fn f() -> int { emit { nop }\n return 1 }", 1, 23, "'f' returns a value, so it cannot emit assembly: a generator returns nothing. Move the emit into a const fn with no return type")]
+    [InlineData("const fn f() { return 1 }", 1, 16, "'f' returns no value. Remove the value, or give it a return type, e.g. 'const fn f(...) -> int'")]
+    [InlineData("const fn f() -> int { return }", 1, 23, "'f' must return an int value. Write the value after 'return'")]
+    [InlineData("const fn f() -> int { break }", 1, 23, "'break' and 'continue' must be inside a loop. Use 'return' to leave the function")]
+    [InlineData("const fn f() -> int { for i in 0..3 using X { }\n return 1 }", 1, 23, "A const fn's loop runs at compile time, with its variable in no register. Remove 'using X'")]
+    [InlineData("const fn f(n: int) -> int { var n = 1\n return n }", 1, 29, "'n' is already declared at 1:12. Use another name")]
+    [InlineData("const W = 1\nconst fn f() -> int { var W = 1\n return W }", 2, 23, "'W' is already declared at 1:1. Use another name")]
+    [InlineData("const fn f() -> int { 1 + 2\n return 1 }", 1, 25, "Only a function call can be used as a statement. Assign the value to a variable, or remove it")]
+    [InlineData("const fn f(n: int, n: int) -> int { return n }", 1, 20, "Parameter 'n' is declared twice. Rename one of them")]
+    [InlineData("const fn len(n: int) -> int { return n }", 1, 1, "'len' is a built-in function; choose another name")]
+    [InlineData("const fn f() -> int { return 1 }\nfn f() { }", 2, 1, "'f' is already declared at 1:1. Rename one of them")]
+    [InlineData("fn g() { const fn f() -> int { return 1 } }", 1, 10, "'const fn' must be declared outside functions. Move it to the top level of the file")]
+    [InlineData("const fn f(true using carry) -> int { return 1 }", 1, 12, "A const fn's parameter is a name and a compile-time type. Write 'n: int'")]
+    [InlineData("const fn f() -> int { linear var t: [int; 2]\n return 1 }", 1, 23, "A const fn's array holds compile-time values, stored nowhere. Remove 'linear' or 'indexed'")]
+    [InlineData("const fn f() -> int { var x\n return 1 }", 1, 23, "'x' needs an initial value. Write 'var x = ...'")]
+    [InlineData("const fn f() -> int { var x: int\n return x }\nconst K = f()", 1, 23, "'x' needs an initial value (called from line 3). Write 'var x: int = ...'")]
+    public void Errors_in_the_declaration(string source, int line, int column, string expected)
     {
         var e = Error(source + "\nfn main() { }");
-        Assert.Contains(expected, e.Description);
+        Expect.Message(e, line, column, expected);
     }
 
     [Fact]
@@ -761,7 +769,7 @@ public sealed class ConstFnTests : IDisposable
         Write("tables.tern", "private const fn secret() -> int { return 1 }\nconst fn open() -> int { return secret() + 1 }\n");
         Assert.Equal(2, RunMain("import tables\nconst K = tables.open()\nvar v: u8\nfn main() { v = K }").U8("v"));
         var e = ErrorInMain("import tables\nconst K = tables.secret()\nfn main() { }");
-        Assert.Contains("'tables.secret' is private to the module tables", e.Description);
+        Expect.Message(e, 2, 11, "'tables.secret' is private to the module tables; only code in tables can use it. Remove 'private' there, or use another of its functions");
     }
 
     [Fact]
@@ -876,20 +884,41 @@ public sealed class ConstFnTests : IDisposable
     }
 
     [Theory]
-    [InlineData("const fn f(n: int) -> int {\n    assert n, \"m\"\n    return n\n}\nconst K = f(1)\nfn main() { }", 2,
+    [InlineData("const fn f(n: int) -> int {\n    assert n, \"m\"\n    return n\n}\nconst K = f(1)\nfn main() { }", 2, 12,
         "An assert condition is a bool (called from line 5). Write a comparison, e.g. COUNT <= 64")]
-    [InlineData("const fn f(n: int) -> int {\n    assert n > 0\n    return n\n}\nconst K = f(1)\nfn main() { }", 2,
-        "Expected ',' and a message string after the condition")]
-    [InlineData("const fn f(n: int) -> int {\n    assert n > 0, n\n    return n\n}\nconst K = f(1)\nfn main() { }", 2,
-        "Expected a message string")]
-    [InlineData("fn main() {\n    assert 1 < 2, \"m\"\n}", 2,
+    [InlineData("const fn f(n: int) -> int {\n    assert n > 0\n    return n\n}\nconst K = f(1)\nfn main() { }", 2, 17,
+        "Expected ',' and a message string after the condition, found end of line")]
+    [InlineData("const fn f(n: int) -> int {\n    assert n > 0, n\n    return n\n}\nconst K = f(1)\nfn main() { }", 2, 19,
+        "Expected a message string, found 'n'")]
+    [InlineData("fn main() {\n    assert 1 < 2, \"m\"\n}", 2, 5,
         "An assert is checked at compile time. Write it at the top level or in a const fn")]
-    [InlineData("fn main() {\n    if true {\n        assert 1 < 2, \"m\"\n    }\n}", 3,
+    [InlineData("fn main() {\n    if true {\n        assert 1 < 2, \"m\"\n    }\n}", 3, 9,
         "An assert is checked at compile time. Write it at the top level or in a const fn")]
-    public void Assert_errors(string source, int line, string message)
+    public void Assert_errors(string source, int line, int column, string message)
     {
-        var e = Error(source);
-        Assert.Equal(line, e.Pos.Line);
-        Assert.StartsWith(message, e.Description);
+        Expect.Message(Error(source), line, column, message);
+    }
+
+    // Errors the coverage run of R6 found no test for (review code-quality-tests, finding 4).
+    [Theory]
+    [InlineData("const T = [len([0 for j in 0..250]) for i in 0..60000]\nfn main() { }", 1, 11, "This list did not finish after 10,000,000 steps. Use a shorter range")]
+    [InlineData("const fn g() -> int {\n    var x = 5\n    return x[0]\n}\nconst K = g()\nfn main() { }", 3, 13, "Only arrays can be indexed (called from line 5). Use an array, or a data table")]
+    [InlineData("const fn g() -> int {\n    var a = [1, 2]\n    return a[true]\n}\nconst K = g()\nfn main() { }", 3, 14, "An index is a bool here, but needs an int (called from line 5). Use an int value")]
+    [InlineData("const fn g() -> int {\n    var a = [1, 2]\n    return a[[1]]\n}\nconst K = g()\nfn main() { }", 3, 14, "An index is an array here, but needs an int (called from line 5). Use an int value")]
+    [InlineData("var x: u8\nfn main() { x = [i for i in 0..3][0] }", 2, 17, "A list built with 'for' is computed at compile time. Use a 'for' loop to fill the array at runtime")]
+    [InlineData("const K = 2.5\nvar x: u8 = K\nfn main() { }", 2, 13, "This value is the real number 2.5, but an int is expected here. Use round(x), floor(x), ceil(x) or trunc(x) to make it an int")]
+    [InlineData("struct P { x: u8 }\ndata t: [P; 2] = repeat(1, 2)\nfn main() { }", 2, 18, "A compile-time array holds numbers or bools, so it cannot fill a table of P. Use a table of numbers")]
+    [InlineData("fn f() { }\nconst fn g() -> int { return f }\nconst K = g()\nfn main() { }", 2, 30, "'f' is a function, not a value (called from line 3). Use addr(f) for its address")]
+    [InlineData("fn f() -> u8 { return 1 }\nconst fn g() -> int { return f() }\nconst K = g()\nfn main() { }", 2, 30, "'f' runs on the 6502, so compile-time code cannot call it (called from line 3). Use a const fn")]
+    [InlineData("struct P { x: u8 }\nconst fn g() { var a = addr(P) }\nfn main() { asm { g() } }", 2, 29, "'P' is a struct type, which has no address (called from line 3). Use addr() with a global, data or a function")]
+    [InlineData("const fn h() -> int { return 1 }\nconst fn g() { var a = addr(h) }\nfn main() { asm { g() } }", 2, 29, "'h' is a const fn, which has no address (called from line 3). Use addr() with a global, data or a function")]
+    [InlineData("const fn f() -> int { return t[0] }\ndata t: [u8; 2] = [f(), 1]\nfn main() { }", 1, 30, "'t' is read while its own initial value is computed, so it depends on itself (called from line 2). Give it a value that does not read 't'")]
+    [InlineData("const T = [i for i in 0 to 3]\nfn main() { }", 1, 25, "Expected '..' or '..=', found 'to'. Write a range as first..last, or first..=last to include the last value")]
+    [InlineData("var x: u8 = repeat(1, 2)\nfn main() { }", 1, 13, "This value is an array of 2, which only data or a global array can hold. Use it as their initial value, e.g. 'data t: [u8; _] = ...'")]
+    [InlineData("fn f() { }\nconst fn g() {\n    var a = f\n}\nfn main() { asm { g() } }", 3, 13, "'f' is a function, not a value (called from line 5). Use addr(f) for its address")]
+    [InlineData("fn f() { }\nconst fn g() {\n    var a = f()\n}\nfn main() { asm { g() } }", 3, 13, "'f' runs on the 6502, so compile-time code cannot call it (called from line 5). Use a const fn")]
+    public void Reports_compile_time_errors_no_other_test_reached(string source, int line, int column, string expected)
+    {
+        Expect.Error(source, line, column, expected);
     }
 }

@@ -2,29 +2,13 @@ using Tern.Cpu;
 
 namespace Tern.Compiler;
 
-/// <summary>The program file's format (spec 12.2).</summary>
-public enum OutputFormat
-{
-    /// <summary>Commodore: a 2-byte load address, then every byte from the lowest to the highest address used, gaps as zeros.</summary>
-    Prg,
-    /// <summary>Atari DOS: $FF $FF, then load segments (first address, last address, bytes), then the run address in RUNAD.</summary>
-    Xex,
-    /// <summary>
-    /// A ProDOS 8 system file: one block of bytes, loaded at $2000 and started there. A program's areas
-    /// follow each other with no gaps; the startup code moves them into place (spec 12.2).
-    /// </summary>
-    System,
-    /// <summary>
-    /// An iNES 1.0 cartridge image (spec 12.2): a 16-byte header, PRG ROM (banks in order, the fixed bank
-    /// last), then CHR ROM.
-    /// </summary>
-    Nes,
-}
-
 /// <summary>Everything the compiler needs to know about a target machine.</summary>
 public sealed class Platform
 {
+    /// <summary>The name <c>--target</c> takes, and the library's folder (<c>c64</c>, <c>apple2</c>).</summary>
     public required string Name { get; init; }
+    /// <summary>The machine's name in messages: "C64", "Apple II".</summary>
+    public required string Title { get; init; }
     public required CpuVariant Cpu { get; init; }
 
     /// <summary>The instructions of <see cref="Cpu"/>, which the checker, the backend and <c>tern run</c> use.</summary>
@@ -33,6 +17,8 @@ public sealed class Platform
     public required int LoadAddress { get; init; }
     /// <summary>Bytes placed at <see cref="LoadAddress"/> before the code, e.g. a BASIC SYS line.</summary>
     public required byte[] Header { get; init; }
+    /// <summary>What <see cref="Header"/> is, in messages: "BASIC line"; null for a platform with no header.</summary>
+    public string? HeaderName { get; init; }
     /// <summary>
     /// Zero-page bytes the program may use: first and last address of each range, inclusive, in the
     /// order the compiler fills them. A variable cannot cross from one range to the next, so the
@@ -48,14 +34,22 @@ public sealed class Platform
     public required (int First, int Last)[] VolatileAreas { get; init; }
     /// <summary>Encoding of char and string literals without a prefix; null on the NES, where the program declares one (spec 2.1).</summary>
     public required CharEncoding? DefaultEncoding { get; init; }
+    /// <summary>The program file's kind (spec 12.2), which builds its file.</summary>
     public required OutputFormat Format { get; init; }
     /// <summary>The program file's extension: ".prg", ".xex", ".system", ".nes".</summary>
-    public string FileExtension => Format switch { OutputFormat.Prg => ".prg", OutputFormat.Xex => ".xex", OutputFormat.Nes => ".nes", _ => ".system" };
+    public string FileExtension => Format.Extension;
     /// <summary>
     /// The cartridge boards the <c>cartridge</c> line may name (spec 8.4, 12.2), the default first. On the
-    /// NES every program is a cartridge, so the line is required.
+    /// NES every program is a cartridge (<see cref="CartridgeRequired"/>).
     /// </summary>
     public IReadOnlyList<Board> Boards { get; init; } = [];
+    /// <summary>Every program is a cartridge, so the memory block must name a board (the NES).</summary>
+    public bool CartridgeRequired { get; init; }
+    /// <summary>
+    /// The machine takes cartridges, but the compiler builds none for it yet (spec 8.4: the C64's and the
+    /// Atari's): a <c>cartridge</c> line is "not supported yet" rather than an error about the machine.
+    /// </summary>
+    public bool CartridgesPlanned { get; init; }
     /// <summary>
     /// RAM for variables, when code is in ROM (the NES): the variables' block goes there instead of after
     /// the program, and initial values are copied from ROM. Null: variables follow the program.
@@ -65,45 +59,16 @@ public sealed class Platform
     /// The extension of an overlay's file and of a binary without main: as the program's, except on
     /// the Apple II, where they are plain binary files (".bin"), not system files.
     /// </summary>
-    public string BinaryExtension => Format == OutputFormat.System ? ".bin" : FileExtension;
+    public string BinaryExtension => Format.Plain.Extension;
     /// <summary>The label file's format: the one the platform's main emulator loads (question 138).</summary>
     public required LabelFormat Labels { get; init; }
+    /// <summary>
+    /// The machine <c>tern run</c> models (<see cref="Tools.Machine"/>), given the platform and the build's
+    /// overlay files; null for a platform it has no model of, which <c>tern run</c> then reports.
+    /// </summary>
+    internal Func<Platform, IReadOnlyList<OverlayFile>, Tools.Machine>? NewMachine { get; init; }
     /// <summary>ROM and I/O, where <c>tern run</c> finds no program code: first and last address, inclusive.</summary>
     public required (int First, int Last)[] Rom { get; init; }
-
-    /// <summary>The Atari's run address vector, RUNAD.</summary>
-    public const int Runad = 0x02E0;
-
-    /// <summary>
-    /// The file holding <paramref name="segments"/> (merged runs of bytes): a .prg covers every byte
-    /// from the lowest to the highest address, a .xex has one load segment per run and, if
-    /// <paramref name="run"/> is given, a last segment that writes it to RUNAD. On the Apple II this is
-    /// the file of an overlay or a binary, the bytes from the lowest to the highest address; a
-    /// program's system file is built with its startup code (<c>TernCompiler.Apple2</c>).
-    /// </summary>
-    /// <param name="first">The lowest address of the segments.</param>
-    /// <param name="image">The segments' bytes from <paramref name="first"/> on, gaps as zeros: the .prg's contents.</param>
-    public byte[] FileOf(int first, byte[] image, IReadOnlyList<(int Address, byte[] Bytes)> segments, int? run)
-    {
-        var file = new List<byte>();
-        if (Format == OutputFormat.System) return image;
-        if (Format == OutputFormat.Prg)
-        {
-            file.AddRange([(byte)first, (byte)(first >> 8)]);
-            file.AddRange(image);
-            return file.ToArray();
-        }
-        file.AddRange([0xFF, 0xFF]);
-        void Segment(int address, byte[] bytes)
-        {
-            int last = address + bytes.Length - 1;
-            file.AddRange([(byte)address, (byte)(address >> 8), (byte)last, (byte)(last >> 8)]);
-            file.AddRange(bytes);
-        }
-        foreach (var (address, bytes) in segments.OrderBy(s => s.Address)) Segment(address, bytes);
-        if (run is int at) Segment(Runad, [(byte)at, (byte)(at >> 8)]);
-        return file.ToArray();
-    }
 
     public int CodeStart => LoadAddress + Header.Length;
 
@@ -125,6 +90,9 @@ public sealed class Platform
     public static readonly Platform C64 = new()
     {
         Name = "c64",
+        HeaderName = "BASIC line",
+        Title = "C64",
+        CartridgesPlanned = true,
         Cpu = CpuVariant.Nmos6502,
         LoadAddress = 0x0801,
         Header =
@@ -153,6 +121,8 @@ public sealed class Platform
         DefaultEncoding = CharEncoding.Petscii,
         Format = OutputFormat.Prg,
         Labels = LabelFormat.Vice,
+        // The KERNAL's file names have no extension: "LEVEL1" is level1.prg.
+        NewMachine = (_, overlays) => new Tools.C64Machine(new Tools.OverlayDisk(overlays, "")),
         Rom =
         [
             (0xA000, 0xBFFF),   // BASIC
@@ -167,6 +137,8 @@ public sealed class Platform
     public static readonly Platform Atari = new()
     {
         Name = "atari",
+        Title = "Atari",
+        CartridgesPlanned = true,
         Cpu = CpuVariant.Nmos6502,
         LoadAddress = 0x2000,
         Header = [],
@@ -182,6 +154,7 @@ public sealed class Platform
         DefaultEncoding = CharEncoding.Atascii,
         Format = OutputFormat.Xex,
         Labels = LabelFormat.Mads,
+        NewMachine = (p, overlays) => new Tools.AtariMachine(new Tools.OverlayDisk(overlays, p.BinaryExtension)),
         Rom =
         [
             (0xC000, 0xFFFF),   // OS ROM (from $C000 on the XL/XE), I/O at $D000-$D7FF
@@ -196,6 +169,7 @@ public sealed class Platform
     public static readonly Platform Apple2 = new()
     {
         Name = "apple2",
+        Title = "Apple II",
         Cpu = CpuVariant.Nmos6502,
         LoadAddress = 0x2000,
         Header = [],
@@ -206,8 +180,9 @@ public sealed class Platform
             (0xC000, 0xCFFF),   // soft switches, I/O and slot ROMs: a read alone can have an effect
         ],
         DefaultEncoding = CharEncoding.Apple2,
-        Format = OutputFormat.System,
+        Format = OutputFormat.ProDosSystem,
         Labels = LabelFormat.AppleWin,
+        NewMachine = (p, overlays) => new Tools.Apple2Machine(new Tools.OverlayDisk(overlays, p.BinaryExtension)),
         Rom =
         [
             (0xBF00, 0xBFFF),   // ProDOS's global page: the MLI's entry at $BF00
@@ -223,6 +198,8 @@ public sealed class Platform
     public static readonly Platform Nes = new()
     {
         Name = "nes",
+        Title = "NES",
+        CartridgeRequired = true,
         Cpu = CpuVariant.Ricoh2A03,
         LoadAddress = 0x8000,
         Header = [],
@@ -234,8 +211,9 @@ public sealed class Platform
             (0x2000, 0x401F),   // PPU, APU, controller and OAM DMA registers
         ],
         DefaultEncoding = null,
-        Format = OutputFormat.Nes,
+        Format = OutputFormat.Ines,
         Labels = LabelFormat.Mesen,
+        NewMachine = (_, _) => new Tools.NesMachine(),
         Rom = [],
         Boards = [Board.Nrom, Board.Uxrom],
     };

@@ -7,11 +7,8 @@ namespace Tern.Compiler.Tests;
 /// <see cref="TernCompiler.Check"/>: the checks without a build, which return their errors instead of
 /// throwing them, for a language server (review code-quality-syntax 7, tools 7; roadmap R5).
 /// </summary>
-public sealed class CheckTests : IDisposable
+public sealed class CheckTests : TempFolderTest
 {
-    private readonly DirectoryInfo _dir = Directory.CreateTempSubdirectory("tern");
-
-    public void Dispose() => _dir.Delete(recursive: true);
 
     private string MainPath => Path.Combine(_dir.FullName, "main.tern");
 
@@ -87,11 +84,11 @@ public sealed class CheckTests : IDisposable
         // The overlap with the program is found by the layout, which a check does not run.
         const string source = "var first: u8 @ $0801\nfn main() { first = 1 }\n";
         Assert.True(TernCompiler.Check(source).Ok);
-        Assert.Contains("overlaps the program", Assert.Throws<CompileError>(() => TernCompiler.Compile(source)).Message);
+        Expect.Message(Assert.Throws<CompileError>(() => TernCompiler.Compile(source)), 1, 1, "'first' at $0801 overlaps the program and its variables at $0801-$0819. Move 'first', or make the program smaller");
         // Nor does it allocate (review R5, finding 2).
         const string full = "var a: [u8; 200] @ zp\nfn main() { a[1] = a[0] }\n";
         Assert.True(TernCompiler.Check(full).Ok);
-        Assert.Contains("Zero page is full", Assert.Throws<CompileError>(() => TernCompiler.Compile(full)).Message);
+        Expect.Message(Assert.Throws<CompileError>(() => TernCompiler.Compile(full)), 1, 1, "Zero page is full: '@ zp' variables need 200 bytes, 146 are free. Users: a (200). Remove '@ zp' from some of them");
     }
 
     [Fact]
@@ -123,7 +120,7 @@ public sealed class CheckTests : IDisposable
     public void Diagnostics_split_the_suggestion_from_the_message()
     {
         var d = Assert.Single(TernCompiler.Check("fn main() {\n    var temp: u8 = 3\n}\n").Diagnostics("main.tern"));
-        Assert.Equal(("main.tern", 2, "warning", "'temp' is never used."), (d.File, d.Line, d.Severity, d.Message));
+        Assert.Equal(("main.tern", 2, Tools.Severity.Warning, "'temp' is never used."), (d.File, d.Line, d.Severity, d.Message));
         Assert.Equal("Remove it, or start its name with '_' to keep it", d.Suggestion);
     }
 }

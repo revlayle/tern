@@ -63,13 +63,19 @@ public sealed partial class Checker
         return lt.Size >= rt.Size ? lt : rt;
     }
 
+    /// <summary>Fails where a value is needed and <paramref name="e"/> is a call that returns none (review R6 follow-up, finding 1).</summary>
+    private static void RequireValue(Expr e)
+    {
+        if (e.Type.Kind == TypeKind.Void)
+            throw new CompileError(e.Pos, "This function call does not return a value. Call it as a statement on its own");
+    }
+
     /// <summary>Checks that <paramref name="e"/> can be used where <paramref name="target"/> is expected.</summary>
     private static void Coerce(Expr e, TernType target)
     {
         var source = e.Type;
         if (source.Kind == TypeKind.Error) return;
-        if (source.Kind == TypeKind.Void)
-            throw new CompileError(e.Pos, "This function call does not return a value. Call it as a statement on its own");
+        RequireValue(e);
         if (source.IsStruct)
             throw new CompileError(e.Pos, $"A struct cannot be used as a value, since structs are never copied. Use one of its fields, or a pointer: addr(...) gives a ptr {source}");
 
@@ -86,7 +92,7 @@ public sealed partial class Checker
             if (e.IsBitPattern && v < 0 && !target.IsSigned)
                 throw new CompileError(e.Pos, $"'~' gives {v} here, a pattern wider than {target}: the value before '~' has bits above {target}. Use a value that fits in {target} before '~'");
             if (v < target.MinValue || v > target.MaxValue)
-                throw new CompileError(e.Pos, $"{v} does not fit in {target} ({target.MinValue} to {target.MaxValue}). Use a value in that range, or a wider type");
+                throw new CompileError(e.Pos, $"{v} does not fit in {target} ({target.MinValue} to {target.MaxValue}). Use a value in that range, or a wider type") { Reason = new DoesNotFit(v) };
             e.Type = target;
             return;
         }
@@ -110,7 +116,12 @@ public sealed partial class Checker
             throw new CompileError(e.Pos, $"Expected bool, found {source}. Compare instead, as in 'x != 0'");
         if (source.Kind == TypeKind.Bool && target.IsInteger)
             throw new CompileError(e.Pos, $"Expected {target}, found bool. Use 'if' to choose a number, as in 'if b {{ x = 1 }}'");
-        throw new CompileError(e.Pos, $"Expected {target}, found {source}. Use a {target} here");
+        // A whole array is never a value (spec 3.2): name what can be used instead (review R2, suggestion 4).
+        if (source.IsArray)
+            throw new CompileError(e.Pos, Describe(e) is { } array
+                ? $"Expected {target}, found {source}: '{array}' is a whole array, which is never a value. Use one element, as in {array}[0], or addr({array}) for its address"
+                : $"Expected {target}, found {source}, a whole array, which is never a value. Use one element of it, or its address with addr()");
+        throw new CompileError(e.Pos, $"Expected {target}, found {source}, which does not convert to {target}. Use a {target} here");
     }
 
     /// <summary>
@@ -120,7 +131,7 @@ public sealed partial class Checker
     private static void CoerceNamed(Expr e, TernType target, string? setBy, bool isConstant)
     {
         try { Coerce(e, target); }
-        catch (CompileError error) when (setBy is not null && target.IsInteger && error.Description.Contains(" does not fit in "))
+        catch (CompileError error) when (error.Reason is DoesNotFit && setBy is not null && target.IsInteger)
         {
             long v = e.ConstValue!.Value;
             var wider = WiderFor(v, target);

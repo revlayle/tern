@@ -101,6 +101,7 @@ public class AddressConversionTests
         Assert.Equal([(byte)((map + 299) >> 8), (byte)(map + 2)], r.Ram.Bytes.AsSpan(r.Address("table"), 2).ToArray());
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void Lo_and_hi_of_an_address_with_an_offset_is_one_load()
     {
@@ -123,20 +124,18 @@ public class AddressConversionTests
     }
 
     [Theory]
-    [InlineData("var p: ptr u8\nvar x: u8\nfn main() { x = p.hi }", ".hi needs a number; convert the pointer first: (p as u16).hi")]
-    [InlineData("var map: [u8; 9]\nvar n: u8\nvar x: u8\nfn main() { x = (addr(map) + n).hi }", ".hi needs a number; convert the pointer first: (p as u16).hi")]
-    public void Lo_and_hi_of_a_pointer_that_is_not_a_filled_in_address_is_an_error(string source, string expected)
+    [InlineData("var p: ptr u8\nvar x: u8\nfn main() { x = p.hi }", 3, 18, ".hi needs a number; convert the pointer first: (p as u16).hi")]
+    [InlineData("var map: [u8; 9]\nvar n: u8\nvar x: u8\nfn main() { x = (addr(map) + n).hi }", 4, 32, ".hi needs a number; convert the pointer first: (p as u16).hi")]
+    public void Lo_and_hi_of_a_pointer_that_is_not_a_filled_in_address_is_an_error(string source, int line, int column, string expected)
     {
-        var e = Assert.Throws<CompileError>(() => TernCompiler.Compile(source));
-        Assert.Contains(expected, e.Description);
+        Expect.Error(source, line, column, expected);
     }
 
     [Fact]
     public void A_number_before_a_pointer_names_the_operands_as_written()
     {
         // Question 85.
-        var e = Assert.Throws<CompileError>(() => TernCompiler.Compile("var map: [u8; 9]\nvar p: ptr u8\nvar n: u8\nfn main() { p = n + addr(map) }"));
-        Assert.Contains("Write 'addr(map) + n' to move the pointer", e.Description);
+        Expect.Error(() => TernCompiler.Compile("var map: [u8; 9]\nvar p: ptr u8\nvar n: u8\nfn main() { p = n + addr(map) }"), 4, 19, "A number before a pointer is not pointer arithmetic. Write 'addr(map) + n' to move the pointer, or convert the pointer with 'as u16' for a number");
     }
 
     [Fact]
@@ -171,21 +170,20 @@ public class AddressConversionTests
 
     [Theory]
     [InlineData("var p: ptr u8\nvar w: u16\nfn main() { w = w + p }",
-        "A number before a pointer is not pointer arithmetic. Write 'p + w' to move the pointer, or convert the pointer with 'as u16' for a number")]
-    [InlineData("var p: ptr u8\nvar w: u16\nvar b: bool\nfn main() { b = p == w }", "Cannot compare ptr u8 with u16; convert one side with 'as'")]
-    [InlineData("var p: ptr u8\nvar w: u16\nfn main() { p = w }", "Expected ptr u8, found u16. Convert with 'as ptr u8'")]
-    [InlineData("fn take(n: ptr u8) { }\nvar w: u16\nfn main() { take(w) }", "Expected ptr u8, found u16. Convert with 'as ptr u8'")]
-    [InlineData("var p: ptr u8\nvar x: u8\nfn main() { x = p }", "Expected u8, found ptr u8")]
+        3, 19, "A number before a pointer is not pointer arithmetic. Write 'p + w' to move the pointer, or convert the pointer with 'as u16' for a number")]
+    [InlineData("var p: ptr u8\nvar w: u16\nvar b: bool\nfn main() { b = p == w }", 4, 19, "Cannot compare ptr u8 with u16; convert one side with 'as'")]
+    [InlineData("var p: ptr u8\nvar w: u16\nfn main() { p = w }", 3, 17, "Expected ptr u8, found u16. Convert with 'as ptr u8'")]
+    [InlineData("fn take(n: ptr u8) { }\nvar w: u16\nfn main() { take(w) }", 3, 18, "Expected ptr u8, found u16. Convert with 'as ptr u8'")]
+    [InlineData("var p: ptr u8\nvar x: u8\nfn main() { x = p }", 3, 17, "Expected u8, found ptr u8. Convert with 'as u16' first, then take .lo or .hi")]
     // Review 2, finding 1: a compound assignment is the operation it stands for (spec 3.1).
-    [InlineData("var p: ptr u8\nvar w: u16\nfn main() { w += p }", "Expected u16, found ptr u8. Convert with 'as u16'")]
-    [InlineData("var p: ptr u8\nvar w: u16\nfn main() { w -= p }", "Expected u16, found ptr u8. Convert with 'as u16'")]
-    [InlineData("var p: ptr u8\nvar w: u16\nfn main() { w &= p }", "Expected u16, found ptr u8. Convert with 'as u16'")]
-    [InlineData("var map: [u8; 4]\nvar w: u16\nfn main() { w += addr(map) }", "Expected u16, found ptr u8. Convert with 'as u16'")]
+    [InlineData("var p: ptr u8\nvar w: u16\nfn main() { w += p }", 3, 18, "Expected u16, found ptr u8. Convert with 'as u16'")]
+    [InlineData("var p: ptr u8\nvar w: u16\nfn main() { w -= p }", 3, 18, "Expected u16, found ptr u8. Convert with 'as u16'")]
+    [InlineData("var p: ptr u8\nvar w: u16\nfn main() { w &= p }", 3, 18, "Expected u16, found ptr u8. Convert with 'as u16'")]
+    [InlineData("var map: [u8; 4]\nvar w: u16\nfn main() { w += addr(map) }", 3, 18, "Expected u16, found ptr u8. Convert with 'as u16'")]
     // Review 3, suggestion 1: a target that is not u16 gets the usual conversion error.
-    [InlineData("var p: ptr u8\nvar x: u8\nfn main() { x += p }", "Expected u8, found ptr u8")]
-    public void A_pointer_still_needs_as_in_an_operator(string source, string expected)
+    [InlineData("var p: ptr u8\nvar x: u8\nfn main() { x += p }", 3, 18, "Expected u8, found ptr u8. Convert with 'as u16' first, then take .lo or .hi")]
+    public void A_pointer_still_needs_as_in_an_operator(string source, int line, int column, string expected)
     {
-        var e = Assert.Throws<CompileError>(() => TernCompiler.Compile(source));
-        Assert.Contains(expected, e.Description);
+        Expect.Error(source, line, column, expected);
     }
 }

@@ -5,6 +5,7 @@ namespace Tern.Compiler.Tests;
 /// <summary>M19: <c>-> bool using overflow</c>, the V flag as a return value (spec 6.1, 7).</summary>
 public class OverflowTests
 {
+    [Trait("Shape", "nmos6502")]
     [Theory]
     [InlineData(0x00)]
     [InlineData(0x40)]
@@ -93,6 +94,7 @@ public class OverflowTests
         Assert.Equal(overflow ? 1 : 0, r.U8("stored"));
     }
 
+    [Trait("Shape", "nmos6502")]
     [Theory]
     [InlineData(0x00)]
     [InlineData(0x40)]
@@ -167,6 +169,7 @@ public class OverflowTests
         Assert.Equal(overflow ? 1 : 0, r.U8("loops"));
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void If_is_the_adc_then_bvc()
     {
@@ -189,14 +192,13 @@ public class OverflowTests
     }
 
     [Theory]
-    [InlineData("fn f() -> bool using overflow { return true }\nfn main() { }", "Only an asm fn, an inline asm fn or a routine at a fixed address")]
-    [InlineData("inline fn f() -> bool using overflow { return true }\nfn main() { }", "Only an asm fn, an inline asm fn or a routine at a fixed address")]
-    [InlineData("fn f(b: bool using overflow) { }\nfn main() { }", "cannot be passed using Overflow")]
-    [InlineData("fn f(true using overflow) @ $C000\nfn main() { }", "A fixed input goes in A, X, Y or the carry, not Overflow")]
-    [InlineData("fn f() -> u8 using overflow @ $C000\nfn main() { }", "cannot be passed using Overflow")]
-    public void Reports_errors(string source, string expected)
+    [InlineData("fn f() -> bool using overflow { return true }\nfn main() { }", 1, 11, "Only an asm fn, an inline asm fn or a routine at a fixed address can return a bool using overflow: no instruction sets the V flag, so a fn cannot 'return true' in it. Return it using carry, zero or negative")]
+    [InlineData("inline fn f() -> bool using overflow { return true }\nfn main() { }", 1, 18, "Only an asm fn, an inline asm fn or a routine at a fixed address can return a bool using overflow: no instruction sets the V flag, so a fn cannot 'return true' in it. Return it using carry, zero or negative")]
+    [InlineData("fn f(b: bool using overflow) { }\nfn main() { }", 1, 6, "A bool value cannot be passed using Overflow. Use A, X or Y")]
+    [InlineData("fn f(true using overflow) @ $C000\nfn main() { }", 1, 6, "A fixed input goes in A, X, Y or the carry, not Overflow. Use one of those")]
+    [InlineData("fn f() -> u8 using overflow @ $C000\nfn main() { }", 1, 11, "A u8 value cannot be passed using Overflow. Use A, X or Y")]
+    public void Reports_errors(string source, int line, int column, string expected)
     {
-        var e = Assert.Throws<CompileError>(() => TernCompiler.Compile(source));
-        Assert.Contains(expected, e.Description);
+        Expect.Error(source, line, column, expected);
     }
 }

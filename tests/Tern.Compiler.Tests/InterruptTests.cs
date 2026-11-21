@@ -159,13 +159,13 @@ public class InterruptTests
     [Theory]
     // Review M6, finding 1: mul8 and div8 share math's private work bytes.
     [InlineData("import math\nvar q: u8\nvar p: u16\ninterrupt fn handler() { q = math.div8(200, 7) }\nfn main() { p = math.mul8(3, 13) }",
-        "'math.mul8' (called from main) and 'math.div8' (called from the interrupt handler 'handler') both use 'math.w0', a private variable of its module")]
+        4, 11, "'math.mul8' (called from main) and 'math.div8' (called from the interrupt handler 'handler') both use 'math.w0', a private variable of its module. An interrupt could change it while the other is using it. Call functions of this module from only main or only one interrupt handler")]
     [InlineData("import math\nvar q: u8\nvar p: u16\ninterrupt fn h1() { q = math.div8(200, 7) }\ninterrupt fn h2() { p = math.mul16(3, 13) }\nfn main() { }",
-        "(called from the interrupt handler 'h1') and 'math.mul16' (called from the interrupt handler 'h2') both use 'math.w")]
-    public void Private_module_variables_used_from_two_roots_are_errors(string source, string expected)
+        5, 11, "'math.div8' (called from the interrupt handler 'h1') and 'math.mul16' (called from the interrupt handler 'h2') both use 'math.w0', a private variable of its module. An interrupt could change it while the other is using it. Call functions of this module from only main or only one interrupt handler")]
+    public void Private_module_variables_used_from_two_roots_are_errors(string source, int line, int column, string expected)
     {
         var e = Assert.Throws<CompileError>(() => TernCompiler.Compile(source));
-        Assert.Contains(expected, e.Description);
+        Expect.Message(e, line, column, expected);
         Assert.Null(e.Pos.File); // reported in the program, at the handler
     }
 
@@ -253,9 +253,7 @@ public class InterruptTests
         // Main also calls the module's helper: a function reached from both sides is not on the handler side.
         string call = timer.Contains("fn poke") ? "timer.poke()" : "timer.bump()";
         string main = Main48.Replace("seen = timer.now() }", "seen = timer.now(); " + call + " }");
-        var e = Assert.Throws<CompileError>(() => WithModules([("timer", timer)], path => TernCompiler.Compile(main, null, path, "lib")));
-        Assert.Contains("a private variable of its module", e.Description);
-        Assert.Contains("'timer.ticks'", e.Description);
+        Expect.Error(() => WithModules([("timer", timer)], path => TernCompiler.Compile(main, null, path, "lib")), 3, 11, "'timer.bump' (called from main) and 'timer.bump' (called from the interrupt handler 'timer.tick') both use 'timer.ticks', a private variable of its module. An interrupt could change it while the other is using it. Call functions of this module from only main or only one interrupt handler");
     }
 
     [Fact]
@@ -277,7 +275,7 @@ public class InterruptTests
                 seen = timer.now()
             }
             """, null, path, "lib")));
-        Assert.Contains("a private variable of its module", e.Description);
+        Expect.Message(e, 4, 11, "'timer.now' (called from main) and 'timer.bump' (called from the interrupt handler 'frame') both use 'timer.ticks', a private variable of its module. An interrupt could change it while the other is using it. Call functions of this module from only main or only one interrupt handler");
     }
 
     [Fact]
@@ -308,7 +306,7 @@ public class InterruptTests
             """;
         var e = Assert.Throws<CompileError>(() =>
             WithModules(modules, path => TernCompiler.Compile(main, null, path, "lib")));
-        Assert.Contains("both use 'b.n', a private variable of its module", e.Description);
+        Expect.Message(e, 2, 11, "'b.peek' (called from main) and 'b.poke' (called from the interrupt handler 'a.h') both use 'b.n', a private variable of its module. An interrupt could change it while the other is using it. Call functions of this module from only main or only one interrupt handler");
     }
 
     [Fact]
@@ -504,18 +502,17 @@ public class InterruptTests
     }
 
     [Theory]
-    [InlineData("interrupt fn h(x: u8) { }\nfn main() { }", "An interrupt handler takes no parameters and returns no value")]
-    [InlineData("interrupt fn h() -> u8 { return 1 }\nfn main() { }", "An interrupt handler takes no parameters and returns no value")]
-    [InlineData("interrupt fn h() { }\nfn main() { h() }", "'h' is an interrupt fn, which only the CPU or another interrupt fn calls")]
-    [InlineData("interrupt fn h() { }\nfn main() { asm {\n jsr h\n } }", "'h' is an interrupt handler: it ends with rti, so jsr cannot call it")]
-    [InlineData("fn main() { interrupt fn h() { } }", "'interrupt fn' must be declared outside functions")]
-    [InlineData("interrupt asm fn h() {\n rti\n }\nfn main() { }", "An interrupt handler in assembly is an 'asm fn' that saves what it changes and ends with rti")]
-    [InlineData("interrupt var x: u8\nfn main() { }", "'interrupt' goes before 'fn'")]
-    [InlineData("interrupt fn h() @ $1000\nfn main() { }", "An interrupt handler needs a body")]
-    [InlineData("interrupt fn main() { }", "'main' cannot be an interrupt handler")]
-    public void Reports_errors(string source, string expected)
+    [InlineData("interrupt fn h(x: u8) { }\nfn main() { }", 1, 11, "'h' has parameters, so it can only be called as a part of another interrupt fn. An interrupt handler takes no parameters and returns no value: the CPU calls it, not your code. Remove them, or call it only from an interrupt fn")]
+    [InlineData("interrupt fn h() -> u8 { return 1 }\nfn main() { }", 1, 11, "'h' has a return value, so it can only be called as a part of another interrupt fn. An interrupt handler takes no parameters and returns no value: the CPU calls it, not your code. Remove them, or call it only from an interrupt fn")]
+    [InlineData("interrupt fn h() { }\nfn main() { h() }", 2, 13, "'h' is an interrupt fn, which only the CPU or another interrupt fn calls. Install its address in the interrupt vector, or call it from an interrupt fn")]
+    [InlineData("interrupt fn h() { }\nfn main() { asm {\n jsr h\n } }", 3, 6, "'h' is an interrupt handler: it ends with rti, so jsr cannot call it. Install its address instead: lda #h.lo")]
+    [InlineData("fn main() { interrupt fn h() { } }", 1, 13, "'interrupt fn' must be declared outside functions. Move it to the top level of the file")]
+    [InlineData("interrupt asm fn h() {\n rti\n }\nfn main() { }", 1, 1, "An interrupt handler in assembly is an 'asm fn' that saves what it changes and ends with rti; 'interrupt' is for handlers in Tern. Remove 'interrupt'")]
+    [InlineData("interrupt var x: u8\nfn main() { }", 1, 1, "'interrupt' goes before 'fn', e.g. 'interrupt fn raster() { ... }'; found 'var'. Write 'interrupt fn' or remove 'interrupt'")]
+    [InlineData("interrupt fn h() @ $1000\nfn main() { }", 1, 11, "An interrupt handler needs a body; '@ $addr' declares a routine that is already there. Remove 'interrupt' or the address")]
+    [InlineData("interrupt fn main() { }", 1, 11, "'main' cannot be an interrupt handler; give the handler another name")]
+    public void Reports_errors(string source, int line, int column, string expected)
     {
-        var e = Assert.Throws<CompileError>(() => TernCompiler.Compile(source));
-        Assert.Contains(expected, e.Description);
+        Expect.Error(source, line, column, expected);
     }
 }

@@ -11,6 +11,7 @@ public class ConstantConditionTests
         fn b() { r = 2 }
         """;
 
+    [Trait("Shape", "nmos6502")]
     [Theory]
     [InlineData("const F = false", "F", "b", "a", 2)]
     [InlineData("const T = true", "T", "a", "b", 1)]
@@ -77,12 +78,12 @@ public class ConstantConditionTests
     [Fact]
     public void The_branch_not_taken_is_still_checked()
     {
-        var e = Assert.Throws<CompileError>(() => TernCompiler.Compile($"const F = false\n{Functions}\nfn main() {{ if F {{ nothing() }} }}"));
-        Assert.Contains("'nothing' is not a function", e.Description);
+        var e = Expect.Error(() => TernCompiler.Compile($"const F = false\n{Functions}\nfn main() {{ if F {{ nothing() }} }}"), 5, 20, "'nothing' is not a function. Check the spelling, or declare it");
         e = Assert.Throws<CompileError>(() => TernCompiler.Compile($"const T = true\n{Functions}\nfn main() {{ if T {{ a() }} else {{ r = 300 }} }}"));
-        Assert.Contains("300 does not fit in u8", e.Description);
+        Expect.Message(e, 5, 37, "300 does not fit in u8 (0 to 255). Use a value in that range, or a wider type");
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void The_sprites_module_without_FLICKER_has_no_flicker_code_or_tables()
     {

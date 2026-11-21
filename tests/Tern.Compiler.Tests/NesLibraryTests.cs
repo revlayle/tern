@@ -79,6 +79,7 @@ public class NesLibraryTests
         Assert.Equal(0x1E, r.Nes.Mask);
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void The_frame_loop_sends_the_sprites_by_dma_and_counts_frames()
     {

@@ -326,6 +326,7 @@ public class PointerTests
         Assert.Equal(7, r.Ram.Bytes[0x3000 + 300]);
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void Fixed_address_pointers()
     {
@@ -445,5 +446,44 @@ public class PointerTests
             }
             """);
         Assert.Equal(5, r.U8("count"));
+    }
+
+    /// <summary>The pointer errors (spec 3.4), with the part of the message each must have; moved from ErrorTests (review code-quality-tests 14).</summary>
+    [Theory]
+    [InlineData("var p: ptr\nfn main() { }", 1, 8, "'ptr' needs the type it points to. Write e.g. 'ptr u8'")]
+    [InlineData("var p: ptr u8\nvar q: ptr u8\nvar r: ptr u8\nfn main() { r = p + q }", 4, 19, "Two pointers cannot be added. Convert them to u16 first: (p as u16)")]
+    [InlineData("var p: ptr u8\nvar q: ptr u16\nvar w: u16\nfn main() { w = p - q }", 4, 19, "Cannot subtract ptr u16 from ptr u8; convert one side with 'as'")]
+    [InlineData("var p: ptr u8\nvar q: ptr u8\nfn main() { q = p - q }", 3, 19, "Expected ptr u8, found u16. Convert with 'as ptr u8'")]
+    [InlineData("var p: ptr u8\nfn main() { p = p & 7 }", 2, 19, "'&' does not work on pointers. Convert to u16 first: (p as u16)")]
+    [InlineData("var p: ptr u8\nfn main() { p <<= 1 }", 2, 15, "'<<=' does not work on pointers; only '+=' and '-=' do. Convert the pointer with 'as u16' for other operators")]
+    [InlineData("var p: ptr u8\nvar s: i8\nfn main() { p = p + s }", 3, 21, "A pointer moves by a u8 or u16, not i8. Convert the offset with 'as u16'")]
+    [InlineData("var p: ptr u8\nfn main() { p = p + -1 }", 2, 21, "A pointer moves by an unsigned number; use '-' to move back")]
+    [InlineData("var p: ptr u8\nvar q: ptr u8\nfn main() { q = 1 - p }", 3, 19, "A pointer cannot be subtracted from a number. Convert the pointer with 'as u16'")]
+    [InlineData("var p: ptr u8\nvar w: u16\nfn main() { p = w }", 3, 17, "Expected ptr u8, found u16. Convert with 'as ptr u8'")]
+    // Review code-quality-semantics 12: every type mismatch says how to fix it, with a fix that compiles.
+    [InlineData("var b: bool = 1\nfn main() { }", 1, 15, "Expected bool, found a number. Write true or false, or compare, as in 'x != 0'")]
+    [InlineData("var b: bool\nvar x: u8\nfn main() { b = x }", 3, 17, "Expected bool, found u8. Compare instead, as in 'x != 0'")]
+    [InlineData("var b: bool\nvar x: u8\nfn main() { x = b }", 3, 17, "Expected u8, found bool. Use 'if' to choose a number, as in 'if b { x = 1 }'")]
+    [InlineData("var p: ptr u8\nvar x: u8\nfn main() { p = x }", 3, 17, "Expected ptr u8, found u8. Convert with 'as u16' first, then 'as ptr u8'")]
+    [InlineData("var p: ptr u8\nvar x: u8\nfn main() { x = p }", 3, 17, "Expected u8, found ptr u8. Convert with 'as u16' first, then take .lo or .hi")]
+    [InlineData("var p: ptr u8\nvar s: i16\nfn main() { s = p }", 3, 17, "Expected i16, found ptr u8. Convert with 'as u16' first, then 'as i16'")]
+    [InlineData("fn main() { var a: [u8; 2] = [1, 2] }", 1, 30, "An initial value for a local array is not supported yet. Assign the elements, or use a global or data")]
+    [InlineData("var p: ptr u8\nvar w: u16\nfn main() { w = w + p }", 3, 19, "A number before a pointer is not pointer arithmetic. Write 'p + w' to move the pointer, or convert the pointer with 'as u16' for a number")]
+    [InlineData("var p: ptr u8\nvar q: ptr u16\nfn main() { q = p }", 3, 17, "Expected ptr u16, found ptr u8. Convert with 'as ptr u16'")]
+    [InlineData("var p: ptr u8\nvar b: u8\nfn main() { b = p as u8 }", 3, 19, "Cannot convert ptr u8 to u8; a pointer converts only to u16 or another pointer. Convert to u16 first, then take .lo or .hi")]
+    [InlineData("var p: ptr u8\nvar b: u8\nfn main() { p = b as ptr u8 }", 3, 19, "Cannot convert u8 to ptr u8; only u16 and pointers convert to a pointer. Convert to u16 first")]
+    [InlineData("var p: ptr u8\nvar q: ptr u16\nfn main() { if p == q { } }", 3, 18, "Cannot compare ptr u8 with ptr u16; convert one side with 'as'")]
+    [InlineData("var p: ptr u8\nvar w: u16\nfn main() { if p == w { } }", 3, 18, "Cannot compare ptr u8 with u16; convert one side with 'as'")]
+    [InlineData("var p: ptr u8\nvar b: u8\nfn main() { b = p.lo }", 3, 18, ".lo needs a number; convert the pointer first: (p as u16).lo")]
+    [InlineData("var p: ptr u16\nvar w: u16\nfn main() { w = p[128] }", 3, 19, "Index 128 is too large: p[i] reaches 256 bytes, which is 128 u16 values. Move the pointer forward first: p + 256")]
+    [InlineData("var p: ptr u8\nfn main() { for i in 0..4 using Y { p[0] = i } }", 2, 38, "p[i] needs the Y register, which holds a loop variable. Use 'using X' for that loop")]
+    [InlineData("const C = 5\nvar p: ptr u8\nfn main() { p = addr(C) }", 3, 22, "'C' is a constant, which has no address. Use data for a value in memory")]
+    [InlineData("var p: ptr u8\nfn main() { p = addr(nothing) }", 2, 22, "'nothing' is not declared. Check the spelling, or declare it")]
+    [InlineData("var p: ptr u8\nvar a: [u8; 2]\nfn main() { p = addr(a[1]) }", 3, 17, "addr() takes the name of a variable, array or data, or a field of a struct variable. Write addr(name)")]
+    [InlineData("var p: ptr u8\nfn main() { for i in 0..4 using X { p = addr(i) } }", 2, 46, "'i' lives in a register and has no address. Remove 'using' to keep it in memory")]
+    [InlineData("var p: ptr [u8; 4]\nfn main() { }", 1, 8, "A pointer must point to a number, bool, pointer or struct. Use the array's element type: ptr u8")]
+    public void Reports_pointer_errors(string source, int line, int column, string expected)
+    {
+        Expect.Error(source, line, column, expected);
     }
 }

@@ -278,13 +278,12 @@ public sealed class ScrollTests
     }
 
     [Theory]
-    [InlineData(", SCREEN_A = $8100", "multiples of $0400")]
-    [InlineData(", SCREEN_B = $C000", "same 16 KB VIC bank")]
-    [InlineData(", SCREEN_B = $8000", "must be different screens")]
-    public void Wrong_screen_addresses_are_errors(string parameters, string message)
+    [InlineData(", SCREEN_A = $8100", 2, 8, "scroll.SCREEN_A and SCREEN_B must be multiples of $0400 (assert at scroll.tern:54:1)")]
+    [InlineData(", SCREEN_B = $C000", 2, 8, "scroll.SCREEN_A and SCREEN_B must be in the same 16 KB VIC bank (assert at scroll.tern:55:1)")]
+    [InlineData(", SCREEN_B = $8000", 2, 8, "scroll.SCREEN_A and SCREEN_B must be different screens (assert at scroll.tern:56:1)")]
+    public void Wrong_screen_addresses_are_errors(string parameters, int line, int column, string message)
     {
-        var e = Assert.Throws<CompileError>(() => TernCompiler.Compile($"import c64\nimport scroll(COLORS = false{parameters})\nfn main() {{ scroll.set_fine(0, 0) }}"));
-        Assert.Contains(message, e.Description);
+        Expect.Error(() => TernCompiler.Compile($"import c64\nimport scroll(COLORS = false{parameters})\nfn main() {{ scroll.set_fine(0, 0) }}"), line, column, message);
     }
 
     [Fact]

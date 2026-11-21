@@ -15,12 +15,16 @@ public sealed record OverlayFile(string Name, string Area, int LoadAddress, byte
 
 /// <summary>A variable's place: its type as written (<c>u16</c>, <c>[u8; 10]</c>), and the function whose frame holds it (null for a global).</summary>
 /// <param name="InChr">Tile data in a NES chr area: <paramref name="Address"/> is in the PPU's memory, not the CPU's.</param>
-public sealed record VariableInfo(string Name, int Address, int Size, string Type, string? Function, bool IsData, bool InChr = false);
+public sealed record VariableInfo(string Name, int Address, int Size, string Type, string? Function, bool IsData, bool InChr = false)
+{
+    /// <summary>The type itself, which <see cref="Type"/> spells: read by the tools instead of the text (review code-quality-tools 7).</summary>
+    internal Semantics.TernType? Of { get; init; }
+}
 
 public sealed class CompileResult
 {
     /// <summary>
-    /// The program file in the platform's format (<see cref="Platform.FileOf"/>): a .prg, or a .xex with
+    /// The program file in the platform's kind (<see cref="Platform.Format"/>): a .prg, or a .xex with
     /// one load segment per run of bytes and the run address (none for a binary without main).
     /// </summary>
     public required byte[] File { get; init; }
@@ -183,8 +187,7 @@ public static partial class TernCompiler
         }
         catch (CompileError e) when (checking.HasWarnings)
         {
-            checking.AddWarnings(e);
-            throw;
+            throw checking.WithWarnings(e);
         }
     }
 
@@ -213,18 +216,20 @@ public static partial class TernCompiler
             try { program = Checker.Check(Modules, platform, _errors, _found, warnLibrary); }
             catch (CompileError e) when (HasWarnings)
             {
-                AddWarnings(e);
-                throw;
+                throw WithWarnings(e);
             }
             if (warnings == WarningMode.AsErrors && HasWarnings) ThrowWarningsAsErrors();
             return program;
         }
 
-        /// <summary>Gives a later error the warnings found before it; with <c>--warnings-as-errors</c>, they are errors instead.</summary>
-        public void AddWarnings(CompileError e)
+        /// <summary>
+        /// A later error with the warnings found before it, as a new error (it is not changed); with
+        /// <c>--warnings-as-errors</c>, the warnings are thrown as errors instead.
+        /// </summary>
+        public CompileError WithWarnings(CompileError e)
         {
             if (warnings == WarningMode.AsErrors) ThrowWarningsAsErrors();
-            e.WithWarnings = _errors.Sort(e.All.Concat(_found!));
+            return e.Carrying(e.All.Skip(1).ToList(), e.MoreNotReported, copy => _errors.Sort(copy.All.Concat(_found!)));
         }
 
         // --warnings-as-errors: each warning is an error, and the build stops (spec 13).
@@ -237,7 +242,7 @@ public static partial class TernCompiler
 
     private static string Bytes(int n) => n == 1 ? "1 byte" : $"{n} bytes";
 
-    private static string Plural(int n, string one, string many) => n == 1 ? $"1 {one}" : $"{n} {many}";
+    internal static string Plural(int n, string one, string many) => n == 1 ? $"1 {one}" : $"{n} {many}";
 
     /// <summary>A program's export table is placed like fixed data: in a program or reserved area (spec 12.3).</summary>
     private static void CheckExportTable(CheckedProgram program, AddressRange range)
@@ -301,7 +306,7 @@ public static partial class TernCompiler
                 if (area.UsedEnd > area.Free.First && range.Overlaps(used))
                     throw new CompileError(g.Pos,
                         $"'{g.Name}' at {range} overlaps the program and its variables at {used}. " +
-                        $"Move '{g.Name}', or make the program smaller");
+                        $"Move '{g.Name}', or make the program smaller") { Reason = new OverlapsPlaced() };
             }
             foreach (var module in code.Sections.Where(s => s.Overlay is not null && s.Size > 0).GroupBy(s => s.Overlay!))
             {
@@ -309,21 +314,21 @@ public static partial class TernCompiler
                 if (!g.DeclaredVolatile && module.Any(s => range.Overlaps(new AddressRange(s.Address, s.Address + s.Size - 1))))
                     throw new CompileError(g.Pos,
                         $"'{g.Name}' at {range} overlaps the overlay {module.Key} at {file}, which is loaded there. " +
-                        $"Declare it 'volatile var {g.Name}' if the overlap is intended; otherwise name the overlay's own variable ({module.Key}.name) or move '{g.Name}' out of the overlay's area");
+                        $"Declare it 'volatile var {g.Name}' if the overlap is intended; otherwise name the overlay's own variable ({module.Key}.name) or move '{g.Name}' out of the overlay's area") { Reason = new OverlapsPlaced() };
             }
             foreach (var (regionName, use) in plan.RegionUse)
                 if (range.Overlaps(use))
                     throw new CompileError(g.Pos,
-                        $"'{g.Name}' at {range} overlaps the variables the compiler placed in region '{regionName}' at {use}. Move '{g.Name}', or place it with the region");
+                        $"'{g.Name}' at {range} overlaps the variables the compiler placed in region '{regionName}' at {use}. Move '{g.Name}', or place it with the region") { Reason = new OverlapsPlaced() };
             foreach (var section in code.Sections.Where(s => s.IsFixed && s.Size > 0 && (s.Overlay is null || (g.Module?.OverlayArea is not null && g.Module.Unit == s.Overlay))))
                 if (range.Overlaps(new AddressRange(section.Address, section.Address + section.Size - 1)))
                     throw new CompileError(g.Pos,
-                        $"'{g.Name}' at {range} overlaps the data '{section.Name}' at {new AddressRange(section.Address, section.Address + section.Size - 1)}. Move one of them");
+                        $"'{g.Name}' at {range} overlaps the data '{section.Name}' at {new AddressRange(section.Address, section.Address + section.Size - 1)}. Move one of them") { Reason = new OverlapsPlaced() };
             foreach (var v in inZeroPage)
                 if (first <= v.Address + v.Type.Size - 1 && range.Last >= v.Address)
                     throw new CompileError(g.Pos,
                         $"'{g.Name}' at {range} overlaps '{v.QualifiedName}' at {new AddressRange(v.Address, v.Address + v.Type.Size - 1)}, " +
-                        $"which the compiler placed in zero page. Move '{g.Name}' out of {MemoryLayout.ListZeroPage(zeroPage)}");
+                        $"which the compiler placed in zero page. Move '{g.Name}' out of {MemoryLayout.ListZeroPage(zeroPage)}") { Reason = new OverlapsPlaced() };
         }
     }
 
@@ -331,16 +336,16 @@ public static partial class TernCompiler
     /// Startup code: the platform's own first steps (<paramref name="prelude"/>), then set up zero-page
     /// globals and clear the uninitialized ones in RAM (except noinit ones).
     /// </summary>
-    /// <param name="ramCleared">The prelude cleared all of RAM (the NES): zeros are not stored again.</param>
+    /// <param name="ramCleared">The RAM the prelude cleared (the NES's): zeros there are not stored again.</param>
     /// <param name="initial">The initial values in ROM that the startup copies (<see cref="RamPlan.CopiedGlobals"/>).</param>
     private static List<AsmItem> Startup(RamPlan plan, Label bss, Func<FunctionSymbol, Label> labelOf, IEnumerable<AsmItem> prelude,
-        bool ramCleared = false, Label? initial = null)
+        AddressRange? ramCleared = null, Label? initial = null)
     {
         var items = new List<AsmItem> { new Instr(Cld) };
         items.AddRange(prelude);
 
         int? a = null;
-        foreach (var g in plan.ZeroPageGlobals.Where(g => !g.NoInit && !(ramCleared && g.InitialBytes is null)))
+        foreach (var g in plan.ZeroPageGlobals.Where(g => !g.NoInit && !(ramCleared is not null && g.InitialBytes is null)))
         {
             var bytes = ByteLayout(g, g.InitialBytes ?? new byte[g.Type.Size]);
             var addresses = AddressBytes(g);
@@ -368,9 +373,9 @@ public static partial class TernCompiler
             items.Add(new Comment("copy the initial values from ROM"));
             CopyBlock(items, plan.CopiedSize, p => new LabelOperand(initial!, p), p => new LabelOperand(bss, plan.CopiedStart + p), "copy");
         }
-        if (plan.ZeroedSize > 0 && !ramCleared)
+        if (plan.ZeroedSize > 0 && ramCleared is null)
             ClearBlock(items, plan.ZeroedSize, p => new LabelOperand(bss, plan.ZeroedStart + p), "clear");
-        foreach (var block in plan.RegionClears.Where(b => !ramCleared || b.First > 0x07FF))
+        foreach (var block in plan.RegionClears.Where(b => ramCleared is not { } cleared || b.First > cleared.Last))
             ClearBlock(items, block.Size, p => new AddrOperand(block.First + p), $"clear_{block.First:X4}_");
         return items;
     }
@@ -401,10 +406,53 @@ public static partial class TernCompiler
     }
 
     /// <summary>
+    /// Copies <paramref name="size"/> bytes from <paramref name="from"/> to <paramref name="to"/>, 256 at a time,
+    /// as <see cref="ClearBlock"/> clears: the startup code's copy of the initial values from ROM to RAM.
+    /// </summary>
+    private static void CopyBlock(List<AsmItem> items, int size, Func<int, Operand> from, Func<int, Operand> to, string name)
+    {
+        for (int p = 0; p < size / 256; p++)
+        {
+            var loop = new Label($"{name}{p}");
+            items.Add(new Instr(Ldx, Immediate, new Imm(0)));
+            items.Add(new LabelDef(loop));
+            items.Add(new Instr(Lda, AbsoluteX, from(p * 256)));
+            items.Add(new Instr(Sta, AbsoluteX, to(p * 256)));
+            items.Add(new Instr(Inx));
+            items.Add(new Instr(Bne, Relative, new LabelOperand(loop)));
+        }
+        int rest = size % 256;
+        if (rest > 0)
+        {
+            var loop = new Label(name);
+            items.Add(new Instr(Ldx, Immediate, new Imm(rest)));
+            items.Add(new LabelDef(loop));
+            items.Add(new Instr(Lda, AbsoluteX, from(size / 256 * 256 - 1)));
+            items.Add(new Instr(Sta, AbsoluteX, to(size / 256 * 256 - 1)));
+            items.Add(new Instr(Dex));
+            items.Add(new Instr(Bne, Relative, new LabelOperand(loop)));
+        }
+    }
+
+    /// <summary>The initial values of the variables the startup code copies to RAM: their bytes in the block's order, gaps as zeros.</summary>
+    private static List<AsmItem> InitialValues(RamPlan plan, Label initial, Func<FunctionSymbol, Label> labelOf)
+    {
+        var items = new List<AsmItem> { new SectionStart("initial values"), new LabelDef(initial) };
+        int at = plan.CopiedStart;
+        foreach (var (g, offset) in plan.CopiedGlobals.OrderBy(e => e.Offset))
+        {
+            if (offset > at) items.Add(new DataBytes(new byte[offset - at]));
+            items.AddRange(ImageBytes(g, labelOf));
+            at = offset + g.Type.Size;
+        }
+        return items;
+    }
+
+    /// <summary>
     /// The initial value of a global in the program image. Addresses in it (spec 4) are filled in
     /// by the assembler from the functions' labels and the variables' addresses.
     /// </summary>
-    private static IEnumerable<AsmItem> ImageBytes(VariableSymbol g, Func<FunctionSymbol, Label> labelOf)
+    internal static IEnumerable<AsmItem> ImageBytes(VariableSymbol g, Func<FunctionSymbol, Label> labelOf)
     {
         var bytes = ByteLayout(g, g.InitialBytes ?? new byte[g.Type.Size]);
         int start = 0;
@@ -434,7 +482,7 @@ public static partial class TernCompiler
     }
 
     /// <summary>Where byte <paramref name="i"/> of a value is in its memory layout (see <see cref="ByteLayout"/>).</summary>
-    private static int LayoutIndex(VariableSymbol v, int i)
+    internal static int LayoutIndex(VariableSymbol v, int i)
     {
         if (!v.Type.IsArray || v.Type.Element!.Size == 1 || v.Type.Linear) return i;
         int size = v.Type.Element.Size;
@@ -446,7 +494,7 @@ public static partial class TernCompiler
     /// its layout in memory: an array of 16-bit values or of structs, unless linear, is split into one
     /// table per element byte (spec 3.2, 3.3): byte k of element i is at k * length + i.
     /// </summary>
-    private static byte[] ByteLayout(VariableSymbol v, byte[] bytes)
+    internal static byte[] ByteLayout(VariableSymbol v, byte[] bytes)
     {
         if (!v.Type.IsArray || v.Type.Element!.Size == 1 || v.Type.Linear) return bytes;
         var split = new byte[bytes.Length];

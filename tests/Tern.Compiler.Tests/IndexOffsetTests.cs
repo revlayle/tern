@@ -41,6 +41,7 @@ public class IndexOffsetTests
         Assert.Equal((ushort)((byte)(small[0] + 100) + words[0]), r.U16("sum"));
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void A_subtraction_that_wraps_in_a_256_element_array_is_not_folded()
     {
@@ -57,6 +58,7 @@ public class IndexOffsetTests
         Assert.DoesNotContain("ring-1", r.Result.Listing);
     }
 
+    [Trait("Shape", "nmos6502")]
     [Theory]
     [InlineData(255, 1, true)]
     [InlineData(255, 2, false)]
@@ -77,6 +79,7 @@ public class IndexOffsetTests
         Assert.Equal(folded, r.Result.Listing.Contains($"a-{c},x"));
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void A_loop_counter_in_x_is_used_directly()
     {
@@ -103,6 +106,7 @@ public class IndexOffsetTests
         var v: [u16; 128]
         """;
 
+    [Trait("Shape", "nmos6502")]
     [Theory]
     [InlineData("0..99", 1, 0, 98, false)]
     [InlineData("0..=254", 1, 0, 254, false)]
@@ -130,6 +134,7 @@ public class IndexOffsetTests
         Assert.Contains($"b+{c},x", r.Result.Listing);
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void A_step_folds_from_the_last_value_the_loop_reaches()
     {
@@ -144,6 +149,7 @@ public class IndexOffsetTests
         Assert.Contains("a+10,x", r.Result.Listing);
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void A_constant_offset_folds_on_16_bit_arrays_and_with_the_constant_first()
     {
@@ -157,6 +163,7 @@ public class IndexOffsetTests
         Assert.Contains("w+1,x", r.Result.Listing);
     }
 
+    [Trait("Shape", "nmos6502")]
     [Theory]
     [InlineData(0)]
     [InlineData(1)]
@@ -177,6 +184,7 @@ public class IndexOffsetTests
         Assert.Contains("a+1,x", r.Result.Listing);
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void I_plus_2_under_a_variable_end_is_not_folded()
     {
@@ -191,6 +199,7 @@ public class IndexOffsetTests
         Assert.DoesNotContain("a+2,x", r.Result.Listing);
     }
 
+    [Trait("Shape", "nmos6502")]
     [Theory]
     [InlineData("0..=n", 255)]        // inclusive variable end: i can be 255
     [InlineData("0..=255", 255)]
@@ -213,6 +222,7 @@ public class IndexOffsetTests
         Assert.DoesNotContain($"a+{c},x", r.Result.Listing);
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void A_ring_buffer_index_outside_a_loop_wraps()
     {

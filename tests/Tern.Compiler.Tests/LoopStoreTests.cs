@@ -24,6 +24,7 @@ public class LoopStoreTests
         return crc;
     }
 
+    [Trait("Shape", "nmos6502")]
     [Theory]
     [InlineData(0x07)]
     [InlineData(0x00)]
@@ -53,6 +54,7 @@ public class LoopStoreTests
         Assert.Matches(@"dex\|bne main\.for\d+\|sta crc\|", code);
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void A_break_and_the_end_of_the_loop_share_one_store()
     {
@@ -111,6 +113,7 @@ public class LoopStoreTests
         }
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void A_loop_that_reads_the_memory_or_calls_keeps_its_stores()
     {
@@ -135,6 +138,7 @@ public class LoopStoreTests
         Assert.Contains("adc seen|sta seen|inx", Listing.Code(r));
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void A_global_used_by_main_and_a_handler_is_stored_in_the_loop()
     {
@@ -162,6 +166,7 @@ public class LoopStoreTests
         Assert.Matches(@"stx shared\|inx|sta shared", Listing.Code(r));
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void A_global_read_through_its_address_in_the_loop_keeps_its_stores()
     {
@@ -180,6 +185,7 @@ public class LoopStoreTests
         Assert.Contains("sta last", Listing.Code(r).Split("bne")[0]);
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void No_register_holds_the_value_at_the_exit()
     {

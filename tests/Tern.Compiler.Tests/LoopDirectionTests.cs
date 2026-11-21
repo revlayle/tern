@@ -95,6 +95,7 @@ public class LoopDirectionTests
     }
 
     /// <summary>Spec 11: 'for i in n..0 step -1 using X' is ldx n / beq done / ... dex / bne loop (decision 106).</summary>
+    [Trait("Shape", "nmos6502")]
     [Theory]
     [InlineData(0, 0)]
     [InlineData(1, 1)]
@@ -120,6 +121,7 @@ public class LoopDirectionTests
     /// variable held in X (the check comes before that load, and skips its store), a start that
     /// needs a compare, and a larger step. cnt starts at 7, so a skip that stored X would show.
     /// </summary>
+    [Trait("Shape", "nmos6502")]
     [Theory]
     [InlineData("for i in n..0 step -1 { add(i)\n cnt += 1 }", 0, 1, "lda n|sta main.i|beq")]
     [InlineData("for i in n..0 step -1 using Y { cnt += 1 }", 0, 1, "ldy n|beq main.fskip3|ldx cnt|")]
@@ -148,6 +150,7 @@ public class LoopDirectionTests
         }
     }
 
+    [Trait("Shape", "nmos6502")]
     [Theory]
     [InlineData(-3, 7)]
     [InlineData(0, 8)]
@@ -181,6 +184,7 @@ public class LoopDirectionTests
     }
 
     /// <summary>The spec 11 rows that count down keep their code with 'step -1'.</summary>
+    [Trait("Shape", "nmos6502")]
     [Theory]
     [InlineData("for i in 9..=0 step -1 using X { out = i }", "ldx #$09|", "|dex|bpl|")]
     [InlineData("for i in n..0 step -1 using X { out = i }", "ldx n|", "|dex|bne|")]

@@ -54,9 +54,9 @@ public class LongBufferTests
     {
         void Dirty(Ram ram, int at) { for (int k = 0; k < 600; k++) ram.Bytes[at + k] = 0xEE; }
         const string source = "var buf: [u8; 600]\nnoinit var raw: [u8; 600]\nvar x: u8\nfn main() { x = len(buf) as u8 }";
-        var probe = Run.Program(source);
-        int buf = probe.Address("buf"), raw = probe.Address("raw");
-        var r = Run.Program(source, setup: ram => { Dirty(ram, buf); Dirty(ram, raw); });
+        var compiled = Run.Compile(source);
+        int buf = compiled.Symbols["buf"], raw = compiled.Symbols["raw"];
+        var r = Run.Of(compiled, setup: ram => { Dirty(ram, buf); Dirty(ram, raw); });
         for (int k = 0; k < 600; k++)
         {
             Assert.Equal(0, r.U8("buf", k));

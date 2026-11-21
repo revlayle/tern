@@ -127,7 +127,7 @@ internal sealed class C64Machine(OverlayDisk disk) : Machine
     }
 
     /// <summary>A screen code in the upper-case character set; reversed characters as the plain ones.</summary>
-    public override char ScreenChar(byte code)
+    protected override char ScreenChar(byte code)
     {
         code &= 0x7F;
         return code switch

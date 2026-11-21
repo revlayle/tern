@@ -45,6 +45,7 @@ public class ByteWriteTests
                 new Instr(Inc, AbsoluteX, new VarOperand(V)), Abs(Lda, V), Abs(Sta, X), new Instr(Rts)));
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void A_sum_with_carries_reads_the_low_byte_from_a()
     {

@@ -36,6 +36,7 @@ public class IndexCheckTests
         Assert.Contains("Index 200 is outside 'a', which has 4 elements", e.Message);
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void A_folded_offset_is_checked_at_the_element_it_reaches()
     {

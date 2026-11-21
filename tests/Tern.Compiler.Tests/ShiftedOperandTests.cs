@@ -60,6 +60,7 @@ public class ShiftedOperandTests
             }
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void The_low_byte_is_shifted_in_a()
     {

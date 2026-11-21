@@ -28,6 +28,7 @@ public class IndexedOperandTests
         "+" => "adc", "-" => "sbc", "&" => "and", "|" => "ora", _ => "eor",
     };
 
+    [Trait("Shape", "nmos6502")]
     [Theory]
     [InlineData("+")]
     [InlineData("-")]
@@ -63,6 +64,7 @@ public class IndexedOperandTests
         for (int i = 0; i < 16; i++) Assert.Equal((byte)(A[i] - B[15 - i]), r.U8("c", i));
     }
 
+    [Trait("Shape", "nmos6502")]
     [Theory]
     [InlineData("+")]
     [InlineData("&")]
@@ -92,6 +94,7 @@ public class IndexedOperandTests
         for (int i = 0; i < 16; i++) Assert.Equal((byte)(B[i] - (A[i] >> 1)), r.U8("c", i));
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void Pointer_elements_are_operands_through_y()
     {
@@ -117,6 +120,7 @@ public class IndexedOperandTests
         Assert.DoesNotContain("_t0", r.Result.Listing);
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void Elements_are_compared_in_place()
     {
@@ -150,6 +154,7 @@ public class IndexedOperandTests
         Assert.DoesNotContain("cmp main._t", r.Result.Listing);
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void Signed_elements_are_compared_in_place()
     {
@@ -191,6 +196,7 @@ public class IndexedOperandTests
         for (int i = 0; i < 16; i++) Assert.Equal(i < B[i] ? 1 : 0, r.U8("flags", i));
     }
 
+    [Trait("Shape", "nmos6502")]
     [Theory]
     [InlineData("+")]
     [InlineData("-")]
@@ -220,6 +226,7 @@ public class IndexedOperandTests
         Assert.DoesNotContain("_t0", r.Result.Listing);
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void Adjacent_sixteen_bit_elements_add_like_the_assembly()
     {
@@ -238,6 +245,7 @@ public class IndexedOperandTests
         Assert.DoesNotContain("_t0", r.Result.Listing);
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void A_sixteen_bit_element_is_added_to_and_compared_with_a_variable()
     {

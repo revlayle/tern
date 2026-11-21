@@ -15,6 +15,7 @@ public class CopyFromSourceTests
 {
     private static string Values(byte[] values) => string.Join(", ", values);
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void A_swap_compares_the_elements_and_keeps_one_in_y()
     {
@@ -45,6 +46,7 @@ public class CopyFromSourceTests
         Assert.DoesNotContain("main.b", code);
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void A_copy_of_a_variable_is_loaded_into_a_register_before_the_variable_changes()
     {
@@ -65,6 +67,7 @@ public class CopyFromSourceTests
         }
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void A_call_keeps_the_copy_in_memory()
     {
@@ -120,6 +123,7 @@ public class CopyFromSourceTests
         Assert.Equal([0, 0, 0, 0], Enumerable.Range(0, 4).Select(k => (int)r.U8("values", k)));
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void A_volatile_variable_is_read_once()
     {
@@ -138,6 +142,7 @@ public class CopyFromSourceTests
         Assert.Single(Listing.Code(r).Split('|'), i => i == "lda port");
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void A_copy_read_in_an_inner_loop_stays_in_memory()
     {
@@ -185,6 +190,7 @@ public class CopyFromSourceTests
                     }
         """;
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void With_the_index_in_y_the_copy_goes_through_x()
     {
@@ -206,6 +212,7 @@ public class CopyFromSourceTests
         Assert.Contains("lda values+1,y|cmp values,y|bcs main.endif6|ldx values,y|sta values,y|txa|sta values+1,y", Listing.Code(r));
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void With_both_index_registers_in_use_the_copy_stays_in_memory()
     {

@@ -17,11 +17,12 @@ public sealed class Library
     /// <param name="calls">Statements that call the routines to test, e.g. "math.mul8(0, 0)".</param>
     public Library(string imports, string calls, Action<Ram>? setup = null)
     {
-        Result = TernCompiler.Compile($"{imports}\nvar go: bool\nfn main() {{\n    if go {{\n{calls}\n    }}\n}}\n");
+        Result = Run.Compile($"{imports}\nvar go: bool\nfn main() {{\n    if go {{\n{calls}\n    }}\n}}\n");
         StartState.Fill(Ram);
-        Ram.Load((ushort)Result.LoadAddress, Result.Image);
+        // tern run's machine loads the file, as for a run (review code-quality-tests 6).
+        var bus = Machine.For(Result.Platform, Result).Load(Result, Ram);
         setup?.Invoke(Ram);
-        Cpu = new Cpu6502(Ram, Result.Platform.Cpu) { PC = (ushort)Result.Entry, SP = 0xFF };
+        Cpu = new Cpu6502(bus, Result.Platform.Cpu) { PC = (ushort)Result.Entry, SP = 0xFF };
         StartState.Set(Cpu);
         RunToHalt(1_000_000);
     }
@@ -41,6 +42,9 @@ public sealed class Library
     /// <summary>The 16-bit result in A (low) and X (high).</summary>
     public int AX => Cpu.A | (Cpu.X << 8);
 
+    /// <summary>The cycles of the <c>jsr</c> a caller makes: the run starts at the routine, so they are added (the rts is run).</summary>
+    private const int JsrCycles = 6;
+
     /// <summary>Calls a routine with the given registers. Returns its cycles, including the jsr and rts.</summary>
     public long Call(string function, int a = 0, int x = 0, int y = 0, bool carry = false, long maxCycles = 1_000_000)
     {
@@ -55,7 +59,7 @@ public sealed class Library
         Cpu.PC = (ushort)Address(function);
         long start = Cpu.Cycles;
         RunToHalt(maxCycles);
-        return Cpu.Cycles - start + 6;
+        return Cpu.Cycles - start + JsrCycles;
     }
 
     private void RunToHalt(long maxCycles)

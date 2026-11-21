@@ -20,7 +20,7 @@ public static partial class Cli
             if (string.IsNullOrWhiteSpace(input)) return Usage1("No source file given");
             if (args.WarningProblem is { } both) return Usage1(both);
             if (args.Platform(out var noTarget) is not { } platform) return Usage1(noTarget);
-            if (outputPath is not null && OutputProblem(outputPath) is { } badOutput) return Fail(json, new Diagnostic(input, 0, 0, "error", badOutput, null), badOutput);
+            if (outputPath is not null && OutputProblem(outputPath) is { } badOutput) return Fail(json, Diagnostic.Error(input, badOutput), badOutput);
             var result = CompileFile(input, platform, json, MaxErrors(args), args.Warnings);
             if (result is null) return 1;
             outputPath ??= Path.ChangeExtension(input, result.HaltAddress < 0 ? platform.BinaryExtension : platform.FileExtension);
@@ -41,14 +41,14 @@ public static partial class Cli
             if (result.ApiModule is not null)
                 extra.Add((Path.Combine(directory, result.ApiModuleName + ".tern"), p => File.WriteAllText(p, result.ApiModule)));
             var writes = program.Concat(extra).ToList();
-            if (Clash(result.SourceFiles.Append(input), writes.Select(w => w.Path).ToList()) is { } clash) return Fail(json, new Diagnostic(input, 0, 0, "error", clash, null), clash);
+            if (Clash(result.SourceFiles.Append(input), writes.Select(w => w.Path).ToList()) is { } clash) return Fail(json, Diagnostic.Error(input, clash), clash);
             foreach (var (path, write) in writes)
             {
                 try { write(path); }
                 catch (Exception e) when (FileProblem(e) is { } why)
                 {
                     string text = $"Cannot write {path}: {why}";
-                    return Fail(json, new Diagnostic(input, 0, 0, "error", text, null), text);
+                    return Fail(json, Diagnostic.Error(input, text), text);
                 }
             }
 
@@ -78,10 +78,10 @@ public static partial class Cli
             if (program is null) return 1;
             List<MemoryDump> dumps;
             try { dumps = args.All("--dump").Select(d => MemoryDump.Parse(d, program)).ToList(); }
-            catch (FormatException e) { return Fail(json, new Diagnostic(input, 0, 0, "error", "--dump " + e.Message, null), "--dump " + e.Message); }
+            catch (FormatException e) { return Fail(json, Diagnostic.Error(input, "--dump " + e.Message), "--dump " + e.Message); }
             RunResult run;
             try { run = Runner.Run(program, RunOptionsOf(args) with { MainFile = Path.GetFileName(input) }); }
-            catch (RunError e) { return Fail(json, new Diagnostic(input, 0, 0, "error", e.Message, null), e.Message); }
+            catch (RunError e) { return Fail(json, Diagnostic.Error(input, e.Message), e.Message); }
             bool screen = args.Has("--screen");
             var lines = args.Has("--profile") ? LineTable.Rows(program, Path.GetFileName(input), run.Profile) : null;
             output.Write(json ? RunReport.Json(run, dumps, screen, lines, Warnings(program, input)) + Environment.NewLine : RunReport.Text(run, dumps, screen, lines));
@@ -119,7 +119,7 @@ public static partial class Cli
                     catch (Exception e) when (FileProblem(e) is { } why)
                     {
                         string text = ReadProblem(path!, why);
-                        return Fail(json, new Diagnostic(path!, 0, 0, "error", text, null), text);
+                        return Fail(json, Diagnostic.Error(path!, text), text);
                     }
                 }
                 results.Add(Tools.Bench.Measure(variant, args.Value("--fn"), dumps, RunOptionsOf(args), maxErrors, platform));
@@ -150,7 +150,7 @@ public static partial class Cli
             catch (Exception e) when (FileProblem(e) is { } why)
             {
                 string text = ReadProblem(input, why);
-                Fail(json, new Diagnostic(input, 0, 0, "error", text, null), text);
+                Fail(json, Diagnostic.Error(input, text), text);
                 return null;
             }
             try
@@ -163,7 +163,7 @@ public static partial class Cli
             catch (CompileError e)
             {
                 // Every error found, with any warnings, sorted by place (spec 13); the text ends with their numbers.
-                if (json) output.WriteLine(Diagnostic.ToJson(false, [], null, e.WithWarnings.Select(x => Diagnostic.From(x, input)).ToList()));
+                if (json) output.WriteLine(Diagnostic.ToJson(false, [], null, Diagnostic.All(e, input)));
                 else Print(e.WithWarnings, e.MoreNotReported);
                 return null;
             }
@@ -173,7 +173,7 @@ public static partial class Cli
                 foreach (var x in list)
                 {
                     var d = Diagnostic.From(x, input);
-                    error.WriteLine($"{d.File}:{d.Line}:{d.Column}: {d.Severity}: {x.Description}");
+                    error.WriteLine($"{d.File}:{d.Line}:{d.Column}: {d.SeverityWord}: {x.Description}");
                 }
                 error.WriteLine(Diagnostic.Count(list.Count(x => !x.IsWarning), more, maxErrors, list.Count(x => x.IsWarning)));
             }
@@ -192,7 +192,7 @@ public static partial class Cli
         {
             string text = $"{problem}. Run 'tern --help' for the options";
             // With --json, a command-line problem is JSON too, with no file (review code-quality-tools 13).
-            if (jsonOut) output.WriteLine(Diagnostic.ToJson(false, [], null, [new Diagnostic("", 0, 0, "error", text, null)]));
+            if (jsonOut) output.WriteLine(Diagnostic.ToJson(false, [], null, [Diagnostic.Error("", text)]));
             else error.WriteLine(text + ".");
             return 1;
         }

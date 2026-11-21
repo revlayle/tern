@@ -539,6 +539,7 @@ public class IoTests
 
     // ---------- Code shape ----------
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void KERNAL_routines_are_direct_calls()
     {
@@ -552,6 +553,7 @@ public class IoTests
         Assert.Contains("jsr $FFB7", r.Result.Listing);
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void Unused_functions_cost_nothing()
     {

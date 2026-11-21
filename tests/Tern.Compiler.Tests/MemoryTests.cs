@@ -387,52 +387,48 @@ public class MemoryTests
     // ---------- Errors ----------
 
     [Theory]
-    [InlineData("memory { $2000..=$1000 reserved }\nfn main() { }", "starts at $2000 and ends at $1000, before its start")]
-    [InlineData("memory { $2000..$2FFF reserved }\nfn main() { }", "A memory range includes its last address. Write first..=last")]
-    [InlineData("memory { $2000..=$2FFF reserved\n$2800..=$37FF reserved }\nfn main() { }", "$2800-$37FF (reserved) overlaps $2000-$2FFF (reserved, line 1)")]
-    [InlineData("memory { $0801..=$4FFF program\n$4000..=$9FFF program }\nfn main() { }", "overlaps $0801-$4FFF (program, line 1)")]
-    [InlineData("memory { $2000..=$2FFF region a\n$2000..=$2FFF reserved }\nfn main() { }", "(reserved) overlaps $2000-$2FFF (region a, line 1)")]
-    [InlineData("memory { $100..=$1FF zeropage }\nfn main() { }", "A zeropage range must lie in $00-$FF")]
-    [InlineData("memory { $2000..=$20FF region r\n$3000..=$30FF region r }\nfn main() { }", "The region 'r' is declared twice")]
-    [InlineData("memory { $2000..=$2FFF weird }\nfn main() { }", "Unknown kind of memory 'weird'")]
-    [InlineData("memory { $2000..=$2FFF region }\nfn main() { }", "Expected a name after 'region'")]
-    [InlineData("memory { $2000..=$2FFF reserved", "The memory block is not closed with '}'")]
-    [InlineData("memory { $2000..=$10000 reserved }\nfn main() { }", "is outside memory")]
-    [InlineData("memory { NOPE..=$2FFF reserved }\nfn main() { }", "'NOPE' is not declared")]
-    [InlineData("var x: u8\nmemory { $2000..=$2FFF reserved }\nfn main() { }", "The memory block goes after the imports and constants")]
-    [InlineData("memory { $2000..=$2FFF reserved }\nmemory { $3000..=$3FFF reserved }\nfn main() { }", "The memory block goes after the imports and constants")]
-    [InlineData("memory { $0900..=$9FFF program }\nfn main() { }", "A program with 'main' starts at $0801")]
-    [InlineData("memory { $0800..=$08FF reserved }\nfn main() { }", "A program with 'main' starts at $0801")]
-    [InlineData("memory { $0800..=$9FFF reserved }\nfn main() { }", "No program area is left")]
-    [InlineData("memory { $0801..=$0830 program }\n" + Functions, "no program area has room for them in one piece")]
-    [InlineData("memory { $0801..=$0830 program }\n" + Functions, "$0801-$0830:")]
-    [InlineData("memory { $0801..=$0805 program\n$1000..=$1FFF program }\nfn main() { }", "The BASIC line and startup code (")]
-    [InlineData("memory { $0801..=$0805 program\n$1000..=$1FFF program }\nfn main() { }", "does not fit in $0801-$0805")]
-    [InlineData("data first: [u8; 3] @ $0801 = [1, 2, 3]\nfn main() { }", "'first' at $0801-$0803 overlaps the BASIC line and startup code at $0801-")]
-    [InlineData("memory { $C000..=$C0FF region buf }\nvar a: [u8; 16] @ buf\nvar b: u8 @ $C004\nfn main() { a[4] = 1; b = 2 }", "'b' at $C004 overlaps the variables the compiler placed in region 'buf' at $C000-$C00F")]
-    [InlineData("memory { $0002..=$7FFF program }\nvar p: ptr u8 = 0\nfn main() { p[0] = 1 }", "Zero page is full")]
-    [InlineData("memory { $0801..=$0830 program }\n" + Functions, "(startup")]   // what is in the area
-    [InlineData("memory { $0801..=$09FF program }\nvar a: [u8; 200]\nvar b: [u8; 200]\nvar c: [u8; 200]\nvar d: [u8; 200]\nfn main() { a[0] = 1 }", "The variables need 800 bytes")]
-    [InlineData("memory { $0801..=$0810 program }\ndata d: [u8; 16] @ $0801 = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]\nfn main() { }", "does not fit in $0801-$0810")]
-    [InlineData("memory { $C000..=$C00F region small }\nvar big: [u8; 32] @ small\nfn main() { }", "Region 'small' ($C000-$C00F, 16 bytes) is full: 'big' needs 32 bytes")]
-    [InlineData("memory { $C000..=$C00F region small }\nvar v: u8 @ small = 5\nfn main() { }", "A variable in a region cannot have an initial value")]
-    [InlineData("var v: u8 @ nowhere\nfn main() { }", "'nowhere' is not declared")]
-    [InlineData("memory { $C000..=$C0FF region BUF }\nconst BUF = $C100\nvar x: u8 @ BUF\nfn main() { x = 1 }", "The region 'BUF' has the name of a constant of the main file (line 2)")]
-    [InlineData("memory { $C000..=$C0FF region x }\nvar x: u8\nfn main() { x = 1 }", "The region 'x' has the name of a variable of the main file")]
-    [InlineData("memory { $C000..=$C0FF region main }\nfn main() { }", "The region 'main' has the name of a function of the main file")]
-    [InlineData("import c64\nmemory { $C000..=$C0FF region c64 }\nfn main() { }", "The region 'c64' has the name of an imported module")]
-    [InlineData("memory { $C000..=$C00F region r }\nfn main() { var local: u8 @ r = 0 }", "Only global variables can have a fixed address")]
-    [InlineData("data a: [u8; 2] @ $C000 = [1, 2]\nfn main() { }", "'a' at $C000-$C001 is not in a program or reserved area")]
-    [InlineData("memory { $2000..=$2FFF reserved }\ndata a: [u8; 2] @ $2000 = [1, 2]\ndata b: [u8; 1] @ $2001 = [3]\nfn main() { }", "'a' ($2000-$2001) and 'b' ($2001) are placed at overlapping addresses")]
-    [InlineData("memory { $2000..=$2FFF reserved }\ndata a: [u8; 2] @ $2000 = [1, 2]\nvar v: u8 @ $2001\nfn main() { }", "'v' at $2001 overlaps the data 'a' at $2000-$2001")]
-    [InlineData("memory { $2000..=$2FFF reserved }\ndata a: [u8; 2] @ $2FFF = [1, 2]\nfn main() { }", "'a' at $2FFF-$3000 is not in a program or reserved area")]
-    [InlineData("memory { $2000..=$2FFF reserved }\ndata a @ zp = [1, 2]\nfn main() { }", "'@ zp' is for variables")]
-    [InlineData("memory { $FB..=$FE zeropage }\nvar a: [u8; 5] @ zp\nfn main() { a[0] = 1 }", "Zero page is full")]
-    [InlineData("memory { $80..=$80 zeropage\n$FB..=$FE zeropage }\nvar a: u16 @ zp\nfn main() { a = 1 }", "would cross the end of a zero-page range")]
-    public void Reports_errors(string source, string expected)
+    [InlineData("memory { $2000..=$1000 reserved }\nfn main() { }", 1, 24, "The range starts at $2000 and ends at $1000, before its start. Write the lower address first")]
+    [InlineData("memory { $2000..$2FFF reserved }\nfn main() { }", 1, 15, "A memory range includes its last address. Write first..=last")]
+    [InlineData("memory { $2000..=$2FFF reserved\n$2800..=$37FF reserved }\nfn main() { }", 2, 15, "$2800-$37FF (reserved) overlaps $2000-$2FFF (reserved, line 1). Ranges may not overlap, except volatile ones. Move one of them")]
+    [InlineData("memory { $0801..=$4FFF program\n$4000..=$9FFF program }\nfn main() { }", 2, 15, "$4000-$9FFF (program) overlaps $0801-$4FFF (program, line 1). Ranges may not overlap, except volatile ones. Move one of them")]
+    [InlineData("memory { $2000..=$2FFF region a\n$2000..=$2FFF reserved }\nfn main() { }", 2, 15, "$2000-$2FFF (reserved) overlaps $2000-$2FFF (region a, line 1). Ranges may not overlap, except volatile ones. Move one of them")]
+    [InlineData("memory { $100..=$1FF zeropage }\nfn main() { }", 1, 22, "A zeropage range must lie in $00-$FF; $0100-$01FF does not. Use addresses below $100")]
+    [InlineData("memory { $2000..=$20FF region r\n$3000..=$30FF region r }\nfn main() { }", 2, 15, "The region 'r' is declared twice. Give each region its own name")]
+    [InlineData("memory { $2000..=$2FFF weird }\nfn main() { }", 1, 24, "Unknown kind of memory 'weird'. Use program, zeropage, reserved, region, volatile, overlay, bank or chr")]
+    [InlineData("memory { $2000..=$2FFF region }\nfn main() { }", 1, 31, "Expected a name after 'region', found '}'")]
+    [InlineData("memory { $2000..=$2FFF reserved", 1, 1, "The memory block is not closed with '}'. Add '}' after its last range")]
+    [InlineData("memory { $2000..=$10000 reserved }\nfn main() { }", 1, 25, "The range $2000..=$10000 is outside memory ($0000-$FFFF). Use addresses in that range")]
+    [InlineData("memory { NOPE..=$2FFF reserved }\nfn main() { }", 1, 10, "'NOPE' is not declared. Check the spelling, or declare it")]
+    [InlineData("var x: u8\nmemory { $2000..=$2FFF reserved }\nfn main() { }", 2, 1, "The memory block goes after the imports and constants, before other declarations, and there is only one. Move it there, or join the two blocks")]
+    [InlineData("memory { $2000..=$2FFF reserved }\nmemory { $3000..=$3FFF reserved }\nfn main() { }", 2, 1, "The memory block goes after the imports and constants, before other declarations, and there is only one. Move it there, or join the two blocks")]
+    [InlineData("memory { $0900..=$9FFF program }\nfn main() { }", 2, 1, "A program with 'main' starts at $0801, where the C64 BASIC line goes, but its first program area begins at $0900. Start the first 'program' line of the memory block at $0801")]
+    [InlineData("memory { $0800..=$08FF reserved }\nfn main() { }", 2, 1, "A program with 'main' starts at $0801, where the C64 BASIC line goes, but its first program area begins at $0900. Move the 'reserved' or 'region' range that covers it")]
+    [InlineData("memory { $0800..=$9FFF reserved }\nfn main() { }", 1, 24, "No program area is left: the reserved and region ranges cover all of $0801-$9FFF. Leave room for the program")]
+    [InlineData("memory { $0801..=$0830 program }\n" + Functions, 1, 1, "'f6' needs 14 bytes, and no program area has room for them in one piece (code is never split across areas). Areas: $0801-$0830: 42 of 48 bytes used (startup, main). Make an area larger, or split the code into smaller functions")]
+    [InlineData("memory { $0801..=$0805 program\n$1000..=$1FFF program }\nfn main() { }", 1, 1, "The BASIC line and startup code (19 bytes) must be at the start of the first program area, but it does not fit in $0801-$0805. Make the first area larger")]
+    [InlineData("data first: [u8; 3] @ $0801 = [1, 2, 3]\nfn main() { }", 1, 1, "'first' at $0801-$0803 overlaps the BASIC line and startup code at $0801-$0813, which must be at the start of the first program area. Move the data, or start the program area lower")]
+    [InlineData("memory { $C000..=$C0FF region buf }\nvar a: [u8; 16] @ buf\nvar b: u8 @ $C004\nfn main() { a[4] = 1; b = 2 }", 3, 1, "'b' at $C004 overlaps the variables the compiler placed in region 'buf' at $C000-$C00F. Move 'b', or place it with the region")]
+    [InlineData("memory { $0002..=$7FFF program }\nvar p: ptr u8 = 0\nfn main() { p[0] = 1 }", 2, 1, "Zero page is full: '@ zp' variables, dereferenced pointers and zero-page assembly operands need 2 bytes, 0 are free. Users: p (2). Remove '@ zp' from some of them")]
+    [InlineData("memory { $0801..=$09FF program }\nvar a: [u8; 200]\nvar b: [u8; 200]\nvar c: [u8; 200]\nvar d: [u8; 200]\nfn main() { a[0] = 1 }", 1, 1, "The variables need 800 bytes, and no program area has room for them in one piece (code is never split across areas). Areas: $0801-$09FF: 59 of 511 bytes used (startup, main). Make an area larger, or split the code into smaller functions")]
+    [InlineData("memory { $0801..=$0810 program }\ndata d: [u8; 16] @ $0801 = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]\nfn main() { }", 1, 1, "The BASIC line and startup code (19 bytes) must be at the start of the first program area, but it does not fit in $0801-$0810. Make the first area larger")]
+    [InlineData("memory { $C000..=$C00F region small }\nvar big: [u8; 32] @ small\nfn main() { }", 2, 1, "Region 'small' ($C000-$C00F, 16 bytes) is full: 'big' needs 32 bytes at $C000, 16 are left. Place it elsewhere or make the region larger")]
+    [InlineData("memory { $C000..=$C00F region small }\nvar v: u8 @ small = 5\nfn main() { }", 2, 21, "A variable in a region cannot have an initial value: the region is not part of the program file. Assign it at the start of main")]
+    [InlineData("var v: u8 @ nowhere\nfn main() { }", 1, 13, "'nowhere' is not declared. Check the spelling, or declare it")]
+    [InlineData("memory { $C000..=$C0FF region BUF }\nconst BUF = $C100\nvar x: u8 @ BUF\nfn main() { x = 1 }", 1, 24, "The region 'BUF' has the name of a constant of the main file (line 2), so '@ BUF' would be ambiguous. Rename the region")]
+    [InlineData("memory { $C000..=$C0FF region x }\nvar x: u8\nfn main() { x = 1 }", 1, 24, "The region 'x' has the name of a variable of the main file (line 2), so '@ x' would be ambiguous. Rename the region")]
+    [InlineData("memory { $C000..=$C0FF region main }\nfn main() { }", 1, 24, "The region 'main' has the name of a function of the main file (line 2), so '@ main' would be ambiguous. Rename the region")]
+    [InlineData("import c64\nmemory { $C000..=$C0FF region c64 }\nfn main() { }", 2, 24, "The region 'c64' has the name of an imported module, so '@ c64' would be ambiguous. Rename the region")]
+    [InlineData("memory { $C000..=$C00F region r }\nfn main() { var local: u8 @ r = 0 }", 2, 13, "Only global variables can have a fixed address. Move the variable out of the function")]
+    [InlineData("data a: [u8; 2] @ $C000 = [1, 2]\nfn main() { }", 1, 1, "'a' at $C000-$C001 is not in a program or reserved area. Program areas: $0801-$9FFF; reserved: none. Add a 'reserved' line for it to the memory block")]
+    [InlineData("memory { $2000..=$2FFF reserved }\ndata a: [u8; 2] @ $2000 = [1, 2]\ndata b: [u8; 1] @ $2001 = [3]\nfn main() { }", 1, 1, "'a' ($2000-$2001) and 'b' ($2001) are placed at overlapping addresses. Move one of them")]
+    [InlineData("memory { $2000..=$2FFF reserved }\ndata a: [u8; 2] @ $2000 = [1, 2]\nvar v: u8 @ $2001\nfn main() { }", 3, 1, "'v' at $2001 overlaps the data 'a' at $2000-$2001. Move one of them")]
+    [InlineData("memory { $2000..=$2FFF reserved }\ndata a: [u8; 2] @ $2FFF = [1, 2]\nfn main() { }", 2, 1, "'a' at $2FFF-$3000 is not in a program or reserved area. Program areas: $0801-$1FFF, $3000-$9FFF; reserved: $2000-$2FFF. Add a 'reserved' line for it to the memory block")]
+    [InlineData("memory { $2000..=$2FFF reserved }\ndata a @ zp = [1, 2]\nfn main() { }", 2, 10, "Data is read-only and lives in the program; '@ zp' is for variables. Remove '@ zp', or make it a var")]
+    [InlineData("memory { $FB..=$FE zeropage }\nvar a: [u8; 5] @ zp\nfn main() { a[0] = 1 }", 2, 1, "Zero page is full: '@ zp' variables need 5 bytes, 4 are free. Users: a (5). Remove '@ zp' from some of them")]
+    [InlineData("memory { $80..=$80 zeropage\n$FB..=$FE zeropage }\nvar a: u16 @ zp\nfn main() { a = 1 }", 3, 1, "'a' (2 bytes) would cross the end of a zero-page range at $FB. Zero-page ranges: $80, $FB-$FE. Join the ranges or reorder the variables")]
+    public void Reports_errors(string source, int line, int column, string expected)
     {
-        var e = Assert.Throws<CompileError>(() => TernCompiler.Compile(source));
-        Assert.Contains(expected, e.Description);
+        Expect.Error(source, line, column, expected);
     }
 
     [Fact]
@@ -443,8 +439,7 @@ public class MemoryTests
         {
             string main = Path.Combine(dir.FullName, "main.tern");
             File.WriteAllText(Path.Combine(dir.FullName, "m.tern"), "memory { $2000..=$2FFF reserved }\n");
-            var e = Assert.Throws<CompileError>(() => TernCompiler.Compile("import m\nfn main() { }", sourcePath: main));
-            Assert.Contains("Only the program's main file may have a memory block", e.Description);
+            Expect.Error(() => TernCompiler.Compile("import m\nfn main() { }", sourcePath: main), 1, 1, "Only the program's main file may have a memory block, since it describes the whole program; 'm' is a module. Move the block to the main file");
         }
         finally { dir.Delete(recursive: true); }
     }

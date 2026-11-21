@@ -6,11 +6,8 @@ namespace Tern.Compiler.Tests;
 /// Bank switching on UxROM (spec 8.5, 12.2, M27): bank areas, <c>import m @ area[n]</c>, the image's banks
 /// with the fixed bank last, <c>uxrom.select</c>, and the rules between banks.
 /// </summary>
-public class NesBankTests : IDisposable
+public class NesBankTests : TempFolderTest
 {
-    private readonly DirectoryInfo _dir = Directory.CreateTempSubdirectory("tern-banks-");
-
-    public void Dispose() => _dir.Delete(recursive: true);
 
     private const string Memory = "memory {\n    cartridge uxrom vertical\n    $8000..=$BFFF bank levels\n}\n";
 
@@ -115,6 +112,7 @@ public class NesBankTests : IDisposable
         Assert.Contains($"NesPrgRom:{3 * 0x4000 + r.Symbols["main"] - 0xC000:X4}:main", lines);
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void The_startup_selects_bank_0_by_writing_0_over_a_0()
     {
@@ -287,10 +285,17 @@ public class NesBankTests : IDisposable
         var e = Error("import level1 @ levels[0]\nimport level2 @ levels[0]\nimport music\n" + Memory + "var w: u16\nfn main() { w = level1.run() + level2.run() }",
             level1: "data BIG: [u8; 10000] = repeat(1, 10000)\nfn run() -> u16 { return addr(BIG) as u16 }\n",
             level2: "data BIG: [u8; 7000] = repeat(2, 7000)\nfn run() -> u16 { return addr(BIG) as u16 }\n");
-        Assert.StartsWith("Bank 0 of 'levels' needs 17", e.Description);
-        Assert.Contains("but a bank has 16384: ", e.Description);
-        Assert.Contains("level1 (100", e.Description);
-        Assert.Contains("level2 (70", e.Description);
-        Assert.EndsWith("Move a module to another bank, or make one smaller", e.Description);
+        Expect.Message(e, 1, 8, "Bank 0 of 'levels' needs 17010 bytes, but a bank has 16384: level2 (7005 bytes), level1 (10005 bytes). Move a module to another bank, or make one smaller");
+    }
+
+    // Errors the coverage run of R6 found no test for (review code-quality-tests, finding 4).
+    [Theory]
+    [InlineData("memory {\n    cartridge uxrom vertical\n    $8000..=$BFFF bank a\n    $8000..=$BFFF bank b\n}\nfn main() { }", 4, 19, "The board 'uxrom' has one bank area, and the block already declares it as 'a'. Remove the line")]
+    [InlineData("memory {\n    cartridge uxrom vertical\n    $0300..=$03FF region a\n    $8000..=$BFFF bank a\n}\nfn main() { }", 4, 19, "The area 'a' is declared twice. Give each area its own name")]
+    [InlineData("memory {\n    cartridge nrom vertical\n    $0300..=$03FF region a\n    $0000..=$1FFF chr a\n}\nfn main() { }", 4, 19, "The area 'a' is declared twice. Give each area its own name")]
+    [InlineData("memory {\n    cartridge nrom vertical\n    $0000..=$1FFF chr tiles\n}\ndata one: u8 @ tiles = 1\nvar n: u8\nfn main() { n = len(one) }", 7, 17, "len() needs an array. Use sizeof() for the size of a type")]
+    public void Reports_memory_block_errors_no_other_test_reached(string source, int line, int column, string expected)
+    {
+        Expect.Error(() => TernCompiler.Compile(source, Platform.ByName("nes")), line, column, expected);
     }
 }

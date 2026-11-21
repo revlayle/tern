@@ -275,6 +275,7 @@ public class OverlayTests
         Assert.Equal(0, kernal.LoadA);         // LOAD, not VERIFY
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void C64_load_is_a_direct_sequence_of_KERNAL_calls()
     {
@@ -589,6 +590,7 @@ public class OverlayTests
         Assert.Equal(12, r.U8("d"));
     }
 
+    [Trait("Shape", "nmos6502")]
     [Theory]
     [InlineData("")]
     [InlineData("\n    $6000..=$6FFF  volatile")]   // the variable is in a volatile range too
@@ -832,7 +834,7 @@ public class OverlayTests
             fn main() { level1.run() }
             """, sourcePath: path)));
         Assert.Equal(2, e.Pos.Line);
-        Assert.Contains("The overlay 'level1' needs", e.Description);
+        Expect.Message(e, 2, 8, "The overlay 'level1' needs 15 bytes but its area $6000-$6007 has 8. Make the area larger, or split the module");
     }
 
     [Theory]
@@ -905,6 +907,7 @@ public class OverlayTests
         Assert.Contains("local variable", message);
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void The_listing_shows_the_overlay_code_at_the_area_address()
     {

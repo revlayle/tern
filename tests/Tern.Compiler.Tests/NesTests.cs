@@ -69,6 +69,7 @@ public class NesTests
         Assert.Equal(9, r.U8("a", 1));
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void The_startup_code_is_the_specs()
     {
@@ -203,7 +204,7 @@ public class NesTests
         Assert.Equal("A NES program is a cartridge image, so its memory block names the board. Write 'memory { cartridge nrom vertical }' (boards: nrom, uxrom; mirroring: vertical or horizontal)", e.Description);
         Assert.Equal((1, 1), (e.Pos.Line, e.Pos.Column));
         var e2 = Error("memory {\n    $0300..=$03FF reserved\n}\nfn main() { }");
-        Assert.StartsWith("A NES program is a cartridge image", e2.Description);
+        Expect.Message(e2, 1, 1, "A NES program is a cartridge image, so its memory block names the board. Write 'memory { cartridge nrom vertical }' (boards: nrom, uxrom; mirroring: vertical or horizontal)");
         Assert.Equal(1, e2.Pos.Line);
     }
 
@@ -333,7 +334,7 @@ public class NesTests
         var e = Error(Nrom + "data reset: u16 @ $FFFC = 0\nfn main() { }");
         Assert.Equal("'reset' at $FFFC-$FFFD covers the reset vector ($FFFC), which belongs to the startup code: reset sets up the machine and then calls main. Remove the data, and start the program in main", e.Description);
         var e2 = Error(Nrom + "data v: [u16; 3] @ $FFFA = [0, 0, 0]\nfn main() { }");
-        Assert.StartsWith("'v' at $FFFA-$FFFF covers the reset vector", e2.Description);
+        Expect.Message(e2, 4, 1, "'v' at $FFFA-$FFFF covers the reset vector ($FFFC), which belongs to the startup code: reset sets up the machine and then calls main. Remove the data, and start the program in main");
     }
 
     [Fact]
@@ -344,7 +345,7 @@ public class NesTests
         var number = Error(Nrom + "data irq: u16 @ $FFFE = $C000\nfn main() { }");
         Assert.Equal("The IRQ vector ($FFFE) must be the address of an interrupt fn or an asm fn, which return with rti. Write addr() of an interrupt fn", number.Description);
         var offset = Error(Nrom + "interrupt fn frame() { }\ndata nmi: u16 @ $FFFA = addr(frame) + 1\nfn main() { }");
-        Assert.StartsWith("The NMI vector ($FFFA) must be the address of an interrupt fn or an asm fn", offset.Description);
+        Expect.Message(offset, 5, 1, "The NMI vector ($FFFA) must be the address of an interrupt fn or an asm fn, which return with rti. Write addr() of an interrupt fn");
     }
 
     [Fact]
@@ -448,7 +449,7 @@ public class NesTests
     public void The_address_of_tile_data_is_a_u16_not_a_pointer()
     {
         var e = Error(Tiles + "data font: [u8; 4] @ tiles = [1, 2, 3, 4]\nvar p: ptr u8\nfn main() { p = addr(font) }");
-        Assert.StartsWith("Expected ptr u8, found u16", e.Description);
+        Expect.Message(e, 7, 17, "Expected ptr u8, found u16. Convert with 'as ptr u8'");
     }
 
     [Fact]

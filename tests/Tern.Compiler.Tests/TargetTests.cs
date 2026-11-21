@@ -3,11 +3,8 @@ using Tern.Compiler.Tools;
 namespace Tern.Compiler.Tests;
 
 /// <summary><c>--target</c> (spec 12.2): every command names the machine it builds for.</summary>
-public sealed class TargetTests : IDisposable
+public sealed class TargetTests : TempFolderTest
 {
-    private readonly DirectoryInfo _dir = Directory.CreateTempSubdirectory("tern-target-");
-
-    public void Dispose() => _dir.Delete(recursive: true);
 
     private string Write(string source)
     {

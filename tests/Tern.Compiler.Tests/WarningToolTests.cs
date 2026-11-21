@@ -9,19 +9,10 @@ namespace Tern.Compiler.Tests;
 /// <c>--no-warnings</c> and <c>--warnings-as-errors</c> (not both); <c>tern run</c> reports them,
 /// <c>tern bench</c> does not.
 /// </summary>
-public sealed class WarningToolTests : IDisposable
+public sealed class WarningToolTests : TempFolderTest
 {
-    private readonly DirectoryInfo _dir = Directory.CreateTempSubdirectory("tern");
 
-    public void Dispose() => _dir.Delete(recursive: true);
-
-    private static (int Code, string Output, string Error) Tern(params string[] args)
-    {
-        var output = new StringWriter();
-        var error = new StringWriter();
-        int code = Cli.Run(Command.C64(args), output, error);
-        return (code, output.ToString(), error.ToString());
-    }
+    private static (int Code, string Output, string Error) Tern(params string[] args) => Command.Tern(Command.C64(args));
 
     private static List<string> Lines(string text) => text.Split('\n').Select(l => l.TrimEnd('\r')).Where(l => l.Length > 0).ToList();
 

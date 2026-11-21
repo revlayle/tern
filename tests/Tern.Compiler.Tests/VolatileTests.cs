@@ -129,21 +129,20 @@ public class VolatileTests
     }
 
     [Theory]
-    [InlineData("var b: [u8; 16] @ $0810\nfn main() { b[0] = 1 }", "'b' at $0810-$081F overlaps the program and its variables at $0801-$")]
-    [InlineData("var b: u8 @ $0801\nfn main() { b = 1 }", "'b' at $0801 overlaps the program and its variables")]
-    [InlineData("var a: u8\nvar z: u8 @ $02\nfn main() { a = z }", "'z' at $0002 overlaps 'a' at $0002, which the compiler placed in zero page. Move 'z' out of $02-$8F")]
-    [InlineData("volatile data t: [u8; 2] = [1, 2]\nfn main() { }", "'volatile' goes before 'var'")]
-    [InlineData("volatile linear data t: [u16; 2] = [1, 2]\nfn main() { }", "'volatile' is for variables; data is read-only, so nothing changes it")]
-    [InlineData("volatile fn f() { }\nfn main() { }", "'volatile' goes before 'var'")]
-    [InlineData("volatile volatile var x: u8\nfn main() { }", "'volatile' is written twice")]
-    [InlineData("noinit noinit var x: u8\nfn main() { }", "'noinit' is written twice")]
-    [InlineData("volatile noinit volatile var x: u8\nfn main() { }", "'volatile' is written twice")]
-    [InlineData("fn main() { volatile var x: u8 = 1 }", "'volatile' is for global variables; nothing else can change a local variable")]
-    [InlineData("var volatile: u8\nfn main() { }", "Expected variable name, found 'volatile'")]
-    public void Reports_errors(string source, string expected)
+    [InlineData("var b: [u8; 16] @ $0810\nfn main() { b[0] = 1 }", 1, 1, "'b' at $0810-$081F overlaps the program and its variables at $0801-$0819. Move 'b', or make the program smaller")]
+    [InlineData("var b: u8 @ $0801\nfn main() { b = 1 }", 1, 1, "'b' at $0801 overlaps the program and its variables at $0801-$0819. Move 'b', or make the program smaller")]
+    [InlineData("var a: u8\nvar z: u8 @ $02\nfn main() { a = z }", 2, 1, "'z' at $0002 overlaps 'a' at $0002, which the compiler placed in zero page. Move 'z' out of $02-$8F, $FB-$FE")]
+    [InlineData("volatile data t: [u8; 2] = [1, 2]\nfn main() { }", 1, 1, "'volatile' goes before 'var', e.g. 'volatile var flags: u8 @ $C000'; found 'data'. Write 'volatile var' or remove 'volatile'")]
+    [InlineData("volatile linear data t: [u16; 2] = [1, 2]\nfn main() { }", 1, 1, "'volatile' is for variables; data is read-only, so nothing changes it. Remove 'volatile'")]
+    [InlineData("volatile fn f() { }\nfn main() { }", 1, 1, "'volatile' goes before 'var', e.g. 'volatile var flags: u8 @ $C000'; found 'fn'. Write 'volatile var' or remove 'volatile'")]
+    [InlineData("volatile volatile var x: u8\nfn main() { }", 1, 1, "'volatile' is written twice. Remove one")]
+    [InlineData("noinit noinit var x: u8\nfn main() { }", 1, 1, "'noinit' is written twice. Remove one")]
+    [InlineData("volatile noinit volatile var x: u8\nfn main() { }", 1, 1, "'volatile' is written twice. Remove one")]
+    [InlineData("fn main() { volatile var x: u8 = 1 }", 1, 13, "'volatile' is for global variables; nothing else can change a local variable. Remove 'volatile'")]
+    [InlineData("var volatile: u8\nfn main() { }", 1, 5, "Expected variable name, found 'volatile', which is a keyword. Use another name")]
+    public void Reports_errors(string source, int line, int column, string expected)
     {
-        var e = Assert.Throws<CompileError>(() => TernCompiler.Compile(source));
-        Assert.Contains(expected, e.Description);
+        Expect.Error(source, line, column, expected);
     }
 
     [Fact]

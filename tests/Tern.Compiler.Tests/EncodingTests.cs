@@ -7,11 +7,8 @@ namespace Tern.Compiler.Tests;
 /// literal prefix; <c>encoding hud: screen { ... }</c> starts from another; <c>default encoding tiles</c> in the
 /// main file sets the encoding of the program's own unprefixed literals, never a library module's.
 /// </summary>
-public sealed class EncodingTests : IDisposable
+public sealed class EncodingTests : TempFolderTest
 {
-    private readonly DirectoryInfo _dir = Directory.CreateTempSubdirectory("tern");
-
-    public void Dispose() => _dir.Delete(recursive: true);
 
     private string MainPath => Path.Combine(_dir.FullName, "main.tern");
     private string LibPath => Path.Combine(_dir.FullName, "lib");
@@ -335,44 +332,44 @@ public sealed class EncodingTests : IDisposable
     [InlineData("encoding t {\n'C' = 1\n'A'..='Z' = 2\n}", "'C' is listed twice in the encoding 't', also at line 2. Remove one", 3, 1)]
     [InlineData("encoding t { 'A'..='Z' = $E7 }", "The range 'A'..='Z' has 26 characters, so from $E7 its bytes pass $FF. Start it at $E6 or lower, or split the range", 1, 14)]
     [InlineData("encoding t { 'A'..='♥' = 0 }", "The range 'A'..='♥' has 9765 characters, but an encoding has 256 bytes. Split the range", 1, 14)]
-    [InlineData("encoding t { '\\0'..='A' = 0 }", "'\\0' and '\\$NN' are bytes", 1, 14)]
+    [InlineData("encoding t { '\\0'..='A' = 0 }", "'\\0' and '\\$NN' are bytes, not characters, so an encoding has no code to give them. Write a character, such as 'A' or '\\n'", 1, 14)]
     [InlineData("encoding tiles { 'A' = 1, 'B' = tiles'A' + 1 }", "The byte of 'B' in the encoding 'tiles' uses 'tiles' itself. Write the byte as a number", 1, 33)]
     [InlineData("encoding a { 'A' = b'B' }\nencoding b { 'B' = a'A' }", "The byte of 'B' in the encoding 'b' uses the encoding 'a', which needs 'b'. Write the byte as a number", 2, 20)]
-    [InlineData("encoding a: b { }\nencoding b { 'B' = a'A' }", "The byte of 'B' in the encoding 'b' uses the encoding 'a', which needs 'b'", 2, 20)]
+    [InlineData("encoding a: b { }\nencoding b { 'B' = a'A' }", "The byte of 'B' in the encoding 'b' uses the encoding 'a', which needs 'b'. Write the byte as a number", 2, 20)]
     [InlineData("default encoding tiles\nencoding tiles { 'A' = 1, 'B' = 'A' + 1 }",
         "The byte of 'B' in the encoding 'tiles' uses a character without a prefix, which is in the default encoding 'tiles', and that needs this byte. Write the byte as a number, or write a prefix before the quote", 2, 33)]
-    [InlineData("default encoding top\nencoding top: tiles { }\nencoding tiles { 'A'..='Z' = 'A' }", "The byte of 'A'..='Z' in the encoding 'tiles' uses a character without a prefix, which is in the default encoding 'top'", 3, 30)]
+    [InlineData("default encoding top\nencoding top: tiles { }\nencoding tiles { 'A'..='Z' = 'A' }", "The byte of 'A'..='Z' in the encoding 'tiles' uses a character without a prefix, which is in the default encoding 'top', and that needs this byte. Write the byte as a number, or write a prefix before the quote", 3, 30)]
     [InlineData("const H: u8 = 'Z'\ndefault encoding tiles\nencoding tiles { 'A' = H, 'Z' = 2 }",
         "'H' depends on itself: H -> encoding tiles -> H. Give one of them a value that does not use the others", 1, 1)]
-    [InlineData("const H: u8 = tiles'Z'\nencoding tiles { 'A' = H, 'Z' = 2 }", "'H' depends on itself: H -> encoding tiles -> H", 1, 1)]
+    [InlineData("const H: u8 = tiles'Z'\nencoding tiles { 'A' = H, 'Z' = 2 }", "'H' depends on itself: H -> encoding tiles -> H. Give one of them a value that does not use the others", 1, 1)]
     [InlineData("encoding t { 'A' = 256 }", "256 is not a byte; an encoding gives each character one byte, $00 to $FF. Use a value in that range", 1, 20)]
-    [InlineData("encoding t { 'A' = -1 }", "-1 is not a byte", 1, 20)]
+    [InlineData("encoding t { 'A' = -1 }", "-1 is not a byte; an encoding gives each character one byte, $00 to $FF. Use a value in that range", 1, 20)]
     [InlineData("var v: u8\nencoding t { 'A' = v }", "An encoding's byte must be known at compile time. Use a number or a constant", 2, 20)]
     [InlineData("encoding t: scren { }", "Unknown encoding 'scren'. Use one of: petscii, petscii_mixed, screen, screen_mixed, atascii, atari_screen, apple2, t", 1, 13)]
     [InlineData("encoding a: b { }\nencoding b: a { }", "The encoding 'a' is based on itself, through 'b'. Change the base of one of them, or remove it", 1, 1)]
-    [InlineData("encoding a: a { }", "The encoding 'a' is based on itself, through 'a'", 1, 1)]
+    [InlineData("encoding a: a { }", "The encoding 'a' is based on itself, through 'a'. Change the base of one of them, or remove it", 1, 1)]
     [InlineData("encoding screen { 'A' = 1 }", "'screen' is a built-in encoding, so the prefix screen\"...\" would have two meanings. Rename the encoding", 1, 1)]
-    [InlineData("var t: u8\nencoding t { }", "'t' is already declared at", 1, 1)]
-    [InlineData("encoding t { }\nconst t = 1", "'t' is already declared at", 2, 1)]
+    [InlineData("var t: u8\nencoding t { }", "'t' is already declared at main.tern:2:1. Rename one of them", 1, 1)]
+    [InlineData("encoding t { }\nconst t = 1", "'t' is already declared at main.tern:1:1. Rename one of them", 2, 1)]
     [InlineData("var v: u8\ndata d = v\"A\"", "'v' is a variable, not an encoding. Use an encoding's name before the quote", 2, 10)]
     [InlineData("encoding t { 'A' = 1 }\ndata d = t\"AB\"", "'B' has no code in the t encoding. Write the byte as \\$NN", 2, 10)]
     [InlineData("encoding t { 'A' = 1 }\nvar c: u8 = t'\\n'", "'\\n' has no code in the t encoding. Write the byte as \\$NN", 2, 13)]
-    [InlineData("encoding t: screen { 'A' = 1 }\ndata d = t\"A\\n\"", "'\\n' has no code in the t encoding", 2, 10)]
+    [InlineData("encoding t: screen { 'A' = 1 }\ndata d = t\"A\\n\"", "'\\n' has no code in the t encoding. Write the byte as \\$NN", 2, 10)]
     [InlineData("encoding t { 'A'..'Z' = 1 }", "A range of characters includes its last one. Write '..=', as in 'a'..='z'", 1, 17)]
     [InlineData("encoding t { 'Z'..='A' = 1 }", "The range 'Z'..='A' goes down. Write the lower character first: 'A'..='Z'", 1, 14)]
     [InlineData("encoding t { screen'A' = 1 }", "An encoding lists characters, not bytes of another encoding. Remove 'screen' before the quote", 1, 14)]
     [InlineData("encoding t { '\\$41' = 1 }", "'\\0' and '\\$NN' are bytes, not characters, so an encoding has no code to give them. Write a character, such as 'A' or '\\n'", 1, 14)]
-    [InlineData("encoding t { 'A' 1 }", "Expected '= byte' after the character", 1, 18)]
-    [InlineData("encoding t { 'A' = 1 'B' = 2 }", "Expected ',' or a line break after the byte", 1, 22)]
-    [InlineData("encoding t { 'A' = 1", "Encoding 't' is not closed with '}'", 1, 1)]
-    [InlineData("encoding t { A = 1 }", "Expected a character in quotes, such as 'A'", 1, 14)]
-    [InlineData("default encoding tiles", "Unknown encoding 'tiles'. Use one of: petscii, petscii_mixed, screen, screen_mixed, atascii, atari_screen", 1, 18)]
+    [InlineData("encoding t { 'A' 1 }", "Expected '= byte' after the character, found '1'", 1, 18)]
+    [InlineData("encoding t { 'A' = 1 'B' = 2 }", "Expected ',' or a line break after the byte, found 'B'. Separate the lines with ',' or a line break", 1, 22)]
+    [InlineData("encoding t { 'A' = 1", "Encoding 't' is not closed with '}'. Add '}' after its last line", 1, 1)]
+    [InlineData("encoding t { A = 1 }", "Expected a character in quotes, such as 'A', found 'A'", 1, 14)]
+    [InlineData("default encoding tiles", "Unknown encoding 'tiles'. Use one of: petscii, petscii_mixed, screen, screen_mixed, atascii, atari_screen, apple2", 1, 18)]
     [InlineData("encoding t { }\ndefault encoding t\ndefault encoding screen", "The program has one 'default encoding' line, at line 2. Remove one", 3, 1)]
     [InlineData("data d = font.tiles\"A\"", "'font' is not declared. Add 'import font' at the top of the file to use the module font", 1, 10)]
     public void Reports_errors(string source, string expected, int line, int column)
     {
         var e = Error(source + "\nfn main() { }");
-        Assert.StartsWith(expected, e.Description);
+        Expect.Message(e, line, column, expected);
         Assert.Equal((line, column), (e.Pos.Line, e.Pos.Column));
     }
 
@@ -433,7 +430,7 @@ public sealed class EncodingTests : IDisposable
             fn main() { out[0] = X[0]; out[1] = X[1] }
             """);
         Assert.Single(e.All);
-        Assert.StartsWith("The byte of 'B' in the encoding 'tiles' uses a character without a prefix, which is in the default encoding 'tiles'", e.Description);
+        Expect.Message(e, 2, 33, "The byte of 'B' in the encoding 'tiles' uses a character without a prefix, which is in the default encoding 'tiles', and that needs this byte. Write the byte as a number, or write a prefix before the quote");
         Assert.Equal((2, 33), (e.Pos.Line, e.Pos.Column));
     }
 

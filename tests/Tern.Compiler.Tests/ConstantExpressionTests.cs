@@ -96,6 +96,7 @@ public class ConstantExpressionTests
         Assert.Equal([1, 2, 3, 4], r.Ram.Bytes.AsSpan(0xC200, 4).ToArray());
     }
 
+    [Trait("Shape", "nmos6502")]
     [Theory]
     [InlineData(0xFF)]
     [InlineData(0x3C)]
