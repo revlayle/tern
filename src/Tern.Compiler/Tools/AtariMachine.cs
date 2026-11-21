@@ -54,6 +54,12 @@ internal sealed class AtariMachine(OverlayDisk disk) : Machine
         ram.Bytes[Rowcrs] = 0;
         ram.Bytes[Colcrs] = 2;
         ram.Bytes[Colcrs + 1] = 0;
+        // Idle input (decision 2026-11-21, question 175): no key (CH), sticks centred (STICK0-3),
+        // triggers up (STRIG0-3), no console key (CONSOL).
+        ram.Bytes[0x02FC] = 0xFF;
+        ram.Bytes.AsSpan(0x0278, 4).Fill(0x0F);
+        ram.Bytes.AsSpan(0x0284, 4).Fill(1);
+        ram.Bytes[0xD01F] = 7;
     }
 
     public override (int Address, int Columns, int Rows) Screen(Ram ram) => (ram.Bytes[Savmsc] | ram.Bytes[Savmsc + 1] << 8, Columns, Rows);

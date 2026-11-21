@@ -47,6 +47,9 @@ internal sealed class C64Machine(OverlayDisk disk) : Machine
         ram.Bytes[TextColor] = LightBlue;     // the KERNAL's light blue
         ram.Bytes[CursorRow] = 0;
         ram.Bytes[CursorColumn] = 0;
+        // Idle input (decision 2026-11-21, question 175): CIA 1's ports read no joystick and no key.
+        ram.Bytes[0xDC00] = 0xFF;
+        ram.Bytes[0xDC01] = 0xFF;
     }
 
     public override (int Address, int Columns, int Rows) Screen(Ram ram) => (ScreenAddress, Columns, Rows);

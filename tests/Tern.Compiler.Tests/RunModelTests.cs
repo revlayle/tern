@@ -440,4 +440,45 @@ public class RunModelTests
         Assert.Equal(7L * run.Interrupts, run.Profile.InterruptCycles);
         Assert.Equal(run.Cycles, run.Profile.Total);
     }
+    // ---------- Idle input (decision 2026-11-21, question 175) ----------
+
+    /// <summary>
+    /// tern run's input reads "nothing pressed", not the seeded fill (spec 13): before, the C64's $DC00 read
+    /// $97 (joystick right) and the Apple II's $C000 $C6 (a key pressed).
+    /// </summary>
+    [Theory]
+    [InlineData("c64", 0xDC00, 0xFF)]   // port A: no joystick 2 direction or fire, no keyboard column selected
+    [InlineData("c64", 0xDC01, 0xFF)]   // port B: no joystick 1, no key
+    [InlineData("atari", 0x02FC, 0xFF)] // CH: no key
+    [InlineData("atari", 0x0278, 0x0F)] // STICK0-3: centred
+    [InlineData("atari", 0x0279, 0x0F)]
+    [InlineData("atari", 0x027A, 0x0F)]
+    [InlineData("atari", 0x027B, 0x0F)]
+    [InlineData("atari", 0x0284, 1)]    // STRIG0-3: not pressed
+    [InlineData("atari", 0x0285, 1)]
+    [InlineData("atari", 0x0286, 1)]
+    [InlineData("atari", 0x0287, 1)]
+    [InlineData("atari", 0xD01F, 7)]    // CONSOL: no console key
+    [InlineData("apple2", 0xC000, 0)]   // the keyboard: no key (below $80)
+    [InlineData("apple2", 0xC061, 0)]   // buttons 0-2 (below $80)
+    [InlineData("apple2", 0xC062, 0)]
+    [InlineData("apple2", 0xC063, 0)]
+    public void Input_reads_idle(string target, int address, int idle)
+    {
+        var platform = Platform.ByName(target)!;
+        var program = TernCompiler.Compile($"var input: u8 @ ${address:X4}\nvar seen: u8\nfn main() {{ seen = input }}", platform);
+        var run = Runner.Run(program);
+        Assert.True(run.Returned, run.Stop);
+        Assert.Equal(idle, run.Ram.Bytes[program.Symbols["seen"]]);
+    }
+
+    [Fact]
+    public void The_nes_controllers_read_no_button()
+    {
+        var program = TernCompiler.Compile(Nrom + "var one: u8\nvar two: u8\nfn main() {\n    one = nes.pad(0)\n    two = nes.pad(1)\n}", Platform.Nes);
+        var run = Runner.Run(program);
+        Assert.True(run.Returned, run.Stop);
+        Assert.Equal(0, run.Ram.Bytes[program.Symbols["one"]]);
+        Assert.Equal(0, run.Ram.Bytes[program.Symbols["two"]]);
+    }
 }

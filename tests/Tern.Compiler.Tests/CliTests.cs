@@ -272,6 +272,7 @@ public sealed class CliTests : TempFolderTest
         foreach (var name in new[] { "CHROUT $FFD2", "LOAD $FFD5", "CIOV $E456", "IOCBs 1-7", "SETVBV $E45C", "COUT $FDED", "GET_PREFIX", "CLOSE", "reading the build's overlay files" })
             Assert.Contains(name, help);
         Assert.Contains("which take no cycles", help);
+        Assert.Contains("Input reads idle, nothing pressed: the C64's $DC00 and $DC01 are $FF", help);
         Assert.Contains("A brk stops the run, except on the NES when the program sets the IRQ vector", help);
         Assert.Contains("exits with 4 on an internal error", help);
     }

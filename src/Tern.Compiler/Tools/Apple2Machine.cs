@@ -70,6 +70,10 @@ internal sealed class Apple2Machine(OverlayDisk disk) : Machine
         Cursor(ram, 0, 0);
         (ram.Bytes[Csw], ram.Bytes[Csw + 1]) = (0xF0, 0xFD);
         (ram.Bytes[Ksw], ram.Bytes[Ksw + 1]) = (0x1B, 0xFD);
+        // Idle input (decision 2026-11-21, question 175): no key strobe (bit 7 of $C000) and buttons 0-2
+        // up (bit 7 of $C061-$C063).
+        ram.Bytes[0xC000] = 0;
+        ram.Bytes.AsSpan(0xC061, 3).Clear();
     }
 
     public override (int Address, int Columns, int Rows) Screen(Ram ram) => (ScreenAddress, Columns, Rows);
