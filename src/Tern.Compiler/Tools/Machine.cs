@@ -28,6 +28,18 @@ internal abstract class Machine
     /// <summary>The machine's stand-ins, in the order the help lists them.</summary>
     protected abstract IReadOnlyList<StandIn> Routines { get; }
 
+    /// <summary>
+    /// The help's sentence on this machine in <c>tern run</c> (review R6, suggestion 3): its stand-ins and what
+    /// else it models, as "On the C64: ...".
+    /// </summary>
+    public abstract string Help { get; }
+
+    /// <summary>The machine's chips that <c>tern run</c> does not model, for the help ("VIC-II, SID or CIA"), or null.</summary>
+    public virtual string? UnmodelledChips => null;
+
+    /// <summary>What the machine's input reads at the start of a run, for the help ("the C64's $DC00 and $DC01 are $FF"), or null.</summary>
+    public virtual string? IdleInput => null;
+
     /// <summary>The routines with stand-ins, for the message when the run reaches another ROM address and for the help.</summary>
     public string StandIns => Routines.Count == 0 ? "none" : string.Join(", ", Routines.Select(s => $"{s.Name} ${s.Address:X4}{(s.Note == "" ? "" : " " + s.Note)}"));
 

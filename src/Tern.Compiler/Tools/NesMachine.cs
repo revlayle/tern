@@ -13,6 +13,11 @@ internal sealed class NesMachine : Machine
     /// <summary>None: the NES has no ROM routines.</summary>
     protected override IReadOnlyList<StandIn> Routines => [];
 
+    public override string Help =>
+        "On the NES: PPU memory and sprite memory (not pixels); the vblank flag, set at the start of vblank and cleared by a read of $2002 or at the end of vblank; " +
+        "an NMI every frame when bit 7 of $2000 is set, and at once when it is set during vblank; the UxROM bank latch; the controllers read as no buttons; " +
+        "a brk runs the program's IRQ handler when the program sets the IRQ vector.";
+
     /// <summary>The PPU, APU, controllers and banks; null until a program is loaded.</summary>
     public NesBus? Bus { get; private set; }
 

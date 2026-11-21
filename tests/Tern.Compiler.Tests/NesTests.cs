@@ -313,11 +313,11 @@ public class NesTests
     public void Other_targets_have_no_cartridges_yet()
     {
         var c64 = Assert.Throws<CompileError>(() => TernCompiler.Compile("memory {\n    cartridge nrom vertical\n}\nfn main() { }", Platform.C64));
-        Assert.Equal("'cartridge' is not supported yet for the c64: cartridge images are built only for the NES so far. Remove the 'cartridge' line", c64.Description);
+        Assert.Equal("'cartridge' is not supported yet for the C64. Remove the 'cartridge' line", c64.Description);
         var apple = Assert.Throws<CompileError>(() => TernCompiler.Compile("memory {\n    cartridge nrom vertical\n}\nfn main() { }", Platform.Apple2));
         Assert.Equal("The Apple II has no cartridges. Remove the 'cartridge' line", apple.Description);
         var chr = Assert.Throws<CompileError>(() => TernCompiler.Compile("memory {\n    $0000..=$1FFF chr tiles\n}\nfn main() { }", Platform.C64));
-        Assert.Equal("A 'chr' area is part of a cartridge board, which the c64 does not have. Remove the line", chr.Description);
+        Assert.Equal("A 'chr' area is part of a cartridge board, which the C64 does not have. Remove the line", chr.Description);
     }
 
     [Fact]

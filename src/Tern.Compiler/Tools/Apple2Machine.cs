@@ -37,6 +37,10 @@ internal sealed class Apple2Machine(OverlayDisk disk) : Machine
         return ram;
     }
 
+    public override string Help => $"On the Apple II: {StandIns}.";
+
+    public override string IdleInput => "the Apple II's $C000 and $C061-$C063 are 0";
+
     protected override IReadOnlyList<StandIn> Routines =>
     [
         new(Apple2Rom.Cout, "COUT", (cpu, ram, output) => { Print(cpu.A, ram, output); return null; }),

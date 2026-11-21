@@ -31,6 +31,12 @@ internal sealed class AtariMachine(OverlayDisk disk) : Machine
     /// <summary>ATASCII's end of line, and the screen editor's control codes that have stand-ins.</summary>
     private const byte EndOfLine = 0x9B, ClearScreen = 0x7D, CursorUp = 0x1C, CursorDown = 0x1D, CursorLeft = 0x1E, CursorRight = 0x1F, Backspace = 0x7E;
 
+    public override string Help => $"On the Atari: {StandIns}.";
+
+    public override string UnmodelledChips => "ANTIC, GTIA, POKEY or PIA";
+
+    public override string IdleInput => "the Atari's CH ($2FC) is $FF, STICK0-3 $0F, STRIG0-3 1 and CONSOL 7";
+
     protected override IReadOnlyList<StandIn> Routines =>
     [
         new(0xE456, "CIOV", Ciov, "for put bytes on IOCB 0 (the screen editor) and for reading the build's overlay files on IOCBs 1-7"),

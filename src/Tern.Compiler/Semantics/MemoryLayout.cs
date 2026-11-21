@@ -73,7 +73,7 @@ public sealed class MemoryLayout
         if (platform.Boards.Count == 0)
             throw new CompileError(line.Pos, !platform.CartridgesPlanned
                 ? $"The {platform.Title} has no cartridges. Remove the 'cartridge' line"
-                : $"'cartridge' is not supported yet for the {platform.Name}: cartridge images are built only for the NES so far. Remove the 'cartridge' line");
+                : $"'cartridge' is not supported yet for the {platform.Title}. Remove the 'cartridge' line");
         var board = platform.Boards.FirstOrDefault(b => b.Name == line.Board)
             ?? throw new CompileError(line.BoardPos,
                 $"The {platform.Title} has no board '{line.Board}'. Use one of: {string.Join(", ", platform.Boards.Select(b => b.Name))}");
@@ -107,7 +107,7 @@ public sealed class MemoryLayout
                 throw new CompileError(line.Pos, $"The range starts at ${first:X4} and ends at ${last:X4}, before its start. Write the lower address first");
             var range = new AddressRange((int)first, (int)last);
             if (line.Kind is MemoryKind.Bank or MemoryKind.Chr && cartridge is null)
-                throw new CompileError(line.Pos, $"A '{line.Kind.Word()}' area is part of a cartridge board, which the {platform.Name} does not have. Remove the line");
+                throw new CompileError(line.Pos, $"A '{line.Kind.Word()}' area is part of a cartridge board, which the {platform.Title} does not have. Remove the line");
             if (line.Kind == MemoryKind.Bank) AddBank(areas, cartridge!, line, range);
             if (line.Kind == MemoryKind.Chr)
             {
