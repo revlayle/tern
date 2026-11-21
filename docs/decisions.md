@@ -1060,3 +1060,9 @@ Spec 13 (`tern run` starts from a machine that is not cleared); roadmap R8. From
 - **Each machine's `Start` sets its input to "nothing pressed"**: the C64's `$DC00`/`$DC01` = `$FF`; the Atari's `CH` = `$FF`, `STICK0`-`3` = `$0F`, `STRIG0`-`3` = 1, `CONSOL` = 7; the Apple II's `$C000` and `$C061`-`$C063` below `$80`; no button on the NES's controllers. Other I/O registers and OS variables stay as the chip model or the seeded fill gives them. `--set` gives input. Reason: question 171 is about RAM the program never wrote; an input register is not RAM, and on the machine it reads "no input" until something is touched. Since 171 the seeded fill made `tern run` press keys and hold joysticks (the Apple II's `$C000` read `$C6`, the C64's `$DC00` `$97`), so a game moved or acted on its own and an agent could not tell it from a bug.
 - **Built first in R8.** It changes `tern run`'s output and the `SkillTests` outputs (the sprite run's A), rewritten in the same commit. Reason: small, and R8 is the next milestone; R6 stays behavior-neutral.
 
+## 2026-11-21: question 176, what a `///` comment belongs to, waits for M28
+
+Roadmap M28. From review R5 (finding 4).
+
+- **The rule is decided by M28's spec session, not now; the built rule stays until then.** Built (R5): `///` lines go to the next token, across blank lines and plain `//` comments; top-level functions, variables, constants and structs keep them; elsewhere they are dropped. Spec 2 does not mention doc comments, so `///` is a plain comment for users. Reason: nothing a user sees depends on it before M28 (the compiler keeps the text; the language server's hover is the first reader), and the rule is best set with M28's other needs (module docs, struct fields, the library's comments). The lean: the 2026-11-12 draft's stricter rule (an error elsewhere or after a blank line), since a comment then cannot attach to the wrong declaration, and making it an error later breaks no program that relies on it.
+
