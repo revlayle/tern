@@ -1090,3 +1090,10 @@ Roadmap V1 and "Not scheduled". Changes the second point of "validation programs
 
 - **V1's first program is smashy smashy alone; the shooter is not scheduled.** Reason (the developer's): the shooter has taken about ten phases in Prog8 and is about half done, too big for one of about 24 validation programs; even one frame of it as its own program needs its whole frame engine. It is ported when the developer wants to finish it in Tern.
 
+## 2026-11-21: Galaxy Stars is V1's first program
+
+Roadmap V1. Adds to "validation programs before the release (V1)" and "the horizontal shooter is not a V1 program" (same day).
+
+- **Galaxy Stars comes first, smashy smashy second, each as its own batch.** Reason: Galaxy Stars is already ported and has the strongest known result of any program, `compare.py`'s frame-by-frame comparison with the Prog8 build; it was built before M21-M27 and R1-R7. The spec session reran it at `cf0a585`: 13,211 frames the same, 18,993 bytes (was 19,003), 4,782 cycles per play frame (was 4,788).
+- **Its remaining assembly is measured again**, routine by routine, and written in plain Tern where that is as fast. Reason: some was kept for reasons later milestones changed (M22's generators for unrolled code, gap 26's constant parts of a pointer sum); a routine that stays assembly keeps its numbers, so the reason is on record.
+
