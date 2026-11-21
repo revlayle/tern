@@ -91,7 +91,9 @@ public class MatchTests
         var r = Run.Program("var out: [u8; 256]\n" + source + "\nfn main() { out[0] = f(3) }");
         Assert.DoesNotContain("jumphi", Listing.Text(r, "f"));
         Assert.DoesNotContain("Jump table of the indexed match", r.Result.Report);
-        Assert.Contains("cmp #$0A|beq", Listing.CodeWithLabels(r, "f"));
+        // The chain: a compare and a branch per value, then the range 19..=20.
+        Assert.Contains("cmp #$0A|beq f.case1|cmp #$0B|beq f.case2|cmp #$0C|beq f.case3|cmp #$0D|beq f.case3|", Listing.Code(r, "f"));
+        Assert.Contains("|cmp #$13|bcc f.mend0|cmp #$15|bcs f.mend0|", Listing.Code(r, "f"));
     }
 
     [Trait("Shape", "nmos6502")]

@@ -99,7 +99,11 @@ public class LoopControlTests
             """);
         Assert.Equal(5, r.U8("odd"));
         Assert.Equal(0, r.U8("n"));
-        Assert.DoesNotContain("dec n|bne", Listing.Code(r));
+        var code = Listing.CodeWithLabels(r);
+        Assert.DoesNotContain("dec n|bne", code);
+        // n is held in X; continue jumps to the loop's test, which ends the loop once.
+        Assert.Contains("dex|jmp main.test1|", code);
+        Assert.Contains("main.test1:|cpx #$00|bne main.while0|", code);
     }
 
     [Trait("Shape", "nmos6502")]
@@ -192,5 +196,7 @@ public class LoopControlTests
         Assert.Equal(v > 0 ? 1 : 0, r.U8("big"));
         Assert.Equal(v <= 0 ? 1 : 0, r.U8("small"));
         Assert.DoesNotContain("cmp", Listing.Code(r));
+        Assert.Contains("lda v|beq main.endif0|", Listing.Code(r));
+        Assert.Contains("lda v|bne main.endif1|", Listing.Code(r));
     }
 }

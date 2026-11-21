@@ -162,7 +162,10 @@ public class AParameterTests
                 Assert.Equal(expected, r.U8("yes", i * n + j));
                 Assert.Equal(expected, r.U8("no", i * n + j));
             }
-        Assert.DoesNotContain(Listing.Instructions(r, "then"), i => i.Contains("then.v"));
+        var then = Listing.Instructions(r, "then");
+        Assert.DoesNotContain(then, i => i.Contains("then.v"));
+        Assert.Contains("cmp then.t", then);     // v's low byte, in A
+        Assert.Contains("cpx then.t+1", then);   // v's high byte, in X
         // Ordering compares the high bytes first; equality the low bytes first.
         Assert.StartsWith(op is "==" or "!=" ? "cmp then.t|" : "cpx then.t+1|", Listing.Code(r, "then"));
     }

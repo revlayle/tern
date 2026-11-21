@@ -370,6 +370,7 @@ public class OptimizerTests
         Assert.Equal(op == 0 ? 10 : op == 1 ? 20 : 30, r.U8("out"));
         var code = Listing.Code(r, separator: " / ");
         Assert.DoesNotContain("jmp main.endif", code);
+        Assert.Contains("lda #$0A / sta out / jmp main.mend0 /", code);   // straight to the match's end
     }
 
     [Fact]

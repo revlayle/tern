@@ -52,6 +52,10 @@ public class OuterCounterTests
         var code = Listing.Code(r);
         Assert.DoesNotContain("main.i", code);
         Assert.DoesNotContain("main.j", code);
+        // i counts in Y and j in X.
+        Assert.StartsWith("ldy #$00|ldx #$01|", code);
+        Assert.Contains("|inx|cpx #$05|", code);
+        Assert.Contains("|iny|cpy #$08|", code);
     }
 
     [Trait("Shape", "nmos6502")]

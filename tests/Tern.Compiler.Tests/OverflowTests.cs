@@ -32,7 +32,10 @@ public class OverflowTests
         Assert.Equal(set ? 1 : 0, r.U8("if_yes"));
         Assert.Equal(set ? 0 : 1, r.U8("if_no"));
         Assert.Equal(set ? 1 : 0, r.U8("stored"));
-        Assert.DoesNotContain(Listing.Instructions(r), l => l.StartsWith("jsr"));
+        var main = Listing.Instructions(r);
+        Assert.DoesNotContain(main, l => l.StartsWith("jsr"));
+        Assert.Equal(3, Listing.Count(main, "bit flags"));   // the body, inlined at each call
+        Assert.Contains("bvc main.endif0", main);             // the flag tested where it is set
     }
 
     [Theory]

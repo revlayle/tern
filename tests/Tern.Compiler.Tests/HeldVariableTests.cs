@@ -193,7 +193,12 @@ public class HeldVariableTests
         Assert.True(r.Interrupts > 20);
         Assert.Equal(50, r.U8("sp"));
         for (int k = 0; k < 50; k++) Assert.Equal(k * 4, r.U8("stack", k));
-        Assert.DoesNotContain("inc sp", Listing.Code(r));
+        var code = Listing.Code(r);
+        Assert.DoesNotContain("inc sp", code);
+        // sp is held in X through the loop: loaded before it, counted with inx, stored after it.
+        Assert.Contains("ldx sp|sta stack,x|", code);
+        Assert.Contains("|inx|", code);
+        Assert.Contains("|stx sp|", code);
     }
 
     [Trait("Shape", "nmos6502")]

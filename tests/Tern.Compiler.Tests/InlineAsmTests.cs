@@ -61,7 +61,9 @@ public class InlineAsmTests
         Assert.Equal(expected ? 1 : 0, r.U8("if_yes"));
         Assert.Equal(expected ? 0 : 1, r.U8("if_no"));
         Assert.Equal(expected ? 1 : 0, r.U8("stored"));
-        Assert.DoesNotContain("jsr", string.Join("\n", Listing.Lines(r, "main")));
+        var main = Listing.Instructions(r);
+        Assert.DoesNotContain(main, i => i.StartsWith("jsr"));
+        Assert.Equal(3, Listing.Count(main, "cpx limit"));   // the body, inlined at each call
     }
 
     [Theory]

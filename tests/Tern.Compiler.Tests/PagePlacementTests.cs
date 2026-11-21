@@ -174,5 +174,9 @@ public class PagePlacementTests
         Assert.Equal(249, r.U8("out"));
         Assert.DoesNotContain("placed so that", r.Result.Report);
         Assert.DoesNotContain("left free", Listing.Outside(r));
+        // buf is stored through an index and read at a constant one, with no table of its own.
+        Assert.Equal([Listing.Startup, "main"], Listing.Sections(r));
+        Assert.Contains("sta buf,x", Listing.Instructions(r));
+        Assert.Contains("lda buf+249", Listing.Instructions(r));
     }
 }
