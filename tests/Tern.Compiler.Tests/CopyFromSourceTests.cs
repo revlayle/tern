@@ -84,7 +84,7 @@ public class CopyFromSourceTests
             }
             """);
         Assert.Equal([10, 20, 30, 40], Enumerable.Range(0, 4).Select(k => (int)r.U8("out", k)));
-        Assert.Contains("sta main.a", r.Result.Listing);
+        Assert.Contains("sta main.a", Listing.Instructions(r));
     }
 
     [Fact]

@@ -114,8 +114,7 @@ public class AddressConversionTests
                 b = (addr(map) - 1).lo
             }
             """);
-        var main = r.Result.Listing[r.Result.Listing.IndexOf("main:")..];
-        main = main[..main.IndexOf("rts")];
+        var main = Listing.Code(r);
         Assert.Contains("lda #(map+299).hi", main);
         Assert.Contains("lda #(map-1).lo", main);
         Assert.DoesNotContain("adc", main);

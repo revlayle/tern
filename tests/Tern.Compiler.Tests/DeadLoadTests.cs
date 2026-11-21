@@ -104,6 +104,6 @@ public class DeadLoadTests
             fn main() { out = f() + t }
             """);
         Assert.Equal(16, r.U8("out"));
-        Assert.Contains("lda #$07", r.Result.Listing);
+        Assert.Contains("lda #$07", Listing.Instructions(r, "f"));
     }
 }

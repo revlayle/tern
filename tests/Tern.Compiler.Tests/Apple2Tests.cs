@@ -119,7 +119,7 @@ public class Apple2Tests
     public void The_startup_sets_up_40_column_text_and_points_reset_at_a_routine_that_quits()
     {
         var r = RunApple2("fn main() { }");
-        var listing = r.Result.Listing;
+        var listing = Listing.Text(r, Listing.Startup);
         // Ctrl-U through COUT when the 80-column firmware prints, then SETNORM, INIT, SETVID, SETKBD, HOME.
         Assert.Contains("lda $37", listing);
         Assert.Contains("cmp #$C3", listing);
@@ -248,7 +248,7 @@ public class Apple2Tests
         var second = r.Result.Segments[1];
         int from = 0x2000 + r.Result.Segments[0].Bytes.Length;
         Assert.True(second.Bytes.Length > second.Address - from, "the area must overlap its place in the file");
-        Assert.Contains("dec $51", r.Result.Listing);
+        Assert.Contains("dec $51", Listing.Instructions(r, Listing.Startup));
     }
 
     [Fact]
@@ -286,7 +286,7 @@ public class Apple2Tests
         Assert.Equal(Enumerable.Range(0, 256).Select(i => (byte)(i * 3)), r.Ram.Bytes[0x0800..0x0900]);
         Assert.Equal(Enumerable.Range(0, 256).Select(i => (byte)(i * 5 + 1)), r.Ram.Bytes[0x0900..0x0A00]);
         Assert.Equal(Enumerable.Range(0, 256).Select(i => (byte)(i * 7 + 2)), r.Ram.Bytes[0x9000..0x9100]);
-        var listing = r.Result.Listing;
+        var listing = Listing.Text(r, Listing.Startup);
         Assert.DoesNotContain("_rest:", listing);
         Assert.DoesNotContain("beq move", listing);
         Assert.Contains("move0_page:", listing);

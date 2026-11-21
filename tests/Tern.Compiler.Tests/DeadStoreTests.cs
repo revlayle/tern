@@ -219,8 +219,7 @@ public class DeadStoreTests
         Assert.Equal(big, r.U8("big"));
         Assert.Equal(seen & 0xFF, r.U8("seen"));
         // last = values[i] is overwritten before the call reads it; last = 0 in the next pass or after the loop.
-        var main = r.Result.Listing.Split("\nmain:")[1].Split("\nnote:")[0];
-        Assert.Equal(2, main.Split("sta last").Length - 1);
+        Assert.Equal(2, Listing.Count(Listing.Instructions(r), "sta last"));
     }
 
     [Trait("Shape", "nmos6502")]
@@ -242,7 +241,9 @@ public class DeadStoreTests
             """);
         for (int k = 0; k < input.Length; k++) Assert.Equal((byte)(input[k] + 3), r.U8("out", k));
         Assert.Equal(input.Count(v => (byte)(v + 3) > 100), r.U8("big"));
-        Assert.DoesNotContain("sta main.t", r.Result.Listing);
+        var main = Listing.Instructions(r);
+        Assert.DoesNotContain(main, i => i.Contains("main.t"));
+        Assert.Contains("sta out,x", main);
     }
 
     [Trait("Shape", "nmos6502")]
@@ -268,7 +269,7 @@ public class DeadStoreTests
             Assert.Equal((byte)(input[k] - prev), r.U8("diffs", k));
             prev = input[k];
         }
-        Assert.Contains("sta main.prev", r.Result.Listing);
+        Assert.Contains("sta main.prev", Listing.Instructions(r));
     }
 
     [Trait("Shape", "nmos6502")]
@@ -297,7 +298,7 @@ public class DeadStoreTests
             }
             """);
         for (int k = 0; k < 10; k++) Assert.Equal(k < 8 ? 100 + 2 * k : 0, r.U8("out", k));
-        Assert.Contains("pha", r.Result.Listing);   // the jump table
+        Assert.Contains("pha", Listing.Instructions(r, "f"));   // the jump table
     }
 
     [Fact]
@@ -385,6 +386,9 @@ public class DeadStoreTests
         Assert.Equal(calls & 0xFF, r.U8("hn"));
         Assert.Equal(acc & 0xFF, r.U8("hacc"));
         Assert.Equal((acc & 0xFF) ^ 85, r.U8("last"));
-        Assert.DoesNotContain("sta h.u", r.Result.Listing);   // u is used only from A
+        var h = Listing.Instructions(r, "h");
+        Assert.DoesNotContain(h, i => i.Contains("h.u"));   // u is used only from A
+        Assert.Contains("eor #$55", h);
+        Assert.Contains("sta last", h);
     }
 }

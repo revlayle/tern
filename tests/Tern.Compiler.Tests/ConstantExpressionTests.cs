@@ -120,7 +120,7 @@ public class ConstantExpressionTests
         Assert.Equal(value * 257 & 0xFFF0, r.U16("w"));
         Assert.Equal((sbyte)value & ~0x0F, (sbyte)r.U8("s"));
         Assert.Equal(0xF0, r.U8("c"));
-        Assert.Contains("and #$F0", r.Result.Listing);
+        Assert.Contains("and #$F0", Listing.Instructions(r));
     }
 
     [Fact]

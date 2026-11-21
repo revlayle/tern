@@ -223,9 +223,9 @@ public class BcdTests
         // The handler's additions and subtractions were binary: it cleared decimal mode.
         Assert.Equal(r.U16("ticks") * 57 & 0xFF, r.U8("acc"));
         Assert.Equal(-r.U16("ticks") * 3 & 0xFF, r.U8("diff"));
-        var listing = r.Result.Listing;
-        var handler = listing[listing.IndexOf("\nframe:", StringComparison.Ordinal)..];
-        Assert.Contains("cld", handler[..handler.IndexOf("rti", StringComparison.Ordinal)]);
+        var handler = Listing.Instructions(r, "frame");
+        Assert.Contains("cld", handler);
+        Assert.Equal("rti", handler[^1]);
     }
 
     [Fact]

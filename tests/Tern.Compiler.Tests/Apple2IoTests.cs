@@ -555,9 +555,10 @@ public class Apple2IoTests
     public void A_program_without_io_has_no_prefix_code()
     {
         var result = TernCompiler.Compile("var x: u8\nfn main() { x = 1 }", Platform.Apple2);
-        Assert.DoesNotContain("prefix", result.Listing);
+        Assert.DoesNotContain("prefix", Listing.Text(result, Listing.Startup));
+        Assert.DoesNotContain("prefix", Listing.Outside(result));
         // The MLI is called only by the quit routine: CLOSE and QUIT.
-        Assert.Equal(2, result.Listing.Split('\n').Count(l => l.Contains("jsr $BF00")));
+        Assert.Equal(2, Listing.Count(Listing.Instructions(result, Listing.Startup), "jsr $BF00"));
         Assert.DoesNotContain("io:", result.Report);
     }
 
@@ -567,7 +568,7 @@ public class Apple2IoTests
     {
         var without = TernCompiler.Compile("var x: u8\nfn main() { x = 1 }", Platform.Apple2);
         var with = TernCompiler.Compile("import io\nvar x: u8\nfn main() { x = 1; if io.close() { x = 2 } }", Platform.Apple2);
-        var listing = with.Listing.Split('\n');
+        var listing = Listing.Lines(with, Listing.Startup).ToArray();
         // GET_PREFIX ($C7) and SET_PREFIX ($C6), each after a jsr $BF00.
         int get = Array.FindIndex(listing, l => l.Contains("an empty prefix becomes the program's folder"));
         Assert.True(get > 0);
@@ -578,9 +579,11 @@ public class Apple2IoTests
         static int At(string line) => Convert.ToInt32(line[1..5], 16);
         int done = Array.FindIndex(listing, l => l.StartsWith("prefix_done:"));
         Assert.Equal(50, At(listing[done + 1]) - At(listing[get + 1]));
-        int parameters = Array.FindIndex(listing, l => l.StartsWith("prefix_parameters:"));
-        Assert.Contains("01 00 02", listing[parameters + 1]);
-        Assert.DoesNotContain("prefix", without.Listing);
+        var data = Listing.Outside(with).Split('\n');
+        int parameters = Array.FindIndex(data, l => l.StartsWith("prefix_parameters:"));
+        Assert.Contains("01 00 02", data[parameters + 1]);
+        Assert.DoesNotContain("prefix", Listing.Text(without, Listing.Startup));
+        Assert.DoesNotContain("prefix", Listing.Outside(without));
     }
 
     [Fact]

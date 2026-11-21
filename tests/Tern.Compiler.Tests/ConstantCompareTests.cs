@@ -65,7 +65,7 @@ public class ConstantCompareTests
             }
             """);
         Assert.Equal(202, r.U8("hit"));
-        Assert.Contains("cmp #$C9", r.Result.Listing);
-        Assert.DoesNotContain("lda #$C8", r.Result.Listing);
+        Assert.Contains("cmp #$C9", Listing.Instructions(r));
+        Assert.DoesNotContain("lda #$C8", Listing.Instructions(r));
     }
 }

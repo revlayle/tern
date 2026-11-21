@@ -69,7 +69,8 @@ public class ByteWriteTests
         }
         Assert.Equal(sum, r.U16("sum"));
         // inc sum+1, then lows[i] = sum.lo stores A as it is.
-        Assert.DoesNotContain("lda sum ", r.Result.Listing);
-        Assert.Contains("inc sum+1", r.Result.Listing);
+        var main = Listing.Instructions(r);
+        Assert.DoesNotContain("lda sum", main);
+        Assert.Contains("inc sum+1", main);
     }
 }

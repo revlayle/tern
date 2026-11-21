@@ -88,7 +88,7 @@ public class AlignTests
         Assert.Equal(0, r.U8("count"));     // zeroed at startup
         // The buffer starts the block and the zeroed variables follow it, so the only padding is before the block.
         Assert.Equal(at + 1024, r.Address("count"));
-        var free = System.Text.RegularExpressions.Regex.Match(r.Result.Listing, @"; \$[0-9A-F]{4}: (\d+) byte\(s\) left free so that aligned variables");
+        var free = System.Text.RegularExpressions.Regex.Match(Listing.Outside(r), @"; \$[0-9A-F]{4}: (\d+) byte\(s\) left free so that aligned variables");
         int padding = free.Success ? int.Parse(free.Groups[1].Value) : 0;
         var line = r.Result.Report.Split('\n').Single(l => l.StartsWith("Aligned buffer"));
         Assert.Equal($"Aligned buffer: ${at:X4} (@ align(256)), {padding} bytes of padding before it", line.TrimEnd());
@@ -107,7 +107,7 @@ public class AlignTests
             """);
         int at = r.Address("buf");
         Assert.Equal(0, at % 256);
-        var free = System.Text.RegularExpressions.Regex.Match(r.Result.Listing,
+        var free = System.Text.RegularExpressions.Regex.Match(Listing.Outside(r),
             @"; \$([0-9A-F]{4}): (\d+) byte\(s\) left free so that aligned variables start at a multiple of their alignment");
         Assert.True(free.Success, r.Result.Listing);
         int padding = int.Parse(free.Groups[2].Value);
@@ -138,7 +138,7 @@ public class AlignTests
         int padding = int.Parse(System.Text.RegularExpressions.Regex.Match(line, @"(\d+) bytes? of padding").Groups[1].Value);
         Assert.True(padding < n);
         Assert.All(r.Result.Image[(at - r.Result.LoadAddress - padding)..(at - r.Result.LoadAddress)], b => Assert.Equal(0, b));
-        if (padding > 0) Assert.Contains($"byte(s) of padding: 'TABLE' is placed with '@ align({n})'", r.Result.Listing);
+        if (padding > 0) Assert.Contains($"byte(s) of padding: 'TABLE' is placed with '@ align({n})'", Listing.Outside(r));
     }
 
     [Fact]

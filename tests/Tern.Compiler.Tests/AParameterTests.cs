@@ -55,7 +55,9 @@ public class AParameterTests
                 }
                 """);
             for (int v = 0; v < 256; v++) Assert.Equal(Expected(v, t) ? 1 : 0, r.U8("out", v));
-            Assert.DoesNotContain("sta test.v", r.Result.Listing);
+            var test = Listing.Instructions(r, "test");
+            Assert.DoesNotContain(test, i => i.Contains("test.v"));
+            Assert.Contains("cmp test.t", test);
         }
     }
 
@@ -87,8 +89,8 @@ public class AParameterTests
             }
             """);
         Assert.Equal([1, 0, 6, 0], Enumerable.Range(0, 4).Select(k => (int)r.U8("out", k)));
-        Assert.Contains("sta first.v", r.Result.Listing);
-        Assert.Contains("cmp first.v", r.Result.Listing);
+        Assert.Contains("sta first.v", Listing.Instructions(r, "first"));
+        Assert.Contains("cmp first.v", Listing.Instructions(r, "first"));
     }
 
     [Fact]
@@ -160,7 +162,7 @@ public class AParameterTests
                 Assert.Equal(expected, r.U8("yes", i * n + j));
                 Assert.Equal(expected, r.U8("no", i * n + j));
             }
-        Assert.DoesNotContain("then.v", r.Result.Listing.Replace("then.v:", ""));
+        Assert.DoesNotContain(Listing.Instructions(r, "then"), i => i.Contains("then.v"));
         // Ordering compares the high bytes first; equality the low bytes first.
         Assert.StartsWith(op is "==" or "!=" ? "cmp then.t|" : "cpx then.t+1|", Listing.Code(r, "then"));
     }
@@ -206,6 +208,6 @@ public class AParameterTests
             }
             """);
         Assert.Equal([1, 0], new[] { (int)r.U8("out"), r.U8("out", 1) });
-        Assert.Contains("stx f.v+1", r.Result.Listing);
+        Assert.Contains("stx f.v+1", Listing.Instructions(r, "f"));
     }
 }

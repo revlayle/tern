@@ -72,9 +72,9 @@ public class AtariLibraryTests
     public void Put_costs_one_call_into_cio()
     {
         var r = TernCompiler.Compile("import atari\nfn main() { atari.put('A') }\n", Platform.Atari);
-        var put = r.Listing.Replace("\r", "").Split("atari.put:\n")[1].Split("\n").TakeWhile(l => !l.EndsWith(':')).ToList();
-        Assert.Equal(6, put.Count(l => l.StartsWith('$')));
-        Assert.Contains(put, l => l.Contains("jmp $E456"));
+        var put = Listing.Instructions(r, "atari.put");
+        Assert.Equal(6, put.Count);
+        Assert.Equal("jmp $E456", put[^1]);
     }
 
     [Theory]
@@ -300,7 +300,7 @@ public class AtariLibraryTests
         // DOS's address is the halt loop, so the run ends as if main had returned.
         var run = Runner.Run(result, new RunOptions { Sets = [new(0x0A, (byte)result.HaltAddress), new(0x0B, (byte)(result.HaltAddress >> 8))] });
         Assert.True(run.Returned, run.Stop);
-        Assert.Contains("jmp (atari.dosvec)", result.Listing);
+        Assert.Contains("jmp (atari.dosvec)", Listing.Instructions(result, "atari.exit"));
     }
 
     [Fact]

@@ -72,7 +72,8 @@ public class Apple2LibraryTests
         var r = TernCompiler.Compile("import apple2\nfn main() {\n    apple2.put('A')\n    apple2.put('B')\n}\n", Platform.Apple2);
         // COUT keeps A and Y, so nothing is saved around the calls.
         // One more is the startup's, which turns off the 80-column firmware.
-        Assert.Equal(3, r.Listing.Split('\n').Count(l => l.Contains("jsr $FDED")));
+        Assert.Equal(["lda #$C1", "jsr $FDED", "lda #$C2", "jsr $FDED", "rts"], Listing.Instructions(r));
+        Assert.Contains("jsr $FDED", Listing.Instructions(r, Listing.Startup));
     }
 
     [Theory]
@@ -216,10 +217,12 @@ public class Apple2LibraryTests
                 apple2.show_hires()
             }
             """, Platform.Apple2);
-        for (int a = 0xC050; a <= 0xC057; a++)
-            Assert.Contains($"sta ${a:X4}", r.Listing.Replace("apple2.sw_graphics", "$C050").Replace("apple2.sw_text", "$C051")
-                .Replace("apple2.sw_full", "$C052").Replace("apple2.sw_mixed", "$C053").Replace("apple2.sw_page1", "$C054")
-                .Replace("apple2.sw_page2", "$C055").Replace("apple2.sw_lores", "$C056").Replace("apple2.sw_hires", "$C057"));
+        string[] names = ["graphics", "text", "full", "mixed", "page1", "page2", "lores", "hires"];
+        for (int k = 0; k < names.Length; k++)
+        {
+            Assert.Equal(0xC050 + k, r.Symbols[$"apple2.sw_{names[k]}"]);
+            Assert.Contains($"sta apple2.sw_{names[k]}", Listing.Instructions(r, $"apple2.show_{names[k]}"));
+        }
     }
 
     [Theory]
@@ -249,7 +252,8 @@ public class Apple2LibraryTests
                 apple2.tone(10, 3)
             }
             """);
-        Assert.Equal(2, r.Result.Listing.Split('\n').Count(l => l.Contains("2C 30 C0")));
+        Assert.Single(Listing.Lines(r, "apple2.click"), l => l.Contains("2C 30 C0"));
+        Assert.Single(Listing.Lines(r, "apple2.tone"), l => l.Contains("2C 30 C0"));
     }
 
     [Fact]

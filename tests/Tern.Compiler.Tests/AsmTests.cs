@@ -64,7 +64,7 @@ public class AsmTests
             """);
         Assert.Equal(7, r.U8("out"));
         Assert.False(r.Result.Symbols.ContainsKey("put.v"));
-        Assert.Contains("lda #$07", r.Result.Listing);
+        Assert.Contains("lda #$07", Listing.Instructions(r));
         var put = string.Join("\n", Listing.Lines(r, "put"));
         Assert.Contains("sta out", put);
         Assert.DoesNotContain("put.v", put);
@@ -224,8 +224,7 @@ public class AsmTests
             """);
         Assert.Equal([8, 5, 12, 12, 15], Bytes(r, "dst", 5));
         Assert.True(r.Address("p") < 0x100);
-        Assert.Contains("B1 ", r.Result.Listing);
-        Assert.Contains("lda (p),y", r.Result.Listing);
+        Assert.Matches(@"B1 [0-9A-F]{2} +lda \(p\),y", Listing.Text(r));
     }
 
     [Fact]
@@ -300,9 +299,10 @@ public class AsmTests
         Assert.Equal([12, 0x33, 0x33, 0x81, 0, 0x5A], Bytes(r, "r", 6));
         Assert.True(r.Address("zx") < 0x100);
         Assert.Equal([0, 0, 9], Bytes(r, "zx", 3));
-        Assert.Contains("6C ", r.Result.Listing);    // jmp (vec)
-        Assert.Contains("A1 ", r.Result.Listing);    // lda (p,x)
-        Assert.Contains("96 ", r.Result.Listing);    // stx zx,y
+        var main = Listing.Text(r);
+        Assert.Matches(@"6C [0-9A-F]{2} [0-9A-F]{2} +jmp \(vec\)", main);
+        Assert.Matches(@"A1 [0-9A-F]{2} +lda \(p,x\)", main);
+        Assert.Matches(@"96 [0-9A-F]{2} +stx zx,y", main);
     }
 
     [Trait("Shape", "nmos6502")]
@@ -319,7 +319,7 @@ public class AsmTests
             }
             """);
         Assert.Equal(2, r.Ram.Bytes[0xD020]);
-        Assert.Contains("8D 20 D0  sta border", r.Result.Listing);
+        Assert.Contains("8D 20 D0  sta border", Listing.Text(r));
     }
 
     [Fact]
@@ -430,7 +430,7 @@ public class AsmTests
                 }
             }
             """);
-        Assert.Contains("; asm: reads A X C D, changes A X C Z N V, reads other score, writes other score", r.Result.Listing);
+        Assert.Contains("; asm: reads A X C D, changes A X C Z N V, reads other score, writes other score", Listing.Text(r));
     }
 
     [Trait("Shape", "nmos6502")]
@@ -582,7 +582,7 @@ public class AsmTests
     public void Jump_vector_at_a_fixed_address_away_from_a_page_end_is_kept()
     {
         var r = TernCompiler.Compile("var v: u16 @ $10FE\nfn main() { asm {\n jmp (v)\n } }");
-        Assert.Contains("6C FE 10", r.Listing);
+        Assert.Contains("6C FE 10", Listing.Text(r));
     }
 
     [Fact]
@@ -635,8 +635,8 @@ public class AsmTests
     {
         var path = FindExample("kernal.tern");
         var result = TernCompiler.Compile(File.ReadAllText(path), sourcePath: path);
-        Assert.DoesNotContain("\nchrout:", result.Listing);
-        Assert.Contains("20 D2 FF  jsr $FFD2", result.Listing);
+        Assert.DoesNotContain("chrout", Listing.Sections(result));
+        Assert.Contains("20 D2 FF  jsr $FFD2", Listing.Text(result, "print"));
     }
 
     /// <summary>An example program: examples/&lt;platform&gt;/name.</summary>
@@ -698,7 +698,7 @@ public class AsmTests
                 Assert.True((r.Address("v") & 0xFF) != 0xFF, $"v at ${r.Address("v"):X4} with pad {n}");
                 Assert.True(((r.Address("t") + 1) & 0xFF) != 0xFF, $"t+1 at ${r.Address("t") + 1:X4} with pad {n}");
                 Assert.Equal(2, r.U8("hit"));
-                padded |= !arrays && r.Result.Listing.Contains("of padding");
+                padded |= !arrays && Listing.Outside(r).Contains("of padding");
             }
         }
         Assert.True(padded);

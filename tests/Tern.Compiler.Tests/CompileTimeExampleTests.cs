@@ -35,7 +35,10 @@ public sealed class CompileTimeExampleTests
                 Assert.Equal(dx * dx + dy * dy <= 10.5 * 10.5, set);
             }
         Assert.Equal(0x0C00 / 64, rig.Ram.Bytes[0x07F8]);
-        Assert.DoesNotContain("jsr", r.Listing[r.Listing.IndexOf("\nmain:", StringComparison.Ordinal)..]);   // after the startup's jsr main
+        var main = Listing.Instructions(r);
+        Assert.DoesNotContain(main, i => i.StartsWith("jsr"));
+        Assert.Contains("lda xs,x", main);   // wait_frame and the moves are inlined
+        Assert.Contains("lda ys,x", main);
 
         // One x and one y write per frame, on line 250, from the tables at a += 2 and b += 3.
         var xs = rig.Vic.Writes.Where(w => w.Reg == 0).ToList();
@@ -130,7 +133,7 @@ public sealed class CompileTimeExampleTests
     public void Speedcode_listing_shows_each_generated_instruction_under_its_emit_line()
     {
         var r = TernCompiler.Compile(Source("speedcode.tern"), sourcePath: AsmTests.FindExample("speedcode.tern"));
-        var listing = r.Listing.Replace("\r", "");
+        var listing = Listing.Text(r, "cycle_unrolled") + "\n";
         int call = Array.FindIndex(Source("speedcode.tern").Replace("\r", "").Split('\n'), l => l.Trim() == "cycle_rows(rows, addr(saved), .done)") + 1;
         Assert.Contains($";  {call}: cycle_rows(rows, addr(saved), .done)\n", listing);
         // 22 rows: 22 saves and two loops of 11 lda / sta pairs, each under its emit line.

@@ -30,16 +30,64 @@ public static class Listing
     /// </summary>
     public static List<string> Lines(CompileResult result, string function = "main")
     {
-        var lines = result.Listing.Split('\n').Select(l => l.TrimEnd('\r')).ToList();
-        int start = lines.IndexOf($"{function}:");
-        if (start < 0) throw new Xunit.Sdk.XunitException($"No function {function} in the listing\n{result.Listing}");
-        var last = result.Instructions.LastOrDefault(i => i.Section == function);
-        if (last is null) return [lines[start]];
-        int end = lines.FindIndex(start, l => l.StartsWith($"${last.Address:X4} "));
-        return lines[start..(end + 1)];
+        var lines = AllLines(result);
+        var range = Range(result, lines, function) ?? throw new Xunit.Sdk.XunitException($"No function {function} in the listing\n{result.Listing}");
+        return lines[range];
     }
 
     public static List<string> Lines(Run run, string function = "main") => Lines(run.Result, function);
+
+    /// <summary>
+    /// The listing's lines outside every function and the startup code: data, the variables' areas and the
+    /// layout's notes (padding, space left free), for a check of a note that no function's code can pass.
+    /// </summary>
+    public static string Outside(CompileResult result)
+    {
+        var lines = AllLines(result);
+        var inside = new bool[lines.Count];
+        foreach (var section in result.Instructions.Select(i => i.Section).Distinct())
+            if (Range(result, lines, section) is { } range)
+                for (int i = range.Start.Value; i < range.End.Value; i++) inside[i] = true;
+        return string.Join("\n", lines.Where((_, i) => !inside[i]));
+    }
+
+    public static string Outside(Run run) => Outside(run.Result);
+
+    private static List<string> AllLines(CompileResult result) => [.. result.Listing.Split('\n').Select(l => l.TrimEnd('\r'))];
+
+    /// <summary>
+    /// The startup code's section, for <see cref="Instructions"/>, <see cref="Lines"/> and <see cref="Text"/>:
+    /// from the top of the listing (its label is <c>start:</c>) to its last instruction, the quit routine's
+    /// where there is one.
+    /// </summary>
+    public const string Startup = "startup";
+
+    /// <summary>The lines of <paramref name="section"/>, from its label to its last instruction; null when it has no label.</summary>
+    private static System.Range? Range(CompileResult result, List<string> lines, string section)
+    {
+        int start = section == Startup ? 0 : lines.IndexOf($"{section}:");
+        if (start < 0) return null;
+        var last = result.Instructions.LastOrDefault(i => i.Section == section);
+        if (last is null) return start..(start + 1);
+        int end = lines.FindIndex(start, l => l.StartsWith($"${last.Address:X4} "));
+        return start..(end + 1);
+    }
+
+    /// <summary>
+    /// <see cref="Lines"/> as one text, for a check of what the listing shows of one function: its bytes
+    /// (<c>8D 20 D0  sta border</c>) or its source comments.
+    /// </summary>
+    public static string Text(CompileResult result, string function = "main") => string.Join("\n", Lines(result, function));
+
+    public static string Text(Run run, string function = "main") => Text(run.Result, function);
+
+    /// <summary>
+    /// The names of the program's placed sections (functions, data, variables' areas), for a check that a
+    /// function was or was not compiled, without reading the listing.
+    /// </summary>
+    public static List<string> Sections(CompileResult result) => [.. result.Sections.Select(s => s.Name)];
+
+    public static List<string> Sections(Run run) => Sections(run.Result);
 
     /// <summary>
     /// The instructions of <paramref name="function"/> in listing order, with its own labels (<c>main.for1:</c>)

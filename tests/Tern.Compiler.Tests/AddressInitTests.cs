@@ -125,8 +125,8 @@ public class AddressInitTests
         int words = r.Address("words");
         Assert.Equal(one - 1, r.Ram.Bytes[words] | r.Ram.Bytes[words + 2] << 8);
         Assert.Equal(two, r.Ram.Bytes[words + 1] | r.Ram.Bytes[words + 3] << 8);
-        Assert.Contains("; lo: (one-1)", r.Result.Listing);
-        Assert.Contains("; hi: (two-1)", r.Result.Listing);
+        Assert.Contains("; lo: (one-1)", Listing.Outside(r));
+        Assert.Contains("; hi: (two-1)", Listing.Outside(r));
     }
 
     [Fact]

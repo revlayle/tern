@@ -24,7 +24,8 @@ public class ConstantConditionTests
         Assert.Equal(expected, r.U8("r"));
         Assert.Contains(kept, r.Result.Symbols.Keys);
         Assert.DoesNotContain(left, r.Result.Symbols.Keys);
-        Assert.DoesNotContain($"\n{left}:", r.Result.Listing);
+        Assert.Contains(kept, Listing.Sections(r));
+        Assert.DoesNotContain(left, Listing.Sections(r));
     }
 
     [Fact]
@@ -90,7 +91,8 @@ public class ConstantConditionTests
         string Program(string parameters) => $"import c64\nimport sprites(COUNT = 24{parameters})\nfn main() {{ sprites.init()\n sprites.update() }}";
         var plain = TernCompiler.Compile(Program(""));
         Assert.DoesNotContain(plain.Symbols.Keys, k => k.StartsWith("sprites.build_flicker") || k is "sprites.shown" or "sprites.disp");
-        Assert.DoesNotContain("sprites.build_flicker:", plain.Listing);
+        Assert.DoesNotContain("sprites.build_flicker", Listing.Sections(plain));
+        Assert.Contains("sprites.update", Listing.Sections(plain));
         var flicker = TernCompiler.Compile(Program(", FLICKER = true"));
         Assert.Contains("sprites.build_flicker", flicker.Symbols.Keys);
         Assert.Contains("sprites.shown", flicker.Symbols.Keys);
