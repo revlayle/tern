@@ -293,6 +293,11 @@ public sealed class CliTests : TempFolderTest
         // Each machine's own sentence, from Platform.All (review R6, suggestion 3).
         foreach (var p in Platform.All.Where(p => p.NewMachine is not null))
             Assert.Contains(Machine.For(p).Help, help);
+        // --target's and --screen's texts too, from each platform and machine (review R8, finding 4).
+        foreach (var p in Platform.All)
+            Assert.Contains($"{p.Name} ({p.Description})", help);
+        foreach (var p in Platform.All.Where(p => p.NewMachine is not null))
+            Assert.Contains(Machine.For(p).ScreenHelp, help);
         Assert.Contains("exits with 4 on an internal error", help);
     }
 

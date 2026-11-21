@@ -39,6 +39,8 @@ internal sealed class Apple2Machine(OverlayDisk disk) : Machine
 
     public override string Help => $"On the Apple II: {StandIns}.";
 
+    public override string ScreenHelp => "$0400 on the Apple II";
+
     public override string IdleInput => "the Apple II's $C000 and $C061-$C063 are 0";
 
     protected override IReadOnlyList<StandIn> Routines =>

@@ -33,6 +33,8 @@ internal sealed class AtariMachine(OverlayDisk disk) : Machine
 
     public override string Help => $"On the Atari: {StandIns}.";
 
+    public override string ScreenHelp => "SAVMSC on the Atari";
+
     public override string UnmodelledChips => "ANTIC, GTIA, POKEY or PIA";
 
     public override string IdleInput => "the Atari's CH ($2FC) is $FF, STICK0-3 $0F, STRIG0-3 1 and CONSOL 7";

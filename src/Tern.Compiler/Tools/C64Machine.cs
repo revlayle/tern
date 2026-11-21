@@ -28,6 +28,8 @@ internal sealed class C64Machine(OverlayDisk disk) : Machine
 
     public override string Help => $"On the C64: {StandIns}; LOAD loads the program's own overlay files (\"LEVEL1\" is level1.prg).";
 
+    public override string ScreenHelp => "$0400 on the C64";
+
     public override string UnmodelledChips => "VIC-II, SID or CIA";
 
     public override string IdleInput => "the C64's $DC00 and $DC01 are $FF";

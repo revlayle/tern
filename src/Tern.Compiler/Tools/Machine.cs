@@ -34,6 +34,9 @@ internal abstract class Machine
     /// </summary>
     public abstract string Help { get; }
 
+    /// <summary>Where <c>--screen</c> reads the text screen on this machine, for the help: "$0400 on the C64".</summary>
+    public abstract string ScreenHelp { get; }
+
     /// <summary>The machine's chips that <c>tern run</c> does not model, for the help ("VIC-II, SID or CIA"), or null.</summary>
     public virtual string? UnmodelledChips => null;
 

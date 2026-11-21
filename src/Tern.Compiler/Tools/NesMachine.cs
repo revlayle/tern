@@ -18,6 +18,8 @@ internal sealed class NesMachine : Machine
         "an NMI every frame when bit 7 of $2000 is set, and at once when it is set during vblank; the UxROM bank latch; the controllers read as no buttons; " +
         "a brk runs the program's IRQ handler when the program sets the IRQ vector.";
 
+    public override string ScreenHelp => "on the NES nametable 0, each tile as the character the program's default encoding gives it";
+
     /// <summary>The PPU, APU, controllers and banks; null until a program is loaded.</summary>
     public NesBus? Bus { get; private set; }
 

@@ -39,8 +39,8 @@ public static partial class Cli
     private static readonly Option[] Options =
     [
         new("--target", "<machine>", Takes.Text, EveryCommand,
-            "the machine to build for, which every command needs: c64 (Commodore 64), atari (Atari 8-bit " +
-            "with 48 KB or more), apple2 (Apple II with 64 KB under ProDOS 8) or nes (NES; the memory block names the board)"),
+            // From each platform's description, so a new one is in the help with no edit here (review R8, finding 4).
+            "the machine to build for, which every command needs: " + Joined(Platform.All.Select(p => $"{p.Name} ({p.Description})"))),
         new("-o", "<output>", Takes.Text, [Command.Compile],
             "the program's file; the other files take its name with their own extension. Without it, the source's name"),
         new("--json", "", Takes.Nothing, EveryCommand,
@@ -61,8 +61,7 @@ public static partial class Cli
             "$C000-$C0FF or $C000:16; bench shows it after each run, to check the variants agree")
             { Many = true },
         new("--screen", "", Takes.Nothing, [Command.Run],
-            "show the text screen ($0400 on the C64 and the Apple II, SAVMSC on the Atari; on the NES nametable 0, " +
-            "each tile as the character the program's default encoding gives it)"),
+            $"show the text screen ({string.Join("; ", Platform.All.Where(p => p.NewMachine is not null).Select(p => Machine.For(p).ScreenHelp))})"),
         new("--profile", "", Takes.Nothing, [Command.Run], "show the cycles of each function and each source line"),
         new("--code", "<stmts>", Takes.Text, [Command.Bench],
             "a variant: statements run as the body of main (';' or newlines between statements)") { Many = true },
@@ -70,6 +69,13 @@ public static partial class Cli
             "declarations before main for every --code variant (globals, imports, functions)") { Many = true },
         new("--fn", "<name>", Takes.Text, [Command.Bench], "measure this function instead of main"),
     ];
+
+    /// <summary>"a, b, c or d".</summary>
+    private static string Joined(IEnumerable<string> items)
+    {
+        var list = items.ToList();
+        return list.Count == 1 ? list[0] : string.Join(", ", list.Take(list.Count - 1)) + " or " + list[^1];
+    }
 
     private static Option OptionNamed(string name) => Options.First(o => o.Name == name);
 

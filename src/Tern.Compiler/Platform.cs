@@ -9,6 +9,8 @@ public sealed class Platform
     public required string Name { get; init; }
     /// <summary>The machine's name in messages: "C64", "Apple II".</summary>
     public required string Title { get; init; }
+    /// <summary>What the target is, for the help of <c>--target</c>: "Commodore 64", "Apple II with 64 KB under ProDOS 8".</summary>
+    public required string Description { get; init; }
     public required CpuVariant Cpu { get; init; }
 
     /// <summary>The instructions of <see cref="Cpu"/>, which the checker, the backend and <c>tern run</c> use.</summary>
@@ -97,6 +99,7 @@ public sealed class Platform
         Name = "c64",
         HeaderName = "BASIC line",
         Title = "C64",
+        Description = "Commodore 64",
         CartridgesPlanned = true,
         Cpu = CpuVariant.Nmos6502,
         LoadAddress = 0x0801,
@@ -143,6 +146,7 @@ public sealed class Platform
     {
         Name = "atari",
         Title = "Atari",
+        Description = "Atari 8-bit with 48 KB or more",
         CartridgesPlanned = true,
         Cpu = CpuVariant.Nmos6502,
         LoadAddress = 0x2000,
@@ -175,6 +179,7 @@ public sealed class Platform
     {
         Name = "apple2",
         Title = "Apple II",
+        Description = "Apple II with 64 KB under ProDOS 8",
         Cpu = CpuVariant.Nmos6502,
         LoadAddress = 0x2000,
         Header = [],
@@ -205,6 +210,7 @@ public sealed class Platform
     {
         Name = "nes",
         Title = "NES",
+        Description = "NES; the memory block names the board",
         CartridgeRequired = true,
         Cpu = CpuVariant.Ricoh2A03,
         LoadAddress = 0x8000,

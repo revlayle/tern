@@ -14,7 +14,7 @@ public class PlatformDataTests
     internal static Platform Like(Platform p, string name, IReadOnlyList<Board>? boards = null, bool cartridgeRequired = false,
         bool machine = true) => new()
     {
-        Name = name, Title = name.ToUpperInvariant(), Cpu = p.Cpu, LoadAddress = p.LoadAddress, Header = p.Header, HeaderName = p.HeaderName, ZeroPage = p.ZeroPage,
+        Name = name, Title = name.ToUpperInvariant(), Description = p.Description, Cpu = p.Cpu, LoadAddress = p.LoadAddress, Header = p.Header, HeaderName = p.HeaderName, ZeroPage = p.ZeroPage,
         RamEnd = p.RamEnd, VolatileAreas = p.VolatileAreas, DefaultEncoding = p.DefaultEncoding, Format = p.Format, Labels = p.Labels,
         Rom = p.Rom, Boards = boards ?? p.Boards, CartridgeRequired = cartridgeRequired, VariableRam = p.VariableRam, NewMachine = machine ? p.NewMachine : null,
     };
