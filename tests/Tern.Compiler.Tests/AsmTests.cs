@@ -474,9 +474,7 @@ public class AsmTests
     public void Out_of_range_branch_is_an_error()
     {
         var nops = string.Concat(Enumerable.Repeat("        nop\n", 130));
-        var e = Assert.Throws<CompileError>(() => TernCompiler.Compile($"fn main() {{\n    asm {{\n        beq .far\n{nops}    .far:\n    }}\n}}"));
-        Assert.Contains("Branch to main.far0 is out of range (130 bytes", e.Description);
-        Assert.Contains("Use jmp", e.Description);
+        var e = Expect.Error(() => TernCompiler.Compile($"fn main() {{\n    asm {{\n        beq .far\n{nops}    .far:\n    }}\n}}"), 3, 9, "Branch to main.far0 is out of range (130 bytes; a branch reaches -128 to 127). Use jmp");
         Assert.Equal(3, e.Pos.Line);
     }
 

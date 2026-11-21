@@ -175,13 +175,12 @@ public class MathLibraryTests
     }
 
     [Theory]
-    [InlineData("import math\nvar x: u8\nfn main() { x = math.w0 }", "'math.w0' is private to the module math")]
-    [InlineData("import math\nvar x: u8\nfn main() { x = math.SQUARE_LO[3] }", "'math.SQUARE_LO' is private to the module math")]
-    [InlineData("import text\nvar x: u8\nfn main() { x = text.POWERS[3].lo }", "'text.POWERS' is private to the module text")]
-    [InlineData("import text\nvar x: u16\nfn main() { x = text.POWERS[0] }", "'text.POWERS' is private to the module text")]
-    public void Library_work_variables_and_tables_are_private(string source, string expected)
+    [InlineData("import math\nvar x: u8\nfn main() { x = math.w0 }", 3, 17, "'math.w0' is private to the module math; only code in math can use it. Remove 'private' there, or use another of its functions")]
+    [InlineData("import math\nvar x: u8\nfn main() { x = math.SQUARE_LO[3] }", 3, 17, "'math.SQUARE_LO' is private to the module math; only code in math can use it. Remove 'private' there, or use another of its functions")]
+    [InlineData("import text\nvar x: u8\nfn main() { x = text.POWERS[3].lo }", 3, 17, "'text.POWERS' is private to the module text; only code in text can use it. Remove 'private' there, or use another of its functions")]
+    [InlineData("import text\nvar x: u16\nfn main() { x = text.POWERS[0] }", 3, 17, "'text.POWERS' is private to the module text; only code in text can use it. Remove 'private' there, or use another of its functions")]
+    public void Library_work_variables_and_tables_are_private(string source, int line, int column, string expected)
     {
-        var e = Assert.Throws<Syntax.CompileError>(() => TernCompiler.Compile(source));
-        Assert.StartsWith(expected, e.Description);
+        Expect.Error(source, line, column, expected);
     }
 }

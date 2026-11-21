@@ -834,7 +834,7 @@ public class OverlayTests
             fn main() { level1.run() }
             """, sourcePath: path)));
         Assert.Equal(2, e.Pos.Line);
-        Assert.Contains("The overlay 'level1' needs", e.Description);
+        Expect.Message(e, 2, 8, "The overlay 'level1' needs 15 bytes but its area $6000-$6007 has 8. Make the area larger, or split the module");
     }
 
     [Theory]

@@ -253,9 +253,7 @@ public class InterruptTests
         // Main also calls the module's helper: a function reached from both sides is not on the handler side.
         string call = timer.Contains("fn poke") ? "timer.poke()" : "timer.bump()";
         string main = Main48.Replace("seen = timer.now() }", "seen = timer.now(); " + call + " }");
-        var e = Assert.Throws<CompileError>(() => WithModules([("timer", timer)], path => TernCompiler.Compile(main, null, path, "lib")));
-        Assert.Contains("a private variable of its module", e.Description);
-        Assert.Contains("'timer.ticks'", e.Description);
+        Expect.Error(() => WithModules([("timer", timer)], path => TernCompiler.Compile(main, null, path, "lib")), 3, 11, "'timer.bump' (called from main) and 'timer.bump' (called from the interrupt handler 'timer.tick') both use 'timer.ticks', a private variable of its module. An interrupt could change it while the other is using it. Call functions of this module from only main or only one interrupt handler");
     }
 
     [Fact]
@@ -277,7 +275,7 @@ public class InterruptTests
                 seen = timer.now()
             }
             """, null, path, "lib")));
-        Assert.Contains("a private variable of its module", e.Description);
+        Expect.Message(e, 4, 11, "'timer.now' (called from main) and 'timer.bump' (called from the interrupt handler 'frame') both use 'timer.ticks', a private variable of its module. An interrupt could change it while the other is using it. Call functions of this module from only main or only one interrupt handler");
     }
 
     [Fact]
@@ -308,7 +306,7 @@ public class InterruptTests
             """;
         var e = Assert.Throws<CompileError>(() =>
             WithModules(modules, path => TernCompiler.Compile(main, null, path, "lib")));
-        Assert.Contains("both use 'b.n', a private variable of its module", e.Description);
+        Expect.Message(e, 2, 11, "'b.peek' (called from main) and 'b.poke' (called from the interrupt handler 'a.h') both use 'b.n', a private variable of its module. An interrupt could change it while the other is using it. Call functions of this module from only main or only one interrupt handler");
     }
 
     [Fact]

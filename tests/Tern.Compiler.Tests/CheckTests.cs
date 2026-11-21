@@ -84,11 +84,11 @@ public sealed class CheckTests : TempFolderTest
         // The overlap with the program is found by the layout, which a check does not run.
         const string source = "var first: u8 @ $0801\nfn main() { first = 1 }\n";
         Assert.True(TernCompiler.Check(source).Ok);
-        Assert.Contains("overlaps the program", Assert.Throws<CompileError>(() => TernCompiler.Compile(source)).Message);
+        Expect.Message(Assert.Throws<CompileError>(() => TernCompiler.Compile(source)), 1, 1, "'first' at $0801 overlaps the program and its variables at $0801-$0819. Move 'first', or make the program smaller");
         // Nor does it allocate (review R5, finding 2).
         const string full = "var a: [u8; 200] @ zp\nfn main() { a[1] = a[0] }\n";
         Assert.True(TernCompiler.Check(full).Ok);
-        Assert.Contains("Zero page is full", Assert.Throws<CompileError>(() => TernCompiler.Compile(full)).Message);
+        Expect.Message(Assert.Throws<CompileError>(() => TernCompiler.Compile(full)), 1, 1, "Zero page is full: '@ zp' variables need 200 bytes, 146 are free. Users: a (200). Remove '@ zp' from some of them");
     }
 
     [Fact]

@@ -219,7 +219,7 @@ public sealed class PluginTests : TempFolderTest
     public void Another_fixed_variable_over_the_binarys_data_keeps_the_general_error()
     {
         var e = Error(Level.Replace("var n: u8", "var n: u8\nvar over: u8 @ $600D\nfn touch() { over = 1 }").Replace("fn leave() { n = 0 }", "fn leave() { touch() }"));
-        Assert.Contains("'over' at $600D overlaps the data 'header' at $600C-$600E. Move one of them", e.Description);
+        Expect.Message(e, 10, 1, "'over' at $600D overlaps the data 'header' at $600C-$600E. Move one of them");
     }
 
     [Fact]

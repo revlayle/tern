@@ -297,36 +297,36 @@ public sealed class ConstFnTests : TempFolderTest
     }
 
     [Theory]
-    [InlineData("x = SCALE", "'SCALE' is a real number, which exists only at compile time. Use it in a constant or a const fn, e.g. 'const SCALE_40 = round(SCALE * 40)'")]
-    [InlineData("x = x * SCALE", "'SCALE' is a real number, which exists only at compile time")]
-    [InlineData("asm { lda #SCALE }", "'SCALE' is a real number, which exists only at compile time")]
-    [InlineData("const L = 0.25\n    x = L", "'L' is a real number, which exists only at compile time")]
-    public void A_real_constant_in_runtime_code_is_an_error(string statement, string expected)
+    [InlineData("x = SCALE", 4, 9, "'SCALE' is a real number, which exists only at compile time. Use it in a constant or a const fn, e.g. 'const SCALE_40 = round(SCALE * 40)'")]
+    [InlineData("x = x * SCALE", 4, 13, "'SCALE' is a real number, which exists only at compile time. Use it in a constant or a const fn, e.g. 'const SCALE_40 = round(SCALE * 40)'")]
+    [InlineData("asm { lda #SCALE }", 4, 16, "'SCALE' is a real number, which exists only at compile time. Use it in a constant or a const fn, e.g. 'const SCALE_40 = round(SCALE * 40)'")]
+    [InlineData("const L = 0.25\n    x = L", 5, 9, "'L' is a real number, which exists only at compile time. Use it in a constant or a const fn, e.g. 'const L_40 = round(L * 40)'")]
+    public void A_real_constant_in_runtime_code_is_an_error(string statement, int line, int column, string expected)
     {
         var e = Error($"const SCALE = 1.5\nfn main() {{\n    var x: u8 = 1\n    {statement}\n}}");
-        Assert.StartsWith(expected, e.Description);
+        Expect.Message(e, line, column, expected);
     }
 
     [Fact]
     public void A_real_constant_in_a_global_initial_value_needs_rounding()
     {
         var e = Error("const SCALE = 1.5\nvar x: u8 = SCALE\nfn main() { }");
-        Assert.StartsWith("This value is the real number 1.5, but an int is expected here. Use round(x)", e.Description);
+        Expect.Message(e, 2, 13, "This value is the real number 1.5, but an int is expected here. Use round(x), floor(x), ceil(x) or trunc(x) to make it an int");
         Assert.Equal(3, Run.Program("const SCALE = 1.5\nvar x: u8 = round(SCALE * 2)\nfn main() { }").U8("x"));
     }
 
     [Theory]
-    [InlineData("var x: u8 = 1.5", "1.5 is a real number, which exists only at compile time. Use a constant or a const fn to compute the value, e.g. 'const K = round(1.5 * 40)'")]
-    [InlineData("var x: u8 = round(2.5)", "round() works only at compile time. Use it in a constant, in data, in a global's initial value or in a const fn")]
-    [InlineData("var x: u8 = 3\n    x = x * PI", "'PI' is a real number, which exists only at compile time")]
-    [InlineData("var x: u8 = f(2)", "'f' is a const fn, which runs only at compile time. Use it in a constant, in data or in a global's initial value")]
-    [InlineData("var a: [u8; 3] = repeat(1, 3)", "'repeat' builds an array at compile time. Use a 'for' loop to fill the array at runtime")]
-    [InlineData("var x: u8 = len(repeat(1, 3))", "'repeat' builds an array at compile time")]
-    [InlineData("asm { lda #round(1.5) }", "round() works only at compile time")]
-    public void Compile_time_code_in_a_function_body_is_an_error(string statement, string expected)
+    [InlineData("var x: u8 = 1.5", 3, 17, "1.5 is a real number, which exists only at compile time. Use a constant or a const fn to compute the value, e.g. 'const K = round(1.5 * 40)'")]
+    [InlineData("var x: u8 = round(2.5)", 3, 17, "round() works only at compile time. Use it in a constant, in data, in a global's initial value or in a const fn")]
+    [InlineData("var x: u8 = 3\n    x = x * PI", 4, 13, "'PI' is a real number, which exists only at compile time. Use it in a constant or a const fn, e.g. 'const PI_40 = round(PI * 40)'")]
+    [InlineData("var x: u8 = f(2)", 3, 17, "'f' is a const fn, which runs only at compile time. Use it in a constant, in data or in a global's initial value")]
+    [InlineData("var a: [u8; 3] = repeat(1, 3)", 3, 22, "'repeat' builds an array at compile time. Use a 'for' loop to fill the array at runtime")]
+    [InlineData("var x: u8 = len(repeat(1, 3))", 3, 21, "'repeat' builds an array at compile time. Use a 'for' loop to fill the array at runtime")]
+    [InlineData("asm { lda #round(1.5) }", 3, 16, "round() works only at compile time. Use it in a constant, in data, in a global's initial value or in a const fn")]
+    public void Compile_time_code_in_a_function_body_is_an_error(string statement, int line, int column, string expected)
     {
         var e = Error($"const fn f(n: int) -> int {{ return n }}\nfn main() {{\n    {statement}\n}}");
-        Assert.StartsWith(expected, e.Description);
+        Expect.Message(e, line, column, expected);
     }
 
     // ---------- repeat(value, count) (decision 2026-11-11, question 97) ----------
@@ -769,7 +769,7 @@ public sealed class ConstFnTests : TempFolderTest
         Write("tables.tern", "private const fn secret() -> int { return 1 }\nconst fn open() -> int { return secret() + 1 }\n");
         Assert.Equal(2, RunMain("import tables\nconst K = tables.open()\nvar v: u8\nfn main() { v = K }").U8("v"));
         var e = ErrorInMain("import tables\nconst K = tables.secret()\nfn main() { }");
-        Assert.Contains("'tables.secret' is private to the module tables", e.Description);
+        Expect.Message(e, 2, 11, "'tables.secret' is private to the module tables; only code in tables can use it. Remove 'private' there, or use another of its functions");
     }
 
     [Fact]
@@ -884,20 +884,18 @@ public sealed class ConstFnTests : TempFolderTest
     }
 
     [Theory]
-    [InlineData("const fn f(n: int) -> int {\n    assert n, \"m\"\n    return n\n}\nconst K = f(1)\nfn main() { }", 2,
+    [InlineData("const fn f(n: int) -> int {\n    assert n, \"m\"\n    return n\n}\nconst K = f(1)\nfn main() { }", 2, 12,
         "An assert condition is a bool (called from line 5). Write a comparison, e.g. COUNT <= 64")]
-    [InlineData("const fn f(n: int) -> int {\n    assert n > 0\n    return n\n}\nconst K = f(1)\nfn main() { }", 2,
-        "Expected ',' and a message string after the condition")]
-    [InlineData("const fn f(n: int) -> int {\n    assert n > 0, n\n    return n\n}\nconst K = f(1)\nfn main() { }", 2,
-        "Expected a message string")]
-    [InlineData("fn main() {\n    assert 1 < 2, \"m\"\n}", 2,
+    [InlineData("const fn f(n: int) -> int {\n    assert n > 0\n    return n\n}\nconst K = f(1)\nfn main() { }", 2, 17,
+        "Expected ',' and a message string after the condition, found end of line")]
+    [InlineData("const fn f(n: int) -> int {\n    assert n > 0, n\n    return n\n}\nconst K = f(1)\nfn main() { }", 2, 19,
+        "Expected a message string, found 'n'")]
+    [InlineData("fn main() {\n    assert 1 < 2, \"m\"\n}", 2, 5,
         "An assert is checked at compile time. Write it at the top level or in a const fn")]
-    [InlineData("fn main() {\n    if true {\n        assert 1 < 2, \"m\"\n    }\n}", 3,
+    [InlineData("fn main() {\n    if true {\n        assert 1 < 2, \"m\"\n    }\n}", 3, 9,
         "An assert is checked at compile time. Write it at the top level or in a const fn")]
-    public void Assert_errors(string source, int line, string message)
+    public void Assert_errors(string source, int line, int column, string message)
     {
-        var e = Error(source);
-        Assert.Equal(line, e.Pos.Line);
-        Assert.StartsWith(message, e.Description);
+        Expect.Message(Error(source), line, column, message);
     }
 }

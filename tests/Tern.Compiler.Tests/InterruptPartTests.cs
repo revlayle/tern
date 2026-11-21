@@ -45,7 +45,7 @@ public sealed class InterruptPartTests : TempFolderTest
              a() }
             fn main() { out = 1 }
             """);
-        Assert.Contains("Recursion is not allowed: a -> b -> a", e.Message);
+        Expect.Message(e, 2, 11, "Recursion is not allowed: a -> b -> a. Use a loop instead, with an array as the stack if needed");
     }
 
     [Trait("Shape", "nmos6502")]
@@ -249,7 +249,7 @@ public sealed class InterruptPartTests : TempFolderTest
                 }
             }
             """);
-        Assert.Contains("is called by another interrupt fn", e.Description);
+        Expect.Message(e, 2, 11, "'timer.tick' is called by another interrupt fn (so it is compiled as a part, ending with rts) and its address is also used to install it (which needs rti). Use it one way, or write a second interrupt fn for the other");
     }
 
     [Fact]
@@ -266,6 +266,6 @@ public sealed class InterruptPartTests : TempFolderTest
             interrupt fn h() { m.bump() }
             fn main() { s = m.read() }
             """);
-        Assert.Contains("a private variable of its module", e.Description);
+        Expect.Message(e, 3, 11, "'m.read' (called from main) and 'm.bump' (called from the interrupt handler 'h') both use 'm.n', a private variable of its module. An interrupt could change it while the other is using it. Call functions of this module from only main or only one interrupt handler");
     }
 }

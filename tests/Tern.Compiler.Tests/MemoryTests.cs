@@ -439,8 +439,7 @@ public class MemoryTests
         {
             string main = Path.Combine(dir.FullName, "main.tern");
             File.WriteAllText(Path.Combine(dir.FullName, "m.tern"), "memory { $2000..=$2FFF reserved }\n");
-            var e = Assert.Throws<CompileError>(() => TernCompiler.Compile("import m\nfn main() { }", sourcePath: main));
-            Assert.Contains("Only the program's main file may have a memory block", e.Description);
+            Expect.Error(() => TernCompiler.Compile("import m\nfn main() { }", sourcePath: main), 1, 1, "Only the program's main file may have a memory block, since it describes the whole program; 'm' is a module. Move the block to the main file");
         }
         finally { dir.Delete(recursive: true); }
     }

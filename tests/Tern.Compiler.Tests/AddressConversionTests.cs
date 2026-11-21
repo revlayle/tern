@@ -135,8 +135,7 @@ public class AddressConversionTests
     public void A_number_before_a_pointer_names_the_operands_as_written()
     {
         // Question 85.
-        var e = Assert.Throws<CompileError>(() => TernCompiler.Compile("var map: [u8; 9]\nvar p: ptr u8\nvar n: u8\nfn main() { p = n + addr(map) }"));
-        Assert.Contains("Write 'addr(map) + n' to move the pointer", e.Description);
+        Expect.Error(() => TernCompiler.Compile("var map: [u8; 9]\nvar p: ptr u8\nvar n: u8\nfn main() { p = n + addr(map) }"), 4, 19, "A number before a pointer is not pointer arithmetic. Write 'addr(map) + n' to move the pointer, or convert the pointer with 'as u16' for a number");
     }
 
     [Fact]

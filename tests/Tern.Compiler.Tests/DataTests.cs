@@ -356,7 +356,7 @@ public class DataTests
             File.WriteAllBytes(Path.Combine(dir.FullName, "empty.bin"), []);
             var e = Assert.Throws<CompileError>(() => TernCompiler.Compile(
                 "data d = include_bytes(\"empty.bin\")\nfn main() { }", sourcePath: Path.Combine(dir.FullName, "x.tern")));
-            Assert.Contains("'empty.bin' is empty", e.Description);
+            Expect.Message(e, 1, 24, "'empty.bin' is empty. Use a file with at least one byte");
         }
         finally
         {
@@ -476,8 +476,7 @@ public class DataTests
     public void A_struct_field_has_at_most_256_elements_in_any_order(params string[] declarations)
     {
         var source = "struct S { buf: [u8; 1000], n: u8 }\n" + string.Join("\n", declarations) + "\nfn main() { }";
-        var e = Assert.Throws<CompileError>(() => TernCompiler.Compile(source));
-        Assert.Contains("An array of u8 has at most 256 elements", e.Description);
+        Expect.Error(() => TernCompiler.Compile(source), 1, 22, "An array of u8 has at most 256 elements. Only a global var or data of u8 or i8 may be longer (spec 3.2), and it is used through a pointer. Split it into arrays of at most 256");
     }
 
     [Theory]

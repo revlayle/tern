@@ -231,7 +231,7 @@ public sealed class ModuleTests : TempFolderTest
         var e = Assert.Throws<CompileError>(() => CompileMain("import bad\nfn main() { }"));
         Assert.Equal("'x' is not declared. Check the spelling, or declare it", e.Description);
         Assert.Equal(new SourcePos(2, 5, Path.Combine(Src, "bad.tern")), e.Pos);
-        Assert.StartsWith("bad.tern:2:5", e.Message);
+        Expect.Message(e, 2, 5, "'x' is not declared. Check the spelling, or declare it");
     }
 
     [Theory]
@@ -296,7 +296,7 @@ public sealed class ModuleTests : TempFolderTest
         // Also when the main file is on disk, where the import would find it.
         Write(Src, "main.tern", "import demo\nfn play() { }\nfn main() { demo.steer() }");
         e = Assert.Throws<CompileError>(() => CompileMain("import demo\nfn play() { }\nfn main() { demo.steer() }"));
-        Assert.StartsWith("'main' is the program's main file, which cannot be imported. Move what demo needs", e.Description);
+        Expect.Message(e, 1, 8, "'main' is the program's main file, which cannot be imported. Move what demo needs from it into a module that both import");
     }
 
     [Fact]

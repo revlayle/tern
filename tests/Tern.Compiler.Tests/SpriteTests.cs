@@ -229,8 +229,7 @@ public sealed class SpriteTests
     [InlineData(65)]
     public void Count_outside_8_to_64_is_an_error(int count)
     {
-        var e = Assert.Throws<CompileError>(() => TernCompiler.Compile($"import c64\nimport sprites(COUNT = {count})\nfn main() {{ sprites.init() }}"));
-        Assert.Contains("sprites.COUNT must be 8 to 64", e.Description);
+        Expect.Error(() => TernCompiler.Compile($"import c64\nimport sprites(COUNT = {count})\nfn main() {{ sprites.init() }}"), 2, 8, "sprites.COUNT must be 8 to 64 (assert at sprites.tern:45:1)");
     }
 
     [Fact]

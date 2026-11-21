@@ -159,9 +159,7 @@ public class Apple2Tests
     [Fact]
     public void A_character_outside_ascii_has_no_apple2_code()
     {
-        var e = Assert.Throws<CompileError>(() => Compile("data t = \"£\"\nfn main() { }\n"));
-        Assert.Contains("apple2", e.Description);
-        Assert.Contains("\\$NN", e.Description);
+        Expect.Error(() => Compile("data t = \"£\"\nfn main() { }\n"), 1, 10, "'£' has no code in the apple2 encoding. Write the byte as \\$NN");
     }
 
     [Theory]
@@ -307,8 +305,7 @@ public class Apple2Tests
             var n: u8
             fn main() { n = A[5] }
             """));
-        Assert.Contains("would overwrite the startup code that copies the areas into place, which runs at $2000-", e.Description);
-        Assert.Contains("Start the first program area at $2000", e.Description);
+        Expect.Message(e, 1, 1, "The area at $2000-$20C7 would overwrite the startup code that copies the areas into place, which runs at $2000-$203B in the system file. Start the first program area at $2000, or leave $2000-$203B out of the program areas");
     }
 
     [Fact]
@@ -329,8 +326,7 @@ public class Apple2Tests
             {{uses}}
             }
             """));
-        Assert.StartsWith("The startup code copies the program's areas from the system file, which ProDOS loads at $2000, to their places, but every order of the copies overwrites bytes of the file before they are copied (the area at $8000-", e.Description);
-        Assert.Contains("Start the first program area at $2000, or place the areas further from $2000-", e.Description);
+        Expect.Message(e, 1, 1, "The startup code copies the program's areas from the system file, which ProDOS loads at $2000, to their places, but every order of the copies overwrites bytes of the file before they are copied (the area at $8000-$BEE0 first). Start the first program area at $2000, or place the areas further from $2000-$85E0");
         // The memory block placed the areas, so the error points at it (review M26, suggestion 6).
         Assert.Equal(1, e.Pos.Line);
     }

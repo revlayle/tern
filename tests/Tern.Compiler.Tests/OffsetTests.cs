@@ -96,20 +96,20 @@ public sealed class OffsetTests : TempFolderTest
     }
 
     [Theory]
-    [InlineData("const K = offset(u8.x)", "'u8' is not a struct type. Use offset() with a struct type and one of its fields, e.g. offset(Enemy.hp)")]
-    [InlineData("const K = offset(N.x)", "'N' is not a struct type")]
-    [InlineData("const K = offset(Thing.x)", "'Thing' is not declared")]
-    [InlineData("const K = offset(Enemy.speed)", "Struct 'Enemy' has no field 'speed'. Use one of its fields: kind, pos, vel, hp")]
-    [InlineData("const K = offset(Enemy.pos.z)", "Struct 'Point' has no field 'z'. Use one of its fields: x, y")]
-    [InlineData("const K = offset(Enemy.hp.x)", "'Enemy.hp' is not a struct, so it has no field 'x'. Remove '.x'")]
-    [InlineData("const K = offset(Enemy)", "offset() takes a struct type and one of its fields. Write e.g. offset(Enemy.hp)")]
-    [InlineData("const K = offset(Enemy.hp, 1)", "offset() takes a struct type and one of its fields")]
-    [InlineData("const fn f() -> int { return offset(Enemy.nope) }\nconst K = f()", "Struct 'Enemy' has no field 'nope'")]
-    [InlineData("fn offset() { }", "'offset' is a built-in function; choose another name")]
-    public void Errors(string source, string expected)
+    [InlineData("const K = offset(u8.x)", 5, 18, "'u8' is not a struct type. Use offset() with a struct type and one of its fields, e.g. offset(Enemy.hp)")]
+    [InlineData("const K = offset(N.x)", 5, 18, "'N' is not a struct type. Use offset() with a struct type and one of its fields, e.g. offset(Enemy.hp)")]
+    [InlineData("const K = offset(Thing.x)", 5, 18, "'Thing' is not declared. Check the spelling, or declare it")]
+    [InlineData("const K = offset(Enemy.speed)", 5, 23, "Struct 'Enemy' has no field 'speed'. Use one of its fields: kind, pos, vel, hp")]
+    [InlineData("const K = offset(Enemy.pos.z)", 5, 27, "Struct 'Point' has no field 'z'. Use one of its fields: x, y")]
+    [InlineData("const K = offset(Enemy.hp.x)", 5, 26, "'Enemy.hp' is not a struct, so it has no field 'x'. Remove '.x'")]
+    [InlineData("const K = offset(Enemy)", 5, 11, "offset() takes a struct type and one of its fields. Write e.g. offset(Enemy.hp)")]
+    [InlineData("const K = offset(Enemy.hp, 1)", 5, 11, "offset() takes a struct type and one of its fields. Write e.g. offset(Enemy.hp)")]
+    [InlineData("const fn f() -> int { return offset(Enemy.nope) }\nconst K = f()", 5, 42, "Struct 'Enemy' has no field 'nope' (called from line 6). Use one of its fields: kind, pos, vel, hp")]
+    [InlineData("fn offset() { }", 5, 1, "'offset' is a built-in function; choose another name")]
+    public void Errors(string source, int line, int column, string expected)
     {
         var e = Error(Structs + "const N = 3\n" + source + "\nfn main() { }");
-        Assert.StartsWith(expected, e.Description);
+        Expect.Message(e, line, column, expected);
     }
 
     [Fact]

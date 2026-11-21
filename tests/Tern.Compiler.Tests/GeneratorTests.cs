@@ -293,26 +293,26 @@ public sealed class GeneratorTests : TempFolderTest
     }
 
     [Theory]
-    [InlineData("const fn g(t: label) {\n    emit { t: }\n}", "g(addr(buf))", "'t' is the address of 'buf', which is already placed (called from line 10). Use label() for a new label")]
-    [InlineData("const fn g(t: label) {\n    emit { t: }\n}", "g(.done)", "'t' is placed by the calling block (called from line 10). Use label() for a new label")]
-    [InlineData("const fn g(t: label) {\n    emit { jmp t }\n}", "g(.nope)", "'.nope' is not a label of this block. Use a label the block places, e.g. '.nope:'")]
-    [InlineData("const fn g(t: label) {\n    var u = t - t\n}", "g(addr(buf))", "A label's address is decided when the program is placed, so the const fn cannot use it with '-' (called from line 10). Use the label alone, plus or minus an int, or in an emit operand as .lo / .hi")]
-    [InlineData("const fn g(t: label) {\n    var u = t * 2\n}", "g(addr(buf))", "A label's address is decided when the program is placed, so the const fn cannot use it with '*'")]
-    [InlineData("const fn g(t: label) {\n    var u = 1 - t\n}", "g(addr(buf))", "A label's address is decided when the program is placed, so the const fn cannot use it with '-'")]
-    [InlineData("const fn g(t: label) {\n    if t + 1 > 0 { }\n}", "g(.done)", "A label's address is decided when the program is placed, so the const fn cannot use it with '>'")]
-    [InlineData("const fn g() {\n    var t = label() + 1\n    emit { t: }\n}", "g()", "'t' is a label plus an offset of 1, which cannot be placed (called from line 11). Place the label itself, made with label()")]
-    [InlineData("const fn g(t: label) {\n    emit { t: }\n}", "g(addr(buf) + 2)", "'t' is the address of 'buf', which is already placed")]
-    [InlineData("const fn g(t: label) {\n    if t == t { }\n}", "g(.done)", "A label's address is decided when the program is placed, so the const fn cannot use it with '=='")]
-    [InlineData("const fn g(t: label) {\n    emit { lda t * 2 }\n}", "g(addr(buf))", "In assembly, an address can only have a constant added or subtracted")]
-    [InlineData("const fn g(t: int) { }", "g(addr(buf))", "The argument 't' of 'g' is a label, but an int is expected")]
-    [InlineData("const fn g() {\n    var k = addr(K)\n}", "g()", "'K' is a constant, which has no address (called from line 10). Use the constant itself")]
-    [InlineData("const fn g() {\n    var v = 1\n    var k = addr(v)\n}", "g()", "'v' is a variable of the const fn, which has no address")]
-    [InlineData("const fn g() {\n    var k = addr(nope)\n}", "g()", "'nope' is not declared")]
-    [InlineData("const fn g() {\n    var k = addr(buf[1])\n}", "g()", "addr() in a const fn takes the name of a global, data or function (called from line 10). Write e.g. addr(buffer)")]
-    public void Address_and_block_label_errors(string generator, string call, string expected)
+    [InlineData("const fn g(t: label) {\n    emit { t: }\n}", "g(addr(buf))", 2, 12, "'t' is the address of 'buf', which is already placed (called from line 10). Use label() for a new label")]
+    [InlineData("const fn g(t: label) {\n    emit { t: }\n}", "g(.done)", 2, 12, "'t' is placed by the calling block (called from line 10). Use label() for a new label")]
+    [InlineData("const fn g(t: label) {\n    emit { jmp t }\n}", "g(.nope)", 10, 11, "'.nope' is not a label of this block. Use a label the block places, e.g. '.nope:'")]
+    [InlineData("const fn g(t: label) {\n    var u = t - t\n}", "g(addr(buf))", 2, 15, "A label's address is decided when the program is placed, so the const fn cannot use it with '-' (called from line 10). Use the label alone, plus or minus an int, or in an emit operand as .lo / .hi")]
+    [InlineData("const fn g(t: label) {\n    var u = t * 2\n}", "g(addr(buf))", 2, 15, "A label's address is decided when the program is placed, so the const fn cannot use it with '*' (called from line 10). Use the label alone, plus or minus an int, or in an emit operand as .lo / .hi")]
+    [InlineData("const fn g(t: label) {\n    var u = 1 - t\n}", "g(addr(buf))", 2, 15, "A label's address is decided when the program is placed, so the const fn cannot use it with '-' (called from line 10). Use the label alone, plus or minus an int, or in an emit operand as .lo / .hi")]
+    [InlineData("const fn g(t: label) {\n    if t + 1 > 0 { }\n}", "g(.done)", 2, 14, "A label's address is decided when the program is placed, so the const fn cannot use it with '>' (called from line 10). Use the label alone, plus or minus an int, or in an emit operand as .lo / .hi")]
+    [InlineData("const fn g() {\n    var t = label() + 1\n    emit { t: }\n}", "g()", 3, 12, "'t' is a label plus an offset of 1, which cannot be placed (called from line 11). Place the label itself, made with label()")]
+    [InlineData("const fn g(t: label) {\n    emit { t: }\n}", "g(addr(buf) + 2)", 2, 12, "'t' is the address of 'buf', which is already placed (called from line 10). Use label() for a new label")]
+    [InlineData("const fn g(t: label) {\n    if t == t { }\n}", "g(.done)", 2, 10, "A label's address is decided when the program is placed, so the const fn cannot use it with '==' (called from line 10). Use the label alone, plus or minus an int, or in an emit operand as .lo / .hi")]
+    [InlineData("const fn g(t: label) {\n    emit { lda t * 2 }\n}", "g(addr(buf))", 2, 18, "In assembly, an address can only have a constant added or subtracted (generated by the call at line 10). Write e.g. name+1 or (name+1).hi")]
+    [InlineData("const fn g(t: int) { }", "g(addr(buf))", 8, 11, "The argument 't' of 'g' is a label, but an int is expected. Change the value, or the declared type")]
+    [InlineData("const fn g() {\n    var k = addr(K)\n}", "g()", 2, 18, "'K' is a constant, which has no address (called from line 10). Use the constant itself")]
+    [InlineData("const fn g() {\n    var v = 1\n    var k = addr(v)\n}", "g()", 3, 18, "'v' is a variable of the const fn, which has no address (called from line 11). Use addr() with a global, data or a function")]
+    [InlineData("const fn g() {\n    var k = addr(nope)\n}", "g()", 2, 18, "'nope' is not declared (called from line 10). Check the spelling, or declare it")]
+    [InlineData("const fn g() {\n    var k = addr(buf[1])\n}", "g()", 2, 13, "addr() in a const fn takes the name of a global, data or function (called from line 10). Write e.g. addr(buffer)")]
+    public void Address_and_block_label_errors(string generator, string call, int line, int column, string expected)
     {
         var e = Error($"{generator}\nconst K = 1\nvar buf: [u8; 4]\nfn main() {{\n    asm {{\n        nop\n    .done:\n        {call}\n    }}\n}}");
-        Assert.StartsWith(expected, e.Description);
+        Expect.Message(e, line, column, expected);
     }
 
     // ---------- Operands ----------
@@ -455,8 +455,7 @@ public sealed class GeneratorTests : TempFolderTest
             }
             """);
         Assert.Equal(5, e.Pos.Line);
-        Assert.StartsWith("Branch to ", e.Description);
-        Assert.EndsWith("a branch reaches -128 to 127) (generated by the call at line 9). Use jmp", e.Description);
+        Expect.Message(e, 5, 12, "Branch to main.label_10 is out of range (-202 bytes; a branch reaches -128 to 127) (generated by the call at line 9). Use jmp");
     }
 
     [Theory]

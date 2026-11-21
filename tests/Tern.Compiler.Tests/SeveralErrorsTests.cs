@@ -490,7 +490,7 @@ public sealed class SeveralErrorsTests : TempFolderTest
         // Recursion is found in the call graph, which needs a program without errors.
         var e = Assert.Throws<CompileError>(() => TernCompiler.Compile("fn a() { b() }\nfn b() { a() }\nfn main() { a() }"));
         Assert.Single(e.All);
-        Assert.Contains("Recursion is not allowed", e.Description);
+        Expect.Message(e, 1, 1, "Recursion is not allowed: a -> b -> a. Use a loop instead, with an array as the stack if needed");
         e = Assert.Throws<CompileError>(() => TernCompiler.Compile("var x: u8\nfn a() { b() }\nfn b() { a() }\nfn main() {\n a()\n x = true\n}"));
         Assert.Equal(["Expected u8, found bool. Use 'if' to choose a number, as in 'if b { x = 1 }'"], e.All.Select(x => x.Description));
     }

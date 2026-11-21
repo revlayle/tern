@@ -41,13 +41,12 @@ public class PlatformDataTests
     /// platform's message named "the BASIC line and startup code", read from the section's name.
     /// </summary>
     [Theory]
-    [InlineData("c64", "'first' at $0801-$0803 overlaps the BASIC line and startup code at $0801-")]
-    [InlineData("atari", "'first' at $2000-$2002 overlaps the startup code at $2000-")]
-    public void Data_over_the_startup_code_names_what_is_there(string target, string expected)
+    [InlineData("c64", 1, 1, "'first' at $0801-$0803 overlaps the BASIC line and startup code at $0801-$0813, which must be at the start of the first program area. Move the data, or start the program area lower")]
+    [InlineData("atari", 1, 1, "'first' at $2000-$2002 overlaps the startup code at $2000-$2006, which must be at the start of the first program area. Move the data, or start the program area lower")]
+    public void Data_over_the_startup_code_names_what_is_there(string target, int line, int column, string expected)
     {
         var platform = Platform.ByName(target)!;
-        var e = Assert.Throws<CompileError>(() => TernCompiler.Compile($"data first: [u8; 3] @ ${platform.LoadAddress:X4} = [1, 2, 3]\nfn main() {{ }}", platform));
-        Assert.StartsWith(expected, e.Description);
+        Expect.Error(() => TernCompiler.Compile($"data first: [u8; 3] @ ${platform.LoadAddress:X4} = [1, 2, 3]\nfn main() {{ }}", platform), line, column, expected);
     }
 
     /// <summary>The cartridge rule is the platform's, whatever its name.</summary>
@@ -55,6 +54,6 @@ public class PlatformDataTests
     public void A_platform_that_requires_a_cartridge_says_so_by_its_title()
     {
         var e = Assert.Throws<CompileError>(() => TernCompiler.Compile("fn main() { }", Like(Platform.Nes, "famicom", cartridgeRequired: true)));
-        Assert.StartsWith("A FAMICOM program is a cartridge image, so its memory block names the board.", e.Description);
+        Expect.Message(e, 1, 1, "A FAMICOM program is a cartridge image, so its memory block names the board. Write 'memory { cartridge nrom vertical }' (boards: nrom, uxrom; mirroring: vertical or horizontal)");
     }
 }

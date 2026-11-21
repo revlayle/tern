@@ -115,10 +115,8 @@ public class ErrorTests
     [Fact]
     public void Deeply_nested_blocks_and_types_are_an_error()
     {
-        var blocks = Assert.Throws<CompileError>(() => TernCompiler.Compile($"fn main() {{ {Repeat("if true { ", 300)}{Repeat("}", 300)} }}"));
-        Assert.Contains("nested more than", blocks.Description);
-        var types = Assert.Throws<CompileError>(() => TernCompiler.Compile($"var t: {Repeat("[", 300)}u8{Repeat("; 1]", 300)}\nfn main() {{ }}"));
-        Assert.Contains("nested more than", types.Description);
+        Expect.Error(() => TernCompiler.Compile($"fn main() {{ {Repeat("if true { ", 300)}{Repeat("}", 300)} }}"), 1, 2566, "This is nested more than 256 deep (brackets, operators in a row, blocks or types). Split it with a constant, a variable or a function");
+        Expect.Error(() => TernCompiler.Compile($"var t: {Repeat("[", 300)}u8{Repeat("; 1]", 300)}\nfn main() {{ }}"), 1, 264, "This is nested more than 256 deep (brackets, operators in a row, blocks or types). Split it with a constant, a variable or a function");
     }
 
     [Fact]
@@ -201,7 +199,7 @@ public class ErrorTests
             var big: [u8; 200] @ zp
             fn main() { }
             """));
-        Assert.Contains("Zero page is full", e.Description);
+        Expect.Message(e, 1, 1, "Zero page is full: '@ zp' variables need 200 bytes, 146 are free. Users: big (200). Remove '@ zp' from some of them");
     }
 
     [Fact]
@@ -215,8 +213,7 @@ public class ErrorTests
             var r: ptr u8
             fn main() { p[0] = 1; q[0] = 1; r[0] = 1 }
             """));
-        Assert.Contains("Zero page is full: '@ zp' variables, dereferenced pointers and zero-page assembly operands need 148 bytes, 146 are free", e.Description);
-        Assert.Contains("big (142), p (2), q (2), r (2)", e.Description);
+        Expect.Message(e, 2, 1, "Zero page is full: '@ zp' variables, dereferenced pointers and zero-page assembly operands need 148 bytes, 146 are free. Users: big (142), p (2), q (2), r (2). Remove '@ zp' from some of them");
     }
 
     // Review code-quality-syntax 3: the C64's free zero page is $02-$8F and $FB-$FE (spec 12.2).
@@ -316,7 +313,7 @@ public class ErrorTests
         Assert.Equal(2, r.U8("r"));
         // A line starting with '-' is a new statement, not a continuation.
         var e = Assert.Throws<CompileError>(() => TernCompiler.Compile("var s: i8\nvar t: i8\nfn main() {\n    t = s\n    -2\n}"));
-        Assert.StartsWith("Only a function call can be used as a statement", e.Description);
+        Expect.Message(e, 5, 5, "Only a function call can be used as a statement. Assign the value to a variable, or remove it");
         Assert.Equal(5, e.Pos.Line);
     }
 }

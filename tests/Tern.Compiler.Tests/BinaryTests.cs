@@ -476,7 +476,7 @@ public class BinaryTests
             File.WriteAllText(Path.Combine(dir.FullName, "m.tern"), "fn f() { }\nexport f\n");
             var e = Assert.Throws<CompileError>(() => TernCompiler.Compile(
                 "import m\nfn main() { }", sourcePath: Path.Combine(dir.FullName, "main.tern")));
-            Assert.Contains("Only the program's main file may export functions", e.Description);
+            Expect.Message(e, 2, 8, "Only the program's main file may export functions; 'm' is a module. Move the 'export' line to the main file");
         }
         finally { dir.Delete(recursive: true); }
     }

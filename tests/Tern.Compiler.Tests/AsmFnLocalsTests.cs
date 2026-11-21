@@ -86,14 +86,13 @@ public class AsmFnLocalsTests
     }
 
     [Theory]
-    [InlineData("asm fn f() {\n var t: u8 = 3\n lda t\n}\nfn main() { f() }", "'t' in an asm fn has no initial value: the assembly sets it. Remove the value and store it in the assembly")]
-    [InlineData("asm fn f() {\n var t: u8 @ $C000\n lda t\n}\nfn main() { f() }", "Only global variables can have a fixed address")]
-    [InlineData("asm fn f() {\n lda #1\n var t: u8\n}\nfn main() { f() }", "'var' lines go at the start of an asm fn, before the first instruction. Move this line up")]
-    [InlineData("var t: u8\nasm fn f() {\n var t: u8\n lda t\n}\nfn main() { f() }", "'t' is already declared")]
-    [InlineData("fn main() { asm {\n var t: u8\n } }", "'var' is not allowed inside an asm block. Declare the variable before the block, or use 'var' lines at the start of an asm fn")]
-    public void Errors(string source, string expected)
+    [InlineData("asm fn f() {\n var t: u8 = 3\n lda t\n}\nfn main() { f() }", 2, 14, "'t' in an asm fn has no initial value: the assembly sets it. Remove the value and store it in the assembly")]
+    [InlineData("asm fn f() {\n var t: u8 @ $C000\n lda t\n}\nfn main() { f() }", 2, 2, "Only global variables can have a fixed address. Move the variable out of the function")]
+    [InlineData("asm fn f() {\n lda #1\n var t: u8\n}\nfn main() { f() }", 3, 2, "'var' lines go at the start of an asm fn, before the first instruction. Move this line up")]
+    [InlineData("var t: u8\nasm fn f() {\n var t: u8\n lda t\n}\nfn main() { f() }", 3, 2, "'t' is already declared at 1:1. Rename one of them")]
+    [InlineData("fn main() { asm {\n var t: u8\n } }", 2, 2, "'var' is not allowed inside an asm block. Declare the variable before the block, or use 'var' lines at the start of an asm fn")]
+    public void Errors(string source, int line, int column, string expected)
     {
-        var e = Assert.Throws<CompileError>(() => TernCompiler.Compile(source));
-        Assert.StartsWith(expected, e.Description);
+        Expect.Error(source, line, column, expected);
     }
 }

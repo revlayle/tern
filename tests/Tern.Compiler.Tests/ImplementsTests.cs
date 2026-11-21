@@ -488,8 +488,7 @@ public class ImplementsTests
     [Fact]
     public void Implements_is_a_keyword()
     {
-        var e = Assert.Throws<CompileError>(() => TernCompiler.Compile("fn main() { var implements: u8 = 1 }"));
-        Assert.Contains("'implements', which is a keyword", e.Description);
+        Expect.Error(() => TernCompiler.Compile("fn main() { var implements: u8 = 1 }"), 1, 17, "Expected variable name, found 'implements', which is a keyword. Use another name");
     }
 
     [Fact]
@@ -682,8 +681,7 @@ public class ImplementsTests
     [Fact]
     public void Implements_with_no_name_is_a_parse_error()
     {
-        var e = Assert.Throws<CompileError>(() => TernCompiler.Compile("import level1 implements\nfn main() { }"));
-        Assert.Contains("the name of an interface module after 'implements'", e.Description);
+        Expect.Error(() => TernCompiler.Compile("import level1 implements\nfn main() { }"), 2, 1, "Expected the name of an interface module after 'implements', found 'fn'");
     }
 
     // ---------- Warnings ----------

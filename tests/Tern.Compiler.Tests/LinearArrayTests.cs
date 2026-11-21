@@ -114,7 +114,7 @@ public class LinearArrayTests
     {
         var e = Assert.Throws<CompileError>(() => TernCompiler.Compile(
             "linear var s: [i16; 4]\nvar p: ptr u16\nfn main() { p = addr(s) }"));
-        Assert.Contains("found ptr i16", e.Description);
+        Expect.Message(e, 3, 17, "Expected ptr u16, found ptr i16. Convert with 'as ptr u16'");
     }
 
     [Fact]

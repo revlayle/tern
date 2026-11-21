@@ -285,10 +285,6 @@ public class NesBankTests : TempFolderTest
         var e = Error("import level1 @ levels[0]\nimport level2 @ levels[0]\nimport music\n" + Memory + "var w: u16\nfn main() { w = level1.run() + level2.run() }",
             level1: "data BIG: [u8; 10000] = repeat(1, 10000)\nfn run() -> u16 { return addr(BIG) as u16 }\n",
             level2: "data BIG: [u8; 7000] = repeat(2, 7000)\nfn run() -> u16 { return addr(BIG) as u16 }\n");
-        Assert.StartsWith("Bank 0 of 'levels' needs 17", e.Description);
-        Assert.Contains("but a bank has 16384: ", e.Description);
-        Assert.Contains("level1 (100", e.Description);
-        Assert.Contains("level2 (70", e.Description);
-        Assert.EndsWith("Move a module to another bank, or make one smaller", e.Description);
+        Expect.Message(e, 1, 8, "Bank 0 of 'levels' needs 17010 bytes, but a bank has 16384: level2 (7005 bytes), level1 (10005 bytes). Move a module to another bank, or make one smaller");
     }
 }
