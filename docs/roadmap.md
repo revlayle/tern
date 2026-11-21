@@ -754,17 +754,49 @@ Done when: each item has its test, the benchmarks and `SkillTests` are unchanged
 
 After R7 and its fixes (decision 2026-11-16). Also tests 13 (`Run.Program` does all its work in its constructor), with the run model of tools 1. Its review also checks the code-quality findings it handles, as R7 does for R1-R5: a verdict per finding, the demonstration programs run again.
 
-Review themes 3 and 5, and the rest of theme 7.
+Review themes 3 and 5, and the rest of theme 7 except tests 9 and 11, which moved to R8 (decision 2026-11-21).
 
 - Each platform fact in one place, in the platform description: no tests on platform names ("has boards" for the NES, "cartridge" for NES output), and an unknown platform an error instead of the C64's stand-ins. C64 cartridges, the X16 and the C128 then add a description, not branches.
 - No control flow decided by matching error text, no exception changed after it is thrown, no meaning read from strings in the assembler.
-- Tests check error positions and whole messages, not fragments; the feature suite runs on every platform.
+- Tests check error positions and whole messages, not fragments, and every message has a test or a reason it cannot be reached (tests 4); the feature suite runs on every platform.
+
+R6's status table keeps rows for tests 9 and 11, marked "moved to R8"; its review gives them that verdict without reading them.
 
 Done when: adding a platform needs no change outside its description and its library, the feature suite passes on all four platforms, and the benchmarks and `SkillTests` are unchanged.
 
+### R8: Listing tests, the suite on every platform, test folders
+
+Decision 2026-11-21, changed the same day (tests 4 stays in R6). After R6 is merged, before the release; its own branch (`r8-tests`), review and merge. The test findings R6 leaves, the rest of tests 6, and `tern run`'s idle input. Apart from fixes for bugs the tests find, no compiler code changes, so no benchmark moves. Its review checks the findings in R7's way (a verdict per finding).
+
+In this order:
+
+1. `tern run`'s idle input (question 175, spec 13): each machine's `Start` sets its input registers and the OS variables that hold input to "nothing pressed". Each value has a test that fails before it; the `SkillTests` outputs that move are rewritten in the same commit.
+2. Tests 9, listing checks: each `Assert.Contains` / `DoesNotContain` on a listing scoped to the function it is about (`Listing.Code`), and each `DoesNotContain` paired with a positive check of the expected shape.
+3. The suite on every platform (the rest of tests 6): run the whole suite with `TERN_TARGET` set to the Atari, the Apple II and the NES, and look at each test that fails. A test that fails because a C64 fact is written into it (an address such as `@ $C000`, `$D0xx` as the volatile example, `0xC0xx` in C#, no cartridge line) is marked as a C64 test with a trait, as `Shape` marks listing tests; a failure that is a compiler or library bug is fixed with its test, as in R2. A script may group the failures by their error first. Rewriting the marked tests to take their addresses from `TestTarget` is not part of R8.
+4. Tests 11, folders: test files moved into folders by spec section, with the section in each class comment; files moved, not changed, in a commit of their own, last, so the moves stay visible as renames.
+
+Messages stay one text through R8 (question 177, decision 2026-11-21); their split into problem, fix and code is M28's.
+
+Done when: `tern run` starts with idle input on all four platforms, no listing check reads the whole listing, the suite without the tests marked as C64 tests passes with `TERN_TARGET` on all four platforms, the tests are filed by spec section, the benchmarks are unchanged, and `SkillTests` changes only by the idle input.
+
+### V1: Validation programs
+
+Decision 2026-11-21. After R6 and R8, before the release; its own branches (one per batch of programs), reviews and merges. A check of the compiler, its library and `tern run` on real programs: about 24 in all, about six per platform, each with a known right result, run in `tern run` and on the platform's emulator. Includes the real-emulator checks of question 174 (`TERN_REAL`).
+
+- **The programs.** First the developer's own game smashy smashy. Then ports of existing 6502 programs, and programs written for the suite where no source is found. Both kinds: portable logic built for all four platforms (e.g. a sieve, sorting, a checksum, decompression, Life, maze generation, fixed-point math, a BCD score, a text parser) and programs that use what each machine is for (C64 raster interrupts, sprites, SID, scrolling; Atari display list interrupts, player-missile graphics; Apple II hires, ProDOS files; NES scrolling, sprites, controllers, bank switching), at a few sizes (a small game, an effect, a tool, a program with overlays).
+- **Others' code is checked before it is ported.** Each program not the developer's own is examined first: who wrote it, its license, and whether a Tern version of it may be published in this repository as a test program. Only code whose license allows changed copies to be redistributed (or that is in the public domain) is used; when that is unclear, the program is not used. The developer approves each one. Its `README` names the source, the author and the license; the original's code is in the repository only if its license allows it. No recreation of a commercial game (name, characters, art, levels); its mechanics in an original program are fine.
+- **A port is the same behavior in natural Tern**, not the assembly translated line by line (which would test `asm` blocks only). Where the original is assembly, its bytes and cycles for the same work are recorded beside Tern's.
+- **Written from the `tern` skill**, as a user would, in a session that does not change the compiler; where the agent gets stuck is a finding for the skill or the messages.
+- **Each program has a known right result**: memory or the text screen after a set number of frames or cycles, checked in `tern run` by the test suite, and a screenshot on its emulator (VICE, Altirra, AppleWin, Mesen), run by a script when asked (`TERN_REAL=1`, as `TERN_COMPARE`, using `tests/tools/altirra-shot.ps1` and `mesen-shot.ps1`).
+- **A gap log per program** (`gaps.md`, as for Galaxy Stars), sorted by a spec session into: the compiler breaks the spec, a small language change, a code shape, or not a gap. A compiler or library bug is fixed with its test on a coding branch.
+
+Layout: `validation/<platform>/<program>/` with the source, the expected results, the `README` and `gaps.md`; a program built for all four platforms under `validation/all/`.
+
+Done when: every program builds, gives its known result in `tern run` and on its emulator(s) with `TERN_REAL=1`, each port's source and license is recorded and approved, and every gap is sorted and each bug fixed.
+
 ## First release (after R7)
 
-Decision 2026-11-08, changed 2026-11-13: the first release comes once the four platforms C64, Atari, Apple II and NES work; the Commander X16 and the Commodore 128 come after it. Done when: M27 and R1-R6 are merged, R7's must-fix items are fixed or accepted, the developer guide covers every behavior in its list, the guide (`docs/guide/`) and spec 10.1 describe the compiler and library as built, and every example builds for its platforms.
+Decision 2026-11-08, changed 2026-11-13: the first release comes once the four platforms C64, Atari, Apple II and NES work; the Commander X16 and the Commodore 128 come after it. Done when: M27, R1-R6, R8 and V1 are merged, R7's must-fix items are fixed or accepted, the developer guide covers every behavior in its list, the guide (`docs/guide/`) and spec 10.1 describe the compiler and library as built, and every example builds for its platforms.
 
 ## After the first release
 
@@ -773,9 +805,10 @@ Decision 2026-11-08, changed 2026-11-13: the first release comes once the four p
 Decision 2026-11-12 (was M23); the first milestone after the first release, before the X16 and the C128 (decision 2026-11-13). Starts with a spec session that settles the design; its spec section is not written yet.
 
 - `///` doc comments before declarations, kept by the compiler.
+- Each message made as its parts: the problem, the fix sentence and a code, with an end position, at every place that makes an error, in one pass; `FixVerbs` then checks the fix's first word instead of finding it (question 177, decision 2026-11-21). R8's whole-message tests guard it: the text a user sees does not change.
 - A Tern language server (LSP): errors as you type (in the M19 JSON format, several per compile since M23), hover with the doc comment, type and cost (bytes, cycles where fixed), go to definition, e.g. showing that `set_irq` needs an `interrupt fn`.
 
-A draft from the spec session of 2026-11-12, to start from: `///` only right before a declaration or struct field (elsewhere, or with a blank line between, an error); a `///` block at the top of a file followed by a blank line documents the module; Markdown text, no `@param` tags; the library's comments become `///`. The server is `tern lsp` (stdio, no new NuGet package) with a VS Code extension in `editors/vscode/` (colouring and a client); a module is compiled through a main file that imports it, or checked alone; hover shows signature, address, bytes and fixed cycles for functions, type and address for variables, values for constants, offsets for struct fields, from the last version that compiled when the text does not; go to definition for names, `module.name`, `import`, fields, asm `.label`s and `addr()` arguments.
+Question 176 (decision 2026-11-21) is settled here, by M28's spec session: as built since R5, `///` lines go to the next token across blank lines and plain `//` comments (Rust's rule), only top-level functions, variables, constants and structs keep them, and a `///` elsewhere is dropped silently; the draft below is stricter (an error elsewhere or after a blank line), which the spec session of 2026-11-21 leaned towards. A draft from the spec session of 2026-11-12, to start from: `///` only right before a declaration or struct field (elsewhere, or with a blank line between, an error); a `///` block at the top of a file followed by a blank line documents the module; Markdown text, no `@param` tags; the library's comments become `///`. The server is `tern lsp` (stdio, no new NuGet package) with a VS Code extension in `editors/vscode/` (colouring and a client); a module is compiled through a main file that imports it, or checked alone; hover shows signature, address, bytes and fixed cycles for functions, type and address for variables, values for constants, offsets for struct fields, from the last version that compiled when the text does not; go to definition for names, `module.name`, `import`, fields, asm `.label`s and `addr()` arguments.
 
 ### 65C02: analysis (spec session, before M29)
 
@@ -813,6 +846,7 @@ Done when: the benchmarks and a sprite example build for the C128 and run in VIC
 
 Each has a reason to wait; the spec session schedules one when that reason changes.
 
+- **The developer's horizontal shooter in Tern** (decision 2026-11-21): the unfinished game whose Prog8 frame rate started Tern. Not in V1: about ten phases of work in Prog8 and half done, too big for a validation program, and a one-frame slice still needs its whole frame engine. Scheduled when the developer wants to finish it in Tern.
 - **Question 63 (b)** (deferred 2026-11-07): folding `a[i + c]` proved from another access (no benchmark needs it, and it makes one line's cost depend on another, rule 4). Reconsider when a real program needs it. F20 is rejected and F14 is replaced by `indexed match` (decision 2026-11-08).
 - **Arrays of structs as struct fields** (spec 3.3, decision 2026-11-12): designed; built after the first release or when a program needs it. (Second copies of functions called from two roots, 14.2, are not planned: decision 2026-11-12.)
 - **`pha`/`pla` temporaries** (spec 14.3, decision 2026-11-12): first count, in the benchmarks and examples, the temporaries outside zero page that are saved from A and restored into A with no `jsr` or `asm` block between; build it with the optimizer work after M21 if there are enough.

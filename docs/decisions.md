@@ -1029,3 +1029,64 @@ Roadmap R7, R7 fixes, R6. R7's review (`docs/reviews/code-quality-followup.md`) 
 - **Tests 13 joins R6**, with the run model (tools 1). Reason: `Run.Program`'s constructor is the tests' half of the run model R6 already reworks.
 - **Syntax 9 (statement ends decided in the lexer, patched in the parser) and the part of syntax 20 that waits for it: until M28 needs them.** Reason: a design change to how statements end; the language server is what needs exact recovery, and it can be designed with it.
 - **Accepted for after the release:** backend 11 (backend state in checker symbols and the syntax tree), semantics 21 (the call graph built as a side effect), the small-things lists backend 16, backend 17, semantics 22 and syntax 22, tools 18's other four parts, syntax 11's last part (the interpreter's unstated reliance on the checker), and semantics 5's last part (an unreached function that calls itself is not reported; it is never compiled, so no wrong code). Reason: none changes what a program does; they are structure and tidying, and the remaining budget goes to the release.
+
+## 2026-11-21: R6 goes to review; its three test findings become R8
+
+Roadmap R6 and R8. Changes the R6 scope of 2026-11-15 and 2026-11-16 ("the rest of theme 7").
+
+- **R6 goes to review with its platform and message work done; tests 4, 9 and 11 move to a new milestone, R8, after R6's merge and before the release.** R6's done-when is met (a platform is its description and library, the feature suite passes on four platforms, no benchmark or `SkillTests` output moved); what was left are the error tests' positions and whole messages (tests 4), listing checks scoped to their function (tests 9) and test folders by spec section (tests 11). Reason: the R6 branch is already 19 commits of construction work, and a smaller review is a better one; the three findings touch only tests, so they review well on their own; and tests 4 is the guard for question 177 (a message's fix as its own part), which may change ~460 places where messages are made, so it should land before that change and with that question answered.
+- **R8's order: tests 4, then 9, then 11.** Tests 11 moves files only, last, so git sees the earlier edits and the moves as renames.
+- **R8 also runs the whole suite on every platform (`TERN_TARGET`), the rest of tests 6**, before tests 11: each failing test is either marked as a C64 test (a trait, so it can be filtered out) or, if it shows a bug, fixed with its test. Reason: R6's review found the suite failing on the Atari and the NES (96 and 482 tests while R6 was being coded), every sampled failure a C64 fact in the test; the rest were not looked at, so a compiler bug on another platform could stay hidden among them. Marking and filtering makes `TERN_TARGET` a working check, for the X16 and C128 too, without rewriting the tests' addresses, which waits until after the release.
+- **Tests 4 may use a baseline file** of every error case's position and message, rewritten with an environment variable like the benchmarks, instead of rewriting each theory by hand. Reason: one check covers every case, and a changed message shows in the diff; the coding session picks between it and a shared `Expect.Error`.
+- **The release waits for R8.** Reason: CLAUDE.md asks for a test per error, and `tern --json` reports positions and suggestions that agents act on.
+
+## 2026-11-21: question 177, where a message's fix sentence starts
+
+Roadmap R8 and M28. From R6 (tools 7).
+
+- **As built, for the release: an error is one text, and `Diagnostic.FixStart` finds the fix as the first sentence (after ". " or "; ") that starts with a `FixVerbs` word.** `tern --json`'s suggestion and the "(called from ...)" note both use that place. Reason: it works, and `FixSentenceTests.Every_error_has_a_fix_sentence_or_is_listed` fails on any message whose fix it cannot find, so the suggestion agents read is right today.
+- **M28 makes each message as its parts (problem, fix, code, end position) at every place that makes an error, in one pass.** `FixVerbs` then checks the fix's first word rather than finding the fix. Reason: the language server needs a code and an end position on every diagnostic, which `CompileError` lacks; splitting the fix out now would touch the ~460 places twice. R8's whole-message tests guard the pass, since the text a user sees does not change.
+
+## 2026-11-21: question 174, the library tests' fake ROMs and checks on the real emulators
+
+Roadmap: checks on the real emulators. From R4 (tests 12).
+
+- **The library tests' fakes stay, and `tern run` stays read-only.** `IoTests.FakeKernal`, `AtariIoTests.FakeCio` and `Apple2IoTests.FakeMli` are the tests' programmable disk (writes, a full disk, failures on demand, recorded calls); `tern run`'s stand-ins only read the build's overlay files, and a write stops the run (spec 13). Reason: `tern run` checks a program's logic; a writable disk would need rules for where files go, whether they last and how to make them fail, which no user has asked for, and would change `tern run`'s output. Failures on demand belong to a test's set-up. The two models overlap on reads only; R4 removed the fake calls that copied a stand-in.
+- **The real-emulator checks (`TERN_REAL=1`) come after the release.** Reason: each platform milestone was checked by hand on its emulators (CLAUDE.md); what is missing is a record and a repeatable run. Altirra and AppleWin need a window and screens need a tolerant comparison, which is its own piece of work, not a test edit for R8. Accepted risk: an error in a ROM model (as tools 9 and 11 were) can ship in the release.
+
+## 2026-11-21: question 175, idle input in `tern run`
+
+Spec 13 (`tern run` starts from a machine that is not cleared); roadmap R8. From review R4 (suggestion 1). Adds to question 171.
+
+- **Each machine's `Start` sets its input to "nothing pressed"**: the C64's `$DC00`/`$DC01` = `$FF`; the Atari's `CH` = `$FF`, `STICK0`-`3` = `$0F`, `STRIG0`-`3` = 1, `CONSOL` = 7; the Apple II's `$C000` and `$C061`-`$C063` below `$80`; no button on the NES's controllers. Other I/O registers and OS variables stay as the chip model or the seeded fill gives them. `--set` gives input. Reason: question 171 is about RAM the program never wrote; an input register is not RAM, and on the machine it reads "no input" until something is touched. Since 171 the seeded fill made `tern run` press keys and hold joysticks (the Apple II's `$C000` read `$C6`, the C64's `$DC00` `$97`), so a game moved or acted on its own and an agent could not tell it from a bug.
+- **Built first in R8.** It changes `tern run`'s output and the `SkillTests` outputs (the sprite run's A), rewritten in the same commit. Reason: small, and R8 is the next milestone; R6 stays behavior-neutral.
+
+## 2026-11-21: question 176, what a `///` comment belongs to, waits for M28
+
+Roadmap M28. From review R5 (finding 4).
+
+- **The rule is decided by M28's spec session, not now; the built rule stays until then.** Built (R5): `///` lines go to the next token, across blank lines and plain `//` comments; top-level functions, variables, constants and structs keep them; elsewhere they are dropped. Spec 2 does not mention doc comments, so `///` is a plain comment for users. Reason: nothing a user sees depends on it before M28 (the compiler keeps the text; the language server's hover is the first reader), and the rule is best set with M28's other needs (module docs, struct fields, the library's comments). The lean: the 2026-11-12 draft's stricter rule (an error elsewhere or after a blank line), since a comment then cannot attach to the wrong declaration, and making it an error later breaks no program that relies on it.
+
+## 2026-11-21: tests 4 stays in R6
+
+Roadmap R6 and R8. Changes the first two points of "R6 goes to review; its three test findings become R8" (same day).
+
+- **Tests 4 is finished in R6; only tests 9 and 11 move to R8.** The coding session, which works in its own worktree and had not seen the split, had already moved the error theories and the other error tests to whole messages and positions (`Expect.Error`, `Expect.Message`; commits `5355cdd` and `6bb2a63` on `r6-data`), finding and fixing two message bugs. It finishes tests 4 with the list of messages no test reaches, each given a test or a reason, then stops; R6 goes to review. Reason: reverting would throw away working tests and two fixes, and a finding split across two milestones means bookkeeping in two status tables and two reviews. Question 177's order still holds: whole-message tests come before M28's message split.
+- **R8's order: idle input (question 175), tests 9, the suite on every platform (`TERN_TARGET`), tests 11.**
+
+## 2026-11-21: validation programs before the release (V1)
+
+Roadmap V1 and the first release. Changes the second point of question 174 (same day): the real-emulator checks come before the release, as part of V1.
+
+- **About 24 programs, about six per platform, each with a known right result in `tern run` and on the platform's emulator, after R6 and R8 and before the release.** Reason: the tests check features one at a time; real programs are where features meet, and Galaxy Stars found gaps no spec session had. The release should not wait for more than the four platforms need.
+- **The developer's own games first** (smashy smashy; the unfinished horizontal shooter whose Prog8 frame rate, short of the target without going mostly to assembly, is why Tern exists), then ports of existing 6502 programs, then programs written for the suite. Reason: a port has shapes nobody chose with Tern in mind and an original to compare against; a program written for the suite tends to avoid what Tern cannot do.
+- **Others' code is checked for the right to publish a Tern version before it is ported**, and the developer approves each program; when the license is unclear, it is not used (the developer's requirement). No recreation of a commercial game.
+- **The real-emulator checks (`TERN_REAL`) are part of V1, not after the release.** Reason: a validation that runs only in `tern run` cannot find errors in its models of the ROMs and chips (as tools 9 and 11 were), and these programs are the set such a script needs.
+- **Programs are written from the `tern` skill, in sessions that do not change the compiler.** Reason: the skill is how agents write Tern; where a session gets stuck is a finding.
+
+## 2026-11-21: the horizontal shooter is not a V1 program
+
+Roadmap V1 and "Not scheduled". Changes the second point of "validation programs before the release (V1)" (same day).
+
+- **V1's first program is smashy smashy alone; the shooter is not scheduled.** Reason (the developer's): the shooter has taken about ten phases in Prog8 and is about half done, too big for one of about 24 validation programs; even one frame of it as its own program needs its whole frame engine. It is ported when the developer wants to finish it in Tern.
+
