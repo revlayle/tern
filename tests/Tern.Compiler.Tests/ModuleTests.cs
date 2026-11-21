@@ -328,7 +328,7 @@ public sealed class ModuleTests : TempFolderTest
         // Also from another of the program's modules.
         Write(Src, "game.tern", "import random\nfn go() { random.seed(1) }");
         e = Assert.Throws<CompileError>(() => CompileMain("import game\nfn main() { game.go() }"));
-        Assert.StartsWith("'random' is both a library module", e.Description);
+        Expect.Message(e, 1, 8, $"'random' is both a library module ({Path.Combine(Lib, "random.tern")}) and your file {Path.Combine(Src, "random.tern")}. Rename your file, e.g. to my_random.tern, and import it by its new name");
 
         // tern --json gives the fix as the suggestion.
         var d = Tern.Compiler.Tools.Diagnostic.From(e, "main.tern");

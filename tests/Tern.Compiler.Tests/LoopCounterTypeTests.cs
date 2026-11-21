@@ -56,7 +56,7 @@ public class LoopCounterTypeTests
         // The counter's type: a u8 counter fits a u8 variable with no 'as'.
         var assign = $"var b: u8\nfn main() {{\n    for i in {range} {{ b = i }}\n}}";
         if (size == 1) TernCompiler.Compile(assign);
-        else Assert.Contains("Expected u8, found u16", Assert.Throws<CompileError>(() => TernCompiler.Compile(assign)).Description);
+        else Expect.Error(assign, 3, 21 + range.Length, "Expected u8, found u16. Convert with 'as u8'");
     }
 
     [Trait("Shape", "nmos6502")]
@@ -141,7 +141,8 @@ public class LoopCounterTypeTests
                 for i in {{range}} { }
             }
             """));
-        Assert.Contains("does not fit in", e.Description);
+        string end = range[(range.LastIndexOfAny(['.', '=']) + 1)..];
+        Expect.Message(e, 3, 14 + range.Length - end.Length, $"{end} does not fit in u8 (0 to 255), the type of 'start', which it is combined with. Convert 'start' with 'as u16'");
     }
 
     [Fact]

@@ -174,6 +174,7 @@ public sealed partial class Checker
     private void CheckCast(CastExpr c)
     {
         CheckExpr(c.Operand);
+        RequireValue(c.Operand);
         var target = ResolveType(c.Target);
         var source = c.Operand.Type;
         if (!target.IsScalar) throw new CompileError(c.Pos, $"Cannot convert to {target}. Convert to a number, bool or pointer type");
@@ -205,6 +206,7 @@ public sealed partial class Checker
     private void CheckUnary(UnaryExpr u)
     {
         CheckExpr(u.Operand);
+        RequireValue(u.Operand);
         var t = u.Operand.Type;
         long? v = u.Operand.ConstValue;
         switch (u.Op)
@@ -250,9 +252,8 @@ public sealed partial class Checker
         CheckExpr(b.Left);
         CheckExpr(b.Right);
         // Before an operand is converted to the other's type, which for a void call said "Expected void, found a number".
-        foreach (var side in new[] { b.Left, b.Right })
-            if (side.Type.Kind == TypeKind.Void)
-                throw new CompileError(side.Pos, "This function call does not return a value. Call it as a statement on its own");
+        RequireValue(b.Left);
+        RequireValue(b.Right);
         long? l = b.Left.ConstValue, r = b.Right.ConstValue;
         if ((b.Left.Type.IsStruct || b.Right.Type.IsStruct)
             && b.Op is not (TokenKind.EqEq or TokenKind.NotEq or TokenKind.Less or TokenKind.LessEq or TokenKind.Greater or TokenKind.GreaterEq))
@@ -339,9 +340,10 @@ public sealed partial class Checker
                     CheckPointerArithmetic(b);
                     return;
                 }
-                var t = Unify(b.Left, b.Right, b.Pos);
-                if (!(t.IsInteger || t.Kind == TypeKind.IntLiteral))
+                // Before Unify, which said "Cannot combine bool and bool. Convert one side with 'as'" (review R6 follow-up, finding 2).
+                if (b.Left.Type.Kind == TypeKind.Bool || b.Right.Type.Kind == TypeKind.Bool)
                     throw new CompileError(b.Pos, $"'{OpText(b.Op)}' needs numbers. Use '&&', '||' and '!' for bool values");
+                var t = Unify(b.Left, b.Right, b.Pos);
                 b.Type = t;
                 if (l is not null && r is not null)
                 {

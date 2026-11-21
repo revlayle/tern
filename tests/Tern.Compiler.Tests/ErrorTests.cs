@@ -361,7 +361,19 @@ public class ErrorTests
     [InlineData("var x: u8 = 0b_\nfn main() { }", 1, 13, "Number has no digits. Write digits after '$' or '0b', e.g. $FF or 0b1010")]
     [InlineData("var x: u8 = 1 ` 2\nfn main() { }", 1, 15, "Unexpected character '`'. Remove it, or put it in a string or a comment")]
     [InlineData("fn main() {\n    module m\n}", 2, 5, "'module' must be the first line of the file, outside functions. Move it there")]
-    [InlineData("var b: bool\nvar x: u8\nfn main() { x = b | x }", 3, 19, "Cannot combine bool and u8. Convert one side with 'as'")]
+    // Review R6 follow-up, finding 2: a bool operand of '+ - & | ^' was "Cannot combine bool and bool. Convert one side with 'as'".
+    [InlineData("var b: bool\nvar x: u8\nfn main() { x = b | x }", 3, 19, "'|' needs numbers. Use '&&', '||' and '!' for bool values")]
+    [InlineData("var x: u8\nfn main() { x = true + false }", 2, 22, "'+' needs numbers. Use '&&', '||' and '!' for bool values")]
+    [InlineData("var a: [u8; 2]\nvar b: [u8; 2]\nvar x: u8\nfn main() { x = a + b }", 4, 19, "Cannot combine [u8; 2] and [u8; 2]. Convert one side with 'as'")]
+    // Review R6 follow-up, finding 1: a call with no value, wherever a value is needed.
+    [InlineData("fn f() { }\nvar x: u8\nfn main() { x = -f() }", 3, 18, "This function call does not return a value. Call it as a statement on its own")]
+    [InlineData("fn f() { }\nvar x: u8\nfn main() { x = ~f() }", 3, 18, "This function call does not return a value. Call it as a statement on its own")]
+    [InlineData("fn f() { }\nvar x: u8\nfn main() { x = f() as u8 }", 3, 17, "This function call does not return a value. Call it as a statement on its own")]
+    [InlineData("fn f() { }\nfn main() { if f() { } }", 2, 16, "This function call does not return a value. Call it as a statement on its own")]
+    [InlineData("fn f() { }\nfn main() { while f() { } }", 2, 19, "This function call does not return a value. Call it as a statement on its own")]
+    [InlineData("fn f() { }\nvar b: bool\nfn main() { b = !f() }", 3, 18, "This function call does not return a value. Call it as a statement on its own")]
+    // Review R6 follow-up, finding 3: checked before only as a fragment, in the operand matrix.
+    [InlineData("var a: u8\nfn main() { for i in 0..10 step 128 { } }", 2, 33, "'step' must be between -127 and 127. Use a smaller step, or a 'while' loop")]
     public void Reports_errors_no_other_test_reached(string source, int line, int column, string expected)
     {
         Expect.Error(source, line, column, expected);

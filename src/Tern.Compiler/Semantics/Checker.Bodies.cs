@@ -487,6 +487,7 @@ public sealed partial class Checker
     private void CheckCondition(Expr cond)
     {
         CheckExpr(cond);
+        RequireValue(cond);
         if (cond.Type.Kind != TypeKind.Bool)
             throw new CompileError(cond.Pos, $"A condition must be bool, not {cond.Type}. Compare it, e.g. 'x != 0'");
     }

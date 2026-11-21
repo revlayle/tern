@@ -63,13 +63,19 @@ public sealed partial class Checker
         return lt.Size >= rt.Size ? lt : rt;
     }
 
+    /// <summary>Fails where a value is needed and <paramref name="e"/> is a call that returns none (review R6 follow-up, finding 1).</summary>
+    private static void RequireValue(Expr e)
+    {
+        if (e.Type.Kind == TypeKind.Void)
+            throw new CompileError(e.Pos, "This function call does not return a value. Call it as a statement on its own");
+    }
+
     /// <summary>Checks that <paramref name="e"/> can be used where <paramref name="target"/> is expected.</summary>
     private static void Coerce(Expr e, TernType target)
     {
         var source = e.Type;
         if (source.Kind == TypeKind.Error) return;
-        if (source.Kind == TypeKind.Void)
-            throw new CompileError(e.Pos, "This function call does not return a value. Call it as a statement on its own");
+        RequireValue(e);
         if (source.IsStruct)
             throw new CompileError(e.Pos, $"A struct cannot be used as a value, since structs are never copied. Use one of its fields, or a pointer: addr(...) gives a ptr {source}");
 

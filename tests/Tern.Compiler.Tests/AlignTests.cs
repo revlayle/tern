@@ -8,6 +8,8 @@ public class AlignTests
     private static string Message(string source) =>
         Assert.Throws<CompileError>(() => TernCompiler.Compile(source)).Description;
 
+    private static CompileError Error(string source) => Assert.Throws<CompileError>(() => TernCompiler.Compile(source));
+
     [Theory]
     [InlineData(2)]
     [InlineData(64)]
@@ -228,9 +230,8 @@ public class AlignTests
     [InlineData("-2")]
     public void The_alignment_must_be_a_power_of_two_from_2_to_32768(string n)
     {
-        var message = Message($"var buf: [u8; 4] @ align({n})\nfn main() {{ buf[0] = 1 }}");
-        Assert.StartsWith("The alignment must be a power of two from 2 to 32768", message);
-        Assert.Contains("Use one such as 64, 256 or 2048", message);
+        var e = Error($"var buf: [u8; 4] @ align({n})\nfn main() {{ buf[0] = 1 }}");
+        Expect.Message(e, 1, 26, $"The alignment must be a power of two from 2 to 32768, not {n}. Use one such as 64, 256 or 2048");
     }
 
     [Fact]
@@ -247,56 +248,53 @@ public class AlignTests
     [Fact]
     public void The_alignment_must_be_known_at_compile_time()
     {
-        var message = Message("var k: u8\nvar buf: [u8; 4] @ align(k)\nfn main() { buf[0] = k }");
-        Assert.StartsWith("The alignment must be known at compile time", message);
+        var e = Error("var k: u8\nvar buf: [u8; 4] @ align(k)\nfn main() { buf[0] = k }");
+        Expect.Message(e, 2, 26, "The alignment must be known at compile time. Use a number or a constant, as in '@ align(256)'");
     }
 
     [Fact]
     public void A_local_cannot_be_aligned()
     {
-        var message = Message("fn main() {\n    var buf: [u8; 4] @ align(4)\n    buf[0] = 1\n}");
-        Assert.StartsWith("Only global variables and data can be aligned", message);
-        Assert.Contains("Move the variable out of the function", message);
+        var e = Error("fn main() {\n    var buf: [u8; 4] @ align(4)\n    buf[0] = 1\n}");
+        Expect.Message(e, 2, 5, "Only global variables and data can be aligned: a local's memory is shared with other functions' (spec 8.1). Move the variable out of the function");
     }
 
     [Fact]
     public void A_dereferenced_pointer_cannot_be_aligned()
     {
-        var message = Message("var buf: [u8; 4]\nvar p: ptr u8 @ align(2)\nfn main() { p = addr(buf); p[0] = 1 }");
-        Assert.Equal("'p' must be in zero page, since it is dereferenced as a pointer, so it cannot be placed with '@ align(2)'. Remove '@ align(2)'", message);
+        var e = Error("var buf: [u8; 4]\nvar p: ptr u8 @ align(2)\nfn main() { p = addr(buf); p[0] = 1 }");
+        Expect.Message(e, 2, 1, "'p' must be in zero page, since it is dereferenced as a pointer, so it cannot be placed with '@ align(2)'. Remove '@ align(2)'");
     }
 
     [Fact]
     public void Align_needs_parentheses()
     {
-        var message = Message("var buf: [u8; 4] @ align 256\nfn main() { buf[0] = 1 }");
-        Assert.StartsWith("Expected '(' and the alignment, as in '@ align(256)'", message);
+        var e = Error("var buf: [u8; 4] @ align 256\nfn main() { buf[0] = 1 }");
+        Expect.Message(e, 1, 26, "Expected '(' and the alignment, as in '@ align(256)', found '256'");
     }
 
     [Fact]
     public void Variables_that_fit_nowhere_at_their_alignment_are_an_error()
     {
         // 1500 bytes fit in the 2 KB area, but not from a multiple of $800 after the program's code.
-        var message = Message("""
+        var e = Error("""
             memory { $0801..=$0FFF program }
             noinit var buf: [u8; 1500] @ align(2048)
             var p: ptr u8
             fn main() { p = addr(buf); p[0] = 1 }
             """);
-        Assert.StartsWith("The variables after the program (", message);
-        Assert.Contains("must start where 'buf' is at a multiple of $800, and no program area has room for them there", message);
-        Assert.EndsWith("Make a program area larger, or use a smaller alignment", message);
+        Expect.Message(e, 2, 8, "The variables after the program (1500 bytes) must start where 'buf' is at a multiple of $800, and no program area has room for them there. Make a program area larger, or use a smaller alignment");
     }
 
     [Fact]
     public void Aligned_data_that_fits_nowhere_is_an_error()
     {
-        var message = Message("""
+        var e = Error("""
             memory { $0801..=$0FFF program }
             data BIG: [u8; 1500] @ align(1024) = [0 for i in 0..1500]
             fn main() { }
             """);
-        Assert.Contains("BIG", message);
+        Expect.Message(e, 1, 1, "'BIG' needs 2503 bytes, and no program area has room for them in one piece (code is never split across areas). Areas: $0801-$0FFF: 20 of 2047 bytes used (startup, main). Make an area larger, or split the code into smaller functions");
     }
 
     [Fact]
