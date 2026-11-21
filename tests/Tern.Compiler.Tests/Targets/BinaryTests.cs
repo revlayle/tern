@@ -449,7 +449,6 @@ public class BinaryTests
 
     // ---------- Errors ----------
 
-    [Trait("Platform", "c64")]
     [Theory]
     [InlineData("fn main() { }\nfn f() { }\nexport f", 3, 8, "A program with 'main' cannot export functions without an address: 'export' alone builds a binary for another program to call, which has no 'main'. Give the table an address for plug-ins to call ('export f @ $0900'), or remove 'main'")]
     [InlineData("fn f() { }\nexport f, f", 2, 11, "'f' is exported twice. Remove one")]
@@ -460,8 +459,6 @@ public class BinaryTests
     [InlineData("inline fn h() { }\nexport h", 2, 8, "'h' is inline: it has no code of its own to put in the jump table. Remove 'inline'")]
     [InlineData("fn chrout(c: u8 using A) @ $FFD2\nexport chrout", 2, 8, "'chrout' is a routine at a fixed address, not part of this binary. Remove it from the export line")]
     [InlineData("fn f(n: u8) { }\nexport f", 2, 8, "'f' takes 'n' in memory, which the caller of a binary cannot set. Pass it in a register (n: u8 using A)")]
-    [InlineData("memory { $C000..=$C003 program\n$C100..=$C1FF program }\nexport play\nfn play() { }", 1, 1, "The jump table (6 bytes) must be at the start of the first program area, but it does not fit in $C000-$C003. Make the first area larger")]
-    [InlineData("memory { $C000..=$CFFF program }\nexport play\ndata first: [u8; 3] @ $C000 = [1, 2, 3]\nfn play() { }", 1, 1, "'first' at $C000-$C002 overlaps the jump table at $C000-$C005, which must be at the start of the first program area. Move the data, or start the program area lower")]
     [InlineData("fn f() { }\nexport", 2, 7, "Expected a function name after 'export', found end of file")]
     [InlineData("fn f() { }", 1, 1, "The program has no 'fn main()'. Add 'fn main() { }', or an 'export' line for a binary that another program calls")]
     [InlineData("fn f() { f() }\nexport f", 1, 1, "Recursion is not allowed: f -> f. Use a loop instead, with an array as the stack if needed")]
@@ -469,6 +466,14 @@ public class BinaryTests
     {
         Expect.Error(source, line, column, expected);
     }
+
+    /// <summary>The rows of <see cref="Reports_errors"/> that name a C64 fact (an address, the C64's areas or encoding), so they fail on the other targets (review R8, finding 2).</summary>
+    [Trait("Platform", "c64")]
+    [Theory]
+    [InlineData("memory { $C000..=$C003 program\n$C100..=$C1FF program }\nexport play\nfn play() { }", 1, 1, "The jump table (6 bytes) must be at the start of the first program area, but it does not fit in $C000-$C003. Make the first area larger")]
+    [InlineData("memory { $C000..=$CFFF program }\nexport play\ndata first: [u8; 3] @ $C000 = [1, 2, 3]\nfn play() { }", 1, 1, "'first' at $C000-$C002 overlaps the jump table at $C000-$C005, which must be at the start of the first program area. Move the data, or start the program area lower")]
+    public void Reports_errors_with_c64_facts(string source, int line, int column, string expected) =>
+        Reports_errors(source, line, column, expected);
 
     [Fact]
     public void A_module_cannot_export()

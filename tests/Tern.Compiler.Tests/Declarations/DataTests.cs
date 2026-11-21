@@ -309,12 +309,8 @@ public class DataTests
     [InlineData("data d: [u16; 2] = [1, 2]\nfn main() { d[0].lo = 5 }", 2, 14, "'d' is data, which is read-only. Declare it with 'var' to change it")]
     [InlineData("data d = 5\nfn main() { }", 1, 1, "Data must be an array, a string or a struct, unless it is placed with '@'. Use 'const' for a single value")]
     [InlineData("data d: [u8; 2]\nfn main() { }", 1, 16, "Expected '=' and the data's value, found end of line")]
-    [InlineData("data d @ $C000 = \"A\"\nfn main() { }", 1, 1, "'d' at $C000 is not in a program or reserved area. Program areas: $0801-$9FFF; reserved: none. Add a 'reserved' line for it to the memory block")]
     [InlineData("fn main() { data d = \"A\" }", 1, 13, "'data' must be declared outside functions. Move it to the top level of the file")]
-    [InlineData("data d: [u8; 3] = \"AB\"\nfn main() { }", 1, 19, "Expected 3 bytes, found 2. Change the length to 2, or write '_' to take it from the value")]
-    [InlineData("data d: [u16; 2] = \"AB\"\nfn main() { }", 1, 20, "This value is a [u8; 2] array, but 'd' is [u16; 2]. Change the type to [u8; 2]")]
     [InlineData("data d = \"\"\nfn main() { }", 1, 10, "A string must have at least one character. Write at least one")]
-    [InlineData("data d = \"A{\"\nfn main() { }", 1, 10, "'{' has no code in the petscii encoding. Write the byte as \\$NN")]
     [InlineData("data d = screen\"A\\n\"\nfn main() { }", 1, 10, "'\\n' has no code in the screen encoding. Write the byte as \\$NN")]
     [InlineData("var c: u8 = petscii_mixed'π'\nfn main() { }", 1, 13, "'π' has no code in the petscii_mixed encoding. Write the byte as \\$NN")]
     [InlineData("data d = ascii\"A\"\nfn main() { }", 1, 10, "The 'ascii' encoding is not supported yet. Use one of: petscii, petscii_mixed, screen, screen_mixed, atascii, atari_screen, apple2, or declare an encoding")]
@@ -329,15 +325,24 @@ public class DataTests
     [InlineData("var c: u8\nfn main() { c = \"A\" }", 2, 17, "A string can only be the value of data or a global array. Declare it as data, e.g. 'data HI = \"HI\"', and pass addr(HI), len(HI)")]
     [InlineData("data d = include_bytes(5)\nfn main() { }", 1, 10, "include_bytes() takes a file name in quotes. Write include_bytes(\"file.bin\")")]
     [InlineData("var c: u8\nfn main() { c = include_bytes(\"x\")[0] }", 2, 17, "include_bytes() can only be the value of data or a global array. Declare data with it: data name = include_bytes(\"file.bin\")")]
-    [InlineData("data d = \"" + "0123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789"
-        + "0123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789"
-        + "0123456789012345678901234567890123456789012345678901234567890123456789\"\nvar c: u8\nfn main() { c = d[0] }",
-        3, 18, "'d' has 270 elements, too many for a u8 index. Read it through a pointer: addr(d)")]
-    [Trait("Platform", "c64")]
     public void Reports_errors(string source, int line, int column, string expected)
     {
         Expect.Error(source, line, column, expected);
     }
+
+    /// <summary>The rows of <see cref="Reports_errors"/> that name a C64 fact (an address, the C64's areas or encoding), so they fail on the other targets (review R8, finding 2).</summary>
+    [Trait("Platform", "c64")]
+    [Theory]
+    [InlineData("data d @ $C000 = \"A\"\nfn main() { }", 1, 1, "'d' at $C000 is not in a program or reserved area. Program areas: $0801-$9FFF; reserved: none. Add a 'reserved' line for it to the memory block")]
+    [InlineData("data d: [u8; 3] = \"AB\"\nfn main() { }", 1, 19, "Expected 3 bytes, found 2. Change the length to 2, or write '_' to take it from the value")]
+    [InlineData("data d: [u16; 2] = \"AB\"\nfn main() { }", 1, 20, "This value is a [u8; 2] array, but 'd' is [u16; 2]. Change the type to [u8; 2]")]
+    [InlineData("data d = \"A{\"\nfn main() { }", 1, 10, "'{' has no code in the petscii encoding. Write the byte as \\$NN")]
+    [InlineData("data d = \"" + "0123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789"
+        + "0123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789"
+        + "0123456789012345678901234567890123456789012345678901234567890123456789\"\nvar c: u8\nfn main() { c = d[0] }",
+        3, 18, "'d' has 270 elements, too many for a u8 index. Read it through a pointer: addr(d)")]
+    public void Reports_errors_with_c64_facts(string source, int line, int column, string expected) =>
+        Reports_errors(source, line, column, expected);
 
     // The message used to put the system's own period before ". Check" (found by the whole-message check, R6).
     [Fact]
@@ -450,7 +455,6 @@ public class DataTests
         Assert.Equal((byte)'Y', r.U8("written", 1));
     }
 
-    [Trait("Platform", "c64")]
     [Theory]
     [InlineData("data d: [u8; _] = 5\nfn main() { }", 1, 9, "The length '_' is taken from a list or string initial value, a list built with 'for' or a const fn's array, so it works only on a global var or data with one, as in 'data t: [u8; _] = [1, 2, 3]'. Write the length here")]
     [InlineData("var d: [u8; _]\nfn main() { }", 1, 8, "The length '_' is taken from a list or string initial value, a list built with 'for' or a const fn's array, so it works only on a global var or data with one, as in 'data t: [u8; _] = [1, 2, 3]'. Write the length here")]
@@ -458,7 +462,6 @@ public class DataTests
     [InlineData("fn f(p: ptr [u8; _]) { }\nfn main() { }", 1, 13, "The length '_' is taken from a list or string initial value, a list built with 'for' or a const fn's array, so it works only on a global var or data with one, as in 'data t: [u8; _] = [1, 2, 3]'. Write the length here")]
     [InlineData("struct S { a: [u8; _] }\nvar s: S\nfn main() { }", 1, 15, "The length '_' is taken from a list or string initial value, a list built with 'for' or a const fn's array, so it works only on a global var or data with one, as in 'data t: [u8; _] = [1, 2, 3]'. Write the length here")]
     [InlineData("var t: [u8; 9] = screen\"GALAXY 00\\0\"\nfn main() { }", 1, 18, "Expected 9 bytes, found 10. Change the length to 10, or write '_' to take it from the value")]
-    [InlineData("var t: [u16; _] = \"AB\"\nfn main() { }", 1, 19, "This value is a [u8; 2] array, but 't' is [u16; 2]. Change the type to [u8; 2]")]
     [InlineData("data d: [u8; _] = []\nfn main() { }", 1, 9, "Array length must be 1 to 256, not 0. Use a length in that range")]
     [InlineData("var d: [u8; _] = [1, 2, 300]\nfn main() { }", 1, 25, "300 does not fit in u8 (0 to 255). Use a value in that range, or a wider type")]
     [InlineData("data d = [1, 2, 3]\nfn main() { }", 1, 1, "Data arrays need a written type. Write data d: [u8; _] = [...], where '_' takes the length from the list")]
@@ -466,6 +469,13 @@ public class DataTests
     {
         Expect.Error(source, line, column, expected);
     }
+
+    /// <summary>The rows of <see cref="Underscore_length_errors"/> that name a C64 fact (an address, the C64's areas or encoding), so they fail on the other targets (review R8, finding 2).</summary>
+    [Trait("Platform", "c64")]
+    [Theory]
+    [InlineData("var t: [u16; _] = \"AB\"\nfn main() { }", 1, 19, "This value is a [u8; 2] array, but 't' is [u16; 2]. Change the type to [u8; 2]")]
+    public void Underscore_length_errors_with_c64_facts(string source, int line, int column, string expected) =>
+        Underscore_length_errors(source, line, column, expected);
 
     [Theory]
     [InlineData("var a: [u8; 4294967298]", 1, 13, "An array of u8 has at most 65536 elements, all of memory, not 4294967298. Use a smaller length")]

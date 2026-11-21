@@ -403,21 +403,29 @@ public class MemoryTests
 
     // ---------- Errors ----------
 
+    [Theory]
+    [InlineData("memory { $2000..$2FFF reserved }\nfn main() { }", 1, 15, "A memory range includes its last address. Write first..=last")]
+    [InlineData("memory { $2000..=$2FFF weird }\nfn main() { }", 1, 24, "Unknown kind of memory 'weird'. Use program, zeropage, reserved, region, volatile, overlay, bank or chr")]
+    [InlineData("memory { $2000..=$2FFF region }\nfn main() { }", 1, 31, "Expected a name after 'region', found '}'")]
+    [InlineData("memory { $2000..=$2FFF reserved", 1, 1, "The memory block is not closed with '}'. Add '}' after its last range")]
+    [InlineData("memory { NOPE..=$2FFF reserved }\nfn main() { }", 1, 10, "'NOPE' is not declared. Check the spelling, or declare it")]
+    [InlineData("var x: u8\nmemory { $2000..=$2FFF reserved }\nfn main() { }", 2, 1, "The memory block goes after the imports and constants, before other declarations, and there is only one. Move it there, or join the two blocks")]
+    [InlineData("var v: u8 @ nowhere\nfn main() { }", 1, 13, "'nowhere' is not declared. Check the spelling, or declare it")]
+    public void Reports_errors(string source, int line, int column, string expected)
+    {
+        Expect.Error(source, line, column, expected);
+    }
+
+    /// <summary>The rows of <see cref="Reports_errors"/> that name a C64 fact (an address, the C64's areas or encoding), so they fail on the other targets (review R8, finding 2).</summary>
     [Trait("Platform", "c64")]
     [Theory]
     [InlineData("memory { $2000..=$1000 reserved }\nfn main() { }", 1, 24, "The range starts at $2000 and ends at $1000, before its start. Write the lower address first")]
-    [InlineData("memory { $2000..$2FFF reserved }\nfn main() { }", 1, 15, "A memory range includes its last address. Write first..=last")]
     [InlineData("memory { $2000..=$2FFF reserved\n$2800..=$37FF reserved }\nfn main() { }", 2, 15, "$2800-$37FF (reserved) overlaps $2000-$2FFF (reserved, line 1). Ranges may not overlap, except volatile ones. Move one of them")]
     [InlineData("memory { $0801..=$4FFF program\n$4000..=$9FFF program }\nfn main() { }", 2, 15, "$4000-$9FFF (program) overlaps $0801-$4FFF (program, line 1). Ranges may not overlap, except volatile ones. Move one of them")]
     [InlineData("memory { $2000..=$2FFF region a\n$2000..=$2FFF reserved }\nfn main() { }", 2, 15, "$2000-$2FFF (reserved) overlaps $2000-$2FFF (region a, line 1). Ranges may not overlap, except volatile ones. Move one of them")]
     [InlineData("memory { $100..=$1FF zeropage }\nfn main() { }", 1, 22, "A zeropage range must lie in $00-$FF; $0100-$01FF does not. Use addresses below $100")]
     [InlineData("memory { $2000..=$20FF region r\n$3000..=$30FF region r }\nfn main() { }", 2, 15, "The region 'r' is declared twice. Give each region its own name")]
-    [InlineData("memory { $2000..=$2FFF weird }\nfn main() { }", 1, 24, "Unknown kind of memory 'weird'. Use program, zeropage, reserved, region, volatile, overlay, bank or chr")]
-    [InlineData("memory { $2000..=$2FFF region }\nfn main() { }", 1, 31, "Expected a name after 'region', found '}'")]
-    [InlineData("memory { $2000..=$2FFF reserved", 1, 1, "The memory block is not closed with '}'. Add '}' after its last range")]
     [InlineData("memory { $2000..=$10000 reserved }\nfn main() { }", 1, 25, "The range $2000..=$10000 is outside memory ($0000-$FFFF). Use addresses in that range")]
-    [InlineData("memory { NOPE..=$2FFF reserved }\nfn main() { }", 1, 10, "'NOPE' is not declared. Check the spelling, or declare it")]
-    [InlineData("var x: u8\nmemory { $2000..=$2FFF reserved }\nfn main() { }", 2, 1, "The memory block goes after the imports and constants, before other declarations, and there is only one. Move it there, or join the two blocks")]
     [InlineData("memory { $2000..=$2FFF reserved }\nmemory { $3000..=$3FFF reserved }\nfn main() { }", 2, 1, "The memory block goes after the imports and constants, before other declarations, and there is only one. Move it there, or join the two blocks")]
     [InlineData("memory { $0900..=$9FFF program }\nfn main() { }", 2, 1, "A program with 'main' starts at $0801, where the C64 BASIC line goes, but its first program area begins at $0900. Start the first 'program' line of the memory block at $0801")]
     [InlineData("memory { $0800..=$08FF reserved }\nfn main() { }", 2, 1, "A program with 'main' starts at $0801, where the C64 BASIC line goes, but its first program area begins at $0900. Move the 'reserved' or 'region' range that covers it")]
@@ -431,7 +439,6 @@ public class MemoryTests
     [InlineData("memory { $0801..=$0810 program }\ndata d: [u8; 16] @ $0801 = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]\nfn main() { }", 1, 1, "The BASIC line and startup code (19 bytes) must be at the start of the first program area, but it does not fit in $0801-$0810. Make the first area larger")]
     [InlineData("memory { $C000..=$C00F region small }\nvar big: [u8; 32] @ small\nfn main() { }", 2, 1, "Region 'small' ($C000-$C00F, 16 bytes) is full: 'big' needs 32 bytes at $C000, 16 are left. Place it elsewhere or make the region larger")]
     [InlineData("memory { $C000..=$C00F region small }\nvar v: u8 @ small = 5\nfn main() { }", 2, 21, "A variable in a region cannot have an initial value: the region is not part of the program file. Assign it at the start of main")]
-    [InlineData("var v: u8 @ nowhere\nfn main() { }", 1, 13, "'nowhere' is not declared. Check the spelling, or declare it")]
     [InlineData("memory { $C000..=$C0FF region BUF }\nconst BUF = $C100\nvar x: u8 @ BUF\nfn main() { x = 1 }", 1, 24, "The region 'BUF' has the name of a constant of the main file (line 2), so '@ BUF' would be ambiguous. Rename the region")]
     [InlineData("memory { $C000..=$C0FF region x }\nvar x: u8\nfn main() { x = 1 }", 1, 24, "The region 'x' has the name of a variable of the main file (line 2), so '@ x' would be ambiguous. Rename the region")]
     [InlineData("memory { $C000..=$C0FF region main }\nfn main() { }", 1, 24, "The region 'main' has the name of a function of the main file (line 2), so '@ main' would be ambiguous. Rename the region")]
@@ -444,10 +451,8 @@ public class MemoryTests
     [InlineData("memory { $2000..=$2FFF reserved }\ndata a @ zp = [1, 2]\nfn main() { }", 2, 10, "Data is read-only and lives in the program; '@ zp' is for variables. Remove '@ zp', or make it a var")]
     [InlineData("memory { $FB..=$FE zeropage }\nvar a: [u8; 5] @ zp\nfn main() { a[0] = 1 }", 2, 1, "Zero page is full: '@ zp' variables need 5 bytes, 4 are free. Users: a (5). Remove '@ zp' from some of them")]
     [InlineData("memory { $80..=$80 zeropage\n$FB..=$FE zeropage }\nvar a: u16 @ zp\nfn main() { a = 1 }", 3, 1, "'a' (2 bytes) would cross the end of a zero-page range at $FB. Zero-page ranges: $80, $FB-$FE. Join the ranges or reorder the variables")]
-    public void Reports_errors(string source, int line, int column, string expected)
-    {
-        Expect.Error(source, line, column, expected);
-    }
+    public void Reports_errors_with_c64_facts(string source, int line, int column, string expected) =>
+        Reports_errors(source, line, column, expected);
 
     [Fact]
     public void A_module_cannot_have_a_memory_block()

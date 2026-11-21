@@ -134,11 +134,7 @@ public class VolatileTests
         Assert.True(r.U8("waited") > 0);
     }
 
-    [Trait("Platform", "c64")]
     [Theory]
-    [InlineData("var b: [u8; 16] @ $0810\nfn main() { b[0] = 1 }", 1, 1, "'b' at $0810-$081F overlaps the program and its variables at $0801-$0819. Move 'b', or make the program smaller")]
-    [InlineData("var b: u8 @ $0801\nfn main() { b = 1 }", 1, 1, "'b' at $0801 overlaps the program and its variables at $0801-$0819. Move 'b', or make the program smaller")]
-    [InlineData("var a: u8\nvar z: u8 @ $02\nfn main() { a = z }", 2, 1, "'z' at $0002 overlaps 'a' at $0002, which the compiler placed in zero page. Move 'z' out of $02-$8F, $FB-$FE")]
     [InlineData("volatile data t: [u8; 2] = [1, 2]\nfn main() { }", 1, 1, "'volatile' goes before 'var', e.g. 'volatile var flags: u8 @ $C000'; found 'data'. Write 'volatile var' or remove 'volatile'")]
     [InlineData("volatile linear data t: [u16; 2] = [1, 2]\nfn main() { }", 1, 1, "'volatile' is for variables; data is read-only, so nothing changes it. Remove 'volatile'")]
     [InlineData("volatile fn f() { }\nfn main() { }", 1, 1, "'volatile' goes before 'var', e.g. 'volatile var flags: u8 @ $C000'; found 'fn'. Write 'volatile var' or remove 'volatile'")]
@@ -151,6 +147,15 @@ public class VolatileTests
     {
         Expect.Error(source, line, column, expected);
     }
+
+    /// <summary>The rows of <see cref="Reports_errors"/> that name a C64 fact (an address, the C64's areas or encoding), so they fail on the other targets (review R8, finding 2).</summary>
+    [Trait("Platform", "c64")]
+    [Theory]
+    [InlineData("var b: [u8; 16] @ $0810\nfn main() { b[0] = 1 }", 1, 1, "'b' at $0810-$081F overlaps the program and its variables at $0801-$0819. Move 'b', or make the program smaller")]
+    [InlineData("var b: u8 @ $0801\nfn main() { b = 1 }", 1, 1, "'b' at $0801 overlaps the program and its variables at $0801-$0819. Move 'b', or make the program smaller")]
+    [InlineData("var a: u8\nvar z: u8 @ $02\nfn main() { a = z }", 2, 1, "'z' at $0002 overlaps 'a' at $0002, which the compiler placed in zero page. Move 'z' out of $02-$8F, $FB-$FE")]
+    public void Reports_errors_with_c64_facts(string source, int line, int column, string expected) =>
+        Reports_errors(source, line, column, expected);
 
     [Trait("Platform", "c64")]
     [Fact]

@@ -491,8 +491,6 @@ public class AsmTests
     [InlineData("asm {\n nop\n}\nfn main() { }", 1, 1, "An asm block must be inside a function. Use 'asm fn name() { ... }' for a whole function in assembly")]
     [InlineData("fn main() { asm fn f() { } }", 1, 13, "'asm fn' must be declared outside functions. Move it to the top level of the file")]
     [InlineData("fn main() { asm {\n nop\n }", 1, 11, "Block is not closed with '}'. Add '}' where it ends")]
-    [InlineData("data msg = \"A\"\nfn main() { asm {\n lda #<msg\n } }", 3, 7, "An immediate operand is one byte, and an address has two. Write #name.lo or #name.hi")]
-    [InlineData("data msg = \"A\"\nfn main() { asm {\n lda #msg\n } }", 3, 7, "An address has two bytes. Write #name.lo or #name.hi")]
     [InlineData("fn main() { asm {\n lda #300\n } }", 2, 7, "#300 does not fit in a byte. Use a value from -128 to 255, or .lo and .hi of it")]
     [InlineData("fn main() { asm {\n lda #-129\n } }", 2, 7, "#-129 does not fit in a byte. Use a value from -128 to 255, or .lo and .hi of it")]
     [InlineData("fn main() { asm {\n bne .nowhere\n } }", 2, 6, "Label '.nowhere' is not defined in this asm block. Define it with '.nowhere:' on a line of the block")]
@@ -505,13 +503,9 @@ public class AsmTests
     [InlineData("var b: u8 @ $D020\nfn main() { asm {\n lda (b),y\n } }", 3, 7, "'lda (address),y' needs a zero-page address, but 'b' is at $D020. Place it in zero page ('@ zp' or an address below $100)")]
     [InlineData("fn main() { asm {\n lda (main),y\n } }", 2, 7, "'lda (address),y' needs a zero-page address, not a function. Use a variable in zero page")]
     [InlineData("fn main() { asm {\n stx $1234,y\n } }", 2, 6, "'stx address,y' needs a zero-page address ($00-$FF), not $1234. Use a variable in zero page")]
-    // Review code-quality-semantics 10: data was moved into zero page.
-    [InlineData("data msg = \"HI\"\nvar out: u8\nfn main() { asm {\n ldy #0\n lda (msg),y\n sta out\n } }",
-        5, 7, "'lda (address),y' needs a pointer in zero page, but 'msg' is data, not a pointer. Declare one, as in 'var p: ptr u8 = addr(msg)', and use (p),y")]
     [InlineData("data t: [u8; 4] = [1, 2, 3, 4]\nfn main() { asm {\n ldx #0\n lda (t,x)\n } }", 4, 7, "'lda (address,x)' needs a pointer in zero page, but 't' is data, not a pointer. Declare one, as in 'var p: ptr u8 = addr(t)', and use (p),y")]
     [InlineData("data t: [u8; 4] = [1, 2, 3, 4]\nfn main() { asm {\n ldy #0\n stx t,y\n } }",
         4, 6, "'stx address,y' needs a zero-page address, but 't' is data, which is never in zero page. Use another addressing mode, or a variable in zero page")]
-    [Trait("Platform", "c64")]
     [InlineData("fn main() { asm {\n stx $12,x\n } }", 2, 2, "'stx' has no address,x mode. Use another addressing mode or instruction")]
     [InlineData("fn main() { asm {\n lda $12,z\n } }", 2, 10, "Expected x or y after ',', found 'z'. Write ',x' or ',y'")]
     [InlineData("fn main() { asm {\n lda ($12,y)\n } }", 2, 11, "Expected x in (address,x), found 'y'. Write (address,x)")]
@@ -529,18 +523,13 @@ public class AsmTests
     [InlineData("var t: [u8; 2]\nfn main() { asm {\n lda t[1]\n } }", 3, 7, "An assembly operand must be a constant, or the name of a variable, function or .label. Declare a constant for a computed value")]
     [InlineData("fn main() { asm {\n lda 70000\n } }", 2, 6, "Address 70000 is outside memory. Use an address from $0000 to $FFFF")]
     [InlineData("data B: [u8; 1] = [0]\nfn main() { asm {\n lda B + 65536\n } }", 3, 8, "Offset 65536 from an address is outside memory. Use a smaller offset")]
-    // The address itself, once the program is placed (third review, suggestion 3).
-    [InlineData("data B: [u8; 1] = [0]\nfn main() { asm {\n lda B + 65000\n } }", 3, 2, "The address B+65000 is $10600, outside memory. Use a smaller offset")]
-    [InlineData("data B: [u8; 1] = [0]\nfn main() { asm {\n lda B + 65535\n } }", 3, 2, "The address B+65535 is $10817, outside memory. Use a smaller offset")]
     [InlineData("var v: u8 @ $02\nfn main() { asm {\n lda v - 5\n } }", 3, 2, "The address v-5 is -$3, outside memory. Use a smaller offset")]
     [InlineData("var v: u8 @ $C000\nfn main() { asm {\n sta v + $4000, x\n } }", 3, 2, "The address v+16384 is $10000, outside memory. Use a smaller offset")]
-    [InlineData("fn f() { }\nfn main() { asm {\n jmp f + 65000\n } }", 3, 2, "The address f+65000 is $105FF, outside memory. Use a smaller offset")]
     [InlineData("data B: [u8; 1] = [0]\nfn main() { asm {\n lda B + 4294967296\n } }", 3, 8, "Offset 4294967296 from an address is outside memory. Use a smaller offset")]
     [InlineData("var v: u8\nfn main() { asm {\n lda v - 65536\n } }", 3, 8, "Offset -65536 from an address is outside memory. Use a smaller offset")]
     [InlineData("var v: u16\nfn main() { asm {\n lda #(v + 65536).hi\n } }", 3, 18, "Offset 65536 from an address is outside memory. Use a smaller offset")]
     [InlineData("fn main() { asm {\n lda 1/0\n } }", 2, 7, "Division by zero. Check the divisor")]
     [InlineData("fn main() { asm {\n lda #1 == 1\n } }", 2, 9, "Assembly operands can only use + - * / % & | ^ << >>. Declare a constant for anything else")]
-    [InlineData("data d: [u8; 2] = [1, 2]\nfn main() { asm {\n inc d\n } }", 3, 6, "'d' is data, which is read-only. Declare it with 'var' to change it")]
     [InlineData("fn main() { for i in 0..3 { asm {\n inc i\n } } }", 2, 6, "Loop variable 'i' cannot be changed inside the loop. Use a 'while' loop to change the counter yourself")]
     [InlineData("fn main() { for i in 0..3 using X { asm {\n stx i\n } } }", 2, 6, "'i' lives in register X; use the register directly")]
     [InlineData("asm fn f(v: u8 using A) {\n sta v\n}\nfn main() { f(1) }", 2, 6, "'v' is passed in register A; use the register directly")]
@@ -558,6 +547,22 @@ public class AsmTests
     {
         Expect.Error(source, line, column, expected);
     }
+
+    /// <summary>The rows of <see cref="Reports_errors"/> that name a C64 fact (an address, the C64's areas or encoding), so they fail on the other targets (review R8, finding 2).</summary>
+    [Trait("Platform", "c64")]
+    [Theory]
+    [InlineData("data msg = \"A\"\nfn main() { asm {\n lda #<msg\n } }", 3, 7, "An immediate operand is one byte, and an address has two. Write #name.lo or #name.hi")]
+    [InlineData("data msg = \"A\"\nfn main() { asm {\n lda #msg\n } }", 3, 7, "An address has two bytes. Write #name.lo or #name.hi")]
+    // Review code-quality-semantics 10: data was moved into zero page.
+    [InlineData("data msg = \"HI\"\nvar out: u8\nfn main() { asm {\n ldy #0\n lda (msg),y\n sta out\n } }",
+        5, 7, "'lda (address),y' needs a pointer in zero page, but 'msg' is data, not a pointer. Declare one, as in 'var p: ptr u8 = addr(msg)', and use (p),y")]
+    // The address itself, once the program is placed (third review, suggestion 3).
+    [InlineData("data B: [u8; 1] = [0]\nfn main() { asm {\n lda B + 65000\n } }", 3, 2, "The address B+65000 is $10600, outside memory. Use a smaller offset")]
+    [InlineData("data B: [u8; 1] = [0]\nfn main() { asm {\n lda B + 65535\n } }", 3, 2, "The address B+65535 is $10817, outside memory. Use a smaller offset")]
+    [InlineData("fn f() { }\nfn main() { asm {\n jmp f + 65000\n } }", 3, 2, "The address f+65000 is $105FF, outside memory. Use a smaller offset")]
+    [InlineData("data d: [u8; 2] = [1, 2]\nfn main() { asm {\n inc d\n } }", 3, 6, "'d' is data, which is read-only. Declare it with 'var' to change it")]
+    public void Reports_errors_with_c64_facts(string source, int line, int column, string expected) =>
+        Reports_errors(source, line, column, expected);
 
     [Trait("Platform", "c64")]
     [Fact]
