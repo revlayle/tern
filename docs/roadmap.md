@@ -794,6 +794,10 @@ Decision 2026-11-12 (was M23); the first milestone after the first release, befo
 
 A draft from the spec session of 2026-11-12, to start from: `///` only right before a declaration or struct field (elsewhere, or with a blank line between, an error); a `///` block at the top of a file followed by a blank line documents the module; Markdown text, no `@param` tags; the library's comments become `///`. The server is `tern lsp` (stdio, no new NuGet package) with a VS Code extension in `editors/vscode/` (colouring and a client); a module is compiled through a main file that imports it, or checked alone; hover shows signature, address, bytes and fixed cycles for functions, type and address for variables, values for constants, offsets for struct fields, from the last version that compiled when the text does not; go to definition for names, `module.name`, `import`, fields, asm `.label`s and `addr()` arguments.
 
+### Checks on the real emulators (`TERN_REAL`)
+
+Decision 2026-11-21 (question 174; review tests 12). After the release, at a point the developer picks. A small set of programs per platform, each with an expected screen or memory, run on VICE, Altirra, AppleWin and Mesen by a script when asked (`TERN_REAL=1`, as `TERN_COMPARE`), using `tests/tools/altirra-shot.ps1` and `mesen-shot.ps1`. They check the library and `tern run`'s stand-ins against the machines, which no test against a model can (tools 9 and 11 were errors in the model). Done when: each platform's set passes on its emulators, and a failure names the program and what differed.
+
 ### 65C02: analysis (spec session, before M29)
 
 Decision 2026-11-12. Before the X16 platform and its library, a spec session checks how far the compiler should go with the 65C02, beyond the instructions listed in M29. The result may split M29 into a CPU milestone and a platform milestone. Notes from the spec session of 2026-11-12, a starting point, not decisions:
