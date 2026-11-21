@@ -154,17 +154,21 @@ public class AlignTests
             memory { cartridge nrom vertical }
             var before: [u8; 3]
             var level: [u8; 3] @ align(256) = [1, 2, 3]
+            var next: [u8; 2] @ align(256) = [4, 5]
             var x: u8
-            fn main() { before[0] = 1; level[1] += 5; x = level[1] }
+            fn main() { before[0] = 1; level[1] += 5; x = level[1] + next[1] }
             """, platform: Platform.Nes);
-        int at = r.Address("level");
+        int at = r.Address("level"), second = r.Address("next");
         Assert.Equal(0, at % 256);
-        Assert.True(at < 0x0800);
-        Assert.Equal(7, r.U8("x"));
-        var line = r.Result.Report.Split('\n').Single(l => l.StartsWith("Aligned level")).TrimEnd();
-        int padding = int.Parse(System.Text.RegularExpressions.Regex.Match(line, @"(\d+) bytes? of padding").Groups[1].Value);
-        Assert.Equal($"Aligned level: ${at:X4} (@ align(256)), {padding} {(padding == 1 ? "byte" : "bytes")} of padding before it", line);
-        Assert.InRange(padding, 0, 255);
+        Assert.Equal(0, second % 256);
+        Assert.True(second < 0x0800);
+        Assert.Equal(12, r.U8("x"));
+        // The padding is the gap below each one: none below the first (the block starts with it), and from
+        // the end of the first to the second (review R8, finding 1: the count itself, not only its form).
+        var report = r.Result.Report.Split('\n').Select(l => l.TrimEnd()).ToList();
+        Assert.Contains($"Aligned level: ${at:X4} (@ align(256)), 0 bytes of padding before it", report);
+        Assert.Contains($"Aligned next: ${second:X4} (@ align(256)), {second - (at + 3)} bytes of padding before it", report);
+        Assert.Equal(at + 256, second);
     }
 
     [Fact]
