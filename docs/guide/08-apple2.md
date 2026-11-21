@@ -73,7 +73,7 @@ Results that are `bool` are true on failure. Overlays are written as `.bin` file
 
 ## 8.5 `tern run` on the Apple II
 
-The built-in emulator has stand-ins for COUT, HOME, the routines the startup code calls, and the MLI's CLOSE and QUIT, and reads the build's own overlay files by name in capitals (`"LEVEL1.BIN"`); a write stops the run, and so does a call to another ROM routine (`read_key`, `bell`, `wait`, `put_hex`). `--screen` shows the text screen, in the Apple II's row order. Graphics are checked in AppleWin.
+The built-in emulator has stand-ins for COUT, HOME, the routines the startup code calls, and the MLI's CLOSE and QUIT, and reads the build's own overlay files by name in capitals (`"LEVEL1.BIN"`); a write stops the run, and so does a call to another ROM routine (`read_key`, `bell`, `wait`, `put_hex`). `--screen` shows the text screen, in the Apple II's row order. The keyboard `$C000` and the buttons `$C061`-`$C063` read below `$80` (no key, no button); `--set $C000=$C1` gives a pressed `A`. Graphics are checked in AppleWin.
 
 ## 8.6 Examples
 

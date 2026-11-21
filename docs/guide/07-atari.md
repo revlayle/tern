@@ -89,7 +89,7 @@ Results that are `bool` are true on failure. A write's last bytes reach the disk
 
 ## 7.6 `tern run` on the Atari
 
-The built-in emulator has no ANTIC, GTIA, POKEY or PIA. CIO's screen output has a stand-in (the screen is the OS's 40 x 24 text screen, with a left margin of 2), and so have `SETVBV` and CIO's reads of the build's own overlay files, named in capitals after the device (`"D1:LEVEL1.XEX"`). Opening a file for writing stops the run. `--screen` shows the text screen. Display lists and interrupts are checked in Altirra.
+The built-in emulator has no ANTIC, GTIA, POKEY or PIA. CIO's screen output has a stand-in (the screen is the OS's 40 x 24 text screen, with a left margin of 2), and so have `SETVBV` and CIO's reads of the build's own overlay files, named in capitals after the device (`"D1:LEVEL1.XEX"`). Opening a file for writing stops the run. `--screen` shows the text screen. Input reads as idle: `CH` (`$2FC`) is `$FF` (no key), `STICK0`-`3` are `$0F` (centered), `STRIG0`-`3` are 1 (not pressed) and `CONSOL` reads 7 (no console key); `--set` gives other values. Display lists and interrupts are checked in Altirra.
 
 ## 7.7 Examples
 

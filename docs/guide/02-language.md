@@ -37,6 +37,7 @@ Compile-time code has two more types, `int` and `real`, which never reach the 65
 - All arithmetic **wraps**, and there is no integer promotion: `u8 + u8` is a `u8` ([10.1](10-behavior.md#101-everything-wraps)).
 - `u8` mixed with `u16` widens to `u16`. Narrowing needs `as`: `x = big as u8` keeps the low byte.
 - Mixing signed and unsigned is an error; cast one side.
+- A `bool` is not a number: `b as u8` gives 0 or 1, and a literal is written as the number (`1`, not `true`). A number is not a `bool` either: an `if` or `while` condition must be a `bool`, and `u8 as bool` is an error. Write the compare, `if x != 0`, which costs the same as a C-style test (`lda x` / `beq skip`). For signed types `x > 0` is not the same test, since a negative `x` is not zero.
 - Constants follow their own rules: they are exact, and they take a type only where they are used ([2.4](#24-constants)).
 - `*`, `/` and `%` work only on constants (`const SIZE = 40 * 25`). At runtime, use shifts or the `math` library:
 
