@@ -52,7 +52,7 @@ public sealed class CliTests : TempFolderTest
     {
         var (code, _, error) = Tern("run", "--target", "c64", Write("a.tern"), "--dump", "nosuch");
         Assert.Equal(1, code);
-        Assert.Equal("--dump No variable 'nosuch'. Locals are written 'function.name'", error);
+        Assert.Equal("--dump No variable 'nosuch'. Write a local as 'function.name'", error);
     }
 
     [Fact]
@@ -107,7 +107,7 @@ public sealed class CliTests : TempFolderTest
     {
         var (code, _, error) = Tern("--target", "c64", "");
         Assert.Equal(1, code);
-        Assert.Equal("No source file given. Run 'tern --help' for the options.", error);
+        Assert.Equal("No source file given. Name a .tern file. Run 'tern --help' for the options.", error);
     }
 
     [Fact]
@@ -225,24 +225,24 @@ public sealed class CliTests : TempFolderTest
     // ---------- Option values (tools 13) ----------
 
     [Theory]
-    [InlineData(new[] { "run", "--target", "c64", "SRC", "--cycles", "abc" }, "--cycles needs a whole number above 0, found 'abc'")]
-    [InlineData(new[] { "run", "--target", "c64", "SRC", "--cycles", "0" }, "--cycles needs a whole number above 0, found '0'")]
-    [InlineData(new[] { "run", "--target", "c64", "SRC", "--irq", "-5" }, "--irq needs a whole number above 0, found '-5'")]
-    [InlineData(new[] { "run", "--target", "c64", "SRC", "--cycles" }, "--cycles needs a whole number above 0 after it")]
-    [InlineData(new[] { "--target", "c64", "SRC", "--max-errors", "0" }, "--max-errors needs a whole number from 1 to 2147483647, found '0'")]
-    [InlineData(new[] { "bench", "--target", "c64", "SRC", "--max-errors", "x" }, "--max-errors needs a whole number from 1 to 2147483647, found 'x'")]
-    [InlineData(new[] { "--target", "c64", "SRC", "-o" }, "-o needs a value after it")]
-    [InlineData(new[] { "run", "--target", "c64", "SRC", "--dump" }, "--dump needs a value after it")]
-    [InlineData(new[] { "SRC", "--target" }, "--target needs a value after it")]
-    [InlineData(new[] { "run", "--target", "c64", "SRC", "--fast" }, "Unknown argument: --fast")]
-    [InlineData(new[] { "--target", "c64", "SRC", "b.tern" }, "Unknown argument: b.tern")]
-    [InlineData(new[] { "run", "--target", "c64", "SRC", "--set", "$DC00" }, "--set '$DC00': write an address and a byte, as $DC00=$FF")]
+    [InlineData(new[] { "run", "--target", "c64", "SRC", "--cycles", "abc" }, "--cycles needs a whole number above 0, found 'abc'. Give a number of 1 or more, in digits")]
+    [InlineData(new[] { "run", "--target", "c64", "SRC", "--cycles", "0" }, "--cycles needs a whole number above 0, found '0'. Give a number of 1 or more, in digits")]
+    [InlineData(new[] { "run", "--target", "c64", "SRC", "--irq", "-5" }, "--irq needs a whole number above 0, found '-5'. Give a number of 1 or more, in digits")]
+    [InlineData(new[] { "run", "--target", "c64", "SRC", "--cycles" }, "--cycles has no value. Give a whole number above 0 after it")]
+    [InlineData(new[] { "--target", "c64", "SRC", "--max-errors", "0" }, "--max-errors needs a whole number from 1 to 2147483647, found '0'. Give a number in that range, in digits")]
+    [InlineData(new[] { "bench", "--target", "c64", "SRC", "--max-errors", "x" }, "--max-errors needs a whole number from 1 to 2147483647, found 'x'. Give a number in that range, in digits")]
+    [InlineData(new[] { "--target", "c64", "SRC", "-o" }, "-o has no value. Give its value after it")]
+    [InlineData(new[] { "run", "--target", "c64", "SRC", "--dump" }, "--dump has no value. Give its value after it")]
+    [InlineData(new[] { "SRC", "--target" }, "--target has no value. Give its value after it")]
+    [InlineData(new[] { "run", "--target", "c64", "SRC", "--fast" }, "Unknown option --fast. Check the spelling")]
+    [InlineData(new[] { "--target", "c64", "SRC", "b.tern" }, "b.tern is a second source file, and tern <file.tern> takes one. Remove it")]
+    [InlineData(new[] { "run", "--target", "c64", "SRC", "--set", "$DC00" }, "--set '$DC00' is not an address and a byte. Write them as $DC00=$FF")]
     // Review code-quality-tools 5: an option of another command is named as one, wherever it is in the table.
-    [InlineData(new[] { "bench", "--target", "c64", "SRC", "-o", "x.prg" }, "-o is an option of tern <file.tern>, not of tern bench")]
-    [InlineData(new[] { "--target", "c64", "SRC", "--cycles", "100" }, "--cycles is an option of tern run and tern bench, not of tern <file.tern>")]
-    [InlineData(new[] { "bench", "--target", "c64", "SRC", "--screen" }, "--screen is an option of tern run, not of tern bench")]
-    [InlineData(new[] { "run", "--target", "c64", "SRC", "--code", "x = 1" }, "--code is an option of tern bench, not of tern run")]
-    [InlineData(new[] { "bench", "--target", "c64", "SRC", "--no-warnings" }, "--no-warnings is an option of tern <file.tern> and tern run, not of tern bench")]
+    [InlineData(new[] { "bench", "--target", "c64", "SRC", "-o", "x.prg" }, "-o is an option of tern <file.tern>, not of tern bench. Remove it")]
+    [InlineData(new[] { "--target", "c64", "SRC", "--cycles", "100" }, "--cycles is an option of tern run and tern bench, not of tern <file.tern>. Remove it")]
+    [InlineData(new[] { "bench", "--target", "c64", "SRC", "--screen" }, "--screen is an option of tern run, not of tern bench. Remove it")]
+    [InlineData(new[] { "run", "--target", "c64", "SRC", "--code", "x = 1" }, "--code is an option of tern bench, not of tern run. Remove it")]
+    [InlineData(new[] { "bench", "--target", "c64", "SRC", "--no-warnings" }, "--no-warnings is an option of tern <file.tern> and tern run, not of tern bench. Remove it")]
     public void A_bad_option_value_names_the_option_and_the_value(string[] args, string expected)
     {
         string src = Write("a.tern");
@@ -251,14 +251,27 @@ public sealed class CliTests : TempFolderTest
         Assert.Equal(expected + ". Run 'tern --help' for the options.", error);
     }
 
-    [Fact]
-    public void A_command_line_problem_with_json_is_json()
+    /// <summary>
+    /// A command-line problem with --json is JSON too, with no file, and its fix is the suggestion (review R6,
+    /// suggestion 1): the five lines the review ran, and a missing value.
+    /// </summary>
+    [Theory]
+    [InlineData(new[] { "--json", "--target" }, "--target has no value.", "Give its value after it. Run 'tern --help' for the options")]
+    [InlineData(new[] { "--target", "zx", "--json", "SRC" }, "Unknown target 'zx'.", "Use --target c64, --target atari, --target apple2 or --target nes. Run 'tern --help' for the options")]
+    [InlineData(new[] { "--target", "c64", "--json", "--max-errors", "abc", "SRC" }, "--max-errors needs a whole number from 1 to 2147483647, found 'abc'.", "Give a number in that range, in digits. Run 'tern --help' for the options")]
+    [InlineData(new[] { "run", "--target", "c64", "--set", "zz", "--json", "SRC" }, "--set 'zz' is not an address and a byte.", "Write them as $DC00=$FF. Run 'tern --help' for the options")]
+    [InlineData(new[] { "--target", "c64", "--json", "--bogus", "SRC" }, "Unknown option --bogus.", "Check the spelling. Run 'tern --help' for the options")]
+    [InlineData(new[] { "run", "--target", "c64", "--dump", "out:0", "--json", "SRC" }, "--dump 'out:0' shows no bytes.", "Give a byte count of 1 or more")]
+    public void A_command_line_problem_with_json_is_json_with_a_suggestion_and_no_file(string[] args, string message, string suggestion)
     {
-        var (code, output, error) = Tern("--json", "--target");
+        string src = Write("ok.tern", "var out: u8\nfn main() { out = 1 }\n");
+        var (code, output, error) = Tern(args.Select(a => a == "SRC" ? src : a).ToArray());
         Assert.Equal(1, code);
         Assert.Equal("", error);
         var d = OnlyDiagnostic(output);
-        Assert.Equal("--target needs a value after it. Run 'tern --help' for the options", d.GetProperty("message").GetString() + (d.GetProperty("suggestion").GetString() is { } s ? ". " + s : ""));
+        Assert.Equal("", d.GetProperty("file").GetString());
+        Assert.Equal(message, d.GetProperty("message").GetString());
+        Assert.Equal(suggestion, d.GetProperty("suggestion").GetString());
     }
 
     // ---------- The help (tools 14) ----------

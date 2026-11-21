@@ -317,19 +317,19 @@ public class RunToolTests
     }
 
     [Theory]
-    [InlineData("nope", "No variable 'nope'. Locals are written 'function.name'")]
-    [InlineData("local", "No variable 'local'. Did you mean 'main.local'?")]
-    [InlineData("$C010-$C000", "the end is before the start")]
-    [InlineData("$FFFF:2", "goes past $FFFF")]
-    [InlineData("$G000", "is not an address or count")]
+    [InlineData("nope", "No variable 'nope'. Write a local as 'function.name'")]
+    [InlineData("local", "No variable 'local'. Check the spelling: did you mean 'main.local'?")]
+    [InlineData("$C010-$C000", "'$C010-$C000' ends before it starts. Write the lower address first")]
+    [InlineData("$FFFF:2", "goes past $FFFF. Give a range that ends at $FFFF or below")]
+    [InlineData("$G000", "is not an address or count. Write $C000 or 49152")]
     // Review M19, finding 3: no exception other than FormatException.
-    [InlineData("", "--dump needs a variable or an address")]
-    [InlineData(" ", "--dump needs a variable or an address")]
-    [InlineData(":4", "--dump needs a variable or an address")]
+    [InlineData("", "'' is not a variable or an address. Write one, as in score, main.count, $C000-$C0FF or $C000:16")]
+    [InlineData(" ", "is not a variable or an address. Write one, as in score")]
+    [InlineData(":4", "':4' is not a variable or an address. Write one")]
     [InlineData("b:", "'' is not an address or count")]
-    [InlineData("$C000:0", "the byte count must be at least 1")]
-    [InlineData("b:0", "the byte count must be at least 1")]
-    [InlineData("high:100", "'high:100' goes past $FFFF ('high' is at $FFF0)")]
+    [InlineData("$C000:0", "'$C000:0' shows no bytes. Give a byte count of 1 or more")]
+    [InlineData("b:0", "'b:0' shows no bytes. Give a byte count of 1 or more")]
+    [InlineData("high:100", "'high:100' goes past $FFFF ('high' is at $FFF0). Give a smaller byte count")]
     public void A_bad_dump_says_what_is_wrong(string what, string expected)
     {
         var e = Assert.Throws<FormatException>(() => MemoryDump.Parse(what, TernCompiler.Compile(Values)));
@@ -411,7 +411,7 @@ public class RunToolTests
     }
 
     [Theory]
-    [InlineData("$DC00", "write an address and a byte, as $DC00=$FF")]
+    [InlineData("$DC00", "'$DC00' is not an address and a byte. Write them as $DC00=$FF")]
     [InlineData("$DC00=256", "'256' is not a byte (0 to 255)")]
     [InlineData("$10000=1", "'$10000' is not an address")]
     [InlineData("joy=1", "'joy' is not an address")]
@@ -438,7 +438,7 @@ public class RunToolTests
             Assert.Contains("$C000 (1 byte):\n  $C000  01", output.ToString().Replace("\r", ""));
             var error = new StringWriter();
             Assert.Equal(1, Cli.Run(["run", "--target", "c64", file, "--set", "$DC00"], output, error));
-            Assert.Equal("--set '$DC00': write an address and a byte, as $DC00=$FF. Run 'tern --help' for the options.", error.ToString().Trim());
+            Assert.Equal("--set '$DC00' is not an address and a byte. Write them as $DC00=$FF. Run 'tern --help' for the options.", error.ToString().Trim());
         }
         finally { Directory.Delete(dir, recursive: true); }
     }

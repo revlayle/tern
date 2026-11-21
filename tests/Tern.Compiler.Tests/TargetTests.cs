@@ -19,7 +19,7 @@ public sealed class TargetTests : TempFolderTest
     {
         var (code, _, error) = Command.Tern([.. command, Write("var n: u8\nfn main() { n = 1 }\n")]);
         Assert.Equal(1, code);
-        Assert.Equal($"No target given: write {Platform.Choices}. Run 'tern --help' for the options.", error.Trim());
+        Assert.Equal($"No target given. Write {Platform.Choices}. Run 'tern --help' for the options.", error.Trim());
     }
 
     [Fact]
@@ -27,7 +27,7 @@ public sealed class TargetTests : TempFolderTest
     {
         var (code, _, error) = Command.Tern("--target", "vic20", Write("fn main() { }\n"));
         Assert.Equal(1, code);
-        Assert.Equal($"Unknown target 'vic20': write {Platform.Choices}. Run 'tern --help' for the options.", error.Trim());
+        Assert.Equal($"Unknown target 'vic20'. Use {Platform.Choices}. Run 'tern --help' for the options.", error.Trim());
     }
 
     [Fact]
@@ -36,7 +36,7 @@ public sealed class TargetTests : TempFolderTest
         // Review M25, note 7.
         var (code, _, error) = Command.Tern("--target", "c64", "--target", "atari", Write("fn main() { }\n"));
         Assert.Equal(1, code);
-        Assert.Equal("--target is given more than once: give one target. Run 'tern --help' for the options.", error.Trim());
+        Assert.Equal("--target is given more than once. Give one target. Run 'tern --help' for the options.", error.Trim());
     }
 
     [Fact]

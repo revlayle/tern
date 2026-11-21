@@ -510,6 +510,6 @@ public class NesTests
         Assert.Contains($"NesInternalRam:{r.Symbols["out"]:X4}:out", lines);
         Assert.True(r.Variables["bg"].InChr);
         var e = Assert.Throws<FormatException>(() => Tools.MemoryDump.Parse("bg", r));
-        Assert.Equal("'bg' is tile data in a chr area, at $0020 in the PPU's memory, and --dump shows the CPU's memory", e.Message);
+        Assert.Equal("'bg' is tile data in a chr area, at $0020 in the PPU's memory, and --dump shows the CPU's memory. Check tile data in an emulator", e.Message);
     }
 }

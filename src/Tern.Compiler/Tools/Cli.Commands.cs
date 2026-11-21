@@ -17,7 +17,7 @@ public static partial class Cli
             if (Read(Command.Compile, arguments, out var bad) is not { } args) return Usage1(bad!);
             bool json = args.Has("--json");
             string? input = args.Files.FirstOrDefault(), outputPath = args.Value("-o");
-            if (string.IsNullOrWhiteSpace(input)) return Usage1("No source file given");
+            if (string.IsNullOrWhiteSpace(input)) return Usage1("No source file given. Name a .tern file");
             if (args.WarningProblem is { } both) return Usage1(both);
             if (args.Platform(out var noTarget) is not { } platform) return Usage1(noTarget);
             if (outputPath is not null && OutputProblem(outputPath) is { } badOutput) return Fail(json, Diagnostic.Error(input, badOutput), badOutput);
@@ -70,7 +70,7 @@ public static partial class Cli
             if (Read(Command.Run, arguments, out var bad) is not { } args) return Usage1(bad!);
             bool json = args.Has("--json");
             string? input = args.Files.FirstOrDefault();
-            if (string.IsNullOrWhiteSpace(input)) return Usage1("No source file given");
+            if (string.IsNullOrWhiteSpace(input)) return Usage1("No source file given. Name a .tern file");
             if (args.WarningProblem is { } both) return Usage1(both);
             if (args.Platform(out var noTarget) is not { } platform) return Usage1(noTarget);
 
@@ -78,7 +78,7 @@ public static partial class Cli
             if (program is null) return 1;
             List<MemoryDump> dumps;
             try { dumps = args.All("--dump").Select(d => MemoryDump.Parse(d, program)).ToList(); }
-            catch (FormatException e) { return Fail(json, Diagnostic.Error(input, "--dump " + e.Message), "--dump " + e.Message); }
+            catch (FormatException e) { return Fail(json, Diagnostic.Error("", "--dump " + e.Message), "--dump " + e.Message); }   // a command-line problem: no file
             RunResult run;
             try { run = Runner.Run(program, RunOptionsOf(args) with { MainFile = Path.GetFileName(input) }); }
             catch (RunError e) { return Fail(json, Diagnostic.Error(input, e.Message), e.Message); }
@@ -97,7 +97,7 @@ public static partial class Cli
             // The variants in the order given: files and --code snippets.
             var variants = args.Items.Where(x => x.Option is null || x.Option.Name == "--code")
                 .Select(x => x.Option is null ? (Path: x.Text, Code: (string?)null) : (Path: (string?)null, Code: x.Text)).ToList();
-            if (variants.Count == 0) return Usage1("No variant given: name .tern files or give --code");
+            if (variants.Count == 0) return Usage1("No variant given. Name .tern files, or give --code");
             if (args.Platform(out var noTarget) is not { } platform) return Usage1(noTarget);
 
             var declarations = args.All("--decl").ToList();

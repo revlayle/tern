@@ -133,7 +133,7 @@ public sealed class WarningToolTests : TempFolderTest
         {
             var (code, _, error) = Tern(args);
             Assert.Equal(1, code);
-            Assert.Equal("--no-warnings and --warnings-as-errors cannot be given together. Run 'tern --help' for the options.", error.Trim());
+            Assert.Equal("--no-warnings and --warnings-as-errors cannot be given together. Remove one of them. Run 'tern --help' for the options.", error.Trim());
         }
     }
 

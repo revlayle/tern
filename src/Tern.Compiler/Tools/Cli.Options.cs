@@ -100,15 +100,15 @@ public static partial class Cli
 
         /// <summary>What is wrong with the warning options, or null (spec 13).</summary>
         public string? WarningProblem =>
-            Has("--no-warnings") && Has("--warnings-as-errors") ? "--no-warnings and --warnings-as-errors cannot be given together" : null;
+            Has("--no-warnings") && Has("--warnings-as-errors") ? "--no-warnings and --warnings-as-errors cannot be given together. Remove one of them" : null;
 
         /// <summary>The platform of <c>--target</c> (spec 12.2), or null with <paramref name="problem"/> saying what is wrong.</summary>
         public Platform? Platform(out string problem)
         {
             var names = All("--target").ToList();
-            problem = names.Count > 1 ? "--target is given more than once: give one target"
-                : names.Count == 0 ? $"No target given: write {Compiler.Platform.Choices}"
-                : $"Unknown target '{names[0]}': write {Compiler.Platform.Choices}";
+            problem = names.Count > 1 ? "--target is given more than once. Give one target"
+                : names.Count == 0 ? $"No target given. Write {Compiler.Platform.Choices}"
+                : $"Unknown target '{names[0]}'. Use {Compiler.Platform.Choices}";
             return names.Count == 1 ? Compiler.Platform.ByName(names[0]) : null;
         }
     }
@@ -128,14 +128,15 @@ public static partial class Cli
             if (option is null)
             {
                 // Bench compares any number of files; the other commands take one.
-                if (a.StartsWith('-') || (command != Command.Bench && read.Files.Any())) problem = $"Unknown argument: {a}";
+                if (a.StartsWith('-')) problem = $"Unknown option {a}. Check the spelling";
+                else if (command != Command.Bench && read.Files.Any()) problem = $"{a} is a second source file, and {NameOf(command)} takes one. Remove it";
                 else read.Items.Add((null, a));
             }
             else if (!option.Commands.Contains(command))
-                problem = $"{a} is an option of {string.Join(" and ", option.Commands.Select(NameOf))}, not of {NameOf(command)}";
+                problem = $"{a} is an option of {string.Join(" and ", option.Commands.Select(NameOf))}, not of {NameOf(command)}. Remove it";
             else if (option.Takes == Takes.Nothing) read.Items.Add((option, ""));
             else if (i + 1 >= arguments.Length)
-                problem = option.Takes == Takes.Count ? $"{a} needs a whole number above 0 after it" : $"{a} needs a value after it";
+                problem = option.Takes == Takes.Count ? $"{a} has no value. Give a whole number above 0 after it" : $"{a} has no value. Give its value after it";
             else
             {
                 string text = arguments[++i];
@@ -150,6 +151,6 @@ public static partial class Cli
     /// <summary>What is wrong with a count's value: "--cycles needs a whole number above 0, found 'abc'", or null.</summary>
     private static string? CountProblem(Option option, string text) =>
         long.TryParse(text, NumberStyles.None, CultureInfo.InvariantCulture, out long value) && value >= 1 && value <= option.Max ? null
-        : option.Max == long.MaxValue ? $"{option.Name} needs a whole number above 0, found '{text}'"
-        : $"{option.Name} needs a whole number from 1 to {option.Max}, found '{text}'";
+        : option.Max == long.MaxValue ? $"{option.Name} needs a whole number above 0, found '{text}'. Give a number of 1 or more, in digits"
+        : $"{option.Name} needs a whole number from 1 to {option.Max}, found '{text}'. Give a number in that range, in digits";
 }
