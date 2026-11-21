@@ -774,7 +774,7 @@ In this order:
 2. Tests 9, listing checks: each `Assert.Contains` / `DoesNotContain` on a listing scoped to the function it is about (`Listing.Code`), and each `DoesNotContain` paired with a positive check of the expected shape.
 3. Tests 11, folders: test files moved into folders by spec section, with the section in each class comment; files moved, not changed, in a commit of their own, last, so the moves stay visible as renames.
 
-If question 177 (the fix sentence as its own part of a message) is settled with a change to how messages are made, that change comes after step 1, which guards it.
+Messages stay one text through R8 (question 177, decision 2026-11-21); their split into problem, fix and code is M28's.
 
 Done when: every error test checks position and whole message, every message the compiler can give has a test or is listed with the reason it cannot be reached, no listing check reads the whole listing, the tests are filed by spec section, and the benchmarks and `SkillTests` are unchanged.
 
@@ -789,6 +789,7 @@ Decision 2026-11-08, changed 2026-11-13: the first release comes once the four p
 Decision 2026-11-12 (was M23); the first milestone after the first release, before the X16 and the C128 (decision 2026-11-13). Starts with a spec session that settles the design; its spec section is not written yet.
 
 - `///` doc comments before declarations, kept by the compiler.
+- Each message made as its parts: the problem, the fix sentence and a code, with an end position, at every place that makes an error, in one pass; `FixVerbs` then checks the fix's first word instead of finding it (question 177, decision 2026-11-21). R8's whole-message tests guard it: the text a user sees does not change.
 - A Tern language server (LSP): errors as you type (in the M19 JSON format, several per compile since M23), hover with the doc comment, type and cost (bytes, cycles where fixed), go to definition, e.g. showing that `set_irq` needs an `interrupt fn`.
 
 A draft from the spec session of 2026-11-12, to start from: `///` only right before a declaration or struct field (elsewhere, or with a blank line between, an error); a `///` block at the top of a file followed by a blank line documents the module; Markdown text, no `@param` tags; the library's comments become `///`. The server is `tern lsp` (stdio, no new NuGet package) with a VS Code extension in `editors/vscode/` (colouring and a client); a module is compiled through a main file that imports it, or checked alone; hover shows signature, address, bytes and fixed cycles for functions, type and address for variables, values for constants, offsets for struct fields, from the last version that compiled when the text does not; go to definition for names, `module.name`, `import`, fields, asm `.label`s and `addr()` arguments.

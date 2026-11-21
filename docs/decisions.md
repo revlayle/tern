@@ -1039,3 +1039,10 @@ Roadmap R6 and R8. Changes the R6 scope of 2026-11-15 and 2026-11-16 ("the rest 
 - **Tests 4 may use a baseline file** of every error case's position and message, rewritten with an environment variable like the benchmarks, instead of rewriting each theory by hand. Reason: one check covers every case, and a changed message shows in the diff; the coding session picks between it and a shared `Expect.Error`.
 - **The release waits for R8.** Reason: CLAUDE.md asks for a test per error, and `tern --json` reports positions and suggestions that agents act on.
 
+## 2026-11-21: question 177, where a message's fix sentence starts
+
+Roadmap R8 and M28. From R6 (tools 7).
+
+- **As built, for the release: an error is one text, and `Diagnostic.FixStart` finds the fix as the first sentence (after ". " or "; ") that starts with a `FixVerbs` word.** `tern --json`'s suggestion and the "(called from ...)" note both use that place. Reason: it works, and `FixSentenceTests.Every_error_has_a_fix_sentence_or_is_listed` fails on any message whose fix it cannot find, so the suggestion agents read is right today.
+- **M28 makes each message as its parts (problem, fix, code, end position) at every place that makes an error, in one pass.** `FixVerbs` then checks the fix's first word rather than finding the fix. Reason: the language server needs a code and an end position on every diagnostic, which `CompileError` lacks; splitting the fix out now would touch the ~460 places twice. R8's whole-message tests guard the pass, since the text a user sees does not change.
+
