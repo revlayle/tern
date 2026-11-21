@@ -161,7 +161,7 @@ public static partial class Cli
             $"Memory is plain RAM (no {string.Join("; no ", machines.Select(m => m.UnmodelledChips).OfType<string>())}); a few ROM routines have stand-ins, which take no cycles, and other ROM calls stop the run. " +
             "Memory the program does not load starts with fixed pseudo-random bytes and A, X and Y are not zero, as on a machine after its ROM ran, so a read of memory the program never wrote shows; the text screen starts blank. " +
             $"Input reads idle, nothing pressed: {string.Join("; ", machines.Select(m => m.IdleInput).OfType<string>())}. Give input with --set. " +
-            "A brk stops the run, and so does an undocumented opcode, unless a machine below says otherwise. " +
+            "An undocumented opcode stops the run. A brk does too, unless a machine below says otherwise. " +
             string.Join(" ", machines.Select(m => m.Help));
         return string.Join(Environment.NewLine, Wrap(text, "", ""));
     }

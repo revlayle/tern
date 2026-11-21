@@ -288,7 +288,7 @@ public sealed class CliTests : TempFolderTest
         Assert.Contains("which take no cycles", help);
         Assert.Contains("Input reads idle, nothing pressed: the C64's $DC00 and $DC01 are $FF; the Atari's CH ($2FC) is $FF, STICK0-3 $0F, " +
             "STRIG0-3 1 and CONSOL 7; the Apple II's $C000 and $C061-$C063 are 0. Give input with --set.", help);
-        Assert.Contains("A brk stops the run, and so does an undocumented opcode, unless a machine below says otherwise.", help);
+        Assert.Contains("An undocumented opcode stops the run. A brk does too, unless a machine below says otherwise.", help);
         Assert.Contains("a brk runs the program's IRQ handler when the program sets the IRQ vector.", help);
         // Each machine's own sentence, from Platform.All (review R6, suggestion 3).
         foreach (var p in Platform.All.Where(p => p.NewMachine is not null))
