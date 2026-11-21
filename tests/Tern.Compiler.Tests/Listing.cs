@@ -81,6 +81,17 @@ public static class Listing
 
     public static string Text(Run run, string function = "main") => Text(run.Result, function);
 
+    /// <summary>The source comments just above <paramref name="function"/>'s label: the line that declares it.</summary>
+    public static List<string> Header(CompileResult result, string function = "main")
+    {
+        var lines = AllLines(result);
+        int label = lines.IndexOf($"{function}:");
+        if (label < 0) throw new Xunit.Sdk.XunitException($"No function {function} in the listing\n{result.Listing}");
+        int start = label;
+        while (start > 0 && lines[start - 1].TrimStart().StartsWith(';')) start--;
+        return [.. lines[start..label].Select(l => l.Trim())];
+    }
+
     /// <summary>
     /// The names of the program's placed sections (functions, data, variables' areas), for a check that a
     /// function was or was not compiled, without reading the listing.

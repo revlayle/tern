@@ -55,7 +55,8 @@ public class IndexOffsetTests
             }
             """);
         Assert.Equal(255, r.U8("out"));   // head - 1 wraps to 255
-        Assert.DoesNotContain("ring-1", r.Result.Listing);
+        Assert.DoesNotContain("ring-1", Listing.Code(r));
+        Assert.Matches(@"\blda ring,[xy]\b", Listing.Code(r));
     }
 
     [Trait("Shape", "nmos6502")]
@@ -76,7 +77,8 @@ public class IndexOffsetTests
             }
             """);
         Assert.Equal(1, r.U8("out"));
-        Assert.Equal(folded, r.Result.Listing.Contains($"a-{c},x"));
+        Assert.Equal(folded, Listing.Code(r).Contains($"a-{c},x"));
+        Assert.Equal(!folded, System.Text.RegularExpressions.Regex.IsMatch(Listing.Code(r), @"\blda a,[xy]\b"));
     }
 
     [Trait("Shape", "nmos6502")]
@@ -91,7 +93,7 @@ public class IndexOffsetTests
             }
             """);
         for (int i = 1; i < 8; i++) Assert.Equal(20 * i + 10, r.U8("b", i - 1));
-        Assert.Contains("a-1,x", r.Result.Listing);
+        Assert.Contains("a-1,x", Listing.Code(r));
     }
 
     // M18 F2: a[i + c] folded when the for counter's bounds prove i + c does not wrap (spec 3.2).
@@ -130,8 +132,8 @@ public class IndexOffsetTests
         if (down) order = order.Reverse();
         foreach (int i in order) { want[i] = Ring[i + c]; want[i + c] = (byte)(want[i + c] + 1); }
         for (int k = 0; k < 256; k++) Assert.Equal(want[k], r.U8("b", k));
-        Assert.Contains($"a+{c},x", r.Result.Listing);
-        Assert.Contains($"b+{c},x", r.Result.Listing);
+        Assert.Contains($"a+{c},x", Listing.Code(r));
+        Assert.Contains($"b+{c},x", Listing.Code(r));
     }
 
     [Trait("Shape", "nmos6502")]
@@ -146,7 +148,7 @@ public class IndexOffsetTests
             }
             """);
         for (int i = 0; i <= 250; i += 7) Assert.Equal(Ring[i + 10], r.U8("b", i));
-        Assert.Contains("a+10,x", r.Result.Listing);
+        Assert.Contains("a+10,x", Listing.Code(r));
     }
 
     [Trait("Shape", "nmos6502")]
@@ -160,7 +162,7 @@ public class IndexOffsetTests
             }
             """);
         for (int i = 0; i < 127; i++) Assert.Equal((ushort)(Words[i + 1] + Words[i]), r.U16At("v", i, 128));
-        Assert.Contains("w+1,x", r.Result.Listing);
+        Assert.Contains("w+1,x", Listing.Code(r));
     }
 
     [Trait("Shape", "nmos6502")]
@@ -181,7 +183,7 @@ public class IndexOffsetTests
             }
             """);
         for (int k = 0; k < 256; k++) Assert.Equal(k < last ? Ring[k + 1] : 0, r.U8("b", k));
-        Assert.Contains("a+1,x", r.Result.Listing);
+        Assert.Contains("a+1,x", Listing.Code(r));
     }
 
     [Trait("Shape", "nmos6502")]
@@ -196,7 +198,8 @@ public class IndexOffsetTests
             }
             """);
         for (int k = 0; k < 255; k++) Assert.Equal(Ring[(k + 2) & 0xFF], r.U8("b", k));   // b[254] = a[0]
-        Assert.DoesNotContain("a+2,x", r.Result.Listing);
+        Assert.DoesNotContain("a+2,x", Listing.Code(r));
+        Assert.Matches(@"\blda a,[xy]\b", Listing.Code(r));
     }
 
     [Trait("Shape", "nmos6502")]
@@ -219,7 +222,8 @@ public class IndexOffsetTests
             }
             """);
         Assert.Equal(Ring[(top + c) & 0xFF], r.U8("out"));
-        Assert.DoesNotContain($"a+{c},x", r.Result.Listing);
+        Assert.DoesNotContain($"a+{c},x", Listing.Code(r));
+        Assert.Matches(@"\blda a,[xy]\b", Listing.Code(r));
     }
 
     [Trait("Shape", "nmos6502")]
@@ -235,7 +239,8 @@ public class IndexOffsetTests
             }
             """);
         Assert.Equal(Ring[0], r.U8("out"));
-        Assert.DoesNotContain("a+1,x", r.Result.Listing);
+        Assert.DoesNotContain("a+1,x", Listing.Code(r));
+        Assert.Matches(@"\blda a,[xy]\b", Listing.Code(r));
     }
 
     [Fact]

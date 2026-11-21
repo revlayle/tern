@@ -38,7 +38,7 @@ public class FunctionAddressTests
         Assert.Equal(f, r.U16("v"));
         Assert.Equal(f & 0xFF, r.U8("lo"));
         Assert.Equal(f >> 8, r.U8("hi"));
-        Assert.Contains("lda #f.lo", r.Result.Listing);
+        Assert.Contains("lda #f.lo", Listing.Instructions(r));
     }
 
     [Fact]

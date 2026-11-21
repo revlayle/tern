@@ -48,8 +48,8 @@ public class IndexedOperandTests
             }
             """);
         for (int i = 0; i < 16; i++) Assert.Equal(Apply(op, A[i], B[15 - i]), r.U8("c", i));
-        Assert.Contains($"{Mnemonic(op)} b,y", r.Result.Listing);   // the loop holds X
-        Assert.DoesNotContain("_t0", r.Result.Listing);
+        Assert.Contains($"{Mnemonic(op)} b,y", Listing.Code(r));   // the loop holds X
+        Assert.DoesNotContain("_t0", Listing.Code(r));
     }
 
     [Fact]
@@ -79,7 +79,7 @@ public class IndexedOperandTests
             }
             """);
         for (int i = 0; i < 16; i++) Assert.Equal(Apply(op, B[i], A[i] >> 1), r.U8("c", i));
-        Assert.Contains($"{Mnemonic(op)} b,x", r.Result.Listing);
+        Assert.Contains($"{Mnemonic(op)} b,x", Listing.Code(r));
     }
 
     [Fact]
@@ -115,9 +115,9 @@ public class IndexedOperandTests
             Assert.Equal((byte)(A[i] + B[i]), r.U8("c", i));
             Assert.Equal((A[i] == B[i] ? 1 : 0) + (A[i] < B[i] ? 2 : 0), r.U8("flags", i));
         }
-        Assert.Contains("adc (main.q),y", r.Result.Listing);
-        Assert.Contains("cmp (main.q),y", r.Result.Listing);
-        Assert.DoesNotContain("_t0", r.Result.Listing);
+        Assert.Contains("adc (main.q),y", Listing.Code(r));
+        Assert.Contains("cmp (main.q),y", Listing.Code(r));
+        Assert.DoesNotContain("_t0", Listing.Code(r));
     }
 
     [Trait("Shape", "nmos6502")]
@@ -149,9 +149,9 @@ public class IndexedOperandTests
                 | (x > y ? 16 : 0) | (x <= y ? 32 : 0) | ((x >> 1) < y ? 64 : 0) | (y == (x >> 1) ? 128 : 0);
             Assert.Equal(f, r.U8("flags", i));
         }
-        Assert.Contains("cmp b,x", r.Result.Listing);
-        Assert.Contains("cmp b,y", r.Result.Listing);
-        Assert.DoesNotContain("cmp main._t", r.Result.Listing);
+        Assert.Contains("cmp b,x", Listing.Code(r));
+        Assert.Contains("cmp b,y", Listing.Code(r));
+        Assert.DoesNotContain("cmp main._t", Listing.Code(r));
     }
 
     [Trait("Shape", "nmos6502")]
@@ -180,7 +180,7 @@ public class IndexedOperandTests
             int f = (s[i] < t[i] ? 1 : 0) | (s[i] >= t[i] ? 2 : 0) | (s[i] > t[i] ? 4 : 0) | (s[i] <= t[i] ? 8 : 0);
             Assert.Equal(f, r.U8("flags", i));
         }
-        Assert.Contains("sbc t,x", r.Result.Listing);
+        Assert.Contains("sbc t,x", Listing.Code(r));
     }
 
     [Fact]
@@ -221,9 +221,9 @@ public class IndexedOperandTests
             var want = (ushort)(op switch { "+" => x + y, "-" => x - y, "&" => x & y, "|" => x | y, _ => x ^ y });
             Assert.Equal(want, r.U16At("w", i, 16));
         }
-        Assert.Contains($"{Mnemonic(op)} v,y", r.Result.Listing);
-        Assert.Contains($"{Mnemonic(op)} v+16,y", r.Result.Listing);
-        Assert.DoesNotContain("_t0", r.Result.Listing);
+        Assert.Contains($"{Mnemonic(op)} v,y", Listing.Code(r));
+        Assert.Contains($"{Mnemonic(op)} v+16,y", Listing.Code(r));
+        Assert.DoesNotContain("_t0", Listing.Code(r));
     }
 
     [Trait("Shape", "nmos6502")]
@@ -240,9 +240,9 @@ public class IndexedOperandTests
             """);
         int f0 = 0, f1 = 1;
         for (int i = 2; i < 24; i++) { (f0, f1) = (f1, (ushort)(f0 + f1)); Assert.Equal(f1, r.U16At("fib", i, 24)); }
-        Assert.Contains("adc fib-2,x", r.Result.Listing);
-        Assert.Contains("sta fib,x", r.Result.Listing);
-        Assert.DoesNotContain("_t0", r.Result.Listing);
+        Assert.Contains("adc fib-2,x", Listing.Code(r));
+        Assert.Contains("sta fib,x", Listing.Code(r));
+        Assert.DoesNotContain("_t0", Listing.Code(r));
     }
 
     [Trait("Shape", "nmos6502")]
@@ -275,9 +275,9 @@ public class IndexedOperandTests
         Assert.Equal(total, r.U16("total"));
         Assert.Equal(largest, r.U16("largest"));
         Assert.Equal((byte)count, r.U8("count"));
-        Assert.Contains("adc u,x", r.Result.Listing);
-        Assert.Contains("sbc u+16,x", r.Result.Listing);
-        Assert.DoesNotContain("_t0", r.Result.Listing);
+        Assert.Contains("adc u,x", Listing.Code(r));
+        Assert.Contains("sbc u+16,x", Listing.Code(r));
+        Assert.DoesNotContain("_t0", Listing.Code(r));
     }
 
     [Theory]

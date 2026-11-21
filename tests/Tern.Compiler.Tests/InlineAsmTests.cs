@@ -27,7 +27,8 @@ public class InlineAsmTests
         Assert.Equal(((x << 1) | 1) & 0xFF, r.U8("out"));
         var main = string.Join("\n", Listing.Lines(r, "main"));
         Assert.DoesNotContain("jsr", main);
-        Assert.DoesNotContain("twice_plus_one:", r.Result.Listing);
+        Assert.DoesNotContain("twice_plus_one", Listing.Sections(r));
+        Assert.Contains("ora #$01", Listing.Instructions(r));
     }
 
     [Trait("Shape", "nmos6502")]

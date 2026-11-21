@@ -164,16 +164,17 @@ public class EvaluationOrderTests
     [InlineData("w = (v1 as u16) - ((v2 as u16) << 1)")]
     public void Two_volatile_reads_run_left_to_right(string body)
     {
-        var listing = TernCompiler.Compile($$"""
+        var result = TernCompiler.Compile($$"""
             volatile var v1: u8 @ $D012
             volatile var v2: u8 @ $D013
             var r: u8
             var w: u16
             fn main() { {{body}} }
-            """).Listing;
-        int first = listing.IndexOf(" v1 ", StringComparison.Ordinal);
-        int second = listing.IndexOf(" v2 ", StringComparison.Ordinal);
-        Assert.True(first >= 0 && second > first, listing);
+            """);
+        var main = Listing.Instructions(result);
+        int first = main.FindIndex(i => i.EndsWith(" v1"));
+        int second = main.FindIndex(i => i.EndsWith(" v2"));
+        Assert.True(first >= 0 && second > first, Listing.Code(result));
     }
 
     [Fact]

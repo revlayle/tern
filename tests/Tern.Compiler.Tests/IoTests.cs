@@ -548,9 +548,10 @@ public class IoTests
             io.close(1)
             st = io.status()
             """, new FakeKernal());
-        Assert.Contains("jsr $FFBA", r.Result.Listing);
-        Assert.Contains("jsr $FFC3", r.Result.Listing);
-        Assert.Contains("jsr $FFB7", r.Result.Listing);
+        var main = Listing.Instructions(r);
+        Assert.Contains("jsr $FFBA", main);
+        Assert.Contains("jsr $FFC3", main);
+        Assert.Contains("jsr $FFB7", main);
     }
 
     [Trait("Shape", "nmos6502")]
@@ -558,6 +559,8 @@ public class IoTests
     public void Unused_functions_cost_nothing()
     {
         var r = Go("n = 1", new FakeKernal());
-        Assert.DoesNotContain("jsr $FFBD", r.Result.Listing);
+        Assert.DoesNotContain(r.Result.Instructions, i => i.Text == "jsr $FFBD");
+        Assert.DoesNotContain(Listing.Sections(r), s => s.StartsWith("io."));
+        Assert.Equal(["lda #$01", "sta n", "rts"], Listing.Instructions(r));
     }
 }

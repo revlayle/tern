@@ -52,8 +52,8 @@ public class IndexCheckTests
                 }
             }
             """, checkIndexes: false);
-        Assert.Contains("lda a-1,x", run.Result.Listing);
-        Assert.Contains("lda a+1,x", run.Result.Listing);
+        Assert.Contains("lda a-1,x", Listing.Instructions(run));
+        Assert.Contains("lda a+1,x", Listing.Instructions(run));
         Assert.Equal(["6: Index 255 is outside 'a', which has 10 elements", "7: Index 10 is outside 'a', which has 10 elements"],
             run.IndexErrors.Select(e => $"{e.Line}: {e.Message}"));
         Assert.All(run.IndexErrors, e => Assert.Equal(1, e.Count));

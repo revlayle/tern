@@ -89,7 +89,7 @@ public class MatchTests
             Assert.True(e == res[v], $"f({v}) = {res[v]}, expected {e}");
         }
         var r = Run.Program("var out: [u8; 256]\n" + source + "\nfn main() { out[0] = f(3) }");
-        Assert.DoesNotContain("jumphi", r.Result.Listing);
+        Assert.DoesNotContain("jumphi", Listing.Text(r, "f"));
         Assert.DoesNotContain("Jump table of the indexed match", r.Result.Report);
         Assert.Contains("cmp #$0A|beq", Listing.CodeWithLabels(r, "f"));
     }
@@ -385,7 +385,8 @@ public class MatchTests
             """);
         for (int k = 0; k < 8; k++) Assert.Equal(2, r.U8("out", k));
         Assert.Equal(2, r.U8("out", 15));
-        Assert.DoesNotContain("jumphi", r.Result.Listing);
+        Assert.DoesNotContain("jumphi", Listing.Text(r));
+        Assert.Contains("cmp #$07", Listing.Instructions(r));
     }
 
     [Trait("Shape", "nmos6502")]

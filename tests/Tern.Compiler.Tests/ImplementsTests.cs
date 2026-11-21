@@ -120,7 +120,7 @@ public class ImplementsTests
             {{Header}}
             fn main() { load(1); level_api.init(5) }
             """);
-        Assert.Matches(@"20 00 60 +jsr \$6000", r.Listing);
+        Assert.Matches(@"20 00 60 +jsr \$6000", Listing.Text(r));
     }
 
     [Trait("Shape", "nmos6502")]
@@ -139,7 +139,9 @@ public class ImplementsTests
             Assert.Equal(0x4C, file.Image[3]);
             Assert.Equal(r.Address($"{file.Name}.update"), Word(file.Image, 4));
         }
-        Assert.Matches(@"\$6003  4C .. ..  jmp level1\.update", r.Result.Listing);
+        // Each overlay's table entry for update: a jmp at $6003 to its own function.
+        Assert.Equal(["jmp level1.update", "jmp level2.update"], Listing.Instructions(r, "level_api.update"));
+        Assert.All(r.Result.Instructions.Where(i => i.Section == "level_api.update"), i => Assert.Equal(0x6003, i.Address));
     }
 
     [Fact]

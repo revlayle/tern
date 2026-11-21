@@ -76,7 +76,7 @@ public sealed class ModuleTests : TempFolderTest
         Assert.Equal((30 + 200) & 0xFF, r.U8("d"));
         Assert.Equal(42, r.U8("e"));
         Assert.Equal(4, r.U8("util.counter"));
-        Assert.Contains("jsr util.add", r.Result.Listing);
+        Assert.Contains("jsr util.add", Listing.Instructions(r));
         // VICE labels keep the dots, so a module name and a similar main-file name do not clash.
         Assert.Contains($"al C:{r.Address("util.counter"):x4} .util.counter{Environment.NewLine}", r.Result.Labels);
     }
@@ -211,8 +211,8 @@ public sealed class ModuleTests : TempFolderTest
     {
         Write(Src, "util.tern", Util);
         var r = CompileMain("import util\nvar v: u8\nfn main() { v = util.add(1, 2) }");
-        Assert.Contains("; util.tern:5: fn add(a: u8, b: u8) -> u8 { return clamp(a + b) }", r.Listing);
-        Assert.Contains(";    3: fn main() { v = util.add(1, 2) }", r.Listing);
+        Assert.Contains("; util.tern:5: fn add(a: u8, b: u8) -> u8 { return clamp(a + b) }", Listing.Header(r, "util.add"));
+        Assert.Contains(";    3: fn main() { v = util.add(1, 2) }", Listing.Header(r));
     }
 
     [Fact]

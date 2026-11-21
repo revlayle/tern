@@ -290,7 +290,9 @@ public class InlineLocalsTests
             fn main() { a = bump(41) }
             """);
         Assert.Equal(42, r.U8("a"));
-        Assert.DoesNotContain("jsr bump", r.Result.Listing);
+        var main = Listing.Instructions(r);
+        Assert.DoesNotContain(main, i => i.StartsWith("jsr"));
+        Assert.Contains("inc main.bump.t", main);
         Assert.Contains("main.bump.t", r.Result.Symbols.Keys);
     }
 

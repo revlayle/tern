@@ -160,7 +160,7 @@ public class MathLibraryTests
         Assert.Equal(600, r.U16("p"));
         Assert.Equal(66, r.U8("q"));
         Assert.Equal(2, r.U8("rest"));
-        Assert.Matches(@"ldx b\s+;.*\n.*lda a\s+;.*\n.*jsr math\.mul8", r.Result.Listing);
+        Assert.Contains("ldx b|lda a|jsr math.mul8", Listing.Code(r));
     }
 
     [Fact]

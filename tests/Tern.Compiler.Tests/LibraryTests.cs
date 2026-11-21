@@ -296,8 +296,8 @@ public class C64LibraryTests
         Assert.Equal(0x41, r.U8("key"));
         Assert.Equal(12 | (30 << 8), r.U16("pos"));
         // print: the character goes straight from (src),y to the KERNAL.
-        Assert.Matches(@"lda \(c64\.print\.src\),y.*\n.*jsr \$FFD2", r.Result.Listing);
-        Assert.Matches(@"ldx #\$0C.*\n.*ldy #\$1E.*\n.*clc.*\n.*jsr \$FFF0", r.Result.Listing);
+        Assert.Matches(@"lda \(c64\.print\.src\),y\|jsr \$FFD2", Listing.Code(r, "c64.print"));
+        Assert.Matches(@"ldx #\$0C\|ldy #\$1E\|clc\|jsr \$FFF0", Listing.Code(r));
     }
 
     [Trait("Shape", "nmos6502")]
@@ -319,8 +319,8 @@ public class C64LibraryTests
         Assert.Equal(0, r.Ram.Bytes[0xD800 + 399]);
         Assert.Equal(0, r.Ram.Bytes[0xD800 + 440]);
         // KERNAL routines are called in ROM, with no stand-in functions.
-        Assert.DoesNotContain("\nc64.chrout:", r.Result.Listing);
-        Assert.Contains("jsr $FFD2", r.Result.Listing);
+        Assert.DoesNotContain("c64.chrout", Listing.Sections(r));
+        Assert.Contains("jsr $FFD2", Listing.Instructions(r, "c64.print"));
     }
 
     [Fact]
@@ -388,8 +388,8 @@ public class C64LibraryTests
         Assert.Equal(new byte[] { 0x25, 0x40 }, m[0xDC04..0xDC06]);
         Assert.Equal(0x7F, m[0xDD0D]);
         // Every field access is one absolute instruction: lda #6 / sta $D020.
-        Assert.Contains("A9 06", r.Result.Listing);
-        Assert.Contains("8D 20 D0", r.Result.Listing);
+        Assert.Contains("A9 06", Listing.Text(r));
+        Assert.Contains("8D 20 D0", Listing.Text(r));
     }
 
     [Fact]
@@ -444,9 +444,7 @@ public class C64LibraryTests
                 c64.interrupts_on()
             }
             """);
-        Assert.Contains("sei", r.Result.Listing);
-        Assert.Contains("cli", r.Result.Listing);
-        Assert.DoesNotContain("jsr c64.interrupts", r.Result.Listing);
+        Assert.Equal(["sei", "cli", "rts"], Listing.Instructions(r));
     }
 
     [Fact]
@@ -532,7 +530,7 @@ public class C64LibraryTests
         int total = 0;
         for (int k = 0; k < 20; k++) for (int i = 0; i < 200; i++) total += i ^ k;
         Assert.Equal(total & 0xFFFF, r.U16("sum"));
-        Assert.Contains("jmp (c64.kernal_handler)", r.Result.Listing);
+        Assert.Contains("jmp (c64.kernal_handler)", Listing.Instructions(r, "c64.kernal_entry"));
         Assert.Equal(0xFF, r.Cpu.SP);   // every interrupt left the stack as it found it
     }
 
@@ -543,10 +541,11 @@ public class C64LibraryTests
         // Checked in VICE (the commands are in its header): the split runs and the drive's status is printed.
         var path = AsmTests.FindExample("kernal_irq.tern");
         var result = TernCompiler.Compile(File.ReadAllText(path), sourcePath: path);
-        Assert.Contains("jsr c64.set_kernal_irq", result.Listing);
-        Assert.Contains("jsr io.drive_status", result.Listing);
-        Assert.Contains("jmp (c64.kernal_handler)", result.Listing);
-        Assert.Contains("jsr c64.cia_irqs_off", result.Listing);
+        var main = Listing.Instructions(result);
+        Assert.Contains("jsr c64.set_kernal_irq", main);
+        Assert.Contains("jsr io.drive_status", main);
+        Assert.Contains("jsr c64.cia_irqs_off", main);
+        Assert.Contains("jmp (c64.kernal_handler)", Listing.Instructions(result, "c64.kernal_entry"));
     }
 
     [Trait("Shape", "nmos6502")]
@@ -566,13 +565,11 @@ public class C64LibraryTests
         Assert.Equal(0x7F, r.Ram.Bytes[0xDC0D]);
         Assert.Equal(0x7F, r.Ram.Bytes[0xDD0D]);
         Assert.False(r.Cpu.I);   // leaves the I flag alone
-        var lines = r.Result.Listing.Split('\n');
-        int start = Array.FindIndex(lines, l => l.StartsWith("c64.cia_irqs_off:"));
-        var body = string.Join("\n", lines.Skip(start).TakeWhile(l => !l.Contains("rts")));
-        Assert.Contains("sta c64.cia1+13 ", body);
-        Assert.Contains("sta c64.cia2+13 ", body);
-        Assert.Contains("lda c64.cia1+13 ", body);
-        Assert.Contains("lda c64.cia2+13 ", body);
+        var body = Listing.Instructions(r, "c64.cia_irqs_off");
+        Assert.Contains("sta c64.cia1+13", body);
+        Assert.Contains("sta c64.cia2+13", body);
+        Assert.Contains("lda c64.cia1+13", body);
+        Assert.Contains("lda c64.cia2+13", body);
     }
 
     [Fact]

@@ -367,8 +367,7 @@ public class MemoryTests
             var dst: ptr u8 @ zp
             fn main() { dst[i] = src[i] }
             """);
-        var main = r.Listing[r.Listing.IndexOf("\nmain:", StringComparison.Ordinal)..];
-        return main.Split('\n').Count(l => l.StartsWith('$') && (l.Contains("ldy i ") || l.Contains("lda i ")));
+        return Listing.Instructions(r).Count(i => i is "ldy i" or "lda i");
     }
 
     [Theory]

@@ -233,7 +233,8 @@ public sealed class InterruptPartTests : TempFolderTest
             }
             """);
         Assert.Equal("rti", Listing.Instructions(r, "timer.tick")[^1]);
-        Assert.DoesNotContain("\ntimer.both:", r.Result.Listing);
+        Assert.DoesNotContain("timer.both", Listing.Sections(r));
+        Assert.Contains("timer.tick", Listing.Sections(r));
     }
 
     [Fact]
