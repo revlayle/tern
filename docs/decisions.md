@@ -1074,3 +1074,13 @@ Roadmap R6 and R8. Changes the first two points of "R6 goes to review; its three
 - **Tests 4 is finished in R6; only tests 9 and 11 move to R8.** The coding session, which works in its own worktree and had not seen the split, had already moved the error theories and the other error tests to whole messages and positions (`Expect.Error`, `Expect.Message`; commits `5355cdd` and `6bb2a63` on `r6-data`), finding and fixing two message bugs. It finishes tests 4 with the list of messages no test reaches, each given a test or a reason, then stops; R6 goes to review. Reason: reverting would throw away working tests and two fixes, and a finding split across two milestones means bookkeeping in two status tables and two reviews. Question 177's order still holds: whole-message tests come before M28's message split.
 - **R8's order: idle input (question 175), tests 9, the suite on every platform (`TERN_TARGET`), tests 11.**
 
+## 2026-11-21: validation programs before the release (V1)
+
+Roadmap V1 and the first release. Changes the second point of question 174 (same day): the real-emulator checks come before the release, as part of V1.
+
+- **About 24 programs, about six per platform, each with a known right result in `tern run` and on the platform's emulator, after R6 and R8 and before the release.** Reason: the tests check features one at a time; real programs are where features meet, and Galaxy Stars found gaps no spec session had. The release should not wait for more than the four platforms need.
+- **The developer's own games first** (smashy smashy; the unfinished horizontal shooter whose Prog8 frame rate, short of the target without going mostly to assembly, is why Tern exists), then ports of existing 6502 programs, then programs written for the suite. Reason: a port has shapes nobody chose with Tern in mind and an original to compare against; a program written for the suite tends to avoid what Tern cannot do.
+- **Others' code is checked for the right to publish a Tern version before it is ported**, and the developer approves each program; when the license is unclear, it is not used (the developer's requirement). No recreation of a commercial game.
+- **The real-emulator checks (`TERN_REAL`) are part of V1, not after the release.** Reason: a validation that runs only in `tern run` cannot find errors in its models of the ROMs and chips (as tools 9 and 11 were), and these programs are the set such a script needs.
+- **Programs are written from the `tern` skill, in sessions that do not change the compiler.** Reason: the skill is how agents write Tern; where a session gets stuck is a finding.
+

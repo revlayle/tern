@@ -779,9 +779,24 @@ Messages stay one text through R8 (question 177, decision 2026-11-21); their spl
 
 Done when: `tern run` starts with idle input on all four platforms, no listing check reads the whole listing, the suite without the tests marked as C64 tests passes with `TERN_TARGET` on all four platforms, the tests are filed by spec section, the benchmarks are unchanged, and `SkillTests` changes only by the idle input.
 
+### V1: Validation programs
+
+Decision 2026-11-21. After R6 and R8, before the release; its own branches (one per batch of programs), reviews and merges. A check of the compiler, its library and `tern run` on real programs: about 24 in all, about six per platform, each with a known right result, run in `tern run` and on the platform's emulator. Includes the real-emulator checks of question 174 (`TERN_REAL`).
+
+- **The programs.** First the developer's own games: smashy smashy, and the unfinished horizontal shooter whose frame rate in Prog8 started Tern (with its frame time measured against the target it was meant to reach). Then ports of existing 6502 programs, and programs written for the suite where no source is found. Both kinds: portable logic built for all four platforms (e.g. a sieve, sorting, a checksum, decompression, Life, maze generation, fixed-point math, a BCD score, a text parser) and programs that use what each machine is for (C64 raster interrupts, sprites, SID, scrolling; Atari display list interrupts, player-missile graphics; Apple II hires, ProDOS files; NES scrolling, sprites, controllers, bank switching), at a few sizes (a small game, an effect, a tool, a program with overlays).
+- **Others' code is checked before it is ported.** Each program not the developer's own is examined first: who wrote it, its license, and whether a Tern version of it may be published in this repository as a test program. Only code whose license allows changed copies to be redistributed (or that is in the public domain) is used; when that is unclear, the program is not used. The developer approves each one. Its `README` names the source, the author and the license; the original's code is in the repository only if its license allows it. No recreation of a commercial game (name, characters, art, levels); its mechanics in an original program are fine.
+- **A port is the same behavior in natural Tern**, not the assembly translated line by line (which would test `asm` blocks only). Where the original is assembly, its bytes and cycles for the same work are recorded beside Tern's.
+- **Written from the `tern` skill**, as a user would, in a session that does not change the compiler; where the agent gets stuck is a finding for the skill or the messages.
+- **Each program has a known right result**: memory or the text screen after a set number of frames or cycles, checked in `tern run` by the test suite, and a screenshot on its emulator (VICE, Altirra, AppleWin, Mesen), run by a script when asked (`TERN_REAL=1`, as `TERN_COMPARE`, using `tests/tools/altirra-shot.ps1` and `mesen-shot.ps1`).
+- **A gap log per program** (`gaps.md`, as for Galaxy Stars), sorted by a spec session into: the compiler breaks the spec, a small language change, a code shape, or not a gap. A compiler or library bug is fixed with its test on a coding branch.
+
+Layout: `validation/<platform>/<program>/` with the source, the expected results, the `README` and `gaps.md`; a program built for all four platforms under `validation/all/`.
+
+Done when: every program builds, gives its known result in `tern run` and on its emulator(s) with `TERN_REAL=1`, each port's source and license is recorded and approved, and every gap is sorted and each bug fixed.
+
 ## First release (after R7)
 
-Decision 2026-11-08, changed 2026-11-13: the first release comes once the four platforms C64, Atari, Apple II and NES work; the Commander X16 and the Commodore 128 come after it. Done when: M27, R1-R6 and R8 are merged, R7's must-fix items are fixed or accepted, the developer guide covers every behavior in its list, the guide (`docs/guide/`) and spec 10.1 describe the compiler and library as built, and every example builds for its platforms.
+Decision 2026-11-08, changed 2026-11-13: the first release comes once the four platforms C64, Atari, Apple II and NES work; the Commander X16 and the Commodore 128 come after it. Done when: M27, R1-R6, R8 and V1 are merged, R7's must-fix items are fixed or accepted, the developer guide covers every behavior in its list, the guide (`docs/guide/`) and spec 10.1 describe the compiler and library as built, and every example builds for its platforms.
 
 ## After the first release
 
@@ -794,10 +809,6 @@ Decision 2026-11-12 (was M23); the first milestone after the first release, befo
 - A Tern language server (LSP): errors as you type (in the M19 JSON format, several per compile since M23), hover with the doc comment, type and cost (bytes, cycles where fixed), go to definition, e.g. showing that `set_irq` needs an `interrupt fn`.
 
 Question 176 (decision 2026-11-21) is settled here, by M28's spec session: as built since R5, `///` lines go to the next token across blank lines and plain `//` comments (Rust's rule), only top-level functions, variables, constants and structs keep them, and a `///` elsewhere is dropped silently; the draft below is stricter (an error elsewhere or after a blank line), which the spec session of 2026-11-21 leaned towards. A draft from the spec session of 2026-11-12, to start from: `///` only right before a declaration or struct field (elsewhere, or with a blank line between, an error); a `///` block at the top of a file followed by a blank line documents the module; Markdown text, no `@param` tags; the library's comments become `///`. The server is `tern lsp` (stdio, no new NuGet package) with a VS Code extension in `editors/vscode/` (colouring and a client); a module is compiled through a main file that imports it, or checked alone; hover shows signature, address, bytes and fixed cycles for functions, type and address for variables, values for constants, offsets for struct fields, from the last version that compiled when the text does not; go to definition for names, `module.name`, `import`, fields, asm `.label`s and `addr()` arguments.
-
-### Checks on the real emulators (`TERN_REAL`)
-
-Decision 2026-11-21 (question 174; review tests 12). After the release, at a point the developer picks. A small set of programs per platform, each with an expected screen or memory, run on VICE, Altirra, AppleWin and Mesen by a script when asked (`TERN_REAL=1`, as `TERN_COMPARE`), using `tests/tools/altirra-shot.ps1` and `mesen-shot.ps1`. They check the library and `tern run`'s stand-ins against the machines, which no test against a model can (tools 9 and 11 were errors in the model). Done when: each platform's set passes on its emulators, and a failure names the program and what differed.
 
 ### 65C02: analysis (spec session, before M29)
 
