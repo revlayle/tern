@@ -8,9 +8,9 @@ namespace Tern.Compiler.Tests;
 /// </summary>
 public static class Expect
 {
-    /// <summary>Compiles <paramref name="source"/> for the default target and checks the error it gives.</summary>
+    /// <summary>Compiles <paramref name="source"/> for the default target, as it needs it (<see cref="TestTarget.Adapt"/>), and checks the error it gives.</summary>
     public static CompileError Error(string source, int line, int column, string message) =>
-        Error(() => TernCompiler.Compile(source, TestTarget.Default), line, column, message);
+        Error(() => TernCompiler.Compile(TestTarget.Adapt(source, TestTarget.Default), TestTarget.Default), line, column, message);
 
     /// <summary>Runs <paramref name="compile"/>, which must throw a <see cref="CompileError"/>, and checks it.</summary>
     public static CompileError Error(Func<object?> compile, int line, int column, string message)

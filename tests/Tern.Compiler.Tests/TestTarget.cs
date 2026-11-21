@@ -26,14 +26,23 @@ public static class TestTarget
 
     /// <summary>
     /// <paramref name="source"/> as <paramref name="platform"/> needs it: on a platform where every program is a
-    /// cartridge, a source with no memory block gets one naming the first board, after its imports.
+    /// cartridge, a source with no memory block gets one naming the first board, after its imports. It goes on a
+    /// line the source already has, after ';', so the lines and columns a test checks stay where they were: on a
+    /// blank line after the imports, at the end of the last import, or else (no import, or one that ends in a
+    /// comment) in front of the first declaration, whose columns then move.
     /// </summary>
     public static string Adapt(string source, Platform platform)
     {
         if (!platform.CartridgeRequired || source.Contains("memory {")) return source;
-        var lines = source.Split('\n').ToList();
-        int at = lines.TakeWhile(l => l.TrimStart().StartsWith("import ") || l.Trim().Length == 0 || l.TrimStart().StartsWith("//")).Count();
-        lines.Insert(at, $"memory {{\n    cartridge {platform.Boards[0].Name} vertical\n}}");
+        string block = $"memory {{ cartridge {platform.Boards[0].Name} vertical }}";
+        var lines = source.Split('\n');
+        int head = lines.TakeWhile(l => l.TrimStart().StartsWith("import ") || l.Trim().Length == 0 || l.TrimStart().StartsWith("//")).Count();
+        int import = head == 0 ? -1 : Array.FindLastIndex(lines, head - 1, head, l => l.TrimStart().StartsWith("import "));
+        int blank = Array.FindIndex(lines, import + 1, head - import - 1, l => l.Trim().Length == 0);
+        if (blank >= 0) lines[blank] = block;
+        else if (import >= 0 && !lines[import].Contains("//")) lines[import] = lines[import].TrimEnd('\r') + "; " + block;
+        else if (head < lines.Length) lines[head] = block + "; " + lines[head];
+        else return source + "\n" + block;
         return string.Join('\n', lines);
     }
 }
