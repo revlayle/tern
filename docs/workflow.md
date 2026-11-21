@@ -5,7 +5,7 @@ Work happens in three kinds of sessions, each in its own terminal. They communic
 | Session | Started with | Works on | Edits |
 |---|---|---|---|
 | **Spec** | `/spec` | Language design discussions with you | `docs/spec-v0.md`, `docs/decisions.md`, `docs/roadmap.md`, `docs/guide/` (and the `docs/guide.md` pointer), `docs/workflow.md`, `CLAUDE.md`, `.claude/commands/`, `.gitignore` |
-| **Coding** | `/code` | One milestone (or part of one) per session | `src/`, `tests/`, `examples/`, `.claude/skills/`, `.claude-plugin/`, `docs/status.md` |
+| **Coding** | `/code` | One milestone (or part of one) per session | `src/`, `tests/`, `examples/`, `validation/`, `.claude/skills/`, `.claude-plugin/`, `docs/status.md` |
 | **Review** | `/review` | Reviewing a milestone branch | `docs/reviews/` |
 | **Merge** | `/merge` | Merging a branch whose review is clean | nothing (creates the merge commit on `main`) |
 
