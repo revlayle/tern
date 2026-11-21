@@ -764,20 +764,28 @@ R6's status table keeps rows for tests 9 and 11, marked "moved to R8"; its revie
 
 Done when: adding a platform needs no change outside its description and its library, the feature suite passes on all four platforms, and the benchmarks and `SkillTests` are unchanged.
 
-### R8: Listing tests, the suite on every platform, test folders
+### R8: Listing tests, the suite on every platform, review R6's suggestions, test folders
 
-Decision 2026-11-21, changed the same day (tests 4 stays in R6). After R6 is merged, before the release; its own branch (`r8-tests`), review and merge. The test findings R6 leaves, the rest of tests 6, and `tern run`'s idle input. Apart from fixes for bugs the tests find, no compiler code changes, so no benchmark moves. Its review checks the findings in R7's way (a verdict per finding).
+Decision 2026-11-21, changed the same day (tests 4 stays in R6; review R6's suggestions added). After R6 is merged, before the release; its own branch (`r8-tests`), review and merge. The test findings R6 leaves, the rest of tests 6, `tern run`'s idle input and review R6's suggestions. Apart from fixes for bugs the tests find and the messages, help text and test code of step 4, no compiler code changes, so no benchmark moves. Its review checks the findings in R7's way (a verdict per finding).
 
 In this order:
 
 1. `tern run`'s idle input (question 175, spec 13): each machine's `Start` sets its input registers and the OS variables that hold input to "nothing pressed". Each value has a test that fails before it; the `SkillTests` outputs that move are rewritten in the same commit.
 2. Tests 9, listing checks: each `Assert.Contains` / `DoesNotContain` on a listing scoped to the function it is about (`Listing.Code`), and each `DoesNotContain` paired with a positive check of the expected shape.
 3. The suite on every platform (the rest of tests 6): run the whole suite with `TERN_TARGET` set to the Atari, the Apple II and the NES, and look at each test that fails. A test that fails because a C64 fact is written into it (an address such as `@ $C000`, `$D0xx` as the volatile example, `0xC0xx` in C#, no cartridge line) is marked as a C64 test with a trait, as `Shape` marks listing tests; a failure that is a compiler or library bug is fixed with its test, as in R2. A script may group the failures by their error first. Rewriting the marked tests to take their addresses from `TestTarget` is not part of R8.
-4. Tests 11, folders: test files moved into folders by spec section, with the section in each class comment; files moved, not changed, in a commit of their own, last, so the moves stay visible as renames.
+4. Review R6's suggestions (`docs/reviews/r6.md`), each with a test that fails before it where it changes behavior:
+   - 1: every command-line error has a `suggestion` in `--json`: its fix is a sentence of its own that starts with a fix verb ("Unknown target 'zx'. Use --target c64, ..."), the `--dump` byte-count error gets a fix, and command-line errors name no file. `CliTests` requires the suggestion.
+   - 2: the module parameter's fallback message is made from the error's reason, with one fix, and has a test.
+   - 3: no platform named in shared code: the cartridge messages in `MemoryLayout` use `Title` and name no other platform; the help's run-model paragraph comes from each `Machine`, listed from `Platform.All`; `ProDosSystem` finds the `io` module through a platform library property, not its name.
+   - 4, its small part: `Run` counts the NES's NMIs in `Interrupts`, as `Runner` does. One step loop for `Run` and `Runner` is after the release.
+   - 5: `TargetTests` uses `Command.Tern`.
+   - 6: `Diagnostic`'s doc comment moves from `Severity` to the record.
+   - 7: the bool-to-number fix offers `as u8` first, with the names from the expression ("Convert with 'b as u8' (0 or 1), or use 'if' to choose another number"). The skill's example of this message moves; its `SkillTests` outputs are rewritten and its prose fixed in the same commit.
+5. Tests 11, folders: test files moved into folders by spec section, with the section in each class comment; files moved, not changed, in a commit of their own, last, so the moves stay visible as renames.
 
 Messages stay one text through R8 (question 177, decision 2026-11-21); their split into problem, fix and code is M28's.
 
-Done when: `tern run` starts with idle input on all four platforms, no listing check reads the whole listing, the suite without the tests marked as C64 tests passes with `TERN_TARGET` on all four platforms, the tests are filed by spec section, the benchmarks are unchanged, and `SkillTests` changes only by the idle input.
+Done when: `tern run` starts with idle input on all four platforms, no listing check reads the whole listing, the suite without the tests marked as C64 tests passes with `TERN_TARGET` on all four platforms, the tests are filed by spec section, review R6's suggestions 1-3 and 5-7 and the NMI count of 4 are done, the benchmarks are unchanged, and `SkillTests` changes only by the idle input and the bool-to-number message.
 
 ### V1: Validation programs
 
