@@ -3,8 +3,9 @@ namespace Tern.Compiler.Tests;
 /// <summary>
 /// The target a test runs on when it names none, and the source a platform needs (review code-quality-tests
 /// 5 and 6). The default is the C64, or the platform named by <c>TERN_TARGET</c> (<c>atari</c>, <c>apple2</c>,
-/// <c>nes</c>), read in this one place. Many tests check C64 addresses or NMOS code shapes, so a whole suite
-/// on another target is a way to look for differences, not a run expected to pass.
+/// <c>nes</c>), read in this one place. A test that has a C64 fact written into it (an address, the C64's
+/// encoding or memory map, its modules) is marked <c>[Trait("Platform", "c64")]</c>, so the suite passes on
+/// every target with <c>--filter "Platform!=c64"</c> (R8).
 /// </summary>
 public static class TestTarget
 {
