@@ -23,7 +23,7 @@ public class RunToolTests
             }
             """;
         var (program, run) = RunSource(source);
-        var reference = Run.Program(source);
+        var reference = Run.Of(program);   // the same program, not one compiled for TERN_TARGET
         Assert.True(run.Returned);
         Assert.Equal("main returned", run.Stop);
         Assert.Equal(reference.Cpu.Cycles, run.Cycles);

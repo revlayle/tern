@@ -200,7 +200,7 @@ public class AtariTests
     [Fact]
     public void Library_modules_that_are_not_c64_only_work_unchanged()
     {
-        var c64 = Run.Program(Modules);
+        var c64 = Run.Program(Modules, platform: Platform.C64);
         var atari = Run.Program(Modules, platform: Platform.Atari);
         foreach (var v in c64.Result.Variables.Values.Where(v => v.Function is null && !v.IsData && !v.Name.Contains('.')))
             Assert.True(c64.Ram.Bytes.AsSpan(v.Address, v.Size).SequenceEqual(atari.Ram.Bytes.AsSpan(atari.Address(v.Name), v.Size)), v.Name);

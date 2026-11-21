@@ -28,10 +28,13 @@ public static partial class TernCompiler
         }, reason) { Fill = fill };
     }
 
-    /// <summary>The bytes between an aligned global and whatever ends below it in the same memory: the padding its alignment costs.</summary>
+    /// <summary>
+    /// The bytes between an aligned global and whatever ends below it in the same memory: the padding its
+    /// alignment costs. On a cartridge, a variable with an initial value is in the RAM block too (copied).
+    /// </summary>
     private static int AlignmentPadding(VariableSymbol g, RamPlan plan, AssembledCode code)
     {
-        var block = plan.ZeroedGlobals.Concat(plan.NoinitGlobals).Concat(plan.FrameVariables).Select(e => e.Var).ToList();
+        var block = plan.ZeroedGlobals.Concat(plan.NoinitGlobals).Concat(plan.CopiedGlobals).Concat(plan.FrameVariables).Select(e => e.Var).ToList();
         if (block.Contains(g))
             return g.Address - block.Where(v => v != g && v.Address + v.Type.Size <= g.Address)
                 .Select(v => v.Address + v.Type.Size).Append(code.VariablesAfter).Max();

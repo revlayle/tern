@@ -31,8 +31,12 @@ public static class TestTarget
     /// blank line after the imports, at the end of the last import, or else (no import, or one that ends in a
     /// comment) in front of the first declaration, whose columns then move.
     /// </summary>
-    public static string Adapt(string source, Platform platform)
+    public static string Adapt(string source, Platform platform) => Adapt(source, platform, out _);
+
+    /// <summary>See <see cref="Adapt(string, Platform)"/>; <paramref name="moved"/> is the line (from 1) whose columns moved, and by how much, or (0, 0).</summary>
+    public static string Adapt(string source, Platform platform, out (int Line, int Columns) moved)
     {
+        moved = (0, 0);
         if (!platform.CartridgeRequired || source.Contains("memory {")) return source;
         string block = $"memory {{ cartridge {platform.Boards[0].Name} vertical }}";
         var lines = source.Split('\n');
@@ -41,7 +45,11 @@ public static class TestTarget
         int blank = Array.FindIndex(lines, import + 1, head - import - 1, l => l.Trim().Length == 0);
         if (blank >= 0) lines[blank] = block;
         else if (import >= 0 && !lines[import].Contains("//")) lines[import] = lines[import].TrimEnd('\r') + "; " + block;
-        else if (head < lines.Length) lines[head] = block + "; " + lines[head];
+        else if (head < lines.Length)
+        {
+            lines[head] = block + "; " + lines[head];
+            moved = (head + 1, block.Length + 2);
+        }
         else return source + "\n" + block;
         return string.Join('\n', lines);
     }

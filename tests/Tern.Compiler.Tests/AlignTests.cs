@@ -142,6 +142,28 @@ public class AlignTests
     }
 
     [Fact]
+    public void On_a_cartridge_a_variable_with_an_initial_value_is_aligned_in_ram()
+    {
+        // In RAM, copied from ROM by the startup code (spec 12.2); the report counted its padding only in
+        // the zeroed, noinit and frame blocks, and crashed (R8, the suite on every platform).
+        var r = Run.Program("""
+            memory { cartridge nrom vertical }
+            var before: [u8; 3]
+            var level: [u8; 3] @ align(256) = [1, 2, 3]
+            var x: u8
+            fn main() { before[0] = 1; level[1] += 5; x = level[1] }
+            """, platform: Platform.Nes);
+        int at = r.Address("level");
+        Assert.Equal(0, at % 256);
+        Assert.True(at < 0x0800);
+        Assert.Equal(7, r.U8("x"));
+        var line = r.Result.Report.Split('\n').Single(l => l.StartsWith("Aligned level")).TrimEnd();
+        int padding = int.Parse(System.Text.RegularExpressions.Regex.Match(line, @"(\d+) bytes? of padding").Groups[1].Value);
+        Assert.Equal($"Aligned level: ${at:X4} (@ align(256)), {padding} {(padding == 1 ? "byte" : "bytes")} of padding before it", line);
+        Assert.InRange(padding, 0, 255);
+    }
+
+    [Fact]
     public void A_variable_with_an_initial_value_is_aligned_in_the_file()
     {
         var r = Run.Program("""
