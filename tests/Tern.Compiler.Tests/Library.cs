@@ -14,13 +14,21 @@ public sealed class Library
     public Ram Ram { get; } = new();
     public Cpu6502 Cpu { get; }
 
+    /// <summary>tern run's machine: its stand-ins where the startup code calls the ROM (the Apple II), its chips' time (the NES).</summary>
+    private readonly Machine _machine;
+
+    /// <summary>Text the stand-ins printed.</summary>
+    private readonly System.Text.StringBuilder _output = new();
+
     /// <param name="calls">Statements that call the routines to test, e.g. "math.mul8(0, 0)".</param>
     public Library(string imports, string calls, Action<Ram>? setup = null)
     {
         Result = Run.Compile($"{imports}\nvar go: bool\nfn main() {{\n    if go {{\n{calls}\n    }}\n}}\n");
         StartState.Fill(Ram);
         // tern run's machine loads the file, as for a run (review code-quality-tests 6).
-        var bus = Machine.For(Result.Platform, Result).Load(Result, Ram);
+        _machine = Machine.For(Result.Platform, Result);
+        if (_machine.StartupCallsRom) _machine.Start(Ram);
+        var bus = _machine.Load(Result, Ram);
         setup?.Invoke(Ram);
         Cpu = new Cpu6502(bus, Result.Platform.Cpu) { PC = (ushort)Result.Entry, SP = 0xFF };
         StartState.Set(Cpu);
@@ -67,7 +75,18 @@ public sealed class Library
         long end = Cpu.Cycles + maxCycles;
         while (Cpu.PC != Result.HaltAddress)
         {
+            if (_machine.StartupCallsRom && _machine.Has(Cpu.PC))
+            {
+                // A stand-in for a ROM routine: do its work, then return as an rts would.
+                if (_machine.Call(Cpu.PC, Cpu, Ram, _output) is { } stop)
+                    throw new Xunit.Sdk.XunitException($"The run stopped: {stop}");
+                ushort low = Ram.Bytes[0x100 + (byte)(Cpu.SP + 1)], high = Ram.Bytes[0x100 + (byte)(Cpu.SP + 2)];
+                Cpu.SP += 2;
+                Cpu.PC = (ushort)((high << 8 | low) + 1);
+                continue;
+            }
             Cpu.Step();
+            _machine.AfterStep(Cpu);
             if (Cpu.Cycles > end)
                 throw new Xunit.Sdk.XunitException($"Did not return within {maxCycles} cycles (PC=${Cpu.PC:X4})");
         }
