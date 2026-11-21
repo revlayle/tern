@@ -1029,3 +1029,13 @@ Roadmap R7, R7 fixes, R6. R7's review (`docs/reviews/code-quality-followup.md`) 
 - **Tests 13 joins R6**, with the run model (tools 1). Reason: `Run.Program`'s constructor is the tests' half of the run model R6 already reworks.
 - **Syntax 9 (statement ends decided in the lexer, patched in the parser) and the part of syntax 20 that waits for it: until M28 needs them.** Reason: a design change to how statements end; the language server is what needs exact recovery, and it can be designed with it.
 - **Accepted for after the release:** backend 11 (backend state in checker symbols and the syntax tree), semantics 21 (the call graph built as a side effect), the small-things lists backend 16, backend 17, semantics 22 and syntax 22, tools 18's other four parts, syntax 11's last part (the interpreter's unstated reliance on the checker), and semantics 5's last part (an unreached function that calls itself is not reported; it is never compiled, so no wrong code). Reason: none changes what a program does; they are structure and tidying, and the remaining budget goes to the release.
+
+## 2026-11-21: R6 goes to review; its three test findings become R8
+
+Roadmap R6 and R8. Changes the R6 scope of 2026-11-15 and 2026-11-16 ("the rest of theme 7").
+
+- **R6 goes to review with its platform and message work done; tests 4, 9 and 11 move to a new milestone, R8, after R6's merge and before the release.** R6's done-when is met (a platform is its description and library, the feature suite passes on four platforms, no benchmark or `SkillTests` output moved); what was left are the error tests' positions and whole messages (tests 4), listing checks scoped to their function (tests 9) and test folders by spec section (tests 11). Reason: the R6 branch is already 19 commits of construction work, and a smaller review is a better one; the three findings touch only tests, so they review well on their own; and tests 4 is the guard for question 177 (a message's fix as its own part), which may change ~460 places where messages are made, so it should land before that change and with that question answered.
+- **R8's order: tests 4, then 9, then 11.** Tests 11 moves files only, last, so git sees the earlier edits and the moves as renames.
+- **Tests 4 may use a baseline file** of every error case's position and message, rewritten with an environment variable like the benchmarks, instead of rewriting each theory by hand. Reason: one check covers every case, and a changed message shows in the diff; the coding session picks between it and a shared `Expect.Error`.
+- **The release waits for R8.** Reason: CLAUDE.md asks for a test per error, and `tern --json` reports positions and suggestions that agents act on.
+

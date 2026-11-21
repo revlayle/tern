@@ -754,17 +754,33 @@ Done when: each item has its test, the benchmarks and `SkillTests` are unchanged
 
 After R7 and its fixes (decision 2026-11-16). Also tests 13 (`Run.Program` does all its work in its constructor), with the run model of tools 1. Its review also checks the code-quality findings it handles, as R7 does for R1-R5: a verdict per finding, the demonstration programs run again.
 
-Review themes 3 and 5, and the rest of theme 7.
+Review themes 3 and 5, and the rest of theme 7 except tests 4, 9 and 11, which moved to R8 (decision 2026-11-21).
 
 - Each platform fact in one place, in the platform description: no tests on platform names ("has boards" for the NES, "cartridge" for NES output), and an unknown platform an error instead of the C64's stand-ins. C64 cartridges, the X16 and the C128 then add a description, not branches.
 - No control flow decided by matching error text, no exception changed after it is thrown, no meaning read from strings in the assembler.
-- Tests check error positions and whole messages, not fragments; the feature suite runs on every platform.
+- The feature suite runs on every platform.
+
+R6's status table keeps rows for tests 4, 9 and 11, marked "moved to R8"; its review gives them that verdict without reading them.
 
 Done when: adding a platform needs no change outside its description and its library, the feature suite passes on all four platforms, and the benchmarks and `SkillTests` are unchanged.
 
+### R8: Error and listing tests
+
+Decision 2026-11-21. After R6 is merged, before the release; its own branch (`r8-tests`), review and merge. The three test findings R6 had left when its platform and message work was done. They change no compiler code, so no benchmark or `SkillTests` output moves. Its review checks them in R7's way (a verdict per finding).
+
+In this order:
+
+1. Tests 4, error tests: every error test checks the line, column and whole message, fix sentence included. One way (the coding session chooses): a baseline file of every error case's position and message, rewritten with an environment variable as the benchmarks are, and read in the diff; or a shared `Expect.Error(source, line, column, fullText)` the theories move to. Then the list of messages no test reaches (`FixSentenceTests.Messages()` or a coverage run), each given a test. A message found wrong while doing this is fixed with its test.
+2. Tests 9, listing checks: each `Assert.Contains` / `DoesNotContain` on a listing scoped to the function it is about (`Listing.Code`), and each `DoesNotContain` paired with a positive check of the expected shape.
+3. Tests 11, folders: test files moved into folders by spec section, with the section in each class comment; files moved, not changed, in a commit of their own, last, so the moves stay visible as renames.
+
+If question 177 (the fix sentence as its own part of a message) is settled with a change to how messages are made, that change comes after step 1, which guards it.
+
+Done when: every error test checks position and whole message, every message the compiler can give has a test or is listed with the reason it cannot be reached, no listing check reads the whole listing, the tests are filed by spec section, and the benchmarks and `SkillTests` are unchanged.
+
 ## First release (after R7)
 
-Decision 2026-11-08, changed 2026-11-13: the first release comes once the four platforms C64, Atari, Apple II and NES work; the Commander X16 and the Commodore 128 come after it. Done when: M27 and R1-R6 are merged, R7's must-fix items are fixed or accepted, the developer guide covers every behavior in its list, the guide (`docs/guide/`) and spec 10.1 describe the compiler and library as built, and every example builds for its platforms.
+Decision 2026-11-08, changed 2026-11-13: the first release comes once the four platforms C64, Atari, Apple II and NES work; the Commander X16 and the Commodore 128 come after it. Done when: M27, R1-R6 and R8 are merged, R7's must-fix items are fixed or accepted, the developer guide covers every behavior in its list, the guide (`docs/guide/`) and spec 10.1 describe the compiler and library as built, and every example builds for its platforms.
 
 ## After the first release
 
