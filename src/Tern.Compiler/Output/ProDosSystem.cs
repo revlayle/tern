@@ -40,8 +40,8 @@ internal sealed class ProDosSystemBuild(OutputBuild.Inputs inputs) : OutputBuild
     internal readonly record struct AreaMove(int From, int To, int Count);
 
     private readonly Label moved = new("moved"), quit = new("quit");
-    // The prefix code comes with io (question 150).
-    private readonly Label? prefix = inputs.Program.Modules.Any(m => m.IsLibrary && m.Name == "io") ? new Label("prefix_parameters") : null;
+    // The prefix code comes with the platform's prefix module, io (question 150).
+    private readonly Label? prefix = inputs.Program.Modules.Any(m => m.IsLibrary && m.Name == inputs.Platform.PrefixModule) ? new Label("prefix_parameters") : null;
     private List<AreaMove> moves = [];
     private int passes;
     private byte[]? systemFile;

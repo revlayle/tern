@@ -60,6 +60,11 @@ public sealed class Platform
     /// the Apple II, where they are plain binary files (".bin"), not system files.
     /// </summary>
     public string BinaryExtension => Format.Plain.Extension;
+    /// <summary>
+    /// The library module whose prefix parameters the startup code fills when the program imports it (the
+    /// Apple II's <c>io</c>, question 150), or null (review R6, suggestion 3).
+    /// </summary>
+    public string? PrefixModule { get; init; }
     /// <summary>The label file's format: the one the platform's main emulator loads (question 138).</summary>
     public required LabelFormat Labels { get; init; }
     /// <summary>
@@ -181,6 +186,7 @@ public sealed class Platform
         ],
         DefaultEncoding = CharEncoding.Apple2,
         Format = OutputFormat.ProDosSystem,
+        PrefixModule = "io",
         Labels = LabelFormat.AppleWin,
         NewMachine = (p, overlays) => new Tools.Apple2Machine(new Tools.OverlayDisk(overlays, p.BinaryExtension)),
         Rom =
