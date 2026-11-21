@@ -69,8 +69,9 @@ public class ShiftedOperandTests
             fn main() { v = v + (v >> 3) }
             """);
         Assert.Equal(1125, r.U16("v"));
-        Assert.Contains("ror a", r.Result.Listing);
-        Assert.DoesNotContain("main._t0+1", r.Result.Listing);
+        var main = Listing.Instructions(r);
+        Assert.Contains("ror a", main);
+        Assert.DoesNotContain(main, i => i.Contains("main._t0+1"));
     }
 
     [Fact]

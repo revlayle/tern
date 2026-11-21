@@ -118,11 +118,10 @@ public class NesBankTests : TempFolderTest
     {
         var path = Write(TwoBanks);
         var r = TernCompiler.Compile(TwoBanks, Platform.Nes, sourcePath: path);
-        var listing = r.Listing;
+        var listing = Listing.Text(r, Listing.Startup);
         int select = listing.IndexOf("stx bank_zero", StringComparison.Ordinal);
         Assert.True(select > 0 && select < listing.IndexOf("vblank1:", StringComparison.Ordinal));
-        Assert.Contains("bank_zero:", listing);
-        Assert.Matches(@"bank_zero:\r?\n\$[0-9A-F]{4}  00", listing);
+        Assert.Matches(@"bank_zero:\n\$[0-9A-F]{4}  00", Listing.Outside(r));
     }
 
     [Fact]

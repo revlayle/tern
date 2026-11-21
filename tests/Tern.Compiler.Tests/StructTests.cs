@@ -223,7 +223,7 @@ public class StructTests
         Assert.Equal(2, r.Ram.Bytes[0xD02A]);
         // Spec 3.3: vic.border = 0 is sta $D020.
         Assert.StartsWith("lda #$06|sta vic+32|lda vic+32|clc|adc #$01|sta vic+33|", Listing.Code(r));
-        Assert.Contains("8D 20 D0", r.Result.Listing); // sta $D020
+        Assert.Contains("8D 20 D0", Listing.Text(r)); // sta $D020
     }
 
     [Trait("Shape", "nmos6502")]

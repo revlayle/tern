@@ -70,9 +70,9 @@ public class RoutineTests
             }
             """);
         Assert.Equal([0x41, 7], Logged(r));
-        Assert.Contains("A9 41     lda #$41", r.Result.Listing);
-        Assert.Contains("20 40 C0  jsr $C040", r.Result.Listing);
-        Assert.DoesNotContain("\nlog:", r.Result.Listing);
+        Assert.Contains("A9 41     lda #$41", Listing.Text(r));
+        Assert.Contains("20 40 C0  jsr $C040", Listing.Text(r));
+        Assert.DoesNotContain("log", Listing.Sections(r));
         Assert.Equal(0xC040, r.Address("log"));
         Assert.Contains("al C:c040 .log", r.Result.Labels);
     }
@@ -124,8 +124,9 @@ public class RoutineTests
             fn main() { log(msg[i] + 1) }
             """);
         Assert.Equal([8], Logged(r));
-        var main = r.Result.Listing[r.Result.Listing.IndexOf("\nmain:")..];
+        var main = Listing.Code(r);
         Assert.DoesNotContain("_t", main);
+        Assert.Matches(@"lda msg,[xy]\|clc\|adc #\$01\|jsr \$C040", main);
     }
 
     [Trait("Shape", "nmos6502")]
@@ -140,7 +141,7 @@ public class RoutineTests
             }
             """);
         Assert.Equal("HELLO"u8.ToArray().Concat(new byte[] { 0, 1, 2 }), Logged(r));
-        Assert.Contains("BD", r.Result.Listing);    // lda msg,x
+        Assert.Matches(@"BD [0-9A-F]{2} [0-9A-F]{2} +lda msg,x", Listing.Text(r));
     }
 
     [Trait("Shape", "nmos6502")]
@@ -167,7 +168,7 @@ public class RoutineTests
             """);
         Assert.Equal([0, 1, 2], Logged(r));
         Assert.Equal(0xC040, r.U8("lo") | (r.U8("hi") << 8));
-        Assert.Contains("jsr log", r.Result.Listing);
+        Assert.Contains("jsr log", Listing.Instructions(r));
     }
 
     [Trait("Shape", "nmos6502")]
@@ -229,7 +230,7 @@ public class RoutineTests
             }
             """);
         Assert.Equal([3, (byte)v, 7, (byte)v, 0xFF, 200], r.Ram.Bytes.AsSpan(r.Address("seen"), 6).ToArray());
-        Assert.Contains("ldx #$03", r.Result.Listing);
+        Assert.Contains("ldx #$03", Listing.Instructions(r));
     }
 
     [Fact]

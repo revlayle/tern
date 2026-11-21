@@ -280,9 +280,10 @@ public class OverlayTests
     public void C64_load_is_a_direct_sequence_of_KERNAL_calls()
     {
         var r = With(Modules, path => Run.Program(LoadProgram, sourcePath: path, standIns: true));
-        Assert.Contains("jsr $FFBD", r.Result.Listing);
-        Assert.Contains("jsr $FFBA", r.Result.Listing);
-        Assert.Contains("jsr $FFD5", r.Result.Listing);
+        var load = Listing.Instructions(r, "c64.load");
+        Assert.Contains("jsr $FFBD", load);
+        Assert.Contains("jsr $FFBA", load);
+        Assert.Contains("jsr $FFD5", load);
     }
 
     [Fact]
@@ -612,10 +613,10 @@ public class OverlayTests
         var r = Compile(main, Ov);
         Assert.Equal(8, r.U8("e"));
         // ov.x is loaded again after the increment, not taken from the register that held the old value.
-        var lines = r.Result.Listing.Split('\n').Select(l => l.Trim()).ToList();
-        int inc = lines.FindIndex(l => l.Contains("inc hdr"));
+        var lines = Listing.Instructions(r);
+        int inc = lines.FindIndex(l => l == "inc hdr");
         Assert.True(inc >= 0);
-        Assert.Contains(lines.Skip(inc + 1).Take(2), l => l.Contains("lda ov.x"));
+        Assert.Contains("lda ov.x", lines.Skip(inc + 1).Take(2));
     }
 
     [Fact]
@@ -915,7 +916,7 @@ public class OverlayTests
             {{Header}}
             fn main() { load(1); level1.run(); load(2); level2.run() }
             """);
-        Assert.Contains("$6000", r.Result.Listing);
+        Assert.Contains(Listing.Lines(r, "level2.run"), l => l.StartsWith("$6000 "));
         Assert.Contains(r.Result.Sections, s => s.Overlay == "level2" && s.Address == 0x6000);
     }
 

@@ -467,7 +467,7 @@ public class ProgramTests
             """);
         Assert.Equal(Enumerable.Range(1, 40).Sum(), r.U16("w"));
         Assert.Equal(7, r.U8("after"));
-        Assert.Contains("jmp main.endif", r.Result.Listing);
+        Assert.Contains(Listing.Instructions(r), i => i.Contains("jmp main.endif"));
     }
 
     private static (int Count, int Sum, int Last) Expected(int from, int to, bool inclusive, int step)

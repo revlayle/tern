@@ -107,8 +107,8 @@ public class VariableStepTests
                 }
             }
             """);
-        Assert.Contains("adc", r.Result.Listing);
-        var lines = r.Result.Listing.Split('\n').Select(l => l.Trim()).ToList();
+        Assert.Contains(Listing.Instructions(r), i => i.StartsWith("adc "));
+        var lines = Listing.Lines(r).Select(l => l.Trim()).ToList();
         int adc = lines.FindIndex(l => l.Contains(" adc "));
         Assert.Contains(" tya", lines[adc - 2]);
         Assert.Contains(" clc", lines[adc - 1]);

@@ -342,7 +342,7 @@ public class PointerTests
             """);
         Assert.Equal(11, r.Ram.Bytes[0x3001]);
         Assert.Equal(22, r.Ram.Bytes[0x3102]);
-        Assert.Contains("91 FB     sta (near),y", r.Result.Listing);
+        Assert.Contains("91 FB     sta (near),y", Listing.Text(r));
     }
 
     [Fact]

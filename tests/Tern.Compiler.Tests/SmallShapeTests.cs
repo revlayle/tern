@@ -118,7 +118,8 @@ public class SmallShapeTests
             }
             """);
         Assert.Equal(4, r.U8("a", 2));
-        Assert.DoesNotContain("inc a,y", r.Result.Listing);
+        Assert.DoesNotContain("inc a,y", Listing.Instructions(r));
+        Assert.Contains("sta a,y", Listing.Instructions(r));
     }
 
     [Trait("Shape", "nmos6502")]

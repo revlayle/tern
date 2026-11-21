@@ -196,7 +196,9 @@ public class OptimizerTests
         var clock = System.Diagnostics.Stopwatch.StartNew();
         var r = TernCompiler.Compile(source);
         Assert.True(clock.Elapsed < TimeSpan.FromSeconds(5), $"took {clock.Elapsed}");
-        Assert.DoesNotContain("lda x ", r.Listing);   // every y = x uses the A that was just stored
+        var main = Listing.Instructions(r);
+        Assert.DoesNotContain("lda x", main);   // every y = x uses the A that was just stored
+        Assert.Contains("sta y", main);
     }
 
     [Trait("Shape", "nmos6502")]
@@ -469,9 +471,9 @@ public class OptimizerTests
                 }
             }
             """);
-        var code = r.Result.Listing.Split((char)10).Where(l => l.StartsWith('$')).ToList();
-        int last = code.FindLastIndex(c => c.Contains(" lda n "));
-        Assert.Contains(" bne ", code[last + 1]);
+        var code = Listing.Instructions(r);
+        int last = code.FindLastIndex(c => c == "lda n");
+        Assert.StartsWith("bne ", code[last + 1]);
     }
 
     [Theory]
@@ -617,7 +619,9 @@ public class RegisterParameterTests
             }
             """);
         for (int k = 0; k < 8; k++) Assert.Equal(10 + k, r.U8("b", k));
-        Assert.DoesNotContain("stx fill.i", r.Result.Listing);
+        var fill = Listing.Instructions(r, "fill");
+        Assert.DoesNotContain(fill, i => i.Contains("fill.i"));
+        Assert.Contains("adc a,x", fill);
     }
 
     // Since M18 (F3) a store that is never read back is removed (the reload became txa), so the
@@ -638,7 +642,7 @@ public class RegisterParameterTests
             fn main() { f(2) }
             """);
         Assert.Equal(value, r.U8("a", index));
-        Assert.Equal(stored, r.Result.Listing.Contains("stx f.i"));
+        Assert.Equal(stored, Listing.Instructions(r, "f").Contains("stx f.i"));
     }
 
     [Trait("Shape", "nmos6502")]
@@ -669,8 +673,10 @@ public class RegisterParameterTests
         Assert.Equal(2, r.U8("buf", 3));
         Assert.Equal(0x1234 + 9, r.U16("res"));   // Y is 5 after w[2], so g(5) would not show n read from Y
         Assert.Equal(10, r.U8("buf", 6));
-        Assert.Contains("sty f.n", r.Result.Listing);
-        Assert.DoesNotContain("sty h.n", r.Result.Listing);   // only p[n]: stays in Y
+        Assert.Contains("sty f.n", Listing.Instructions(r, "f"));
+        var h = Listing.Instructions(r, "h");
+        Assert.DoesNotContain(h, i => i.Contains("h.n"));   // only p[n]: stays in Y
+        Assert.Contains("sta (p),y", h);
     }
 
     [Trait("Shape", "nmos6502")]
@@ -686,7 +692,9 @@ public class RegisterParameterTests
             }
             """);
         Assert.Equal([0, 4, 5], new[] { r.U8("a"), r.U8("a", 1), r.U8("a", 2) });
-        Assert.DoesNotContain("stx put.i", r.Result.Listing);
+        var main = Listing.Instructions(r);
+        Assert.DoesNotContain(main, i => i.Contains("put.i"));
+        Assert.Contains("sta a,x", main);
     }
 
     [Fact]
@@ -729,7 +737,7 @@ public class LoopRegisterTests
                 for i in 0..8 { a[i] = i + 1 }
             }
             """);
-        Assert.Contains("inx", r.Result.Listing);
+        Assert.Contains("inx", Listing.Instructions(r));
         Assert.DoesNotContain("main.i", r.Result.Symbols.Keys);
         for (int i = 0; i < 8; i++) Assert.Equal(i + 1, r.U8("a", i));
     }
@@ -747,7 +755,7 @@ public class LoopRegisterTests
                 for i in 0..=255 { q[i] = p[i] }
             }
             """, setup: ram => { for (int i = 0; i < 256; i++) ram.Bytes[0xC000 + i] = (byte)(i * 7); });
-        Assert.Contains("iny", r.Result.Listing);
+        Assert.Contains("iny", Listing.Instructions(r));
         for (int i = 0; i < 256; i++) Assert.Equal((byte)(i * 7), r.Ram.Bytes[0xC100 + i]);
     }
 
@@ -764,7 +772,7 @@ public class LoopRegisterTests
                 for i in 0..4 { e.name[i] = i + 65 }
             }
             """);
-        Assert.Contains("inx", r.Result.Listing);
+        Assert.Contains("inx", Listing.Instructions(r));
         Assert.Equal("ABCD", System.Text.Encoding.ASCII.GetString(r.Ram.Bytes, r.Address("a") + 1, 4));
     }
 

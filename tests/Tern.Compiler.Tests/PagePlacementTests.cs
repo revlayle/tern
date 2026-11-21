@@ -48,8 +48,10 @@ public class PagePlacementTests
         for (int i = 0; i < 200; i++) sum += (i << 2) + 1000;
         Assert.Equal(sum & 0xFFFF, r.U16("total"));
         Assert.Equal((199 << 2) + 1000, r.U16("big"));
-        // The scalars fill the space below the array, which is not cleared or kept.
-        Assert.DoesNotContain("left free", r.Result.Listing.Split("\nmain:")[0]);
+        // The only space left free is the gap from the code up to the array's page.
+        var free = System.Text.RegularExpressions.Regex.Matches(Listing.Outside(r), @"; \$([0-9A-F]{4}): (\d+) byte\(s\) left free");
+        var gap = Assert.Single(free);
+        Assert.Equal(a, Convert.ToInt32(gap.Groups[1].Value, 16) + int.Parse(gap.Groups[2].Value));
     }
 
     [Fact]
@@ -171,6 +173,6 @@ public class PagePlacementTests
             """);
         Assert.Equal(249, r.U8("out"));
         Assert.DoesNotContain("placed so that", r.Result.Report);
-        Assert.DoesNotContain("left free", r.Result.Listing);
+        Assert.DoesNotContain("left free", Listing.Outside(r));
     }
 }

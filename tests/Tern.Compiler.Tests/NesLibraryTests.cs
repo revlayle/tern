@@ -111,7 +111,7 @@ public class NesLibraryTests
         Assert.Equal(2, r.U8("seen"));
         Assert.True(nes.Dmas >= 2);
         // The handler saves only what the part changes, and ends with rti.
-        Assert.Contains("rti", r.Result.Listing);
+        Assert.Equal("rti", Listing.Instructions(r, "frame")[^1]);
     }
 
     [Theory]

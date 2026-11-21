@@ -286,8 +286,8 @@ public class WideTests
         var path = AsmTests.FindExample("arcade.tern");
         var result = TernCompiler.Compile(File.ReadAllText(path), sourcePath: path);
         foreach (var name in new[] { "wide.add32_u16", "wide.dec32z", "bcd.add", "bcd.digits", "random.next8", "random.below", "math.mul8", "text.hex16" })
-            Assert.Contains($"\n{name}:", result.Listing);
-        Assert.Contains("math.SINE", result.Listing);
+            Assert.Contains(name, Listing.Sections(result));
+        Assert.Contains("math.SINE", Listing.Sections(result));
     }
 
     [Fact]
@@ -301,7 +301,8 @@ public class WideTests
     public void Only_the_widths_that_are_used_are_compiled()
     {
         var u24 = TernCompiler.Compile("import wide\nvar a: wide.U24\nvar b: wide.U24\nfn main() { wide.add24(addr(a), addr(b)) }");
-        Assert.DoesNotContain("wide.add32", u24.Listing);
-        Assert.DoesNotContain("wide.mul24", u24.Listing);
+        Assert.DoesNotContain("wide.add32", Listing.Sections(u24));
+        Assert.DoesNotContain("wide.mul24", Listing.Sections(u24));
+        Assert.Contains("wide.add24", Listing.Sections(u24));
     }
 }

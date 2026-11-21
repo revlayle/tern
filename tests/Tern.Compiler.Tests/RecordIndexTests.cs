@@ -258,12 +258,12 @@ public class RecordIndexTests
             indexed var list: [Odd; 6]
             fn main() { list[2].a = 9 }
             """);
-        Assert.DoesNotContain("list.offsets", r.Result.Listing);
+        Assert.DoesNotContain("list.offsets", Listing.Sections(r));
         var used = Run.Program(Header + """
             indexed var list: [Odd; 6]
             fn main() { var i: u8 = 2; list[i].a = 9 }
             """);
-        Assert.Contains("list.offsets", used.Result.Listing);
+        Assert.Contains("list.offsets", Listing.Sections(used));
         Assert.Contains("Offset table list.offsets: 6 bytes", used.Result.Report);
         Assert.DoesNotContain("Offset table", r.Result.Report);
     }
@@ -290,7 +290,7 @@ public class RecordIndexTests
             fn main() { var i: u8 = 2; list[i].a = list_offsets }
             """);
         Assert.Equal(3, r.Ram.Bytes[r.Address("list") + 10]);
-        Assert.Contains("list.offsets:", r.Result.Listing);
+        Assert.Contains("list.offsets", Listing.Sections(r));
     }
 
     // ---------- Errors ----------

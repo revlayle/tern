@@ -341,8 +341,8 @@ public sealed class SpriteTests
         string main = Main;
         var plain = TernCompiler.Compile(string.Format(main, ""));
         var flicker = TernCompiler.Compile(string.Format(main, ", FLICKER = true"));
-        Assert.DoesNotContain("jsr sprites.build_flicker", plain.Listing);
-        Assert.Contains("jsr sprites.build_flicker", flicker.Listing);
+        Assert.DoesNotContain("jsr sprites.build_flicker", Listing.Instructions(plain, "sprites.update"));
+        Assert.Contains("jsr sprites.build_flicker", Listing.Instructions(flicker, "sprites.update"));
     }
 
     /// <summary>Cycle counts for docs/status.md; the limits are generous so only a large slowdown fails.</summary>

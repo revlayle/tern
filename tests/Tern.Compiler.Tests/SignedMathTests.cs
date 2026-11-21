@@ -184,7 +184,8 @@ public class SignedMathTests
         var without = TernCompiler.Compile("import math\nvar a: u8\nfn main() { a = math.min8(a, 3) }");
         var with = TernCompiler.Compile("import math\nvar a: i8\nfn main() { a = math.sin8(a as u8) }");
         Assert.True(with.Image.Length - without.Image.Length >= 240);
-        Assert.DoesNotContain("SINE", without.Listing);
+        Assert.DoesNotContain("math.SINE", Listing.Sections(without));
+        Assert.Contains("math.SINE", Listing.Sections(with));
     }
 
     [Fact]

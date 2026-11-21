@@ -75,7 +75,7 @@ public class NesTests
     {
         var r = RunNes(Nrom + "var x: u8\nfn main() { x = 1 }");
         Assert.Equal(1, r.U8("x"));
-        var listing = r.Result.Listing;
+        var listing = Listing.Text(r, Listing.Startup);
         string[] steps =
         [
             "sei", "cld", "ldx #$40", "stx $4017", "ldx #$FF", "txs", "inx", "stx $2000", "stx $2001", "stx $4010",

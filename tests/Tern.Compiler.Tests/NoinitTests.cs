@@ -51,7 +51,8 @@ public class NoinitTests
         var with = TernCompiler.Compile(Buffers);
         var without = TernCompiler.Compile(Buffers.Replace("noinit ", ""));
         Assert.True(with.Image.Length < without.Image.Length);
-        Assert.DoesNotContain("clear0", with.Listing);
+        Assert.DoesNotContain("clear0", Listing.Text(with, Listing.Startup));
+        Assert.Contains("clear0", Listing.Text(without, Listing.Startup));
     }
 
     [Fact]
