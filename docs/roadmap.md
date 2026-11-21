@@ -754,31 +754,30 @@ Done when: each item has its test, the benchmarks and `SkillTests` are unchanged
 
 After R7 and its fixes (decision 2026-11-16). Also tests 13 (`Run.Program` does all its work in its constructor), with the run model of tools 1. Its review also checks the code-quality findings it handles, as R7 does for R1-R5: a verdict per finding, the demonstration programs run again.
 
-Review themes 3 and 5, and the rest of theme 7 except tests 4, 9 and 11, which moved to R8 (decision 2026-11-21).
+Review themes 3 and 5, and the rest of theme 7 except tests 9 and 11, which moved to R8 (decision 2026-11-21).
 
 - Each platform fact in one place, in the platform description: no tests on platform names ("has boards" for the NES, "cartridge" for NES output), and an unknown platform an error instead of the C64's stand-ins. C64 cartridges, the X16 and the C128 then add a description, not branches.
 - No control flow decided by matching error text, no exception changed after it is thrown, no meaning read from strings in the assembler.
-- The feature suite runs on every platform.
+- Tests check error positions and whole messages, not fragments, and every message has a test or a reason it cannot be reached (tests 4); the feature suite runs on every platform.
 
-R6's status table keeps rows for tests 4, 9 and 11, marked "moved to R8"; its review gives them that verdict without reading them.
+R6's status table keeps rows for tests 9 and 11, marked "moved to R8"; its review gives them that verdict without reading them.
 
 Done when: adding a platform needs no change outside its description and its library, the feature suite passes on all four platforms, and the benchmarks and `SkillTests` are unchanged.
 
-### R8: Error and listing tests
+### R8: Listing tests, the suite on every platform, test folders
 
-Decision 2026-11-21. After R6 is merged, before the release; its own branch (`r8-tests`), review and merge. The three test findings R6 had left when its platform and message work was done. They change no compiler code, so no benchmark moves. Its review checks them in R7's way (a verdict per finding).
+Decision 2026-11-21, changed the same day (tests 4 stays in R6). After R6 is merged, before the release; its own branch (`r8-tests`), review and merge. The test findings R6 leaves, the rest of tests 6, and `tern run`'s idle input. Apart from fixes for bugs the tests find, no compiler code changes, so no benchmark moves. Its review checks the findings in R7's way (a verdict per finding).
 
 In this order:
 
-0. First, `tern run`'s idle input (question 175, spec 13): each machine's `Start` sets its input registers and the OS variables that hold input to "nothing pressed". Each value has a test that fails before it; the `SkillTests` outputs that move are rewritten in the same commit.
-1. Tests 4, error tests: every error test checks the line, column and whole message, fix sentence included. One way (the coding session chooses): a baseline file of every error case's position and message, rewritten with an environment variable as the benchmarks are, and read in the diff; or a shared `Expect.Error(source, line, column, fullText)` the theories move to. Then the list of messages no test reaches (`FixSentenceTests.Messages()` or a coverage run), each given a test. A message found wrong while doing this is fixed with its test.
+1. `tern run`'s idle input (question 175, spec 13): each machine's `Start` sets its input registers and the OS variables that hold input to "nothing pressed". Each value has a test that fails before it; the `SkillTests` outputs that move are rewritten in the same commit.
 2. Tests 9, listing checks: each `Assert.Contains` / `DoesNotContain` on a listing scoped to the function it is about (`Listing.Code`), and each `DoesNotContain` paired with a positive check of the expected shape.
 3. The suite on every platform (the rest of tests 6): run the whole suite with `TERN_TARGET` set to the Atari, the Apple II and the NES, and look at each test that fails. A test that fails because a C64 fact is written into it (an address such as `@ $C000`, `$D0xx` as the volatile example, `0xC0xx` in C#, no cartridge line) is marked as a C64 test with a trait, as `Shape` marks listing tests; a failure that is a compiler or library bug is fixed with its test, as in R2. A script may group the failures by their error first. Rewriting the marked tests to take their addresses from `TestTarget` is not part of R8.
 4. Tests 11, folders: test files moved into folders by spec section, with the section in each class comment; files moved, not changed, in a commit of their own, last, so the moves stay visible as renames.
 
 Messages stay one text through R8 (question 177, decision 2026-11-21); their split into problem, fix and code is M28's.
 
-Done when: every error test checks position and whole message, every message the compiler can give has a test or is listed with the reason it cannot be reached, no listing check reads the whole listing, the suite without the tests marked as C64 tests passes with `TERN_TARGET` on all four platforms, the tests are filed by spec section, `tern run` starts with idle input on all four platforms, the benchmarks are unchanged, and `SkillTests` changes only by the idle input.
+Done when: `tern run` starts with idle input on all four platforms, no listing check reads the whole listing, the suite without the tests marked as C64 tests passes with `TERN_TARGET` on all four platforms, the tests are filed by spec section, the benchmarks are unchanged, and `SkillTests` changes only by the idle input.
 
 ## First release (after R7)
 

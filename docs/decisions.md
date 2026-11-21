@@ -1067,3 +1067,10 @@ Roadmap M28. From review R5 (finding 4).
 
 - **The rule is decided by M28's spec session, not now; the built rule stays until then.** Built (R5): `///` lines go to the next token, across blank lines and plain `//` comments; top-level functions, variables, constants and structs keep them; elsewhere they are dropped. Spec 2 does not mention doc comments, so `///` is a plain comment for users. Reason: nothing a user sees depends on it before M28 (the compiler keeps the text; the language server's hover is the first reader), and the rule is best set with M28's other needs (module docs, struct fields, the library's comments). The lean: the 2026-11-12 draft's stricter rule (an error elsewhere or after a blank line), since a comment then cannot attach to the wrong declaration, and making it an error later breaks no program that relies on it.
 
+## 2026-11-21: tests 4 stays in R6
+
+Roadmap R6 and R8. Changes the first two points of "R6 goes to review; its three test findings become R8" (same day).
+
+- **Tests 4 is finished in R6; only tests 9 and 11 move to R8.** The coding session, which works in its own worktree and had not seen the split, had already moved the error theories and the other error tests to whole messages and positions (`Expect.Error`, `Expect.Message`; commits `5355cdd` and `6bb2a63` on `r6-data`), finding and fixing two message bugs. It finishes tests 4 with the list of messages no test reaches, each given a test or a reason, then stops; R6 goes to review. Reason: reverting would throw away working tests and two fixes, and a finding split across two milestones means bookkeeping in two status tables and two reviews. Question 177's order still holds: whole-message tests come before M28's message split.
+- **R8's order: idle input (question 175), tests 9, the suite on every platform (`TERN_TARGET`), tests 11.**
+
