@@ -114,8 +114,14 @@ public sealed partial class Checker
             throw new CompileError(e.Pos, $"Expected {target}, found {source}. Convert with 'as {target}'");
         if (target.Kind == TypeKind.Bool && source.IsInteger)
             throw new CompileError(e.Pos, $"Expected bool, found {source}. Compare instead, as in 'x != 0'");
+        // 'as' first, with the expression's own text (review R6, suggestion 7): a bool converts to 0 or 1 (spec 3.5).
         if (source.Kind == TypeKind.Bool && target.IsInteger)
-            throw new CompileError(e.Pos, $"Expected {target}, found bool. Use 'if' to choose a number, as in 'if b {{ x = 1 }}'");
+        {
+            if (e is BoolExpr)
+                throw new CompileError(e.Pos, $"Expected {target}, found bool. Write 1 for true, 0 for false");
+            string conversion = Describe(e) is not { } text ? $"as {target}" : e is BinaryExpr ? $"({text}) as {target}" : $"{text} as {target}";
+            throw new CompileError(e.Pos, $"Expected {target}, found bool. Convert with '{conversion}' (0 or 1), or use 'if' to choose another number");
+        }
         // A whole array is never a value (spec 3.2): name what can be used instead (review R2, suggestion 4).
         if (source.IsArray)
             throw new CompileError(e.Pos, Describe(e) is { } array
@@ -217,6 +223,8 @@ public sealed partial class Checker
         TokenKind.PipeEq => "|=", TokenKind.CaretEq => "^=", TokenKind.ShlEq => "<<=", TokenKind.ShrEq => ">>=",
         TokenKind.Plus => "+", TokenKind.Minus => "-", TokenKind.Amp => "&", TokenKind.Pipe => "|", TokenKind.Caret => "^",
         TokenKind.Shl => "<<", TokenKind.Shr => ">>",
+        TokenKind.EqEq => "==", TokenKind.NotEq => "!=", TokenKind.Less => "<", TokenKind.LessEq => "<=",
+        TokenKind.Greater => ">", TokenKind.GreaterEq => ">=",
         _ => op.ToString(),
     };
 

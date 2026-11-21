@@ -180,7 +180,7 @@ $D015 (1 byte):
   $D015  01
 ```
 
-It stopped in `wait_frame` (the raster register is plain RAM there and stays 0), after setting the
+It stopped in `wait_frame` (the raster register is plain RAM there and keeps the start's pseudo-random `$18`, the A shown), after setting the
 pointer, the position 160, 140 (`$A0`, `$8C`) and sprite 0 on.
 
 ## 4. Writing it faster, if it mattered

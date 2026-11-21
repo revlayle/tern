@@ -15,9 +15,9 @@ public sealed record MemoryDump(string What, int Address, int Size, VariableInfo
         int colon = what.LastIndexOf(':');
         if (colon >= 0) { count = what[(colon + 1)..]; what = what[..colon]; }
         if (what.Length == 0)
-            throw new FormatException($"'{text}': --dump needs a variable or an address (score, main.count, $C000-$C0FF, $C000:16)");
+            throw new FormatException($"'{text}' is not a variable or an address. Write one, as in score, main.count, $C000-$C0FF or $C000:16");
         int? size = colon < 0 ? null : Number(count, text);
-        if (size == 0) throw new FormatException($"'{text}': the byte count must be at least 1");
+        if (size == 0) throw new FormatException($"'{text}' shows no bytes. Give a byte count of 1 or more");
 
         if (what.StartsWith('$') || char.IsDigit(what[0]))
         {
@@ -26,27 +26,27 @@ public sealed record MemoryDump(string What, int Address, int Size, VariableInfo
             if (dash >= 0)
             {
                 int last = Number(what[(dash + 1)..], text);
-                if (last < first) throw new FormatException($"'{text}': the end is before the start");
+                if (last < first) throw new FormatException($"'{text}' ends before it starts. Write the lower address first");
                 size = last - first + 1;
             }
-            if (first + (size ?? 1) > 0x10000) throw new FormatException($"'{text}' goes past $FFFF");
+            if (first + (size ?? 1) > 0x10000) throw new FormatException($"'{text}' goes past $FFFF. Give a range that ends at $FFFF or below");
             return new MemoryDump(text, first, size ?? 1, null);
         }
         if (!program.Variables.TryGetValue(what, out var v))
         {
             var near = program.Variables.Keys.Where(k => k.EndsWith("." + what) || k.Equals(what, StringComparison.OrdinalIgnoreCase)).Take(3).ToList();
-            throw new FormatException($"No variable '{what}'" + (near.Count > 0 ? $". Did you mean {string.Join(" or ", near.Select(n => $"'{n}'"))}?" : ". Locals are written 'function.name'"));
+            throw new FormatException($"'{what}' is not a variable of the program" + (near.Count > 0 ? $". Check the spelling: did you mean {string.Join(" or ", near.Select(n => $"'{n}'"))}?" : ". Write a local as 'function.name'"));
         }
         if (v.InChr)
-            throw new FormatException($"'{v.Name}' is tile data in a chr area, at ${v.Address:X4} in the PPU's memory, and --dump shows the CPU's memory");
-        if (v.Address + (size ?? v.Size) > 0x10000) throw new FormatException($"'{text}' goes past $FFFF ('{v.Name}' is at ${v.Address:X4})");
+            throw new FormatException($"'{v.Name}' is tile data in a chr area, at ${v.Address:X4} in the PPU's memory, and --dump shows the CPU's memory. Check tile data in an emulator");
+        if (v.Address + (size ?? v.Size) > 0x10000) throw new FormatException($"'{text}' goes past $FFFF ('{v.Name}' is at ${v.Address:X4}). Give a smaller byte count");
         return new MemoryDump(text, v.Address, size ?? v.Size, v);
     }
 
     private static int Number(string s, string whole)
     {
         bool ok = MemorySet.TryNumber(s, out int n);
-        if (!ok || n < 0 || n > 0xFFFF) throw new FormatException($"'{whole}': '{s}' is not an address or count (write $C000 or 49152)");
+        if (!ok || n < 0 || n > 0xFFFF) throw new FormatException($"'{whole}': '{s}' is not an address or count. Write $C000 or 49152");
         return n;
     }
 

@@ -31,6 +31,14 @@ internal sealed class AtariMachine(OverlayDisk disk) : Machine
     /// <summary>ATASCII's end of line, and the screen editor's control codes that have stand-ins.</summary>
     private const byte EndOfLine = 0x9B, ClearScreen = 0x7D, CursorUp = 0x1C, CursorDown = 0x1D, CursorLeft = 0x1E, CursorRight = 0x1F, Backspace = 0x7E;
 
+    public override string Help => $"On the Atari: {StandIns}.";
+
+    public override string ScreenHelp => "SAVMSC on the Atari";
+
+    public override string UnmodelledChips => "ANTIC, GTIA, POKEY or PIA";
+
+    public override string IdleInput => "the Atari's CH ($2FC) is $FF, STICK0-3 $0F, STRIG0-3 1 and CONSOL 7";
+
     protected override IReadOnlyList<StandIn> Routines =>
     [
         new(0xE456, "CIOV", Ciov, "for put bytes on IOCB 0 (the screen editor) and for reading the build's overlay files on IOCBs 1-7"),
@@ -54,6 +62,12 @@ internal sealed class AtariMachine(OverlayDisk disk) : Machine
         ram.Bytes[Rowcrs] = 0;
         ram.Bytes[Colcrs] = 2;
         ram.Bytes[Colcrs + 1] = 0;
+        // Idle input (decision 2026-11-21, question 175): no key (CH), sticks centred (STICK0-3),
+        // triggers up (STRIG0-3), no console key (CONSOL).
+        ram.Bytes[0x02FC] = 0xFF;
+        ram.Bytes.AsSpan(0x0278, 4).Fill(0x0F);
+        ram.Bytes.AsSpan(0x0284, 4).Fill(1);
+        ram.Bytes[0xD01F] = 7;
     }
 
     public override (int Address, int Columns, int Rows) Screen(Ram ram) => (ram.Bytes[Savmsc] | ram.Bytes[Savmsc + 1] << 8, Columns, Rows);

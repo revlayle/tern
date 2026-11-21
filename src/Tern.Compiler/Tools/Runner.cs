@@ -29,14 +29,14 @@ public sealed record MemorySet(int Address, byte Value)
     {
         int equals = text.IndexOf('=');
         if (equals < 0)
-            throw new FormatException($"'{text}': write an address and a byte, as $DC00=$FF");
+            throw new FormatException($"'{text}' is not an address and a byte. Write them as $DC00=$FF");
         int address = Number(text[..equals].Trim(), 0xFFFF, "an address");
         int value = Number(text[(equals + 1)..].Trim(), 0xFF, "a byte (0 to 255)");
         return new MemorySet(address, (byte)value);
 
         int Number(string s, int max, string what)
         {
-            if (!TryNumber(s, out int n) || n > max) throw new FormatException($"'{text}': '{s}' is not {what}; write $DC00=$FF or 56320=255");
+            if (!TryNumber(s, out int n) || n > max) throw new FormatException($"'{text}': '{s}' is not {what}. Write $DC00=$FF or 56320=255");
             return n;
         }
     }

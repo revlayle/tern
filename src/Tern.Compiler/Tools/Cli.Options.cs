@@ -39,8 +39,8 @@ public static partial class Cli
     private static readonly Option[] Options =
     [
         new("--target", "<machine>", Takes.Text, EveryCommand,
-            "the machine to build for, which every command needs: c64 (Commodore 64), atari (Atari 8-bit " +
-            "with 48 KB or more), apple2 (Apple II with 64 KB under ProDOS 8) or nes (NES; the memory block names the board)"),
+            // From each platform's description, so a new one is in the help with no edit here (review R8, finding 4).
+            "the machine to build for, which every command needs: " + Joined(Platform.All.Select(p => $"{p.Name} ({p.Description})"))),
         new("-o", "<output>", Takes.Text, [Command.Compile],
             "the program's file; the other files take its name with their own extension. Without it, the source's name"),
         new("--json", "", Takes.Nothing, EveryCommand,
@@ -61,8 +61,7 @@ public static partial class Cli
             "$C000-$C0FF or $C000:16; bench shows it after each run, to check the variants agree")
             { Many = true },
         new("--screen", "", Takes.Nothing, [Command.Run],
-            "show the text screen ($0400 on the C64 and the Apple II, SAVMSC on the Atari; on the NES nametable 0, " +
-            "each tile as the character the program's default encoding gives it)"),
+            $"show the text screen ({string.Join("; ", Platform.All.Where(p => p.NewMachine is not null).Select(p => Machine.For(p).ScreenHelp))})"),
         new("--profile", "", Takes.Nothing, [Command.Run], "show the cycles of each function and each source line"),
         new("--code", "<stmts>", Takes.Text, [Command.Bench],
             "a variant: statements run as the body of main (';' or newlines between statements)") { Many = true },
@@ -70,6 +69,13 @@ public static partial class Cli
             "declarations before main for every --code variant (globals, imports, functions)") { Many = true },
         new("--fn", "<name>", Takes.Text, [Command.Bench], "measure this function instead of main"),
     ];
+
+    /// <summary>"a, b, c or d".</summary>
+    private static string Joined(IEnumerable<string> items)
+    {
+        var list = items.ToList();
+        return list.Count == 1 ? list[0] : string.Join(", ", list.Take(list.Count - 1)) + " or " + list[^1];
+    }
 
     private static Option OptionNamed(string name) => Options.First(o => o.Name == name);
 
@@ -100,15 +106,15 @@ public static partial class Cli
 
         /// <summary>What is wrong with the warning options, or null (spec 13).</summary>
         public string? WarningProblem =>
-            Has("--no-warnings") && Has("--warnings-as-errors") ? "--no-warnings and --warnings-as-errors cannot be given together" : null;
+            Has("--no-warnings") && Has("--warnings-as-errors") ? "--no-warnings and --warnings-as-errors cannot be given together. Remove one of them" : null;
 
         /// <summary>The platform of <c>--target</c> (spec 12.2), or null with <paramref name="problem"/> saying what is wrong.</summary>
         public Platform? Platform(out string problem)
         {
             var names = All("--target").ToList();
-            problem = names.Count > 1 ? "--target is given more than once: give one target"
-                : names.Count == 0 ? $"No target given: write {Compiler.Platform.Choices}"
-                : $"Unknown target '{names[0]}': write {Compiler.Platform.Choices}";
+            problem = names.Count > 1 ? "--target is given more than once. Give one target"
+                : names.Count == 0 ? $"No target given. Write {Compiler.Platform.Choices}"
+                : $"Unknown target '{names[0]}'. Use {Compiler.Platform.Choices}";
             return names.Count == 1 ? Compiler.Platform.ByName(names[0]) : null;
         }
     }
@@ -128,14 +134,15 @@ public static partial class Cli
             if (option is null)
             {
                 // Bench compares any number of files; the other commands take one.
-                if (a.StartsWith('-') || (command != Command.Bench && read.Files.Any())) problem = $"Unknown argument: {a}";
+                if (a.StartsWith('-')) problem = $"Unknown option {a}. Check the spelling";
+                else if (command != Command.Bench && read.Files.Any()) problem = $"{a} is a second source file, and {NameOf(command)} takes one. Remove it";
                 else read.Items.Add((null, a));
             }
             else if (!option.Commands.Contains(command))
-                problem = $"{a} is an option of {string.Join(" and ", option.Commands.Select(NameOf))}, not of {NameOf(command)}";
+                problem = $"{a} is an option of {string.Join(" and ", option.Commands.Select(NameOf))}, not of {NameOf(command)}. Remove it";
             else if (option.Takes == Takes.Nothing) read.Items.Add((option, ""));
             else if (i + 1 >= arguments.Length)
-                problem = option.Takes == Takes.Count ? $"{a} needs a whole number above 0 after it" : $"{a} needs a value after it";
+                problem = option.Takes == Takes.Count ? $"{a} has no value. Give a whole number above 0 after it" : $"{a} has no value. Give its value after it";
             else
             {
                 string text = arguments[++i];
@@ -150,6 +157,6 @@ public static partial class Cli
     /// <summary>What is wrong with a count's value: "--cycles needs a whole number above 0, found 'abc'", or null.</summary>
     private static string? CountProblem(Option option, string text) =>
         long.TryParse(text, NumberStyles.None, CultureInfo.InvariantCulture, out long value) && value >= 1 && value <= option.Max ? null
-        : option.Max == long.MaxValue ? $"{option.Name} needs a whole number above 0, found '{text}'"
-        : $"{option.Name} needs a whole number from 1 to {option.Max}, found '{text}'";
+        : option.Max == long.MaxValue ? $"{option.Name} needs a whole number above 0, found '{text}'. Give a number of 1 or more, in digits"
+        : $"{option.Name} needs a whole number from 1 to {option.Max}, found '{text}'. Give a number in that range, in digits";
 }

@@ -26,6 +26,14 @@ internal sealed class C64Machine(OverlayDisk disk) : Machine
     private string _fileName = "";
     private int _secondary;
 
+    public override string Help => $"On the C64: {StandIns}; LOAD loads the program's own overlay files (\"LEVEL1\" is level1.prg).";
+
+    public override string ScreenHelp => "$0400 on the C64";
+
+    public override string UnmodelledChips => "VIC-II, SID or CIA";
+
+    public override string IdleInput => "the C64's $DC00 and $DC01 are $FF";
+
     protected override IReadOnlyList<StandIn> Routines =>
     [
         new(0xFFD2, "CHROUT", (cpu, ram, output) => { Print(cpu.A, ram, output); cpu.C = false; return CursorBytes(ram); }),
@@ -47,6 +55,9 @@ internal sealed class C64Machine(OverlayDisk disk) : Machine
         ram.Bytes[TextColor] = LightBlue;     // the KERNAL's light blue
         ram.Bytes[CursorRow] = 0;
         ram.Bytes[CursorColumn] = 0;
+        // Idle input (decision 2026-11-21, question 175): CIA 1's ports read no joystick and no key.
+        ram.Bytes[0xDC00] = 0xFF;
+        ram.Bytes[0xDC01] = 0xFF;
     }
 
     public override (int Address, int Columns, int Rows) Screen(Ram ram) => (ScreenAddress, Columns, Rows);

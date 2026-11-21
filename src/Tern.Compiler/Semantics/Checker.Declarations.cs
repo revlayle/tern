@@ -252,11 +252,12 @@ public sealed partial class Checker
                 _parameterScope ??= ParameterScope(main);
                 _module = _parameterScope;
                 try { CheckExpr(value); }
-                catch (CompileError e)
+                catch (CompileError e) when (e.Reason is NotDeclared { Name: var missing })
                 {
-                    if (e.Reason is NotDeclared { Name: var missing } && _unusableConstants.TryGetValue(missing, out var why))
+                    // Made from the reason, with one fix (review R6, suggestion 2); other errors have their own.
+                    if (_unusableConstants.TryGetValue(missing, out var why))
                         throw new CompileError(e.Pos, $"'{missing}' cannot be used in a parameter value, since it does not check without the rest of the program: {why}. Write the value as a number");
-                    throw new CompileError(e.Pos, e.Description + ". A parameter value uses literals and the main file's constants that do not depend on imported modules. Write the value as a number");
+                    throw new CompileError(e.Pos, $"'{missing}' is not a constant that a parameter value can use: a parameter value uses literals and the main file's constants that do not depend on imported modules. Write the value as a number, or check the spelling");
                 }
                 finally { _module = saved; }
             }
@@ -299,7 +300,12 @@ public sealed partial class Checker
         foreach (var c in scope.Syntax.Consts)
         {
             try { DeclareConst(c); }
-            catch (CompileError e) { _unusableConstants[c.Name] = e.Description; } // needs an import, data or a later constant
+            catch (CompileError e)
+            {
+                // Needs an import, data or a later constant: why, without the error's own fix.
+                int fix = Tools.Diagnostic.FixStart(e.Description);
+                _unusableConstants[c.Name] = fix < 0 ? e.Description : e.Description[..fix];
+            }
         }
         _module = saved;
         return scope;
