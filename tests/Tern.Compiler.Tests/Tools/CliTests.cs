@@ -53,7 +53,7 @@ public sealed class CliTests : TempFolderTest
     {
         var (code, _, error) = Tern("run", "--target", "c64", Write("a.tern"), "--dump", "nosuch");
         Assert.Equal(1, code);
-        Assert.Equal("--dump No variable 'nosuch'. Write a local as 'function.name'", error);
+        Assert.Equal("--dump 'nosuch' is not a variable of the program. Write a local as 'function.name'. Run 'tern --help' for the options.", error);
     }
 
     [Fact]
@@ -262,7 +262,7 @@ public sealed class CliTests : TempFolderTest
     [InlineData(new[] { "--target", "c64", "--json", "--max-errors", "abc", "SRC" }, "--max-errors needs a whole number from 1 to 2147483647, found 'abc'.", "Give a number in that range, in digits. Run 'tern --help' for the options")]
     [InlineData(new[] { "run", "--target", "c64", "--set", "zz", "--json", "SRC" }, "--set 'zz' is not an address and a byte.", "Write them as $DC00=$FF. Run 'tern --help' for the options")]
     [InlineData(new[] { "--target", "c64", "--json", "--bogus", "SRC" }, "Unknown option --bogus.", "Check the spelling. Run 'tern --help' for the options")]
-    [InlineData(new[] { "run", "--target", "c64", "--dump", "out:0", "--json", "SRC" }, "--dump 'out:0' shows no bytes.", "Give a byte count of 1 or more")]
+    [InlineData(new[] { "run", "--target", "c64", "--dump", "out:0", "--json", "SRC" }, "--dump 'out:0' shows no bytes.", "Give a byte count of 1 or more. Run 'tern --help' for the options")]
     public void A_command_line_problem_with_json_is_json_with_a_suggestion_and_no_file(string[] args, string message, string suggestion)
     {
         string src = Write("ok.tern", "var out: u8\nfn main() { out = 1 }\n");
@@ -350,7 +350,7 @@ public sealed class CliTests : TempFolderTest
     {
         var (code, output, _) = Tern("bench", "--target", "c64", "--code", "var a: u8 = 1", "--dump", "nosuch");
         Assert.Equal(1, code);
-        Assert.Contains("nosuch = (No variable 'nosuch'", output);
+        Assert.Contains("nosuch = ('nosuch' is not a variable of the program", output);
         var (jsonCode, json, _) = Tern("bench", "--target", "c64", "--json", "--code", "var a: u8 = 1", "--dump", "nosuch");
         Assert.Equal(1, jsonCode);
         Assert.False(JsonDocument.Parse(json).RootElement.GetProperty("ok").GetBoolean());

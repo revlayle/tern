@@ -317,8 +317,8 @@ public class RunToolTests
     }
 
     [Theory]
-    [InlineData("nope", "No variable 'nope'. Write a local as 'function.name'")]
-    [InlineData("local", "No variable 'local'. Check the spelling: did you mean 'main.local'?")]
+    [InlineData("nope", "'nope' is not a variable of the program. Write a local as 'function.name'")]
+    [InlineData("local", "'local' is not a variable of the program. Check the spelling: did you mean 'main.local'?")]
     [InlineData("$C010-$C000", "'$C010-$C000' ends before it starts. Write the lower address first")]
     [InlineData("$FFFF:2", "goes past $FFFF. Give a range that ends at $FFFF or below")]
     [InlineData("$G000", "is not an address or count. Write $C000 or 49152")]

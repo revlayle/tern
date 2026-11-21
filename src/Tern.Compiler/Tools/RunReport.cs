@@ -35,7 +35,7 @@ public sealed record MemoryDump(string What, int Address, int Size, VariableInfo
         if (!program.Variables.TryGetValue(what, out var v))
         {
             var near = program.Variables.Keys.Where(k => k.EndsWith("." + what) || k.Equals(what, StringComparison.OrdinalIgnoreCase)).Take(3).ToList();
-            throw new FormatException($"No variable '{what}'" + (near.Count > 0 ? $". Check the spelling: did you mean {string.Join(" or ", near.Select(n => $"'{n}'"))}?" : ". Write a local as 'function.name'"));
+            throw new FormatException($"'{what}' is not a variable of the program" + (near.Count > 0 ? $". Check the spelling: did you mean {string.Join(" or ", near.Select(n => $"'{n}'"))}?" : ". Write a local as 'function.name'"));
         }
         if (v.InChr)
             throw new FormatException($"'{v.Name}' is tile data in a chr area, at ${v.Address:X4} in the PPU's memory, and --dump shows the CPU's memory. Check tile data in an emulator");

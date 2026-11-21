@@ -78,7 +78,7 @@ public static partial class Cli
             if (program is null) return 1;
             List<MemoryDump> dumps;
             try { dumps = args.All("--dump").Select(d => MemoryDump.Parse(d, program)).ToList(); }
-            catch (FormatException e) { return Fail(json, Diagnostic.Error("", "--dump " + e.Message), "--dump " + e.Message); }   // a command-line problem: no file
+            catch (FormatException e) { return Usage1("--dump " + e.Message); }   // an option's value, as --set's: no file, and the help's pointer
             RunResult run;
             try { run = Runner.Run(program, RunOptionsOf(args) with { MainFile = Path.GetFileName(input) }); }
             catch (RunError e) { return Fail(json, Diagnostic.Error(input, e.Message), e.Message); }
