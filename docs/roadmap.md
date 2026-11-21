@@ -766,17 +766,18 @@ Done when: adding a platform needs no change outside its description and its lib
 
 ### R8: Error and listing tests
 
-Decision 2026-11-21. After R6 is merged, before the release; its own branch (`r8-tests`), review and merge. The three test findings R6 had left when its platform and message work was done. They change no compiler code, so no benchmark or `SkillTests` output moves. Its review checks them in R7's way (a verdict per finding).
+Decision 2026-11-21. After R6 is merged, before the release; its own branch (`r8-tests`), review and merge. The three test findings R6 had left when its platform and message work was done. They change no compiler code, so no benchmark moves. Its review checks them in R7's way (a verdict per finding).
 
 In this order:
 
+0. First, `tern run`'s idle input (question 175, spec 13): each machine's `Start` sets its input registers and the OS variables that hold input to "nothing pressed". Each value has a test that fails before it; the `SkillTests` outputs that move are rewritten in the same commit.
 1. Tests 4, error tests: every error test checks the line, column and whole message, fix sentence included. One way (the coding session chooses): a baseline file of every error case's position and message, rewritten with an environment variable as the benchmarks are, and read in the diff; or a shared `Expect.Error(source, line, column, fullText)` the theories move to. Then the list of messages no test reaches (`FixSentenceTests.Messages()` or a coverage run), each given a test. A message found wrong while doing this is fixed with its test.
 2. Tests 9, listing checks: each `Assert.Contains` / `DoesNotContain` on a listing scoped to the function it is about (`Listing.Code`), and each `DoesNotContain` paired with a positive check of the expected shape.
 3. Tests 11, folders: test files moved into folders by spec section, with the section in each class comment; files moved, not changed, in a commit of their own, last, so the moves stay visible as renames.
 
 Messages stay one text through R8 (question 177, decision 2026-11-21); their split into problem, fix and code is M28's.
 
-Done when: every error test checks position and whole message, every message the compiler can give has a test or is listed with the reason it cannot be reached, no listing check reads the whole listing, the tests are filed by spec section, and the benchmarks and `SkillTests` are unchanged.
+Done when: every error test checks position and whole message, every message the compiler can give has a test or is listed with the reason it cannot be reached, no listing check reads the whole listing, the tests are filed by spec section, `tern run` starts with idle input on all four platforms, the benchmarks are unchanged, and `SkillTests` changes only by the idle input.
 
 ## First release (after R7)
 
