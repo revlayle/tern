@@ -16,9 +16,12 @@ public static class Expect
     {
         string adapted = TestTarget.Adapt(source, TestTarget.Default, out var moved);
         var e = Assert.Throws<CompileError>(() => TernCompiler.Compile(adapted, TestTarget.Default));
-        int at = e.Pos.Line == moved.Line && e.Pos.Column > moved.Columns ? e.Pos.Column - moved.Columns : e.Pos.Column;
-        Assert.Equal(message, e.Description);
-        Assert.Equal((line, column), (e.Pos.Line, at));
+        // Places on the line whose columns moved, in the position and in the text ("declared at 1:37"), as in the source.
+        int Column(int l, int c) => l == moved.Line && c > moved.Columns ? c - moved.Columns : c;
+        string text = moved.Line == 0 ? e.Description : System.Text.RegularExpressions.Regex.Replace(e.Description,
+            @"\b(\d+):(\d+)\b", m => $"{m.Groups[1].Value}:{Column(int.Parse(m.Groups[1].Value), int.Parse(m.Groups[2].Value))}");
+        Assert.Equal(message, text);
+        Assert.Equal((line, column), (e.Pos.Line, Column(e.Pos.Line, e.Pos.Column)));
         return e;
     }
 
