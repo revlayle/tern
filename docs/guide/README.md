@@ -41,6 +41,7 @@ Read chapters 1 to 3 in order, then the chapter for your machine; the others whe
 ## After the first release
 
 - **Doc comments (`///`) and a language server** (M28), which shows errors, types and costs in your editor.
+- **Platform packages** (P1): each platform, the four built-in ones included, as a folder with a description file, startup code, `tern run` stand-ins in 6502 code and its library, through a published interface, so other developers can add 6502 targets.
 - **The 65C02 CPU and the Commander X16** (M29), then **the Commodore 128 in native mode** (M30; C64 programs already run in its C64 mode).
 - Not scheduled yet: calls through function variables (`var handler: fn() targets [idle, walk]`), import paths with subfolders and aliases, MMC1 for the NES, cartridges and RAM banks for the C64 and the Atari, a generator that also returns a value (such as the cycles of the code it emitted).
 - Far off, after the compiler is complete: a standalone assembler extracted from Tern, with its generators, memory block and listing.

@@ -819,6 +819,22 @@ Decision 2026-11-12 (was M23); the first milestone after the first release, befo
 
 Question 176 (decision 2026-11-21) is settled here, by M28's spec session: as built since R5, `///` lines go to the next token across blank lines and plain `//` comments (Rust's rule), only top-level functions, variables, constants and structs keep them, and a `///` elsewhere is dropped silently; the draft below is stricter (an error elsewhere or after a blank line), which the spec session of 2026-11-21 leaned towards. A draft from the spec session of 2026-11-12, to start from: `///` only right before a declaration or struct field (elsewhere, or with a blank line between, an error); a `///` block at the top of a file followed by a blank line documents the module; Markdown text, no `@param` tags; the library's comments become `///`. The server is `tern lsp` (stdio, no new NuGet package) with a VS Code extension in `editors/vscode/` (colouring and a client); a module is compiled through a main file that imports it, or checked alone; hover shows signature, address, bytes and fixed cycles for functions, type and address for variables, values for constants, offsets for struct fields, from the last version that compiled when the text does not; go to definition for names, `module.name`, `import`, fields, asm `.label`s and `addr()` arguments.
 
+### Platform packages: design (spec session, after M28)
+
+Decision 2026-11-21. A spec session settles a published interface for platforms, so that other developers can add 6502 targets without changing the compiler, and so that the four built-in platforms use it too. After R6 a platform is its description and its library, but the description, its output format and its `tern run` machine are C# inside the compiler (`Platform.cs`, `Output/`, `Tools/*Machine.cs`, `NesBus.cs`), and `Platform.All` is fixed when the compiler is built. Notes from the spec session of 2026-11-21, a starting point, not decisions:
+
+- **A platform package is a folder** (e.g. `platforms/vic20/`): a description file (JSON; no new NuGet package), its library `.tern` files, and its startup code in Tern or `asm`. The description holds what `Platform` holds today: memory map, zero page, volatile areas, load address, header, encoding, CPU variant, the label format and the emulator command for the real-emulator checks (as templates, e.g. `al C:{addr} .{name}`), the idle input values, and the text screen's address, size, characters and row addresses. A package may extend another (`c128` extends `c64`: its library searched first, then the other's), which answers M30's library question.
+- **Output formats** are chosen from the built-in set (`.prg` with or without a BASIC line, `.xex`, raw, iNES, ProDOS `.system`); to settle: whether a header template (load address, length, run address as fields) covers the formats a new target needs.
+- **`tern run`'s stand-ins as 6502 code**: a package supplies a small fake ROM, in Tern or `asm`, at the ROM routines' addresses, run by the built-in CPU like the program. What 6502 code cannot do (read one of the build's files, stop the run, report an error) goes through a few host calls, fixed and published (e.g. a `jsr` to a reserved address with a service number in A). The description file and the host calls are the published interface, with a version number; a package names the version it was written for.
+- **Hardware that is more than memory** (the NES PPU behind `$2006`/`$2007`, its vblank and NMI timing, a raster counter, timers): to settle whether simple devices can be declared as data, and whether the rest needs a .NET plugin (a DLL in a plug-in folder) with a published C# interface. A DLL tier is added only if a target needs it; its costs: a public API kept stable across releases, and plug-in code running inside the compiler and the language server.
+- **Questions to research:** which 6502 targets users want (VIC-20, PET, Plus/4, Oric, BBC Micro, Atari 7800, KIM-1, homebrew boards such as Neo6502 and the Foenix F256) and what each needs beyond the data tier; how the CLI, `--json`, the help, the skill and the guide find and list installed packages.
+
+### P1: Platform packages
+
+Decision 2026-11-21. After the design session, before the 65C02 analysis and M29. The four built-in platforms become packages first ("eat our own dogfood"): the C64, Atari, Apple II and NES descriptions, startup code, stand-ins and libraries move into `platforms/<name>/` and are loaded the same way as a package from another developer, with no list of platforms in the compiler. The X16 (M29) and the C128 (M30) are then built as packages.
+
+Done when: the four platforms load as packages through the published interface only, with no platform-specific C# left in the compiler except what the design session puts in a plug-in tier; the whole suite passes on all four platforms (`TERN_TARGET`), and `tern run` gives the same results; the benchmarks and `SkillTests` are unchanged; a sample package for a target not built in (chosen by the design session) is written from the guide alone and passes the portable suite; and the guide documents the interface and its version.
+
 ### 65C02: analysis (spec session, before M29)
 
 Decision 2026-11-12. Before the X16 platform and its library, a spec session checks how far the compiler should go with the 65C02, beyond the instructions listed in M29. The result may split M29 into a CPU milestone and a platform milestone. Notes from the spec session of 2026-11-12, a starting point, not decisions:
@@ -835,13 +851,13 @@ Decision 2026-11-12. Before the X16 platform and its library, a spec session che
 
 - The 65C02 CPU variant (spec 12.1): new instructions in the CPU table, emulator and code generator (`stz`, `bra`, `phx`/`phy`, `inc a`, `(zp)` addressing); code shapes per variant
 - An `interrupt fn` emits `cld` only when the variant has decimal mode (not on the NES's 2A03; decision 2026-11-16)
-- X16 platform: memory map, banked RAM, VERA register structs, KERNAL routines
+- X16 platform, as a platform package (P1): memory map, banked RAM, VERA register structs, KERNAL routines
 
 Done when: the benchmarks compile for the 65C02 and use the new instructions where shorter (listing tests), and an X16 example runs in its emulator.
 
 ### M30: Commodore 128 (native mode)
 
-Decision 2026-11-10. C64 programs already run on a C128 in C64 mode; this target is for native mode. Starts with a spec session that checks the machine's details against the C128 reference.
+Decision 2026-11-10. C64 programs already run on a C128 in C64 mode; this target is for native mode. Built as a platform package (P1) that extends the C64's. Starts with a spec session that checks the machine's details against the C128 reference.
 
 
 - Platform description: the `.prg` with a BASIC 7 `SYS` line at `$1C01`, the free zero page (smaller than the C64's), volatile areas (the C64's plus the MMU and the VDC)

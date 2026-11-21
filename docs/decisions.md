@@ -1119,3 +1119,11 @@ Roadmap R8 (review R6, suggestion 7).
 Spec 3 and 3.1, as written. Records the reason for a rule the spec already states.
 
 - **A number is not a condition, and `u8 as bool` stays an error; write `x != 0`.** Reason: the compare costs nothing over a truthiness rule (`if x != 0` is `lda x` / `beq skip`; a u16 is `lda x` / `ora x+1` / `beq skip`), so truthiness would save typing, not code; `if x` beside `if x != 0` would be two spellings of one meaning (rule 3), and `if flags & 4` would hide which test is meant; storing a bool needs 0 or 1, so `x as bool` would hide the normalizing instructions that `b = x != 0` shows (rule 1). `x != 0`, not `x > 0`, is the general spelling: they differ for a negative `i8` or `i16`.
+
+## 2026-11-21: platform packages through a published interface, after M28
+
+Roadmap "Platform packages: design" and P1. Builds on R6 (platforms as data).
+
+- **After M28, a spec session designs a published interface for platforms; P1 builds it, before the 65C02 analysis and M29.** Reason: other developers should be able to add 6502 targets without changing the compiler. R6 already puts each platform's facts in its description, but the description, its output format and its `tern run` machine are C# inside the compiler, so a target still needs a compiler build.
+- **The four built-in platforms move to packages first, loaded the same way as an outside package** (the developer's "eat our own dogfood"). Reason: an interface the built-in platforms do not use is not tested; with the portable suite (R8) and unchanged benchmarks, moving them shows the interface is complete. The X16 and the C128 are then built as packages.
+- **Data first; a .NET plug-in (DLL) only where a target needs it.** The starting point: a description file, startup code and stand-ins written in 6502 code, plus a few fixed host calls (read a build file, stop the run). Reason: a small, versioned interface stays stable, while publishing the compiler's internal classes (asm items, the RAM plan, the CPU and bus) as a plug-in API would freeze them, and plug-in code would run inside the compiler and language server. Hardware that is more than memory (the NES PPU) is the open case for the design session.
