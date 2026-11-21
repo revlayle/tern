@@ -112,21 +112,21 @@ public sealed class ModuleParameterTests : TempFolderTest
     }
 
     [Theory]
-    [InlineData("import sprites(COUNT = 7)\nfn main() { }", "sprites.COUNT must be 8 to 64")]
-    [InlineData("import sprites(COUNT = 65)\nfn main() { }", "sprites.COUNT must be 8 to 64")]
-    [InlineData("import sprites(COUNT = 256)\nfn main() { }", "256 does not fit in u8")]
-    [InlineData("import sprites(DELTA = 128)\nfn main() { }", "128 does not fit in i8")]
-    [InlineData("import sprites(WIDE = -1)\nfn main() { }", "-1 does not fit in u16")]
-    [InlineData("import sprites(FLICKER = 1)\nfn main() { }", "Expected bool, found a number")]
-    [InlineData("import sprites(COUNT = true)\nfn main() { }", "Expected u8, found bool")]
-    [InlineData("import sprites(SIZE = 10)\nfn main() { }", "Module 'sprites' has no parameter 'SIZE'; its parameters are COUNT, WIDE, FLICKER, DELTA")]
-    [InlineData("import sprites(COUNT = 10, COUNT = 11)\nfn main() { }", "Parameter 'COUNT' is set twice")]
-    [InlineData("import sprites(COUNT = x)\nvar x: u8\nfn main() { }", "'x' is not declared")]
-    public void Wrong_parameter_values_are_errors_at_the_import_line(string source, string expected)
+    [InlineData("import sprites(COUNT = 7)\nfn main() { }", 1, 8, "sprites.COUNT must be 8 to 64 (assert at sprites.tern:2:1)")]
+    [InlineData("import sprites(COUNT = 65)\nfn main() { }", 1, 8, "sprites.COUNT must be 8 to 64 (assert at sprites.tern:2:1)")]
+    [InlineData("import sprites(COUNT = 256)\nfn main() { }", 1, 24, "256 does not fit in u8 (0 to 255). Use a value in that range, or a wider type")]
+    [InlineData("import sprites(DELTA = 128)\nfn main() { }", 1, 24, "128 does not fit in i8 (-128 to 127). Use a value in that range, or a wider type")]
+    [InlineData("import sprites(WIDE = -1)\nfn main() { }", 1, 23, "-1 does not fit in u16 (0 to 65535). Use a value in that range, or a wider type")]
+    [InlineData("import sprites(FLICKER = 1)\nfn main() { }", 1, 26, "Expected bool, found a number. Write true or false, or compare, as in 'x != 0'")]
+    [InlineData("import sprites(COUNT = true)\nfn main() { }", 1, 24, "Expected u8, found bool. Use 'if' to choose a number, as in 'if b { x = 1 }'")]
+    [InlineData("import sprites(SIZE = 10)\nfn main() { }", 1, 16, "Module 'sprites' has no parameter 'SIZE'; its parameters are COUNT, WIDE, FLICKER, DELTA. Use one of those names")]
+    [InlineData("import sprites(COUNT = 10, COUNT = 11)\nfn main() { }", 1, 28, "Parameter 'COUNT' is set twice. Remove one")]
+    [InlineData("import sprites(COUNT = x)\nvar x: u8\nfn main() { }", 1, 24, "'x' is not declared. Check the spelling, or declare it. A parameter value uses literals and the main file's constants that do not depend on imported modules. Write the value as a number")]
+    public void Wrong_parameter_values_are_errors_at_the_import_line(string source, int line, int column, string expected)
     {
         Write("sprites.tern", Sprites);
         var e = Fail(source);
-        Assert.Contains(expected, e.Description);
+        Expect.Message(e, line, column, expected);
         Assert.Equal(1, e.Pos.Line);
         Assert.Equal(Path.Combine(Src, "main.tern"), e.Pos.File);
     }

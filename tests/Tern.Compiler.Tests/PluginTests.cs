@@ -129,53 +129,53 @@ public sealed class PluginTests : TempFolderTest
     }
 
     [Theory]
-    [InlineData("fn leave() { n = 0 }\n", "", "'level_api.leave' has no function in this binary. Write 'fn leave()' in the main file")]
+    [InlineData("fn leave() { n = 0 }\n", "", 6, 8, "'level_api.leave' has no function in this binary. Write 'fn leave()' in the main file")]
     [InlineData("fn enter(level: u8 using A) -> u8 using A {", "fn enter(level: u8 using X) -> u8 using A {",
-        "'enter' does not match 'level_api.enter': it is 'fn enter(level: u8 using X) -> u8 using A', the interface says 'fn enter(level: u8 using A) -> u8 using A'. Change the function to match")]
-    [InlineData("fn enter(level: u8 using A) -> u8 using A {", "fn enter(level: i8 using A) -> u8 using A {", "'enter' does not match 'level_api.enter'")]
-    [InlineData("fn update(t: u8 using X) -> bool using carry {", "fn update(t: u8 using X) -> bool using zero {", "'update' does not match 'level_api.update'")]
-    [InlineData("fn update(t: u8 using X) -> bool using carry {\n    n += t\n    return n >= 10", "fn update(t: u8 using X) {\n    n += t", "'update' does not match 'level_api.update'")]
-    [InlineData("fn leave() { n = 0 }", "fn leave(k: u8 using Y) { n = k }", "'leave' does not match 'level_api.leave'")]
-    [InlineData("fn leave() { n = 0 }", "inline fn leave() { n = 0 }", "'leave' is inline")]
-    [InlineData("fn leave() { n = 0 }", "interrupt fn leave() { n = 0 }", "'leave' is an interrupt handler")]
-    [InlineData("fn leave() { n = 0 }", "var leave: u8", "'level_api.leave' has no function in this binary")]
+        16, 1, "'enter' does not match 'level_api.enter': it is 'fn enter(level: u8 using X) -> u8 using A', the interface says 'fn enter(level: u8 using A) -> u8 using A'. Change the function to match")]
+    [InlineData("fn enter(level: u8 using A) -> u8 using A {", "fn enter(level: i8 using A) -> u8 using A {", 16, 1, "'enter' does not match 'level_api.enter': it is 'fn enter(level: i8 using A) -> u8 using A', the interface says 'fn enter(level: u8 using A) -> u8 using A'. Change the function to match")]
+    [InlineData("fn update(t: u8 using X) -> bool using carry {", "fn update(t: u8 using X) -> bool using zero {", 12, 1, "'update' does not match 'level_api.update': it is 'fn update(t: u8 using X) -> bool using zero', the interface says 'fn update(t: u8 using X) -> bool using carry'. Change the function to match")]
+    [InlineData("fn update(t: u8 using X) -> bool using carry {\n    n += t\n    return n >= 10", "fn update(t: u8 using X) {\n    n += t", 12, 1, "'update' does not match 'level_api.update': it is 'fn update(t: u8 using X)', the interface says 'fn update(t: u8 using X) -> bool using carry'. Change the function to match")]
+    [InlineData("fn leave() { n = 0 }", "fn leave(k: u8 using Y) { n = k }", 11, 1, "'leave' does not match 'level_api.leave': it is 'fn leave(k: u8 using Y)', the interface says 'fn leave()'. Change the function to match")]
+    [InlineData("fn leave() { n = 0 }", "inline fn leave() { n = 0 }", 11, 8, "'leave' is inline: it has no code of its own to put in the jump table. Remove 'inline'")]
+    [InlineData("fn leave() { n = 0 }", "interrupt fn leave() { n = 0 }", 11, 11, "'leave' is an interrupt handler, which the CPU calls through a vector; it cannot be an entry of the jump table. Export a plain function that does the work")]
+    [InlineData("fn leave() { n = 0 }", "var leave: u8", 6, 8, "'level_api.leave' has no function in this binary. Write 'fn leave()' in the main file")]
     // A routine at a fixed address has no body here, as for an overlay (review code-quality-semantics 20: one matching for both).
-    [InlineData("fn leave() { n = 0 }", "fn leave() @ $C000", "'level_api.leave' has no function in this binary")]
-    [InlineData("fn leave() { n = 0 }", "fn leave() { n = 0 }\nfn setup() { }", "'setup' is the name of the binary's startup entry")]
+    [InlineData("fn leave() { n = 0 }", "fn leave() @ $C000", 6, 8, "'level_api.leave' has no function in this binary. Write 'fn leave()' in the main file")]
+    [InlineData("fn leave() { n = 0 }", "fn leave() { n = 0 }\nfn setup() { }", 12, 1, "'setup' is the name of the binary's startup entry (entry 0 of the jump table). Rename the function")]
     [InlineData("data header: level_api.LevelHeader @ $600C = level_api.LevelHeader { width = 40, height = 12, start_x = 3 }\n", "",
-        "'level_api.header' is data every binary of level_api provides. Declare 'data header: level_api.LevelHeader @ $600C = ...' in the main file")]
+        6, 8, "'level_api.header' is data every binary of level_api provides. Declare 'data header: level_api.LevelHeader @ $600C = ...' in the main file")]
     [InlineData("data header: level_api.LevelHeader @ $600C", "data header: level_api.LevelHeader @ $6010",
-        "'header' does not match 'level_api.header'. Declare it as 'data header: level_api.LevelHeader @ $600C = ...'")]
+        8, 1, "'header' does not match 'level_api.header'. Declare it as 'data header: level_api.LevelHeader @ $600C = ...'")]
     [InlineData("data header: level_api.LevelHeader @ $600C = level_api.LevelHeader { width = 40, height = 12, start_x = 3 }", "data header: [u8; 3] @ $600C = [40, 12, 3]",
-        "'header' does not match 'level_api.header'")]
+        8, 1, "'header' does not match 'level_api.header'. Declare it as 'data header: level_api.LevelHeader @ $600C = ...'")]
     [InlineData("data header: level_api.LevelHeader @ $600C = level_api.LevelHeader { width = 40, height = 12, start_x = 3 }", "var header: level_api.LevelHeader @ $600C",
-        "'header' does not match 'level_api.header'")]
-    [InlineData("export level_api", "export level_api, leave", "'export level_api' takes the entries and their addresses from level_api, so the export line names nothing else. Declare a routine for 'leave' in level_api instead")]
-    [InlineData("export level_api", "export leave, level_api", "names nothing else. Declare a routine for 'leave' in level_api instead")]
-    [InlineData("export level_api", "export level_api, level_api", "names nothing else. Remove the second 'level_api'")]
-    [InlineData("level_api.SLOT_FIRST..=", "$5000..=", "'level_api.setup' is at $6000, but setup is entry 0 of the jump table, at the start of the binary's first program area ($5000). Move setup to $5000 in level_api, or start the first program area at $6000")]
-    [InlineData("fn leave() { n = 0 }", "fn leave() { n = 0\n    for i in 0..3 using X { n += 1 } }", "'leave' changes X, which 'level_api.leave' promises to keep. Change the function so that it leaves X alone, or remove X from the routine's 'keeps' list")]
-    public void Reports_errors_in_the_binary(string replace, string with, string expected)
+        8, 1, "'header' does not match 'level_api.header'. Declare it as 'data header: level_api.LevelHeader @ $600C = ...'")]
+    [InlineData("export level_api", "export level_api, leave", 6, 19, "'export level_api' takes the entries and their addresses from level_api, so the export line names nothing else. Declare a routine for 'leave' in level_api instead")]
+    [InlineData("export level_api", "export leave, level_api", 6, 8, "'export level_api' takes the entries and their addresses from level_api, so the export line names nothing else. Declare a routine for 'leave' in level_api instead")]
+    [InlineData("export level_api", "export level_api, level_api", 6, 19, "'export level_api' takes the entries and their addresses from level_api, so the export line names nothing else. Remove the second 'level_api'")]
+    [InlineData("level_api.SLOT_FIRST..=", "$5000..=", 6, 8, "'level_api.setup' is at $6000, but setup is entry 0 of the jump table, at the start of the binary's first program area ($5000). Move setup to $5000 in level_api, or start the first program area at $6000")]
+    [InlineData("fn leave() { n = 0 }", "fn leave() { n = 0\n    for i in 0..3 using X { n += 1 } }", 11, 1, "'leave' changes X, which 'level_api.leave' promises to keep. Change the function so that it leaves X alone, or remove X from the routine's 'keeps' list")]
+    public void Reports_errors_in_the_binary(string replace, string with, int line, int column, string expected)
     {
         Assert.Contains(replace, Level);
         var e = Error(Level.Replace(replace, with));
-        Assert.Contains(expected, e.Description);
+        Expect.Message(e, line, column, expected);
     }
 
     [Theory]
-    [InlineData("fn setup() @ $6000\n", "", "level_api has no 'setup' routine. The host calls setup first, at entry 0 of the jump table. Declare 'fn setup() @ $6000' in level_api")]
-    [InlineData("fn setup() @ $6000", "fn setup() @ $6100", "'level_api.setup' is at $6100, but setup is entry 0")]
-    [InlineData("fn setup() @ $6000", "fn setup(n: u8 using A) @ $6000", "'level_api.setup' must take nothing and return nothing")]
-    [InlineData("@ $6006\n", "@ $6004\n", "'level_api.update' at $6004 overlaps the entry before it: each entry of the jump table is a 3-byte jmp, from $6000. Move it to $6006 or later")]
-    [InlineData("fn leave() @ $6009 keeps X, Y", "fn leave(true using carry) @ $6009", "'level_api.leave' has fixed inputs, which a function of the binary cannot receive")]
+    [InlineData("fn setup() @ $6000\n", "", 6, 8, "level_api has no 'setup' routine. The host calls setup first, at entry 0 of the jump table. Declare 'fn setup() @ $6000' in level_api")]
+    [InlineData("fn setup() @ $6000", "fn setup() @ $6100", 6, 8, "'level_api.setup' is at $6100, but setup is entry 0 of the jump table, at the start of the binary's first program area ($6000). Move setup to $6000 in level_api, or start the first program area at $6100")]
+    [InlineData("fn setup() @ $6000", "fn setup(n: u8 using A) @ $6000", 8, 1, "'level_api.setup' must take nothing and return nothing: it is the binary's startup code. Remove its parameters and return value")]
+    [InlineData("@ $6006\n", "@ $6004\n", 10, 1, "'level_api.update' at $6004 overlaps the entry before it: each entry of the jump table is a 3-byte jmp, from $6000. Move it to $6006 or later")]
+    [InlineData("fn leave() @ $6009 keeps X, Y", "fn leave(true using carry) @ $6009", 11, 1, "'level_api.leave' has fixed inputs, which a function of the binary cannot receive. Declare them as parameters in registers")]
     [InlineData("fn leave() @ $6009", "fn leave() @ $7000",
-        "'level_api.leave' at $7000 is outside the binary's first program area $6000-$6FFF, where the jump table is. Move it in level_api to the table, after the entry before it")]
-    [InlineData("fn setup() @ $6000", "fn setup() @ $6000 keeps A", "'level_api.setup' promises to keep A, but the binary's startup code changes it. Remove A from its 'keeps' list")]
-    public void Reports_errors_in_the_interface(string replace, string with, string expected)
+        11, 1, "'level_api.leave' at $7000 is outside the binary's first program area $6000-$6FFF, where the jump table is. Move it in level_api to the table, after the entry before it")]
+    [InlineData("fn setup() @ $6000", "fn setup() @ $6000 keeps A", 6, 8, "'level_api.setup' promises to keep A, but the binary's startup code changes it. Remove A from its 'keeps' list")]
+    public void Reports_errors_in_the_interface(string replace, string with, int line, int column, string expected)
     {
         Assert.Contains(replace, LevelApi);
         var e = Error(Level, LevelApi.Replace(replace, with));
-        Assert.Contains(expected, e.Description);
+        Expect.Message(e, line, column, expected);
     }
 
     [Fact]
@@ -371,23 +371,22 @@ public sealed class PluginTests : TempFolderTest
 
     [Theory]
     [InlineData("export add_score, beep @ $0900", "export add_score, beep @ $A000",
-        "The export table at $A000-$A005 is not in a program or reserved area. Program areas: $0801-$9FFF; reserved: none. Give it an address in one of them")]
-    [InlineData("export add_score, beep @ $0900", "export add_score, beep @ $0801", "overlaps the BASIC line and startup code at $0801-")]
-    [InlineData("export add_score, beep @ $0900", "export add_score, beep @ $0810", "which must be at the start of the first program area. Give the export table an address after $")]
-    [InlineData("export add_score, beep @ $0900", "export add_score, beep @ $FFFE", "The export table (6 bytes) at $FFFE does not fit in memory. Use a lower address")]
-    [InlineData("export add_score, beep @ $0900", "export add_score, beep @ score", "The address of the export table must be known at compile time")]
-    [InlineData("export add_score, beep @ $0900", "export add_score, main @ $0900", "'main' is where the program starts; plug-ins cannot call it. Remove it from the export line")]
-    [InlineData("export add_score, beep @ $0900", "export add_score, add_score @ $0900", "'add_score' is exported twice")]
-    [InlineData("export add_score, beep @ $0900", "export add_score\nexport beep @ $0900\nexport helper @ $0A00", "A program has one export table. Write all its functions on the 'export' line with the '@'")]
-    [InlineData("fn add_score(n: u8 using A) {", "fn add_score(n: u8) {", "'add_score' takes 'n' in memory, which a plug-in cannot set. Pass it in a register (n: u8 using A)")]
+        26, 26, "The export table at $A000-$A005 is not in a program or reserved area. Program areas: $0801-$9FFF; reserved: none. Give it an address in one of them")]
+    [InlineData("export add_score, beep @ $0900", "export add_score, beep @ $0801", 1, 1, "'export table' at $0801-$0806 overlaps the BASIC line and startup code at $0801-$081B, which must be at the start of the first program area. Give the export table an address after $081B")]
+    [InlineData("export add_score, beep @ $0900", "export add_score, beep @ $0810", 1, 1, "'export table' at $0810-$0815 overlaps the BASIC line and startup code at $0801-$081B, which must be at the start of the first program area. Give the export table an address after $081B")]
+    [InlineData("export add_score, beep @ $0900", "export add_score, beep @ $FFFE", 26, 26, "The export table (6 bytes) at $FFFE does not fit in memory. Use a lower address")]
+    [InlineData("export add_score, beep @ $0900", "export add_score, beep @ score", 26, 26, "The address of the export table must be known at compile time. Use a constant, such as $0900")]
+    [InlineData("export add_score, beep @ $0900", "export add_score, main @ $0900", 26, 19, "'main' is where the program starts; plug-ins cannot call it. Remove it from the export line")]
+    [InlineData("export add_score, beep @ $0900", "export add_score, add_score @ $0900", 26, 19, "'add_score' is exported twice. Remove one")]
+    [InlineData("export add_score, beep @ $0900", "export add_score\nexport beep @ $0900\nexport helper @ $0A00", 28, 15, "A program has one export table. Write all its functions on the 'export' line with the '@'")]
+    [InlineData("fn add_score(n: u8 using A) {", "fn add_score(n: u8) {", 26, 8, "'add_score' takes 'n' in memory, which a plug-in cannot set. Pass it in a register (n: u8 using A)")]
     [InlineData("export add_score, beep @ $0900", "export add_score, beep",
-        "A program with 'main' cannot export functions without an address: 'export' alone builds a binary for another program to call, which has no 'main'. Give the table an address for plug-ins to call ('export f @ $0900'), or remove 'main'")]
+        26, 8, "A program with 'main' cannot export functions without an address: 'export' alone builds a binary for another program to call, which has no 'main'. Give the table an address for plug-ins to call ('export f @ $0900'), or remove 'main'")]
     [InlineData("fn main() {", "fn main_gone() {",
-        "A binary's jump table is at the start of its first program area, so its 'export' line has no address. Remove the '@' and the address, or add 'fn main()' for a program whose table plug-ins call")]
-    public void Reports_errors_in_a_program_export(string replace, string with, string expected)
+        26, 24, "A binary's jump table is at the start of its first program area, so its 'export' line has no address. Remove the '@' and the address, or add 'fn main()' for a program whose table plug-ins call")]
+    public void Reports_errors_in_a_program_export(string replace, string with, int line, int column, string expected)
     {
         Assert.Contains(replace, Host);
-        var e = Assert.Throws<CompileError>(() => TernCompiler.Compile(Host.Replace(replace, with), sourcePath: PathOf("host.tern")));
-        Assert.Contains(expected, e.Description);
+        Expect.Error(() => TernCompiler.Compile(Host.Replace(replace, with), sourcePath: PathOf("host.tern")), line, column, expected);
     }
 }

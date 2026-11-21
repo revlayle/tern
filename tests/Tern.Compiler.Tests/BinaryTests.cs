@@ -448,24 +448,23 @@ public class BinaryTests
     // ---------- Errors ----------
 
     [Theory]
-    [InlineData("fn main() { }\nfn f() { }\nexport f", "A program with 'main' cannot export functions")]
-    [InlineData("fn f() { }\nexport f, f", "'f' is exported twice")]
-    [InlineData("export nope", "'nope' is not declared; 'export' names functions of the main file")]
-    [InlineData("var v: u8\nexport v", "'v' is not a function, so it cannot be exported")]
-    [InlineData("fn setup() { }\nexport setup", "'setup' is the name of the binary's startup entry")]
-    [InlineData("interrupt fn h() { }\nexport h", "'h' is an interrupt handler")]
-    [InlineData("inline fn h() { }\nexport h", "'h' is inline")]
-    [InlineData("fn chrout(c: u8 using A) @ $FFD2\nexport chrout", "'chrout' is a routine at a fixed address, not part of this binary")]
-    [InlineData("fn f(n: u8) { }\nexport f", "'f' takes 'n' in memory, which the caller of a binary cannot set")]
-    [InlineData("memory { $C000..=$C003 program\n$C100..=$C1FF program }\nexport play\nfn play() { }", "The jump table (6 bytes) must be at the start of the first program area")]
-    [InlineData("memory { $C000..=$CFFF program }\nexport play\ndata first: [u8; 3] @ $C000 = [1, 2, 3]\nfn play() { }", "overlaps the jump table at $C000-")]
-    [InlineData("fn f() { }\nexport", "Expected a function name after 'export'")]
-    [InlineData("fn f() { }", "The program has no 'fn main()'. Add 'fn main() { }', or an 'export' line for a binary that another program calls")]
-    [InlineData("fn f() { f() }\nexport f", "Recursion is not allowed")]
-    public void Reports_errors(string source, string expected)
+    [InlineData("fn main() { }\nfn f() { }\nexport f", 3, 8, "A program with 'main' cannot export functions without an address: 'export' alone builds a binary for another program to call, which has no 'main'. Give the table an address for plug-ins to call ('export f @ $0900'), or remove 'main'")]
+    [InlineData("fn f() { }\nexport f, f", 2, 11, "'f' is exported twice. Remove one")]
+    [InlineData("export nope", 1, 8, "'nope' is not declared; 'export' names functions of the main file. Declare it there, or remove it from the export line")]
+    [InlineData("var v: u8\nexport v", 2, 8, "'v' is not a function, so it cannot be exported. Remove it from the export line")]
+    [InlineData("fn setup() { }\nexport setup", 2, 8, "'setup' is the name of the binary's startup entry (entry 0 of the jump table). Rename the function")]
+    [InlineData("interrupt fn h() { }\nexport h", 2, 8, "'h' is an interrupt handler, which the CPU calls through a vector; it cannot be an entry of the jump table. Export a plain function that does the work")]
+    [InlineData("inline fn h() { }\nexport h", 2, 8, "'h' is inline: it has no code of its own to put in the jump table. Remove 'inline'")]
+    [InlineData("fn chrout(c: u8 using A) @ $FFD2\nexport chrout", 2, 8, "'chrout' is a routine at a fixed address, not part of this binary. Remove it from the export line")]
+    [InlineData("fn f(n: u8) { }\nexport f", 2, 8, "'f' takes 'n' in memory, which the caller of a binary cannot set. Pass it in a register (n: u8 using A)")]
+    [InlineData("memory { $C000..=$C003 program\n$C100..=$C1FF program }\nexport play\nfn play() { }", 1, 1, "The jump table (6 bytes) must be at the start of the first program area, but it does not fit in $C000-$C003. Make the first area larger")]
+    [InlineData("memory { $C000..=$CFFF program }\nexport play\ndata first: [u8; 3] @ $C000 = [1, 2, 3]\nfn play() { }", 1, 1, "'first' at $C000-$C002 overlaps the jump table at $C000-$C005, which must be at the start of the first program area. Move the data, or start the program area lower")]
+    [InlineData("fn f() { }\nexport", 2, 7, "Expected a function name after 'export', found end of file")]
+    [InlineData("fn f() { }", 1, 1, "The program has no 'fn main()'. Add 'fn main() { }', or an 'export' line for a binary that another program calls")]
+    [InlineData("fn f() { f() }\nexport f", 1, 1, "Recursion is not allowed: f -> f. Use a loop instead, with an array as the stack if needed")]
+    public void Reports_errors(string source, int line, int column, string expected)
     {
-        var e = Assert.Throws<CompileError>(() => TernCompiler.Compile(source));
-        Assert.Contains(expected, e.Description);
+        Expect.Error(source, line, column, expected);
     }
 
     [Fact]

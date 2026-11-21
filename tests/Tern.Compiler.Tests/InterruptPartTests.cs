@@ -171,16 +171,16 @@ public sealed class InterruptPartTests : TempFolderTest
     }
 
     [Theory]
-    [InlineData("interrupt fn p() { }\nfn main() { p() }", "'p' is an interrupt fn, which only the CPU or another interrupt fn calls")]
-    [InlineData("interrupt fn p() { }\nfn helper() { p() }\ninterrupt fn h() { helper() }\nfn main() { }", "'p' is an interrupt fn, which only the CPU or another interrupt fn calls")]
-    [InlineData("interrupt fn p(a: u8) { }\nfn main() { }", "'p' has parameters, so it can only be called as a part")]
-    [InlineData("interrupt fn p() -> u8 { return 1 }\nfn main() { }", "'p' has a return value, so it can only be called as a part")]
-    [InlineData("interrupt fn p() { }\ninterrupt fn h() { p() }\nfn main() { asm {\n lda #p.lo\n } }", "is called by another interrupt fn")]
-    [InlineData("interrupt fn p() { h() }\ninterrupt fn h() { p() }\ninterrupt fn r() { p() }\nfn main() { }", "recursion")]
-    public void Part_errors(string source, string expected)
+    [InlineData("interrupt fn p() { }\nfn main() { p() }", 2, 13, "'p' is an interrupt fn, which only the CPU or another interrupt fn calls. Install its address in the interrupt vector, or call it from an interrupt fn")]
+    [InlineData("interrupt fn p() { }\nfn helper() { p() }\ninterrupt fn h() { helper() }\nfn main() { }", 2, 15, "'p' is an interrupt fn, which only the CPU or another interrupt fn calls. Install its address in the interrupt vector, or call it from an interrupt fn")]
+    [InlineData("interrupt fn p(a: u8) { }\nfn main() { }", 1, 11, "'p' has parameters, so it can only be called as a part of another interrupt fn. An interrupt handler takes no parameters and returns no value: the CPU calls it, not your code. Remove them, or call it only from an interrupt fn")]
+    [InlineData("interrupt fn p() -> u8 { return 1 }\nfn main() { }", 1, 11, "'p' has a return value, so it can only be called as a part of another interrupt fn. An interrupt handler takes no parameters and returns no value: the CPU calls it, not your code. Remove them, or call it only from an interrupt fn")]
+    [InlineData("interrupt fn p() { }\ninterrupt fn h() { p() }\nfn main() { asm {\n lda #p.lo\n } }", 1, 11, "'p' is called by another interrupt fn (so it is compiled as a part, ending with rts) and its address is also used to install it (which needs rti). Use it one way, or write a second interrupt fn for the other")]
+    [InlineData("interrupt fn p() { h() }\ninterrupt fn h() { p() }\ninterrupt fn r() { p() }\nfn main() { }", 1, 11, "Recursion is not allowed: p -> h -> p. Use a loop instead, with an array as the stack if needed")]
+    public void Part_errors(string source, int line, int column, string expected)
     {
         var e = Fail(source);
-        Assert.Contains(expected, e.Description, StringComparison.OrdinalIgnoreCase);
+        Expect.Message(e, line, column, expected);
     }
 
     [Fact]

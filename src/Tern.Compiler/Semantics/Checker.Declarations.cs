@@ -604,7 +604,7 @@ public sealed partial class Checker
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
         {
-            throw new CompileError(file.Pos, $"Cannot read '{file.Text}' ({path}): {e.Message}. Check the file name, relative to the source file");
+            throw new CompileError(file.Pos, $"Cannot read '{file.Text}' ({path}): {e.Message.TrimEnd('.')}. Check the file name, relative to the source file");
         }
         if (bytes.Length == 0) throw new CompileError(file.Pos, $"'{file.Text}' is empty. Use a file with at least one byte");
         return bytes;

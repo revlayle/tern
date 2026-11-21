@@ -184,18 +184,17 @@ public class LinearArrayTests
     }
 
     [Theory]
-    [InlineData("linear var a: [u8; 4]\nfn main() { }", "'linear' is only for arrays of 16-bit values or structs: the elements of a [u8; 4] are one byte each")]
-    [InlineData("linear var a: [bool; 4]\nfn main() { }", "the elements of a [bool; 4] are one byte each")]
-    [InlineData("linear data a: [u8; 2] = [1, 2]\nfn main() { }", "the elements of a [u8; 2] are one byte each")]
-    [InlineData("linear var a: u16\nfn main() { }", "'linear' is for arrays of 16-bit values or structs")]
-    [InlineData("linear var a: [u16; 129]\nfn main() { }", "A linear array of 16-bit values has at most 128 elements, so that the doubled index fits in a register; 'a' has 129")]
-    [InlineData("linear var a: [u16; 4]\nfn main() { a[4] = 1 }", "Index 4 is past the end of 'a' (length 4)")]
-    [InlineData("linear var a: [u16; 2] = [1]\nfn main() { }", "Expected 2 values, found 1")]
-    [InlineData("fn main() { linear data a: [u16; 2] = [1, 2] }", "'data' must be declared outside functions")]
-    [InlineData("linear const a = 1\nfn main() { }", "'linear' goes before 'var' or 'data'")]
-    public void Reports_errors(string source, string expected)
+    [InlineData("linear var a: [u8; 4]\nfn main() { }", 1, 1, "'linear' is only for arrays of 16-bit values or structs: the elements of a [u8; 4] are one byte each, so they are already stored in order. Remove 'linear'")]
+    [InlineData("linear var a: [bool; 4]\nfn main() { }", 1, 1, "'linear' is only for arrays of 16-bit values or structs: the elements of a [bool; 4] are one byte each, so they are already stored in order. Remove 'linear'")]
+    [InlineData("linear data a: [u8; 2] = [1, 2]\nfn main() { }", 1, 1, "'linear' is only for arrays of 16-bit values or structs: the elements of a [u8; 2] are one byte each, so they are already stored in order. Remove 'linear'")]
+    [InlineData("linear var a: u16\nfn main() { }", 1, 1, "'linear' is for arrays of 16-bit values or structs, e.g. 'linear var pts: [u16; 32]' or 'linear var list: [Enemy; 8]'. Remove 'linear'")]
+    [InlineData("linear var a: [u16; 129]\nfn main() { }", 1, 1, "A linear array of 16-bit values has at most 128 elements, so that the doubled index fits in a register; 'a' has 129. Leave out 'linear' to store it split")]
+    [InlineData("linear var a: [u16; 4]\nfn main() { a[4] = 1 }", 2, 15, "Index 4 is past the end of 'a' (length 4). Use an index below 4")]
+    [InlineData("linear var a: [u16; 2] = [1]\nfn main() { }", 1, 26, "Expected 2 values, found 1. Change the length to 1, or write '_' to take it from the list")]
+    [InlineData("fn main() { linear data a: [u16; 2] = [1, 2] }", 1, 20, "'data' must be declared outside functions. Move it to the top level of the file")]
+    [InlineData("linear const a = 1\nfn main() { }", 1, 8, "'linear' goes before 'var' or 'data', e.g. 'linear var list: [Enemy; 8]'; found 'const'. Write 'linear var' or remove 'linear'")]
+    public void Reports_errors(string source, int line, int column, string expected)
     {
-        var e = Assert.Throws<CompileError>(() => TernCompiler.Compile(source));
-        Assert.Contains(expected, e.Description);
+        Expect.Error(source, line, column, expected);
     }
 }

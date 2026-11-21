@@ -66,7 +66,7 @@ public sealed partial class Checker
             case AsmLabelExpr l:
                 return labels.TryGetValue(l.Name, out var label)
                     ? new AsmValue(0, Label: label)
-                    : throw new CompileError(l.Pos, $"Label '{l.Name}' is not defined in this asm block. Define it with '.{l.Name}:' on a line of the block");
+                    : throw new CompileError(l.Pos, $"Label '{l.Name}' is not defined in this asm block. Define it with '{l.Name}:' on a line of the block");
 
             case NameExpr n:
                 switch (Named(n.Bound, n.Name) ?? Lookup(n.Name))

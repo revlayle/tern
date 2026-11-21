@@ -75,16 +75,15 @@ public class NoinitTests
     }
 
     [Theory]
-    [InlineData("noinit var x: u8 = 3\nfn main() { }", "'x' is noinit, so it cannot have an initial value")]
-    [InlineData("noinit var x: u8 @ $C000\nfn main() { }", "'x' is at a fixed address, which is never zeroed; leave out 'noinit'")]
-    [InlineData("fn main() { noinit var x: u8 = 1 }", "'noinit' is for global variables; local variables are never zeroed")]
-    [InlineData("noinit data t: [u8; 2] = [1, 2]\nfn main() { }", "'noinit' goes before 'var'")]
-    [InlineData("noinit linear data t: [u16; 2] = [1, 2]\nfn main() { }", "'noinit' is for variables; data is never zeroed")]
-    [InlineData("noinit fn f() { }\nfn main() { }", "'noinit' goes before 'var'")]
-    public void Reports_errors(string source, string expected)
+    [InlineData("noinit var x: u8 = 3\nfn main() { }", 1, 20, "'x' is noinit, so it cannot have an initial value. Leave out one or the other")]
+    [InlineData("noinit var x: u8 @ $C000\nfn main() { }", 1, 8, "'x' is at a fixed address, which is never zeroed; leave out 'noinit'")]
+    [InlineData("fn main() { noinit var x: u8 = 1 }", 1, 13, "'noinit' is for global variables; local variables are never zeroed. Remove 'noinit'")]
+    [InlineData("noinit data t: [u8; 2] = [1, 2]\nfn main() { }", 1, 1, "'noinit' goes before 'var', e.g. 'noinit var buffer: [u8; 256]'; found 'data'. Write 'noinit var' or remove 'noinit'")]
+    [InlineData("noinit linear data t: [u16; 2] = [1, 2]\nfn main() { }", 1, 1, "'noinit' is for variables; data is never zeroed. Remove 'noinit'")]
+    [InlineData("noinit fn f() { }\nfn main() { }", 1, 1, "'noinit' goes before 'var', e.g. 'noinit var buffer: [u8; 256]'; found 'fn'. Write 'noinit var' or remove 'noinit'")]
+    public void Reports_errors(string source, int line, int column, string expected)
     {
-        var e = Assert.Throws<CompileError>(() => TernCompiler.Compile(source));
-        Assert.Contains(expected, e.Description);
+        Expect.Error(source, line, column, expected);
     }
 
     // Review code-quality-syntax 18: a modifier's error is the declaration's only error (spec 13).

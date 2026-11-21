@@ -219,20 +219,19 @@ public class InlineTests
     }
 
     [Theory]
-    [InlineData("inline var x: u8\nfn main() { }", "'inline' goes before 'fn'")]
-    [InlineData("inline interrupt fn f() { }\nfn main() { }", "'inline' goes before 'fn'")]
-    [InlineData("interrupt inline fn f() { }\nfn main() { }", "'interrupt' goes before 'fn'")]
-    [InlineData("fn main() { inline fn f() { } }", "'inline fn' must be declared outside functions")]
-    [InlineData("inline fn main() { }", "'main' cannot be inline")]
-    [InlineData("inline fn f() @ $1000\nfn main() { }", "An inline function needs a body")]
-    [InlineData("inline fn f() { }\nfn main() { asm {\n jsr f\n } }", "'f' is inline: it is copied into each Tern caller and has no address of its own")]
-    [InlineData("inline fn f() { g() }\ninline fn g() { f() }\nfn main() { f() }", "Recursion is not allowed: f -> g -> f")]
-    [InlineData("inline asm fn f() {\n var t: u8\n lda t\n var u: u8\n}\nfn main() { f() }", "'var' lines go at the start of an asm fn, before the first instruction. Move this line up")]
-    [InlineData("inline asm fn f() {\n var t: u8 = 3\n lda t\n}\nfn main() { f() }", "'t' in an asm fn has no initial value: the assembly sets it. Remove the value and store it in the assembly")]
-    [InlineData("fn main() {\n asm {\n var t: u8\n lda t\n }\n}", "'var' is not allowed inside an asm block")]
-    public void Reports_errors(string source, string expected)
+    [InlineData("inline var x: u8\nfn main() { }", 1, 1, "'inline' goes before 'fn', e.g. 'inline fn wait_frame() { ... }'; found 'var'. Write 'inline fn' or remove 'inline'")]
+    [InlineData("inline interrupt fn f() { }\nfn main() { }", 1, 1, "'inline' goes before 'fn', e.g. 'inline fn wait_frame() { ... }'; found 'interrupt'. Write 'inline fn' or remove 'inline'")]
+    [InlineData("interrupt inline fn f() { }\nfn main() { }", 1, 1, "'interrupt' goes before 'fn', e.g. 'interrupt fn raster() { ... }'; found 'inline'. Write 'interrupt fn' or remove 'interrupt'")]
+    [InlineData("fn main() { inline fn f() { } }", 1, 13, "'inline fn' must be declared outside functions. Move it to the top level of the file")]
+    [InlineData("inline fn main() { }", 1, 8, "'main' cannot be inline: nothing calls it. Remove 'inline'")]
+    [InlineData("inline fn f() @ $1000\nfn main() { }", 1, 8, "An inline function needs a body; '@ $addr' declares a routine that is already there. Remove 'inline' or the address")]
+    [InlineData("inline fn f() { }\nfn main() { asm {\n jsr f\n } }", 3, 6, "'f' is inline: it is copied into each Tern caller and has no address of its own. Call it from Tern, or remove 'inline'")]
+    [InlineData("inline fn f() { g() }\ninline fn g() { f() }\nfn main() { f() }", 1, 8, "Recursion is not allowed: f -> g -> f. Use a loop instead, with an array as the stack if needed")]
+    [InlineData("inline asm fn f() {\n var t: u8\n lda t\n var u: u8\n}\nfn main() { f() }", 4, 2, "'var' lines go at the start of an asm fn, before the first instruction. Move this line up")]
+    [InlineData("inline asm fn f() {\n var t: u8 = 3\n lda t\n}\nfn main() { f() }", 2, 14, "'t' in an asm fn has no initial value: the assembly sets it. Remove the value and store it in the assembly")]
+    [InlineData("fn main() {\n asm {\n var t: u8\n lda t\n }\n}", 3, 2, "'var' is not allowed inside an asm block. Declare the variable before the block, or use 'var' lines at the start of an asm fn")]
+    public void Reports_errors(string source, int line, int column, string expected)
     {
-        var e = Assert.Throws<CompileError>(() => TernCompiler.Compile(source));
-        Assert.Contains(expected, e.Description);
+        Expect.Error(source, line, column, expected);
     }
 }

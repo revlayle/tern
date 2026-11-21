@@ -235,36 +235,36 @@ public sealed class ModuleTests : TempFolderTest
     }
 
     [Theory]
-    [InlineData("import nothing\nfn main() { }", "Cannot find module 'nothing': there is no nothing.tern in the library")]
-    [InlineData("var x: u8\nimport util\nfn main() { }", "'import' must be at the top of the file, before other declarations")]
-    [InlineData("import util\nimport util\nfn main() { }", "'util' is imported twice")]
-    [InlineData("import 5\nfn main() { }", "Expected a module name after 'import'")]
-    [InlineData("import util\nfn main() { util = 1 }", "'util' is a module; use the names in it as util.name")]
-    [InlineData("import util\nvar v: u8\nfn main() { v = util }", "'util' is a module; use the names in it as util.name")]
-    [InlineData("import util\nvar v: u8\nfn main() { v = util.nope }", "'util.nope' is not declared")]
-    [InlineData("import util\nfn main() { util.nope() }", "'util.nope' is not declared")]
-    [InlineData("import util\nfn main() { util.LIMIT() }", "'util.LIMIT' is not a function")]
-    [InlineData("import util\nfn main() { util.add(1) }", "'util.add' takes 2 argument(s), not 1")]
-    [InlineData("import util\nfn main() { var util: u8 = 1 }", "'util' is the name of an imported module; choose another name")]
-    [InlineData("import util\nfn util() { }\nfn main() { }", "'util' is the name of an imported module; choose another name")]
-    [InlineData("import util\nfn main() { for util in 0..3 { } }", "'util' is the name of an imported module; choose another name")]
-    [InlineData("import util\nfn main() { util. }", "Expected a name in module 'util' after '.'")]
-    [InlineData("import util\nvar v: u8\nfn main() { v = clamp(1) }", "'clamp' is not a function")]
-    [InlineData("import util\nfn main() { asm {\n jsr util.nope\n } }", "'util.nope' is not declared")]
-    [InlineData("import withmain\nfn main() { }", "Only the program's main file has 'fn main()'; 'withmain' is a module")]
-    [InlineData("import util", "The program has no 'fn main()'")]
+    [InlineData("import nothing\nfn main() { }", 1, 8, "Cannot find module 'nothing': there is no nothing.tern in the library ({dir}lib) or in {dir}src. Check the spelling, or put nothing.tern next to the importing file")]
+    [InlineData("var x: u8\nimport util\nfn main() { }", 2, 1, "'import' must be at the top of the file, before other declarations. Move it there")]
+    [InlineData("import util\nimport util\nfn main() { }", 2, 8, "'util' is imported twice. Remove one of the imports")]
+    [InlineData("import 5\nfn main() { }", 1, 8, "Expected a module name after 'import', found '5'")]
+    [InlineData("import util\nfn main() { util = 1 }", 2, 13, "'util' is a module; use the names in it as util.name")]
+    [InlineData("import util\nvar v: u8\nfn main() { v = util }", 3, 17, "'util' is a module; use the names in it as util.name")]
+    [InlineData("import util\nvar v: u8\nfn main() { v = util.nope }", 3, 17, "'util.nope' is not declared. Check the spelling, or declare it in util")]
+    [InlineData("import util\nfn main() { util.nope() }", 2, 13, "'util.nope' is not declared. Check the spelling, or declare it in util")]
+    [InlineData("import util\nfn main() { util.LIMIT() }", 2, 13, "'util.LIMIT' is not a function. Remove the ()")]
+    [InlineData("import util\nfn main() { util.add(1) }", 2, 13, "'util.add' takes 2 argument(s), not 1. Pass 2: util.add(a: u8, b: u8)")]
+    [InlineData("import util\nfn main() { var util: u8 = 1 }", 2, 13, "'util' is the name of an imported module; choose another name")]
+    [InlineData("import util\nfn util() { }\nfn main() { }", 2, 1, "'util' is the name of an imported module; choose another name")]
+    [InlineData("import util\nfn main() { for util in 0..3 { } }", 2, 13, "'util' is the name of an imported module; choose another name")]
+    [InlineData("import util\nfn main() { util. }", 2, 19, "Expected a name in module 'util' after '.', found '}'")]
+    [InlineData("import util\nvar v: u8\nfn main() { v = clamp(1) }", 3, 17, "'clamp' is not a function. Check the spelling, or declare it")]
+    [InlineData("import util\nfn main() { asm {\n jsr util.nope\n } }", 3, 6, "'util.nope' is not declared. Check the spelling, or declare it in util")]
+    [InlineData("import withmain\nfn main() { }", 1, 1, "Only the program's main file has 'fn main()'; 'withmain' is a module. Rename the function")]
+    [InlineData("import util", 1, 1, "The program has no 'fn main()'. Add 'fn main() { }', or an 'export' line for a binary that another program calls")]
     // A missing import (review M4, finding 1).
-    [InlineData("fn main() { text.put(1, 2, 3) }", "'text' is not declared. Add 'import text' at the top of the file to use the module text")]
-    [InlineData("var x: u16\nfn main() { x = c64.SCREEN }", "'c64' is not declared. Add 'import c64' at the top of the file to use the module c64")]
-    [InlineData("fn main() { asm {\n jsr c64.chrout\n } }", "'c64' is not declared. Add 'import c64' at the top of the file to use the module c64")]
-    [InlineData("import util\nvar v: u8\nfn main() { v = other.f() }", "'other' is not declared. Add 'import other'")]
-    [InlineData("var v: u8\nfn main() { v = nothing.lo }", "'nothing' is not declared")]
-    public void Reports_errors(string source, string expected)
+    [InlineData("fn main() { text.put(1, 2, 3) }", 1, 13, "'text' is not declared. Add 'import text' at the top of the file to use the module text")]
+    [InlineData("var x: u16\nfn main() { x = c64.SCREEN }", 2, 17, "'c64' is not declared. Add 'import c64' at the top of the file to use the module c64")]
+    [InlineData("fn main() { asm {\n jsr c64.chrout\n } }", 2, 6, "'c64' is not declared. Add 'import c64' at the top of the file to use the module c64")]
+    [InlineData("import util\nvar v: u8\nfn main() { v = other.f() }", 3, 17, "'other' is not declared. Add 'import other' at the top of the file to use the module other")]
+    [InlineData("var v: u8\nfn main() { v = nothing.lo }", 2, 17, "'nothing' is not declared. Check the spelling, or declare it")]
+    public void Reports_errors(string source, int line, int column, string expected)
     {
         Write(Src, "util.tern", Util);
         Write(Src, "withmain.tern", "fn main() { }");
-        var e = Assert.Throws<CompileError>(() => CompileMain(source));
-        Assert.Contains(expected, e.Description);
+        // {dir} stands for the test's folder.
+        Expect.Error(() => CompileMain(source), line, column, expected.Replace("{dir}", _dir.FullName + Path.DirectorySeparatorChar));
     }
 
     [Fact]
@@ -458,26 +458,25 @@ public sealed class ModuleTests : TempFolderTest
     }
 
     [Theory]
-    [InlineData("fn main() { secret.helper() }", "'secret.helper' is private to the module secret; only code in secret can use it")]
-    [InlineData("fn main() { var x = secret.twice(1) }", "'secret.twice' is private to the module secret")]
-    [InlineData("var x: u8\nfn main() { x = secret.count }", "'secret.count' is private to the module secret")]
-    [InlineData("var x: u8\nfn main() { x = secret.TABLE[0] }", "'secret.TABLE' is private to the module secret")]
-    [InlineData("var x: u8\nfn main() { x = secret.STEP }", "'secret.STEP' is private to the module secret")]
-    [InlineData("var x: u8\nfn main() { x = secret.pair.a }", "'secret.pair' is private to the module secret")]
-    [InlineData("var x: secret.Pair\nfn main() { }", "'secret.Pair' is private to the module secret")]
-    [InlineData("var x: u8\nfn main() { x = sizeof(secret.Pair) }", "'secret.Pair' is private to the module secret")]
-    [InlineData("var p: ptr u8\nfn main() { p = addr(secret.count) }", "'secret.count' is private to the module secret")]
-    [InlineData("fn main() { asm {\n inc secret.count\n } }", "'secret.count' is private to the module secret")]
-    [InlineData("fn main() { asm {\n jsr secret.helper\n } }", "'secret.helper' is private to the module secret")]
-    [InlineData("fn main() { asm {\n lda #secret.TABLE.lo\n } }", "'secret.TABLE' is private to the module secret")]
-    [InlineData("fn main() { private var x: u8 }", "'private' is only for top-level declarations")]
-    [InlineData("private private var x: u8\nfn main() { }", "'private' goes before a declaration (const, var, data, struct or fn); found 'private'")]
-    [InlineData("var private: u8\nfn main() { }", "Expected variable name, found 'private'")]
-    public void Private_names_are_errors_outside_their_module(string body, string expected)
+    [InlineData("fn main() { secret.helper() }", 2, 13, "'secret.helper' is private to the module secret; only code in secret can use it. Remove 'private' there, or use another of its functions")]
+    [InlineData("fn main() { var x = secret.twice(1) }", 2, 21, "'secret.twice' is private to the module secret; only code in secret can use it. Remove 'private' there, or use another of its functions")]
+    [InlineData("var x: u8\nfn main() { x = secret.count }", 3, 17, "'secret.count' is private to the module secret; only code in secret can use it. Remove 'private' there, or use another of its functions")]
+    [InlineData("var x: u8\nfn main() { x = secret.TABLE[0] }", 3, 17, "'secret.TABLE' is private to the module secret; only code in secret can use it. Remove 'private' there, or use another of its functions")]
+    [InlineData("var x: u8\nfn main() { x = secret.STEP }", 3, 17, "'secret.STEP' is private to the module secret; only code in secret can use it. Remove 'private' there, or use another of its functions")]
+    [InlineData("var x: u8\nfn main() { x = secret.pair.a }", 3, 17, "'secret.pair' is private to the module secret; only code in secret can use it. Remove 'private' there, or use another of its functions")]
+    [InlineData("var x: secret.Pair\nfn main() { }", 2, 8, "'secret.Pair' is private to the module secret; only code in secret can use it. Remove 'private' there, or use another of its functions")]
+    [InlineData("var x: u8\nfn main() { x = sizeof(secret.Pair) }", 3, 24, "'secret.Pair' is private to the module secret; only code in secret can use it. Remove 'private' there, or use another of its functions")]
+    [InlineData("var p: ptr u8\nfn main() { p = addr(secret.count) }", 3, 22, "'secret.count' is private to the module secret; only code in secret can use it. Remove 'private' there, or use another of its functions")]
+    [InlineData("fn main() { asm {\n inc secret.count\n } }", 3, 6, "'secret.count' is private to the module secret; only code in secret can use it. Remove 'private' there, or use another of its functions")]
+    [InlineData("fn main() { asm {\n jsr secret.helper\n } }", 3, 6, "'secret.helper' is private to the module secret; only code in secret can use it. Remove 'private' there, or use another of its functions")]
+    [InlineData("fn main() { asm {\n lda #secret.TABLE.lo\n } }", 3, 7, "'secret.TABLE' is private to the module secret; only code in secret can use it. Remove 'private' there, or use another of its functions")]
+    [InlineData("fn main() { private var x: u8 }", 2, 13, "'private' is only for top-level declarations; names inside a function are always private to it. Remove 'private'")]
+    [InlineData("private private var x: u8\nfn main() { }", 2, 1, "'private' goes before a declaration (const, var, data, struct or fn); found 'private'. Write it at the start of the declaration it hides")]
+    [InlineData("var private: u8\nfn main() { }", 2, 5, "Expected variable name, found 'private', which is a keyword. Use another name")]
+    public void Private_names_are_errors_outside_their_module(string body, int line, int column, string expected)
     {
         Write(Src, "secret.tern", Secret);
-        var e = Assert.Throws<CompileError>(() => CompileMain("import secret\n" + body));
-        Assert.Contains(expected, e.Description);
+        Expect.Error(() => CompileMain("import secret\n" + body), line, column, expected);
     }
 
     [Fact]

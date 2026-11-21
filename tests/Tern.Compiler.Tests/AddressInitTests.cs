@@ -186,19 +186,18 @@ public class AddressInitTests
 
     [Theory]
     [InlineData("var a: u8\nvar b: u8\ndata t: [u16; 1] = [(addr(a) as u16) + (addr(b) as u16)]\nfn main() { }",
-        "An address in an initial value is filled in when the program is placed, so it can only be used alone, plus or minus a constant, or as .lo / .hi. Assign other values at the start of main")]
-    [InlineData("var a: u8\ndata t: [u16; 1] = [(addr(a) as u16) & $FF00]\nfn main() { }", "can only be used alone, plus or minus a constant")]
-    [InlineData("var a: u8\ndata t: [u16; 1] = [1000 - (addr(a) as u16)]\nfn main() { }", "can only be used alone, plus or minus a constant")]
-    [InlineData("fn f() { }\ndata t: [u16; 1] = [addr(f) << 1]\nfn main() { }", "can only be used alone, plus or minus a constant")]
-    [InlineData("var a: u8\ndata t: [u16; 1] = [addr(a).lo]\nfn main() { }", "'.lo' of an address is one byte, a u8, but this value is u16. Use a [u8; n] table, or the whole address")]
-    [InlineData("var a: u8\ndata t: [i8; 1] = [addr(a).hi]\nfn main() { }", "'.hi' of an address is one byte, a u8, but this value is i8")]
-    [InlineData("var a: u16\nvar p: ptr u8\ndata t: [ptr u8; 1] = [addr(a) as u16]\nfn main() { }", "Expected ptr u8, found u16. Convert with 'as ptr u8'")]
-    [InlineData("var a: u8\ndata t: [u8; 1] = [addr(a)]\nfn main() { }", "Expected u8, found ptr u8")]
-    [InlineData("const C = 5\ndata t: [u16; 1] = [addr(C)]\nfn main() { }", "'C' is a constant, which has no address")]
-    [InlineData("data t: [u16; 1] = [addr(nothing)]\nfn main() { }", "'nothing' is not declared")]
-    public void Reports_errors(string source, string expected)
+        3, 38, "An address in an initial value is filled in when the program is placed, so it can only be used alone, plus or minus a constant, or as .lo / .hi. Assign other values at the start of main")]
+    [InlineData("var a: u8\ndata t: [u16; 1] = [(addr(a) as u16) & $FF00]\nfn main() { }", 2, 38, "An address in an initial value is filled in when the program is placed, so it can only be used alone, plus or minus a constant, or as .lo / .hi. Assign other values at the start of main")]
+    [InlineData("var a: u8\ndata t: [u16; 1] = [1000 - (addr(a) as u16)]\nfn main() { }", 2, 26, "An address in an initial value is filled in when the program is placed, so it can only be used alone, plus or minus a constant, or as .lo / .hi. Assign other values at the start of main")]
+    [InlineData("fn f() { }\ndata t: [u16; 1] = [addr(f) << 1]\nfn main() { }", 2, 29, "An address in an initial value is filled in when the program is placed, so it can only be used alone, plus or minus a constant, or as .lo / .hi. Assign other values at the start of main")]
+    [InlineData("var a: u8\ndata t: [u16; 1] = [addr(a).lo]\nfn main() { }", 2, 28, "'.lo' of an address is one byte, a u8, but this value is u16. Use a [u8; n] table, or the whole address")]
+    [InlineData("var a: u8\ndata t: [i8; 1] = [addr(a).hi]\nfn main() { }", 2, 27, "'.hi' of an address is one byte, a u8, but this value is i8. Use a [u8; n] table, or the whole address")]
+    [InlineData("var a: u16\nvar p: ptr u8\ndata t: [ptr u8; 1] = [addr(a) as u16]\nfn main() { }", 3, 32, "Expected ptr u8, found u16. Convert with 'as ptr u8'")]
+    [InlineData("var a: u8\ndata t: [u8; 1] = [addr(a)]\nfn main() { }", 2, 20, "Expected u8, found ptr u8. Convert with 'as u16' first, then take .lo or .hi")]
+    [InlineData("const C = 5\ndata t: [u16; 1] = [addr(C)]\nfn main() { }", 2, 26, "'C' is a constant, which has no address. Use data for a value in memory")]
+    [InlineData("data t: [u16; 1] = [addr(nothing)]\nfn main() { }", 1, 26, "'nothing' is not declared. Check the spelling, or declare it")]
+    public void Reports_errors(string source, int line, int column, string expected)
     {
-        var e = Assert.Throws<CompileError>(() => TernCompiler.Compile(source));
-        Assert.Contains(expected, e.Description);
+        Expect.Error(source, line, column, expected);
     }
 }

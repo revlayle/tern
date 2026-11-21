@@ -243,16 +243,15 @@ public class FunctionAddressTests
     }
 
     [Theory]
-    [InlineData("inline fn f() { }\nvar v: u16\nfn main() { v = addr(f) }", "'f' is inline: it is copied into each caller and has no address of its own")]
+    [InlineData("inline fn f() { }\nvar v: u16\nfn main() { v = addr(f) }", 3, 22, "'f' is inline: it is copied into each caller and has no address of its own. Remove 'inline'")]
     [InlineData("fn f(n: u8) { }\nvar v: u16\nfn main() { v = addr(f) }",
-        "'f' takes 'n' in memory, which a call through an address cannot set. Pass it in a register (n: u8 using A)")]
-    [InlineData("fn f() { }\nvar v: ptr u8\nfn main() { v = addr(f) }", "Expected ptr u8, found u16")]
-    [InlineData("fn f() { }\nvar v: u8\nfn main() { v = addr(f) }", "Expected u8, found u16")]
-    [InlineData("fn f() { }\ndata t: [u8; 1] = [addr(f)]\nfn main() { }", "Expected u8, found u16")]
-    [InlineData("fn f() { }\nconst C = addr(f)\nfn main() { }", "addr(f) is known only when the program is placed, so it cannot be part of a constant")]
-    public void Reports_errors(string source, string expected)
+        3, 22, "'f' takes 'n' in memory, which a call through an address cannot set. Pass it in a register (n: u8 using A)")]
+    [InlineData("fn f() { }\nvar v: ptr u8\nfn main() { v = addr(f) }", 3, 17, "Expected ptr u8, found u16. Convert with 'as ptr u8'")]
+    [InlineData("fn f() { }\nvar v: u8\nfn main() { v = addr(f) }", 3, 17, "Expected u8, found u16. Convert with 'as u8'")]
+    [InlineData("fn f() { }\ndata t: [u8; 1] = [addr(f)]\nfn main() { }", 2, 20, "Expected u8, found u16. Convert with 'as u8'")]
+    [InlineData("fn f() { }\nconst C = addr(f)\nfn main() { }", 2, 16, "addr(f) is known only when the program is placed, so it cannot be part of a constant. Use it in a var, data or code")]
+    public void Reports_errors(string source, int line, int column, string expected)
     {
-        var e = Assert.Throws<CompileError>(() => TernCompiler.Compile(source));
-        Assert.Contains(expected, e.Description);
+        Expect.Error(source, line, column, expected);
     }
 }

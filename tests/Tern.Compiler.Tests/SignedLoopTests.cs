@@ -256,16 +256,15 @@ public class SignedLoopTests
         instruction.Split(' ')[0] is "bcc" or "bcs" or "beq" or "bne" or "bmi" or "bpl" or "bvc" or "bvs" or "jmp" ? instruction.Split(' ')[0] : instruction;
 
     [Theory]
-    [InlineData("var n: u8\nfn main() { for i in -5..n { } }", "A loop from a negative bound counts with a signed variable, but the other bound is u8. Convert it with 'as i8'")]
-    [InlineData("var n: u16\nfn main() { for i in n..=-5 { } }", "Convert it with 'as i16'")]
-    [InlineData("var s: i8\nvar n: u8\nfn main() { for i in s..n { } }", "Cannot mix signed and unsigned")]
-    [InlineData("var s: i8\nvar k: u8\nfn main() { for i in s..10 step k { } }", "A variable step needs a u8 loop counter, but the bounds are i8")]
-    [InlineData("fn main() { for i in -300..300 using X { } }", "An i16 loop variable does not fit in X. Remove 'using X', or use bounds that fit in an i8")]
-    [InlineData("fn main() { for i in 0..300 using Y { } }", "A u16 loop variable does not fit in Y. Remove 'using Y', or use bounds that fit in a u8")]
-    public void Reports_errors(string source, string expected)
+    [InlineData("var n: u8\nfn main() { for i in -5..n { } }", 2, 22, "A loop from a negative bound counts with a signed variable, but the other bound is u8. Convert it with 'as i8'")]
+    [InlineData("var n: u16\nfn main() { for i in n..=-5 { } }", 2, 26, "A loop from a negative bound counts with a signed variable, but the other bound is u16. Convert it with 'as i16'")]
+    [InlineData("var s: i8\nvar n: u8\nfn main() { for i in s..n { } }", 3, 13, "Cannot mix signed and unsigned (i8 and u8); convert one side with 'as'")]
+    [InlineData("var s: i8\nvar k: u8\nfn main() { for i in s..10 step k { } }", 3, 33, "A variable step needs a u8 loop counter, but the bounds are i8. Use a constant step, or u8 bounds")]
+    [InlineData("fn main() { for i in -300..300 using X { } }", 1, 13, "An i16 loop variable does not fit in X. Remove 'using X', or use bounds that fit in an i8")]
+    [InlineData("fn main() { for i in 0..300 using Y { } }", 1, 13, "A u16 loop variable does not fit in Y. Remove 'using Y', or use bounds that fit in a u8")]
+    public void Reports_errors(string source, int line, int column, string expected)
     {
-        var e = Assert.Throws<CompileError>(() => TernCompiler.Compile(source));
-        Assert.Contains(expected, e.Description);
+        Expect.Error(source, line, column, expected);
     }
 
     [Fact]
