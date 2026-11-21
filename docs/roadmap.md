@@ -780,7 +780,7 @@ In this order:
    - 4, its small part: `Run` counts the NES's NMIs in `Interrupts`, as `Runner` does. One step loop for `Run` and `Runner` is after the release.
    - 5: `TargetTests` uses `Command.Tern`.
    - 6: `Diagnostic`'s doc comment moves from `Severity` to the record.
-   - 7: the bool-to-number fix offers `as u8` first, with the names from the expression ("Convert with 'b as u8' (0 or 1), or use 'if' to choose another number"). The skill's example of this message moves; its `SkillTests` outputs are rewritten and its prose fixed in the same commit.
+   - 7: the bool-to-number fix offers `as u8` first, with the names from the expression ("Convert with 'b as u8' (0 or 1), or use 'if' to choose another number"); for the literal `true` or `false`, "Write 1 for true, 0 for false" (question 178). The skill's example of this message moves; its `SkillTests` outputs are rewritten and its prose fixed in the same commit.
 5. Tests 11, folders: test files moved into folders by spec section, with the section in each class comment; files moved, not changed, in a commit of their own, last, so the moves stay visible as renames.
 
 Messages stay one text through R8 (question 177, decision 2026-11-21); their split into problem, fix and code is M28's.

@@ -1107,3 +1107,9 @@ Roadmap R8. Changes "R6 goes to review; its three test findings become R8" and "
 - **R8's scope allows these code changes:** messages, the help text and test code. Code generation does not change, so the benchmarks still do not move. `SkillTests` may change by the bool-to-number message as well as the idle input, since the skill quotes that message (`SKILL.md`); its prose is fixed in the same commit.
 - **Messages stay one text** (question 177): suggestion 1 makes each fix a sentence of its own, not a field; the field is M28's.
 - **Accepted for after the release:** one step loop for the tests' `Run` and `tern run`'s `Runner` (the rest of suggestion 4), with tools 18's other parts. Reason: they share the machine already; what differs (the NMI count) is fixed in R8; the rest is structure.
+
+## 2026-11-21: question 178, the bool-to-number message for a literal
+
+Roadmap R8 (review R6, suggestion 7).
+
+- **As built: a bool variable or expression gets "Convert with 'b as u8' (0 or 1), or use 'if' to choose another number"; the literal `true` or `false` gets "Write 1 for true, 0 for false".** Reason: `true as u8` is 1 and `false as u8` is 0 (3.1), folded to the same code as the number, so converting a literal is correct but roundabout; writing the number is what the user means. The skill's example (`total = true`) shows the literal's message.

@@ -32,6 +32,8 @@ src/Tern.Cli/            `tern` command-line tool
 src/lib/                 standard library source (.tern); platform modules in src/lib/<platform>/; copied to lib/ next to the compiler
 tests/Tern.Cpu.Tests/    CPU tests, including Klaus Dormann's 6502 functional test
 tests/Tern.Compiler.Tests/  end-to-end tests: compile, run in the emulator, check memory
+  Source/ ... Tools/       one folder per spec section (Source 2, Types 3, ..., Compiler 13, Tools 13's tools)
+  Programs/ Benchmarks/ Harness/  the examples and ports, the benchmarks (13.2), the test helpers (Run, Expect, Listing, TestTarget)
 examples/c64/            example .tern programs for the C64
 examples/atari/          example .tern programs for the Atari
 .claude/commands/        session commands: /spec, /code, /review, /merge
@@ -107,6 +109,7 @@ These come from the spec and `docs/decisions.md`. Apply them to every change.
 
 - Keep methods under about 100 lines, a guideline rather than a rule. Readability comes first: never split a method only to get under 100 lines, since a long `switch` or a lookup may read best whole. List each longer method, with the reason, in `docs/status.md` (Known limitations) and name it in the session's report to the developer. Over 300 lines is almost always wrong: split it, unless it is a single `switch` or lookup that reads best whole. The hard maximum is 500 lines: a method that long is always split, and a lookup that long becomes a data table (an array or dictionary) instead of code.
 - Every language feature gets end-to-end tests in `tests/Tern.Compiler.Tests` that compile a program, run it in the emulator (`Run.Program`) and check memory. Test edge values (0, 255, 256, -128, wrap-around) and compare against results computed in C#.
+- A new test file goes in its spec section's folder. A test that names a C64 fact (an address, a cartridge) gets `[Trait("Platform", "c64")]`; the rest pass with `TERN_TARGET` set to each platform.
 - Every new compile error gets a test, in the feature's test file (`AsmTests`, `PointerTests`, ...), or in `ErrorTests.cs` for errors with no feature file (lexer, parser, general type errors). Error messages say what is wrong, then how to fix it in a sentence that starts with a verb from `Diagnostic.FixVerbs` (Use, Write, Remove, ...); `tern --json` reports that sentence as the suggestion.
 - When code shape matters, check the listing (`result.Listing`) in a test.
 - A spec keyword that is not implemented yet must give "'x' is not supported yet", not a confusing parse error.
