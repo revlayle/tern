@@ -233,4 +233,12 @@ public class AtariTests
         }
         finally { dir.Delete(recursive: true); }
     }
+
+    // Errors the coverage run of R6 found no test for (review code-quality-tests, finding 4).
+    [Theory]
+    [InlineData("var w: [u8; 126] @ zp\nvar t: [u8; 2] @ zp\nfn main() { w[0] = 1; asm { jmp (t+1) } }", 2, 1, "'t' is used as jmp (t+1) and was placed so that the vector starts at $FF, where the 6502 reads it wrongly. Place it at a fixed address whose low byte is not $FF")]
+    public void Reports_errors_no_other_test_reached(string source, int line, int column, string expected)
+    {
+        Expect.Error(() => TernCompiler.Compile(source, Platform.ByName("atari")), line, column, expected);
+    }
 }

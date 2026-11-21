@@ -249,6 +249,10 @@ public sealed partial class Checker
     {
         CheckExpr(b.Left);
         CheckExpr(b.Right);
+        // Before an operand is converted to the other's type, which for a void call said "Expected void, found a number".
+        foreach (var side in new[] { b.Left, b.Right })
+            if (side.Type.Kind == TypeKind.Void)
+                throw new CompileError(side.Pos, "This function call does not return a value. Call it as a statement on its own");
         long? l = b.Left.ConstValue, r = b.Right.ConstValue;
         if ((b.Left.Type.IsStruct || b.Right.Type.IsStruct)
             && b.Op is not (TokenKind.EqEq or TokenKind.NotEq or TokenKind.Less or TokenKind.LessEq or TokenKind.Greater or TokenKind.GreaterEq))

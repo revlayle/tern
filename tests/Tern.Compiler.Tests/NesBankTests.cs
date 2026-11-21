@@ -287,4 +287,15 @@ public class NesBankTests : TempFolderTest
             level2: "data BIG: [u8; 7000] = repeat(2, 7000)\nfn run() -> u16 { return addr(BIG) as u16 }\n");
         Expect.Message(e, 1, 8, "Bank 0 of 'levels' needs 17010 bytes, but a bank has 16384: level2 (7005 bytes), level1 (10005 bytes). Move a module to another bank, or make one smaller");
     }
+
+    // Errors the coverage run of R6 found no test for (review code-quality-tests, finding 4).
+    [Theory]
+    [InlineData("memory {\n    cartridge uxrom vertical\n    $8000..=$BFFF bank a\n    $8000..=$BFFF bank b\n}\nfn main() { }", 4, 19, "The board 'uxrom' has one bank area, and the block already declares it as 'a'. Remove the line")]
+    [InlineData("memory {\n    cartridge uxrom vertical\n    $0300..=$03FF region a\n    $8000..=$BFFF bank a\n}\nfn main() { }", 4, 19, "The area 'a' is declared twice. Give each area its own name")]
+    [InlineData("memory {\n    cartridge nrom vertical\n    $0300..=$03FF region a\n    $0000..=$1FFF chr a\n}\nfn main() { }", 4, 19, "The area 'a' is declared twice. Give each area its own name")]
+    [InlineData("memory {\n    cartridge nrom vertical\n    $0000..=$1FFF chr tiles\n}\ndata one: u8 @ tiles = 1\nvar n: u8\nfn main() { n = len(one) }", 7, 17, "len() needs an array. Use sizeof() for the size of a type")]
+    public void Reports_memory_block_errors_no_other_test_reached(string source, int line, int column, string expected)
+    {
+        Expect.Error(() => TernCompiler.Compile(source, Platform.ByName("nes")), line, column, expected);
+    }
 }

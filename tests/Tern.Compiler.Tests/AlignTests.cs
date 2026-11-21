@@ -363,4 +363,12 @@ public class AlignTests
         var result = TernCompiler.Compile("var buf: [u8; 4] @ align(4)\nfn main() { }");
         Assert.Contains(result.Warnings, w => w.Description.Contains("'buf'"));
     }
+
+    // Errors the coverage run of R6 found no test for (review code-quality-tests, finding 4).
+    [Theory]
+    [InlineData("data t: [u8; 512] @ align(256) = repeat(0, 512)\nfn main() { asm { jmp (t+255) } }", 1, 1, "'t' is used as jmp (t+...), and at every multiple of $100 a vector in it would start at $xxFF, where the 6502 reads it wrongly. Use a smaller alignment, or move the vector in the data")]
+    public void Reports_errors_no_other_test_reached(string source, int line, int column, string expected)
+    {
+        Expect.Error(source, line, column, expected);
+    }
 }

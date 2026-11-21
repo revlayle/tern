@@ -316,4 +316,54 @@ public class ErrorTests
         Expect.Message(e, 5, 5, "Only a function call can be used as a statement. Assign the value to a variable, or remove it");
         Assert.Equal(5, e.Pos.Line);
     }
+
+    // Errors the coverage run of R6 found no test for (review code-quality-tests, finding 4).
+    [Theory]
+    [InlineData("fn f() -> u8 { return 1 }\nvar a: [u8; 4]\nfn main() { a[f()] += 1 }", 3, 20, "Compound assignment to an element whose index calls a function is not supported. Store the index in a variable first")]
+    [InlineData("var a: [u8; 2]\nvar b: [u8; 2]\nfn main() { a = b }", 3, 13, "Whole arrays cannot be assigned. Assign the elements in a loop, or copy the memory with mem.copy")]
+    [InlineData("var b: bool\nfn main() { b += 1 }", 2, 15, "'+=' needs a number on the left. Use a number variable, or '=' with the whole value")]
+    [InlineData("var b: bool\nfn main() { b |= true }", 2, 15, "'|=' needs a number on the left. Use a number variable, or '=' with the whole value")]
+    [InlineData("var b: bool\nfn main() { for i in 0..b { } }", 2, 25, "Loop bounds must be numbers. Use integer values, or convert with 'as'")]
+    [InlineData("fn main() { for i in 0..10 step 0 { } }", 1, 33, "'step' must be a non-zero constant, or a u8 variable in a loop that counts up with a u8 counter. Use one of those")]
+    [InlineData("fn main() { for i in 0..10 step -1 { } }", 1, 33, "A step of -1 goes the wrong way from 0 to 10. Change the sign of the step, or swap the bounds")]
+    [InlineData("fn main() { for i in 10..0 step 2 { } }", 1, 33, "A step of 2 goes the wrong way from 10 to 0. Change the sign of the step, or swap the bounds")]
+    [InlineData("fn main() { for i in 0..10 using A { } }", 1, 13, "A loop variable can only use X or Y. Write 'using X' or 'using Y'")]
+    [InlineData("fn main() { for i in 0..10 using X { for j in 0..10 using X { } } }", 1, 38, "X is already used by an enclosing loop. Use the other index register, or leave out 'using'")]
+    [InlineData("var a: [u8; 4]\nfn main() { for i in 0 { a[i] = 1 } }", 2, 24, "Expected '..' or '..=', found '{'. Write a range as first..last, or first..=last to include the last value")]
+    [InlineData("fn f(a: u8, a: u8) { }\nfn main() { f(1, 2) }", 1, 13, "Parameter 'a' is declared twice. Rename one of them")]
+    [InlineData("fn f(a: u8 using A, b: u8 using A) { }\nfn main() { f(1, 2) }", 1, 21, "Register A is used by more than one parameter. Use another register for one of them")]
+    [InlineData("fn f(a: u16 using AX, b: u8 using X) { }\nfn main() { f(1, 2) }", 1, 23, "Register X is used by more than one parameter. Use another register for one of them")]
+    [InlineData("var a: [u8; 2] = 5\nfn main() { }", 1, 18, "An array must be initialized with [ ... ]. Write the elements in brackets")]
+    [InlineData("struct P { x: u8 }\nvar p: P = u8 { x = 1 }\nfn main() { }", 2, 12, "'u8' is not a struct, so 'u8 { ... }' is not a struct literal. Check the spelling of the struct name")]
+    [InlineData("var n: u8\nvar a: [u8; n]\nfn main() { }", 2, 13, "Array length must be known at compile time. Use a number or a constant")]
+    [InlineData("var x: u8\nfn main() { x = [1, 2] }", 2, 17, "An array literal can only be used to initialize a global array. Declare the list as data, and read it from there")]
+    [InlineData("const fn g() -> int { return 1 }\nvar x: u8\nfn main() { x = g }", 3, 17, "'g' is a const fn; call it with ()")]
+    [InlineData("fn f() { }\nvar x: u16\nfn main() { x = f }", 3, 17, "'f' is a function; call it with ()")]
+    [InlineData("var a: [u8; 2]\nvar x: u16\nfn main() { x = a as u16 }", 3, 19, "Cannot convert [u8; 2] to u16. Convert one element or field of it instead")]
+    [InlineData("struct P { x: u8 }\nvar p: P\nvar x: u8\nfn main() { x = p as u8 }", 4, 19, "Cannot convert P to u8. Convert one element or field of it instead")]
+    [InlineData("var a: u8\nvar b: bool\nfn main() { b = a && true }", 3, 19, "'&&' needs bool values; use '&' for bits")]
+    [InlineData("var a: bool\nvar b: bool\nvar c: bool\nfn main() { c = a < b }", 4, 19, "bool values can only be compared with == and !=. Use one of those")]
+    [InlineData("var a: bool\nvar x: u8\nfn main() { x = a << 1 }", 3, 19, "Only numbers can be shifted. Convert the value to a number with 'as'")]
+    [InlineData("var a: bool\nvar x: u8\nfn main() { x = ~a }", 3, 17, "'~' needs a number; use '!' for bool")]
+    [InlineData("var x: u8\nfn main() { x = len(x) }", 2, 17, "len() needs an array. Use sizeof() for the size of a type")]
+    [InlineData("var n: u8\nvar x: u8 @ n\nfn main() { }", 2, 13, "The address must be known at compile time. Use a number or a constant")]
+    [InlineData("var x: u16 @ $FFFF\nfn main() { }", 1, 14, "Address $FFFF is outside memory. Use an address up to $FFFF, less the variable's size")]
+    [InlineData("var x: u8 @ $10000\nfn main() { }", 1, 13, "Address $10000 is outside memory. Use an address up to $FFFF, less the variable's size")]
+    [InlineData("fn main() { for i in 0..70000 { } }", 1, 25, "70000 does not fit in 16 bits. Use a value from -32768 to 65535")]
+    [InlineData("var x: u8\nfn main() { match 70000 { _ => { } } }", 2, 19, "70000 does not fit in 16 bits. Use a value from -32768 to 65535")]
+    [InlineData("fn f() { }\nvar x: u8\nfn main() { x = f() }", 3, 17, "This function call does not return a value. Call it as a statement on its own")]
+    [InlineData("fn f() { }\nvar x: u8\nfn main() { x = f() + 1 }", 3, 17, "This function call does not return a value. Call it as a statement on its own")]
+    [InlineData("fn f() { }\nfn main() { if 1 == f() { } }", 2, 21, "This function call does not return a value. Call it as a statement on its own")]
+    [InlineData("var b: bool\nvar p: ptr u8\nfn main() { p = b }", 3, 17, "Expected ptr u8, found bool, which does not convert to ptr u8. Use a ptr u8 here")]
+    [InlineData("fn main(x: u8) { }", 1, 1, "'main' must have no parameters and no return value. Remove them")]
+    [InlineData("fn main() -> u8 { return 1 }", 1, 1, "'main' must have no parameters and no return value. Remove them")]
+    [InlineData("var x: u8 = 0b\nfn main() { }", 1, 13, "Number has no digits. Write digits after '$' or '0b', e.g. $FF or 0b1010")]
+    [InlineData("var x: u8 = 0b_\nfn main() { }", 1, 13, "Number has no digits. Write digits after '$' or '0b', e.g. $FF or 0b1010")]
+    [InlineData("var x: u8 = 1 ` 2\nfn main() { }", 1, 15, "Unexpected character '`'. Remove it, or put it in a string or a comment")]
+    [InlineData("fn main() {\n    module m\n}", 2, 5, "'module' must be the first line of the file, outside functions. Move it there")]
+    [InlineData("var b: bool\nvar x: u8\nfn main() { x = b | x }", 3, 19, "Cannot combine bool and u8. Convert one side with 'as'")]
+    public void Reports_errors_no_other_test_reached(string source, int line, int column, string expected)
+    {
+        Expect.Error(source, line, column, expected);
+    }
 }

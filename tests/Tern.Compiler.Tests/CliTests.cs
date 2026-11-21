@@ -34,6 +34,27 @@ public sealed class CliTests : TempFolderTest
 
     // ---------- Paths (tools 2) ----------
 
+    // Found by the coverage run of R6 (review code-quality-tests, finding 4): no test reached these two.
+    [Fact]
+    public void A_read_only_output_cannot_be_written()
+    {
+        string a = Write("a.tern"), prg = Write("a.prg", "old");
+        File.SetAttributes(prg, FileAttributes.ReadOnly);
+        var (code, _, error) = Tern("--target", "c64", a);
+        File.SetAttributes(prg, FileAttributes.Normal);
+        Assert.Equal(1, code);
+        Assert.Equal($"Cannot write {prg}: access is denied (it may be a folder or read-only)", error);
+        Assert.Equal("old", File.ReadAllText(prg));
+    }
+
+    [Fact]
+    public void Run_with_a_bad_dump_is_an_error()
+    {
+        var (code, _, error) = Tern("run", "--target", "c64", Write("a.tern"), "--dump", "nosuch");
+        Assert.Equal(1, code);
+        Assert.Equal("--dump No variable 'nosuch'. Locals are written 'function.name'", error);
+    }
+
     [Fact]
     public void An_output_in_a_missing_folder_is_an_error_before_compiling()
     {

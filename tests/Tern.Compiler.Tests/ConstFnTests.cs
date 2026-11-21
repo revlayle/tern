@@ -898,4 +898,27 @@ public sealed class ConstFnTests : TempFolderTest
     {
         Expect.Message(Error(source), line, column, message);
     }
+
+    // Errors the coverage run of R6 found no test for (review code-quality-tests, finding 4).
+    [Theory]
+    [InlineData("const T = [len([0 for j in 0..250]) for i in 0..60000]\nfn main() { }", 1, 11, "This list did not finish after 10,000,000 steps. Use a shorter range")]
+    [InlineData("const fn g() -> int {\n    var x = 5\n    return x[0]\n}\nconst K = g()\nfn main() { }", 3, 13, "Only arrays can be indexed (called from line 5). Use an array, or a data table")]
+    [InlineData("const fn g() -> int {\n    var a = [1, 2]\n    return a[true]\n}\nconst K = g()\nfn main() { }", 3, 14, "An index is a bool here, but needs an int (called from line 5). Use an int value")]
+    [InlineData("const fn g() -> int {\n    var a = [1, 2]\n    return a[[1]]\n}\nconst K = g()\nfn main() { }", 3, 14, "An index is an array here, but needs an int (called from line 5). Use an int value")]
+    [InlineData("var x: u8\nfn main() { x = [i for i in 0..3][0] }", 2, 17, "A list built with 'for' is computed at compile time. Use a 'for' loop to fill the array at runtime")]
+    [InlineData("const K = 2.5\nvar x: u8 = K\nfn main() { }", 2, 13, "This value is the real number 2.5, but an int is expected here. Use round(x), floor(x), ceil(x) or trunc(x) to make it an int")]
+    [InlineData("struct P { x: u8 }\ndata t: [P; 2] = repeat(1, 2)\nfn main() { }", 2, 18, "A compile-time array holds numbers or bools, so it cannot fill a table of P. Use a table of numbers")]
+    [InlineData("fn f() { }\nconst fn g() -> int { return f }\nconst K = g()\nfn main() { }", 2, 30, "'f' is a function, not a value (called from line 3). Use addr(f) for its address")]
+    [InlineData("fn f() -> u8 { return 1 }\nconst fn g() -> int { return f() }\nconst K = g()\nfn main() { }", 2, 30, "'f' runs on the 6502, so compile-time code cannot call it (called from line 3). Use a const fn")]
+    [InlineData("struct P { x: u8 }\nconst fn g() { var a = addr(P) }\nfn main() { asm { g() } }", 2, 29, "'P' is a struct type, which has no address (called from line 3). Use addr() with a global, data or a function")]
+    [InlineData("const fn h() -> int { return 1 }\nconst fn g() { var a = addr(h) }\nfn main() { asm { g() } }", 2, 29, "'h' is a const fn, which has no address (called from line 3). Use addr() with a global, data or a function")]
+    [InlineData("const fn f() -> int { return t[0] }\ndata t: [u8; 2] = [f(), 1]\nfn main() { }", 1, 30, "'t' is read while its own initial value is computed, so it depends on itself (called from line 2). Give it a value that does not read 't'")]
+    [InlineData("const T = [i for i in 0 to 3]\nfn main() { }", 1, 25, "Expected '..' or '..=', found 'to'. Write a range as first..last, or first..=last to include the last value")]
+    [InlineData("var x: u8 = repeat(1, 2)\nfn main() { }", 1, 13, "This value is an array of 2, which only data or a global array can hold. Use it as their initial value, e.g. 'data t: [u8; _] = ...'")]
+    [InlineData("fn f() { }\nconst fn g() {\n    var a = f\n}\nfn main() { asm { g() } }", 3, 13, "'f' is a function, not a value (called from line 5). Use addr(f) for its address")]
+    [InlineData("fn f() { }\nconst fn g() {\n    var a = f()\n}\nfn main() { asm { g() } }", 3, 13, "'f' runs on the 6502, so compile-time code cannot call it (called from line 5). Use a const fn")]
+    public void Reports_compile_time_errors_no_other_test_reached(string source, int line, int column, string expected)
+    {
+        Expect.Error(source, line, column, expected);
+    }
 }

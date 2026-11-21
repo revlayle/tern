@@ -373,7 +373,7 @@ public sealed partial class Interpreter
     {
         CtInt i => i.Value,
         CtReal => throw Error(pos, $"{what} is a real here, but needs an int. Use round(x), floor(x), ceil(x) or trunc(x)"),
-        _ => throw Error(pos, $"{what} is {Describe(v.Type)} here, but needs an int. Use round() or floor() to make a real an int"),
+        _ => throw Error(pos, $"{what} is {Describe(v.Type)} here, but needs an int. Use an int value"),
     };
 
     private bool Bool(CtValue v, SourcePos pos, string what) => v is CtBool b ? b.Value
