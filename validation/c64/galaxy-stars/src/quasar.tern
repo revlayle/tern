@@ -1,0 +1,102 @@
+// Quasar (spec section 9): a supernova may leave one, at most once per galaxy. It appears when that supernova's
+// explosion ends, burns out after 5 s (blinking in the last second), and touching it makes the player invincible
+// for 8 s (player.tern). Sprite 7. Its box is a star's box: tile pixels 2-13. Port of ../src/quasar.p8.
+import sound
+import video
+import player
+import stars
+import explode
+import assets
+
+const FORCE = false                 // debug: every supernova leaves one (still once per galaxy). Keep false.
+const ALWAYS = FORCE
+const CHANCE: u8 = 100              // [TUNE] 1 in 100 per supernova
+const LIFE_FRAMES: u8 = 250         // 5 s
+const BLINK_FRAMES: u8 = 50         // [TUNE] blinks in the last second
+const BLINK_SHIFT = 2               // [TUNE] shown 4 frames, hidden 4 (life / 4)
+const ANIM_DELAY: u8 = 4            // [TUNE] game frames per picture
+const ANIM_FRAMES: u8 = 4
+const COLOR: u8 = 14                // light blue disc; multicolor sprite, white core and cyan jets (video.tern)
+const SPRITE: u8 = 7
+const BOX: u8 = 12
+
+var appeared: bool                  // this galaxy already has had its quasar (waiting, shown or gone)
+var wait: u8                        // frames until it appears (its explosion is still running)
+var life: u8                        // frames left while shown, 0 = none shown
+var x: u16                          // box top-left in playfield pixels
+var y: u8
+var anim_frame: u8
+var anim_timer: u8
+var shows: u8                       // quasars shown (debug readout)
+var pickups: u8                     // quasars picked up (debug readout)
+
+fn start_galaxy() {
+    appeared = false
+    wait = 0
+    life = 0
+    video.hide_sprite(SPRITE)
+}
+
+fn chance(c: u8, r: u8) {
+    // A supernova of the star at tile (c, r).
+    if appeared {
+        return
+    }
+    if !ALWAYS && stars.rand_below(CHANCE) != 0 {
+        return
+    }
+    appeared = true
+    wait = explode.FRAMES           // counted down after explode.update, so it appears as the explosion ends
+    x = ((c as u16) << 4) + 2
+    y = (r << 4) + 2
+}
+
+fn update() {
+    // After explode.update: appearing, burning out, pickup.
+    if wait != 0 {
+        wait -= 1
+        if wait == 0 {
+            life = LIFE_FRAMES
+            anim_frame = 0
+            anim_timer = 0
+            shows += 1
+        }
+        return
+    }
+    if life == 0 {
+        return
+    }
+    life -= 1
+    if life == 0 {
+        video.hide_sprite(SPRITE)
+        return
+    }
+    anim_timer += 1
+    if anim_timer == ANIM_DELAY {
+        anim_timer = 0
+        anim_frame += 1
+        if anim_frame == ANIM_FRAMES {
+            anim_frame = 0
+        }
+    }
+    if player.dying == 0 && player.x < x + BOX && x < player.x + player.BOX &&
+            player.y < y + BOX && y < player.y + player.BOX {
+        life = 0
+        pickups += 1
+        sound.play(sound.QUASAR)
+        video.hide_sprite(SPRITE)
+        player.make_invincible()
+    }
+}
+
+fn draw() {
+    // Art centre (frame pixel 10,10) on the box centre (box + 6).
+    if life == 0 {
+        return
+    }
+    if life <= BLINK_FRAMES && (life >> BLINK_SHIFT) & 1 != 0 {
+        video.hide_sprite(SPRITE)
+    } else {
+        video.set_sprite(SPRITE, assets.SPR_QUASAR_0 + anim_frame, COLOR, x - 4, y - 4)
+    }
+}

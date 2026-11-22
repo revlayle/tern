@@ -1,0 +1,88 @@
+// Joystick in port 2 and the Run/Stop key (read from the keyboard matrix), with edge detection.
+// Port of ../src/input.p8.
+// SCRIPTED = true replays the `script` table instead of reading $DC00 (self-testing only; keep false in
+// builds for the designer).
+// While `pilot` is on (the demo, demo.tern) the game gets the pilot's bits; the stick (or the script) only goes to
+// real_pressed, and a fire press there sets demo.quit.
+import c64
+import demo
+
+const SCRIPTED = false
+
+// joystick bits, 1 = active
+const UP: u8 = 0b00001
+const DOWN: u8 = 0b00010
+const LEFT: u8 = 0b00100
+const RIGHT: u8 = 0b01000
+const FIRE: u8 = 0b10000
+const STOP: u8 = 0b100000           // Run/Stop key, in the same bit set
+
+var held: u8                        // bits held this frame
+var pressed: u8                     // bits that went from released to held this frame
+var prev: u8
+var pilot: bool
+var real_pressed: u8                // pilot on: presses on the real stick
+var real_prev: u8
+
+// (frames to hold, joystick bits) pairs. A 0 frame count ends the script; input is released after that.
+// Self-tests may point `script` at their own table.
+data default_script: [u8; _] = [
+    100, 0,
+    0, 0
+]
+var script: ptr u8 = addr(default_script)
+var script_pos: u8
+var script_left: u8
+
+fn read() {
+    var joy: u8 = 0
+    if SCRIPTED {
+        joy = scripted()
+    } else {
+        joy = ~c64.cia1.port_a & 0b00011111
+        // Keyboard matrix: a 0 on a port A bit selects a row, port B shows its keys (0 = down).
+        // Run/Stop is row 7 bit 7. No KERNAL IRQ runs, so nothing else scans.
+        c64.cia1.port_a = 0b01111111
+        if c64.cia1.port_b & 0b10000000 == 0 {
+            joy |= STOP
+        }
+        c64.cia1.port_a = $FF
+    }
+    if pilot {
+        real_pressed = joy & ~real_prev
+        real_prev = joy
+        if real_pressed & FIRE != 0 {
+            demo.quit = true
+        }
+        joy = demo.steer()
+    }
+    pressed = joy & ~prev
+    held = joy
+    prev = joy
+}
+
+fn start_pilot() {
+    real_prev = prev                // a fire held from before is not a press
+    real_pressed = 0
+    pilot = true
+}
+
+fn stop_pilot() {
+    // Back to the stick: what it holds now is not a new press on the next page.
+    pilot = false
+    prev = real_prev
+    held = real_prev
+    pressed = 0
+}
+
+fn scripted() -> u8 {
+    while script_left == 0 {
+        if script[script_pos] == 0 {
+            return 0
+        }
+        script_left = script[script_pos]
+        script_pos += 2
+    }
+    script_left -= 1
+    return script[script_pos - 1]
+}

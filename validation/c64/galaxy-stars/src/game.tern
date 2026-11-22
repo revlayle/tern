@@ -1,0 +1,158 @@
+// The game flow of ../src/main.p8: new game, galaxy start, play, pause and galaxy clear. In a module of its own
+// (main.p8 has them in main): demo.tern calls them, and Tern's main file cannot be imported.
+import math
+import mem
+import text
+import video
+import input
+import player
+import stars
+import explode
+import score
+import hostiles
+import quasar
+import sound
+import demo
+
+// Self-test switch: keep false in builds for the designer.
+// true: the frame count in hex at the top right, and the player's x and y in hex in HUD columns 18-23.
+const TEST = false
+
+// [TUNE] game flow
+const START_FRAMES: u8 = 100        // GALAXY nn for 2 s while the stars appear, one per frame
+const CLEAR_FRAMES: u8 = 150        // GALAXY CLEAR and the time bonus for 3 s
+const MSG_COLOR: u8 = 1
+const START_ROW: u8 = 9             // GALAXY nn, above the player
+const START_COL: u8 = 15
+var galaxy_text: [u8; _] = screen"GALAXY 00\0"
+data paused_text = screen"PAUSED\0"
+data clear_text = screen"GALAXY CLEAR\0"
+data bonus_text = screen"TIME BONUS\0"
+
+fn new_game() {
+    video.clear_screen()
+    video.draw_hud()
+    score.new_game()
+}
+
+fn galaxy_start() {
+    // GALAXY nn for 2 s while the stars appear in random order; no control, the timer doesn't run.
+    explode.clear()
+    stars.place(stars.for_galaxy(score.galaxy))
+    stars.hide_for_reveal()
+    video.draw_playfield()
+    score.start_galaxy()
+    hostiles.start_galaxy(score.galaxy)
+    quasar.start_galaxy()
+    player.init()
+    player.draw()
+    var g: u8 = score.galaxy
+    if g > 99 {
+        g = 99
+    }
+    galaxy_text[7] = '0' + math.div8(g, 10)
+    galaxy_text[8] = '0' + math.remainder8
+    for _ in 0..START_FRAMES {
+        video.wait_frame()
+        input.read()
+        stars.reveal_next()
+        video.message(START_ROW, START_COL, addr(galaxy_text), MSG_COLOR)     // again over a star drawn under it
+        if demo.quit {
+            break                   // fire during the demo
+        }
+    }
+    while stars.revealed < stars.count {
+        stars.reveal_next()
+    }
+    video.restore_tiles(START_ROW, START_COL, len(galaxy_text) - 1)
+}
+
+fn play() -> bool {
+    // PLAYING. True when the galaxy is clear, false when the last life is lost (after its death effect).
+    // When the last star is destroyed the timer and multiplier stop; play goes on until the explosions and
+    // hurls are over (the player can still be hurt) and a death effect has ended.
+    while true {
+        video.wait_frame()
+        input.read()
+        if input.pressed & input.STOP != 0 {
+            pause()
+        }
+        if stars.left != 0 {
+            score.update()          // first: a multiplier raised this frame keeps its full time
+        }
+        player.update()
+        hostiles.update()
+        if player.dying == 0 {
+            stars.player_contact()
+        }
+        hostiles.check_player()
+        explode.check_player()
+        hostiles.check_explosions()
+        stars.update()
+        explode.update()
+        quasar.update()
+        // the hostile chain lives while an explosion, a hurl or invincibility is going on (designer, 2026-10-19:
+        // no longer while a countdown started by an explosion is running)
+        if explode.live == 0 && hostiles.flying == 0 && player.invincible == 0 {
+            score.chain = 0
+        }
+        player.draw()
+        hostiles.draw()
+        quasar.draw()
+        score.flush()
+        if TEST {
+            text.hex8(video.SCREEN + 38, video.frames)
+            text.hex16(video.SCREEN + 18, player.x)
+            text.hex8(video.SCREEN + 22, player.y)
+        }
+        if demo.on && demo.over() {
+            return false
+        }
+        if player.gone {
+            return false
+        }
+        if stars.left == 0 && explode.live == 0 && explode.queued == 0 && hostiles.flying == 0 && player.dying == 0 {
+            return true
+        }
+    }
+}
+
+fn pause() {
+    // Run/Stop again resumes. Everything is frozen meanwhile, the timer too. PAUSED in the free HUD columns.
+    video.message(0, 18, addr(paused_text), MSG_COLOR)
+    while true {
+        video.wait_frame()
+        input.read()
+        if input.pressed & input.STOP != 0 {
+            break
+        }
+    }
+    mem.fill(video.SCREEN + 18, video.CHAR_SPACE, 6)
+    video.hud_invincible(player.inv_secs)      // the countdown shares the PAUSED columns
+    input.pressed = 0               // the resume press is not a game input
+}
+
+fn galaxy_clear() {
+    // GALAXY CLEAR and the time bonus (added now, then the multiplier is x1) for 3 s; then the next galaxy.
+    score.time_bonus()
+    sound.play(sound.CLEAR)
+    quasar.start_galaxy()           // a quasar still shown (or about to appear) goes
+    player.invincible = 0           // and invincibility ends
+    player.inv_secs = 0
+    video.hud_invincible(0)
+    video.message(10, 14, addr(clear_text), MSG_COLOR)
+    video.message(12, 12, addr(bonus_text), MSG_COLOR)
+    var a: ptr u8 = video.row_addr(12) + 23
+    var n: u8 = video.put_hundreds(a, score.bonus_mid, score.bonus_lo)
+    mem.fill(a + (video.COLOR_RAM - video.SCREEN), MSG_COLOR, n)
+    for _ in 0..CLEAR_FRAMES {
+        video.wait_frame()
+        input.read()
+        if demo.quit {
+            break                   // fire during the demo
+        }
+    }
+    if score.galaxy != 255 {
+        score.galaxy += 1
+    }
+}

@@ -37,7 +37,7 @@ public sealed class Run
     /// <param name="Source">The program's source, for the comparison with a plain build; null: no comparison.</param>
     private sealed record Settings(string? Source, long MaxCycles, string? SourcePath, Action<Ram>? Setup, string? LibraryDirectory, long IrqEvery,
         IReadOnlyDictionary<int, Action<Run>>? Traps, bool CheckIndexes, Func<long, int, byte>? Buttons, bool ZeroStart,
-        Func<CompileResult, IEnumerable<int>>? Watch, bool ComparePlain, bool StandIns);
+        Func<CompileResult, IEnumerable<int>>? Watch, bool ComparePlain, bool StandIns, Func<Run, bool>? Until = null);
 
     private Run(CompileResult result, Settings s)
     {
@@ -59,7 +59,7 @@ public sealed class Run
         var checker = new Tools.IndexChecker(Result, s.SourcePath is null ? "program.tern" : Path.GetFileName(s.SourcePath), _machine.PlaceOf);
         IndexErrors = checker.Errors;
         Action<Run>? trap = null;
-        while (Cpu.PC != Result.HaltAddress)
+        while (Cpu.PC != Result.HaltAddress && s.Until?.Invoke(this) != true)
         {
             if (s.IrqEvery > 0 && Cpu.Cycles >= nextIrq)
             {
@@ -144,9 +144,11 @@ public sealed class Run
             new Settings(source, maxCycles, sourcePath, setup, libraryDirectory, irqEvery, traps, checkIndexes, buttons, zeroStart, watch, comparePlain, standIns));
 
     /// <summary>Runs a program compiled with <see cref="Compile"/>, as <c>Program</c> does, without the comparison with a plain build.</summary>
+    /// <param name="until">Stops the run before the next instruction when it returns true, for a program whose main never returns (a game).</param>
     public static Run Of(CompileResult result, long maxCycles = 5_000_000, Action<Ram>? setup = null, long irqEvery = 0,
-        IReadOnlyDictionary<int, Action<Run>>? traps = null, bool checkIndexes = true, Func<long, int, byte>? buttons = null, bool standIns = false) =>
-        new(result, new Settings(null, maxCycles, null, setup, null, irqEvery, traps, checkIndexes, buttons, false, null, false, standIns));
+        IReadOnlyDictionary<int, Action<Run>>? traps = null, bool checkIndexes = true, Func<long, int, byte>? buttons = null, bool standIns = false,
+        Func<Run, bool>? until = null) =>
+        new(result, new Settings(null, maxCycles, null, setup, null, irqEvery, traps, checkIndexes, buttons, false, null, false, standIns, until));
 
     public int Address(string name) =>
         Result.Symbols.TryGetValue(name, out var a) ? a : throw new KeyNotFoundException($"No symbol '{name}'");

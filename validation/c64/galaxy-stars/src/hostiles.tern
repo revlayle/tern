@@ -1,0 +1,615 @@
+// Hostile stars (spec section 7): spawn timer, steering, spin, player contact, boost hurl and its explosion,
+// explosion kills. Slot i uses sprite i + 1. Port of ../src/hostiles.p8.
+// Position is the top-left of the 12x12 collision box plus a 1/16 px fraction. The box sits at pixel (4,4) of
+// the sprite frame. A hostile appears with its box on the box of the star it came from (tile pixels 2-13).
+import sound
+import math
+import video
+import player
+import stars
+import explode
+import score
+import assets
+
+const MAX: u8 = 6
+const BOX: u8 = 12                  // collision box size [TUNE]
+const BOX_INSET: u8 = 4
+const MAX_X: u16 = 320 - BOX
+const MAX_X_LO: u8 = MAX_X & $FF    // its bytes, for the assembly
+const MAX_X_HI: u8 = MAX_X >> 8
+const MAX_Y: u8 = 192 - BOX
+const FAR: u8 = 5                   // spawn: a star outside the 9x9 tiles around the player
+const TURN_FRAMES: u8 = 4           // [TUNE] one heading step towards the player every 4 frames
+const SPIN_DELAY: u8 = 3            // [TUNE] game frames per picture (1 while hurled)
+const SPIN_FRAMES: u8 = 6
+const COLOR: u8 = 2                 // red
+const FRAME_0: u8 = assets.SPR_HOSTILE_0       // first spin frame (for the assembly in draw())
+// [TUNE] hurl: 6 px/f for 16 frames (96 px)
+const HURL_SPEED: i8 = 96
+const HURL_DIAG: i8 = 68
+const HURL_FRAMES: u8 = 16
+const HURL_FREE_FRAMES: u8 = 8      // [TUNE] flies through hostiles for the first 8 frames (48 px)
+const OFF_FRAMES: u8 = 7            // at a playfield edge it flies on this long, out of sight, then is gone
+// [TUNE] respawn push (spec section 8): hostiles whose centre is inside the box around the playfield centre
+// (px 160, py 96), 80 px left and right and 64 px up and down, fly straight out at 6 px/f until outside it
+const PUSH_SPEED: u8 = 96
+const PUSH_HALF_W: u8 = 80
+const PUSH_HALF_H: u8 = 64
+
+// slot states
+const FREE: u8 = 0
+const CHASE: u8 = 1
+const HURLED: u8 = 2
+
+// [TUNE] speed per galaxy 1-21 (then it stays at 29), 1/16 px per frame
+// galaxy 1 = 50% of the player's 24, galaxy 21 = 120%, linear (designer, 2026-10-18: was galaxy 11)
+const SPEED_GALAXIES: u8 = 21
+data galaxy_speed: [u8; SPEED_GALAXIES] = [12, 13, 14, 15, 15, 16, 17, 18, 19, 20, 20, 21, 22, 23, 24, 25, 25, 26, 27, 28, 29]
+// cos of the 16 headings x 127. Heading 0 = right, counting clockwise on screen (4 = down).
+data cos16: [i8; 16] = [127, 117, 90, 49, 0, -49, -90, -117, -127, -117, -90, -49, 0, 49, 90, 117]
+var head_vx: [i8; 16]               // built at galaxy start from the speed
+var head_vy: [i8; 16]
+var push_vx: [i8; 16]               // the 16 headings at PUSH_SPEED
+var push_vy: [i8; 16]
+
+var x: [u16; MAX]
+var y: [u8; MAX]
+var x_frac: [u8; MAX]
+var y_frac: [u8; MAX]
+var state: [u8; MAX]
+var heading: [u8; MAX]              // 0-15
+var pushing: [bool; MAX]            // CHASE: being pushed out of the respawn box
+var push_dir: [u8; MAX]             // heading of the push
+var flight: [u8; MAX]               // HURLED: frames of flight left
+var off_edge: [u8; MAX]             // HURLED: frames left flying off the playfield (no explosion)
+var hurl_vx: [i8; MAX]
+var hurl_vy: [i8; MAX]
+var anim_frame: [u8; MAX]
+var anim_timer: [u8; MAX]
+var spin_ccw: [bool; MAX]
+var used: u8                        // slots not FREE
+var flying: u8                      // HURLED slots
+var interval: u16                   // spawn interval in frames
+var spawn_timer: u16                // frames to the next spawn; at 0 it waits for a free slot
+var turn_clock: u8
+
+// debug readouts
+var spawned: u8                     // warnings started
+var kills: u8                       // hostiles destroyed (hurls and explosions)
+var blasts: u8                      // hurl explosions
+var pushes: u8                      // respawn pushes started
+var hurl_x: u16                     // box x at the last hurl
+var blast_x: u16                    // box x where the last hurled hostile exploded
+
+data sprite_of: [u8; MAX] = [1, 2, 3, 4, 5, 6]     // slot -> sprite (for the assembly in draw())
+
+fn start_galaxy(galaxy: u8) {
+    for i in 0..MAX {
+        state[i] = FREE
+        video.hide_sprite(i + 1)
+    }
+    used = 0
+    flying = 0
+    // max(50, 300 - 12.5 * (g - 1)) frames: 6 s in galaxy 1, a quarter second less per galaxy, 1 s from
+    // galaxy 21 on (rounded up to whole frames)
+    interval = 50
+    if galaxy < 21 {
+        interval = 300 - (math.mul8(galaxy - 1, 25) >> 1)
+    }
+    spawn_timer = interval
+    var g: u8 = galaxy
+    if g > SPEED_GALAXIES {
+        g = SPEED_GALAXIES
+    }
+    set_speed(galaxy_speed[g - 1])
+    for d in 0..16 {
+        push_vx[d] = scale(PUSH_SPEED, cos16[d])
+        push_vy[d] = scale(PUSH_SPEED, cos16[(d - 4) & 15])
+    }
+}
+
+fn set_speed(speed: u8) {
+    // Velocity table for the 16 headings (galaxy start, so multiply and divide are fine here).
+    for d in 0..16 {
+        head_vx[d] = scale(speed, cos16[d])
+        head_vy[d] = scale(speed, cos16[(d - 4) & 15])      // sin = cos 90 degrees earlier
+    }
+}
+
+fn scale(speed: u8, c: i8) -> i8 {
+    // speed * c / 127, rounded
+    var m: u8 = c as u8
+    if c < 0 {
+        m = (-c) as u8
+    }
+    var v: i8 = (math.div16(math.mul8(speed, m) + 63, 127) as u8) as i8
+    if c < 0 {
+        return -v
+    }
+    return v
+}
+
+// ---- per frame ----
+
+fn update() {
+    // Spawn timer, then every hostile moves: chasing ones steer, hurled ones fly and may explode.
+    spawn()
+    turn_clock += 1
+    if player.safe == 0 {
+        for i in 0..MAX {
+            match state[i] {
+                CHASE => chase(i)
+                HURLED => fly(i)
+                _ => {}
+            }
+        }
+    } else {
+        for i in 0..MAX {
+            match state[i] {
+                CHASE => chase_safe(i)
+                HURLED => fly(i)
+                _ => {}
+            }
+        }
+    }
+}
+
+fn spawn() {
+    if spawn_timer != 0 {
+        spawn_timer -= 1
+        if spawn_timer != 0 {
+            return
+        }
+    }
+    if used + stars.warnings >= MAX {
+        return
+    }
+    var s: u8 = stars.pick_hostile()
+    if s == 255 {
+        return
+    }
+    stars.start_warning(s)
+    spawned += 1
+    spawn_timer = interval
+}
+
+fn appear(c: u8, r: u8) {
+    // Called by stars when a warning ends. A slot is free: warnings count towards MAX.
+    for i in 0..MAX {
+        if state[i] == FREE {
+            x[i] = ((c as u16) << 4) + 2
+            y[i] = (r << 4) + 2
+            x_frac[i] = 0
+            y_frac[i] = 0
+            heading[i] = aim(i)
+            pushing[i] = false
+            anim_frame[i] = 0
+            anim_timer[i] = 0
+            spin_ccw[i] = false
+            state[i] = CHASE
+            used += 1
+            return
+        }
+    }
+}
+
+fn chase(i: u8) {
+    // Turns are spread over the 4 frames by slot number.
+    if (turn_clock + i) & (TURN_FRAMES - 1) == 0 {
+        turn(i)
+    }
+    var vx: i8 = head_vx[heading[i]]
+    move(i, vx, head_vy[heading[i]])
+    if vx < 0 {
+        spin_ccw[i] = true
+    } else if vx > 0 {
+        spin_ccw[i] = false
+    }
+    spin(i, SPIN_DELAY)
+}
+
+fn chase_safe(i: u8) {
+    // Instead of chase() while the player is safe after reappearing: a hostile being pushed out of the
+    // respawn box flies on (the push ends well within the safe time), the others hold still, still turning
+    // towards the player. A separate routine, so normal frames pay nothing for it.
+    if pushing[i] {
+        var vx: i8 = push_vx[push_dir[i]]
+        if move(i, vx, push_vy[push_dir[i]]) || !in_push_box(i) {
+            pushing[i] = false
+        }
+        if vx < 0 {
+            spin_ccw[i] = true
+        } else if vx > 0 {
+            spin_ccw[i] = false
+        }
+    } else if (turn_clock + i) & (TURN_FRAMES - 1) == 0 {
+        turn(i)
+    }
+    spin(i, SPIN_DELAY)
+}
+
+fn push_out() {
+    // The player has just reappeared in the centre: chasing hostiles in the box start their push, straight
+    // away from the player (who is at the centre).
+    for i in 0..MAX {
+        if state[i] == CHASE && in_push_box(i) {
+            pushing[i] = true
+            push_dir[i] = (aim(i) + 8) & 15
+            pushes += 1
+        }
+    }
+}
+
+fn in_push_box(i: u8) -> bool {
+    // The hostile's centre (box + 6) strictly inside the respawn box.
+    var cx: u16 = x[i] + 6
+    var cy: u8 = y[i] + 6
+    return cx > 160 - PUSH_HALF_W && cx < 160 + PUSH_HALF_W && cy > 96 - PUSH_HALF_H && cy < 96 + PUSH_HALF_H
+}
+
+fn turn(i: u8) {
+    // One step towards the player's direction, the shorter way round (clockwise when exactly behind).
+    var d: u8 = (aim(i) - heading[i]) & 15
+    if d == 0 {
+        return
+    }
+    if d <= 8 {
+        heading[i] = (heading[i] + 1) & 15
+    } else {
+        heading[i] = (heading[i] - 1) & 15
+    }
+}
+
+fn aim(i: u8) -> u8 {
+    // Heading (0-15) from this hostile to the player. Both boxes have their centre 6 px in, so the
+    // top-left corners give the direction.
+    var ax: u16 = player.x - x[i]
+    var left: bool = player.x < x[i]
+    if left {
+        ax = x[i] - player.x
+    }
+    var ay: u8 = player.y - y[i]
+    var up: bool = player.y < y[i]
+    if up {
+        ay = y[i] - player.y
+    }
+    // angle from the x axis in 22.5 degree steps; boundaries at tan 11.25, 33.75, 56.25, 78.75 degrees
+    // (about 1/5, 2/3, 3/2, 5)
+    var ay_w: u16 = ay
+    var step: u8 = 4
+    if (ay_w << 2) + ay_w < ax {
+        step = 0
+    } else if (ay_w << 1) + ay_w < ax << 1 {
+        step = 1
+    } else if ay_w << 1 < (ax << 1) + ax {
+        step = 2
+    } else if ay_w < (ax << 2) + ax {
+        step = 3
+    }
+    if left {
+        step = 8 - step
+    }
+    if up {
+        step = (16 - step) & 15
+    }
+    return step
+}
+
+fn move(i: u8 using X, vx: i8, vy: i8) -> bool {
+    // Slot i moves by vx, vy (1/16 px), clamped to the playfield as player.move does. Returns true when the
+    // box is at an edge it moved towards.
+    var edge: bool = false
+    var t: i8 = (x_frac[i] as i8) + vx
+    x_frac[i] = (t as u8) & 15
+    var d: i8 = t >> 4
+    if d < 0 {
+        var left: u8 = (-d) as u8
+        if x[i] <= left {
+            x[i] = 0
+            x_frac[i] = 0
+            edge = true
+        } else {
+            x[i] -= left
+        }
+    } else if d != 0 {
+        x[i] += d as u8
+        if x[i] >= MAX_X {
+            x[i] = MAX_X
+            x_frac[i] = 0
+            edge = true
+        }
+    }
+    t = (y_frac[i] as i8) + vy
+    y_frac[i] = (t as u8) & 15
+    d = t >> 4
+    if d < 0 {
+        var up: u8 = (-d) as u8
+        if y[i] <= up {
+            y[i] = 0
+            y_frac[i] = 0
+            edge = true
+        } else {
+            y[i] -= up
+        }
+    } else if d != 0 {
+        y[i] += d as u8
+        if y[i] >= MAX_Y {
+            y[i] = MAX_Y
+            y_frac[i] = 0
+            edge = true
+        }
+    }
+    return edge
+}
+
+fn spin(i: u8, delay: u8) {
+    // Clockwise plays the frames forward.
+    anim_timer[i] += 1
+    if anim_timer[i] < delay {
+        return
+    }
+    anim_timer[i] = 0
+    if spin_ccw[i] {
+        if anim_frame[i] == 0 {
+            anim_frame[i] = SPIN_FRAMES
+        }
+        anim_frame[i] -= 1
+    } else {
+        anim_frame[i] += 1
+        if anim_frame[i] == SPIN_FRAMES {
+            anim_frame[i] = 0
+        }
+    }
+}
+
+// ---- hurl (spec section 7) ----
+
+fn check_player() {
+    // Player box against each chasing hostile: destroyed by the invincible player, hurled while boosting
+    // (also while safe), else a lost life unless the player is safe. Nothing while the player is dying.
+    if player.dying != 0 {
+        return
+    }
+    for i in 0..MAX {
+        if state[i] == CHASE && player.x < x[i] + BOX && x[i] < player.x + player.BOX &&
+                player.y < y[i] + BOX && y[i] < player.y + player.BOX {
+            if player.invincible != 0 {
+                free(i)
+                sound.play(sound.HURL)
+                destroyed()
+            } else if player.boosted {
+                hurl(i)
+            } else if player.hurtable() {
+                player.hurt()
+            }
+        }
+    }
+}
+
+fn hurl(i: u8) {
+    // Direction: the player's movement, or straight away from the player when they aren't moving.
+    // Nearest of 8 directions: an axis counts when it is at least half the other (as player.bounce).
+    var dx: i8 = player.vx
+    var dy: i8 = player.vy
+    if dx == 0 && dy == 0 {
+        // centre to centre (same 6 px inset); the boxes touch, so the difference fits a byte
+        dx = (x[i].lo - player.x.lo) as i8
+        dy = (y[i] - player.y) as i8
+    }
+    var ax: u8 = dx as u8
+    if dx < 0 {
+        ax = (-dx) as u8
+    }
+    var ay: u8 = dy as u8
+    if dy < 0 {
+        ay = (-dy) as u8
+    }
+    var use_x: bool = (ax << 1) > ay
+    var use_y: bool = (ay << 1) > ax
+    var speed: i8 = HURL_SPEED
+    if use_x && use_y {
+        speed = HURL_DIAG
+    }
+    hurl_vx[i] = 0
+    hurl_vy[i] = 0
+    if use_x {
+        hurl_vx[i] = speed
+        if dx < 0 {
+            hurl_vx[i] = -speed
+        }
+    }
+    if use_y {
+        hurl_vy[i] = speed
+        if dy < 0 {
+            hurl_vy[i] = -speed
+        }
+    }
+    if !use_x && !use_y {
+        hurl_vx[i] = HURL_SPEED     // dead centre: to the right
+    }
+    state[i] = HURLED
+    flight[i] = HURL_FRAMES
+    off_edge[i] = 0
+    flying += 1
+    hurl_x = x[i]
+    // the player bounces straight back, opposite the hurl, as off a stationary star
+    player.bounce(-hurl_vx[i], -hurl_vy[i])
+    sound.play(sound.HURL)
+    destroyed()
+}
+
+fn fly(i: u8) {
+    // A hurled hostile is harmless and can't be hit. It flies through stationary stars, and through hostiles
+    // for the first HURL_FREE_FRAMES; after that it explodes on touching a chasing hostile. Otherwise it
+    // explodes at the end of the flight. At a playfield edge it flies on off the screen and is gone with no
+    // explosion (its kill was scored at the hurl).
+    // Frame time: when an explosion already started this frame, it waits in place for the next frame.
+    if off_edge[i] != 0 {
+        // whole pixels, no clamp: the coordinates wrap a little past the edges, where the border hides it
+        x[i] += ((hurl_vx[i] >> 4) as i16) as u16
+        y[i] += (hurl_vy[i] >> 4) as u8
+        spin(i, 1)
+        off_edge[i] -= 1
+        if off_edge[i] == 0 {
+            free(i)
+            flying -= 1
+        }
+        return
+    }
+    if flight[i] != 0 {
+        var edge: bool = move(i, hurl_vx[i], hurl_vy[i])
+        spin(i, 1)
+        flight[i] -= 1
+        if edge {
+            off_edge[i] = OFF_FRAMES
+            return
+        }
+        if flight[i] <= HURL_FRAMES - HURL_FREE_FRAMES && touches_hostile(i) {
+            flight[i] = 0
+        }
+    }
+    if flight[i] == 0 && explode.starts == 0 {
+        blast(i)
+    }
+}
+
+fn touches_hostile(i: u8) -> bool {
+    // Boxes of equal size overlap when both corner differences are in -11..11 (unsigned: d + 11 < 23).
+    var hx: u16 = x[i]
+    var hy: u8 = y[i]
+    for j in 0..MAX {
+        if state[j] == CHASE {
+            var dy: u8 = hy - y[j]
+            if dy + BOX - 1 < BOX * 2 - 1 {
+                var dx: u16 = hx - x[j]
+                if dx + BOX - 1 < BOX * 2 - 1 {
+                    return true
+                }
+            }
+        }
+    }
+    return false
+}
+
+fn blast(i: u8) {
+    // A normal explosion on the tile under the box centre. Not a supernova: no points of its own.
+    free(i)
+    flying -= 1
+    blasts += 1
+    sound.play(sound.SUPERNOVA)     // the same explosion sound
+    blast_x = x[i]
+    explode.start(((x[i] + 6) >> 4) as u8, (y[i] + 6) >> 4)
+}
+
+// ---- kills ----
+
+fn check_explosions() {
+    // Chasing hostiles whose centre is in a running explosion's core are destroyed.
+    if explode.live == 0 {
+        return
+    }
+    while true {
+        var i: u8 = explosion_hit()
+        if i == 255 {
+            break
+        }
+        free(i)
+        destroyed()
+    }
+}
+
+asm fn explosion_hit() -> u8 {
+    // The first chasing hostile whose centre is in a running explosion's core (explode.hits), or 255.
+    // Assembly: up to 6 hostiles x 8 explosions every frame.
+    ldx #0
+.slot:
+    lda state,x
+    cmp #CHASE
+    bne .next
+    // centre of the box: x + 6, y + 6
+    lda x,x
+    clc
+    adc #BOX / 2
+    sta explode.obj_x
+    lda x+MAX,x
+    adc #0
+    sta explode.obj_x+1
+    lda y,x
+    clc
+    adc #BOX / 2
+    sta explode.obj_y
+    ldy #explode.MAX - 1
+.expl:
+    lda explode.timer,y
+    beq .nexpl
+    jsr explode.hits
+    bcc .nexpl
+    txa
+    rts
+.nexpl:
+    dey
+    bpl .expl
+.next:
+    inx
+    cpx #MAX
+    bne .slot
+    lda #255
+}
+
+fn destroyed() {
+    // A hostile hurled or killed: the next chain step, and one star fewer to clear.
+    stars.left -= 1
+    kills += 1
+    score.chain_kill()
+}
+
+fn free(i: u8) {
+    state[i] = FREE
+    used -= 1
+    video.hide_sprite(i + 1)
+}
+
+asm fn draw() {
+    // Sprite shadows of the hostiles in use (sprite = slot + 1), as video.set_sprite does: the frame starts
+    // BOX_INSET px up and left of the box, hardware x = px + 24, y = py + 58. FREE slots were hidden by free().
+    // Assembly: video.set_sprite costs about 250 cycles a call.
+    ldx #0
+.slot:
+    lda state,x
+    beq .next
+    ldy sprite_of,x
+    lda anim_frame,x
+    clc
+    adc #FRAME_0
+    sta video.spr_ptr,y
+    lda #COLOR
+    sta video.spr_col,y
+    lda y,x
+    clc
+    adc #58 - BOX_INSET
+    sta video.spr_y,y
+    lda x,x
+    clc
+    adc #24 - BOX_INSET
+    sta video.spr_x,y
+    lda x+MAX,x
+    adc #0
+    beq .low
+    lda video.spr_msb
+    ora video.sprite_bit,y
+    sta video.spr_msb
+    jmp .enable
+.low:
+    lda video.sprite_bit,y
+    eor #255
+    and video.spr_msb
+    sta video.spr_msb
+.enable:
+    lda video.spr_ena
+    ora video.sprite_bit,y
+    sta video.spr_ena
+.next:
+    inx
+    cpx #MAX
+    bne .slot
+}

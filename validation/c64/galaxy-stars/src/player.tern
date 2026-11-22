@@ -1,0 +1,342 @@
+// Player (spec section 5): 8-direction movement, boost with cooldown, playfield clamp, spin animation,
+// boost glow, the knockback after hitting a star (spec section 6) and invincibility after a quasar
+// pickup (spec section 9). Port of ../src/player.p8.
+// Position is the top-left of the 13x13 collision box in playfield pixels plus a 1/16 px fraction.
+// The box sits at pixel (4,4) of the 24x21 sprite frame (centred in the 21x21 art).
+import sound
+import input
+import video
+import assets
+import score
+import hostiles
+
+const BOX: u8 = 13                  // collision box size [TUNE]
+const BOX_INSET: u8 = 4             // box offset inside the sprite frame
+const MAX_X: u16 = 320 - BOX       // box clamped to the playfield
+const MAX_Y: u8 = 192 - BOX
+// start: art centre (frame pixel 10,10) on the playfield centre px 160, py 96
+const START_X: u16 = 160 - 10 + BOX_INSET
+const START_Y: u8 = 96 - 10 + BOX_INSET
+
+// [TUNE] speeds in 1/16 px per frame; diagonals are each axis at 181/256
+const SPEED: i8 = 24
+const SPEED_DIAG: i8 = 17
+const BOOST_SPEED: i8 = 60
+const BOOST_DIAG: i8 = 42
+const BOOST_FRAMES: u8 = 75
+const COOLDOWN_FRAMES: u8 = 25
+// [TUNE] knockback after hitting a star: 3 px/f for 6 frames, no joystick control
+const KNOCK_SPEED: i8 = 48
+const KNOCK_DIAG: i8 = 34
+const KNOCK_FRAMES: u8 = 6
+
+// [TUNE] animation
+const SPIN_FRAMES: u8 = 6
+const SPIN_DELAY: u8 = 3            // game frames per picture at normal speed (1 while boosting)
+const COLOR: u8 = 7                 // yellow
+data glow_colors: [u8; _] = [1, 7, 8, 7]    // boost glow: white, yellow, orange, yellow, every 2 frames
+// losing a life (spec section 8)
+const DIE_FRAMES: u8 = 50           // 1 s death effect, the player stays where it was hit
+const SAFE_FRAMES: u8 = 100         // 2 s after reappearing: hostiles and explosions can't hurt
+data die_colors: [u8; _] = [1, 2, 7, 0]
+const SAFE_BLINK_SHIFT = 2          // [TUNE] while safe the sprite is shown 4 frames, hidden 4 (safe >> 2)
+const SHRINK_START: u8 = 30         // death effect: shrinks away in 3 steps of 10 frames (SPR_DIE_0-2)
+// invincibility (spec section 9): 8 s; the color cycles every 2 frames, every 8 in the last second [TUNE]
+const INVINCIBLE_FRAMES: u16 = 400
+const INVINCIBLE_SECS: u8 = INVINCIBLE_FRAMES / 50    // HUD countdown
+const INVINCIBLE_SLOW: u16 = 50
+// [art phase] white, yellow, light green, cyan, light blue, purple, light red, orange
+data invincible_colors: [u8; _] = [1, 7, 13, 3, 14, 4, 10, 8]
+
+// joystick bits (input.UP/DOWN/LEFT/RIGHT = bits 0-3) -> axis speeds. Opposite directions cancel.
+data dir_vx: [i8; _] = [0, 0, 0, 0, -SPEED, -SPEED_DIAG, -SPEED_DIAG, -SPEED,
+                         SPEED, SPEED_DIAG, SPEED_DIAG, SPEED, 0, 0, 0, 0]
+data dir_vy: [i8; _] = [0, -SPEED, SPEED, 0, 0, -SPEED_DIAG, SPEED_DIAG, 0,
+                         0, -SPEED_DIAG, SPEED_DIAG, 0, 0, -SPEED, SPEED, 0]
+data boost_vx: [i8; _] = [0, 0, 0, 0, -BOOST_SPEED, -BOOST_DIAG, -BOOST_DIAG, -BOOST_SPEED,
+                           BOOST_SPEED, BOOST_DIAG, BOOST_DIAG, BOOST_SPEED, 0, 0, 0, 0]
+data boost_vy: [i8; _] = [0, -BOOST_SPEED, BOOST_SPEED, 0, 0, -BOOST_DIAG, BOOST_DIAG, 0,
+                           0, -BOOST_DIAG, BOOST_DIAG, 0, 0, -BOOST_SPEED, BOOST_SPEED, 0]
+
+var x: u16
+var y: u8
+var x_frac: u8
+var y_frac: u8
+var boost_left: u8                  // frames of boost left, 0 = not boosting
+var cooldown: u8                    // frames before the next boost is allowed
+var anim_frame: u8                  // 0 to SPIN_FRAMES - 1
+var anim_timer: u8
+var spin_ccw: bool                  // false = clockwise (the start direction)
+var color: u8
+var boosts: u8                      // boosts started (debug readout)
+var knock_left: u8                  // knockback frames left
+var knock_star: u8                  // the star that started the knockback (255: a hurled hostile)
+var knock_vx: i8
+var knock_vy: i8
+var bounces: u8                     // bounces started (debug readout)
+var vx: i8                          // speed moved with this frame (hostile hurl direction)
+var vy: i8
+var boosted: bool                   // the boost was running this frame (hits and hurls count as boosted)
+var dying: u8                       // frames of the death effect left; no control or contacts meanwhile
+var safe: u8                        // frames of safety left after reappearing
+var gone: bool                      // the death effect ended with no lives left: game over
+var invincible: u16                 // frames of invincibility left
+var inv_secs: u8                    // seconds left, shown on the HUD (8 down to 1)
+var inv_frames: u8                  // frames left in the current second
+var deaths: u8                      // lives lost (debug readout)
+var respawns: u8                    // times reappeared (debug readout)
+
+fn init() {
+    x = START_X
+    y = START_Y
+    x_frac = 0
+    y_frac = 0
+    boost_left = 0
+    cooldown = 0
+    anim_frame = 0
+    anim_timer = 0
+    spin_ccw = false
+    color = COLOR
+    knock_left = 0
+    vx = 0
+    vy = 0
+    boosted = false
+    dying = 0
+    safe = 0
+    gone = false
+    invincible = 0
+    inv_secs = 0
+    video.hud_invincible(0)
+}
+
+fn make_invincible() {
+    // Quasar pickup. A running boost, its cooldown and a knockback end: control is back at once, and fire
+    // works again as soon as the invincibility ends.
+    invincible = INVINCIBLE_FRAMES
+    inv_secs = INVINCIBLE_SECS
+    inv_frames = 50
+    video.hud_invincible(inv_secs)
+    boost_left = 0
+    cooldown = 0
+    knock_left = 0
+}
+
+fn hurt() {
+    // Touched by a hostile or caught in an explosion: a life lost, the death effect starts.
+    score.lose_life()
+    sound.play(sound.LIFE_LOST)
+    deaths += 1
+    dying = DIE_FRAMES
+    boost_left = 0
+    cooldown = 0
+    knock_left = 0
+    vx = 0
+    vy = 0
+    boosted = false
+}
+
+fn hurtable() -> bool {
+    return dying == 0 && safe == 0 && invincible == 0
+}
+
+fn update() {
+    if dying != 0 {
+        // the death effect plays where the player was hit; then the centre, or game over
+        dying -= 1
+        color = die_colors[(dying >> 1) & 3]
+        anim_timer = SPIN_DELAY     // fast spin: a picture every frame
+        spin()
+        if dying == 0 {
+            if score.lives == 0 {
+                gone = true
+            } else {
+                init()
+                safe = SAFE_FRAMES
+                respawns += 1
+                hostiles.push_out()
+            }
+        }
+        return
+    }
+    if safe != 0 {
+        safe -= 1
+    }
+    if knock_left != 0 {
+        // knockback: no joystick control (fire presses are ignored too); the boost keeps running
+        knock_left -= 1
+        vx = knock_vx
+        vy = knock_vy
+        move(vx, vy)
+        spin()
+    } else {
+        // invincible: boost speed in the stick direction, fire does nothing
+        if input.pressed & input.FIRE != 0 && boost_left == 0 && cooldown == 0 && invincible == 0 {
+            boost_left = BOOST_FRAMES
+            boosts += 1
+            sound.play(sound.BOOST)
+        }
+
+        var dir: u8 = input.held & 0b1111
+        vx = dir_vx[dir]
+        vy = dir_vy[dir]
+        if boost_left != 0 || invincible != 0 {
+            vx = boost_vx[dir]
+            vy = boost_vy[dir]
+        }
+        move(vx, vy)
+
+        if vx < 0 {
+            spin_ccw = true
+        } else if vx > 0 {
+            spin_ccw = false
+        }
+        if vx != 0 || vy != 0 {
+            spin()
+        }
+    }
+
+    color = COLOR
+    boosted = boost_left != 0
+    if boost_left != 0 {
+        color = glow_colors[(boost_left >> 1) & 3]
+        boost_left -= 1
+        if boost_left == 0 {
+            cooldown = COOLDOWN_FRAMES
+        }
+    } else if cooldown != 0 {
+        cooldown -= 1
+    }
+    if invincible != 0 {
+        var glow: u8 = (invincible.lo >> 1) & 7
+        if invincible <= INVINCIBLE_SLOW {
+            glow = (invincible.lo >> 3) & 7
+        }
+        color = invincible_colors[glow]
+        invincible -= 1
+        inv_frames -= 1
+        if inv_frames == 0 {
+            inv_frames = 50
+            inv_secs -= 1
+            video.hud_invincible(inv_secs)     // reaches 0 (cleared) with the invincibility
+        }
+    }
+}
+
+fn bounce(dx: i8, dy: i8) {
+    // Knockback away from a star: dx, dy point from the star to the player. Nearest of 8 directions:
+    // an axis counts when it is at least half the other (tan 26.6 deg, close to the 22.5 deg boundary).
+    var ax: u8 = (-dx) as u8
+    if dx >= 0 {
+        ax = dx as u8
+    }
+    var ay: u8 = dy as u8
+    if dy < 0 {
+        ay = (-dy) as u8
+    }
+    var use_x: bool = (ax << 1) > ay
+    var use_y: bool = (ay << 1) > ax
+    var speed: i8 = KNOCK_SPEED
+    if use_x && use_y {
+        speed = KNOCK_DIAG
+    }
+    knock_vx = 0
+    knock_vy = 0
+    if use_x {
+        knock_vx = speed
+        if dx < 0 {
+            knock_vx = -speed
+        }
+    }
+    if use_y {
+        knock_vy = speed
+        if dy < 0 {
+            knock_vy = -speed
+        }
+    }
+    if !use_x && !use_y {
+        knock_vy = -KNOCK_SPEED     // dead centre (can't happen with boxes this size): straight up
+    }
+    knock_left = KNOCK_FRAMES
+    knock_star = 255                // stars.touch() sets it after the bounce
+    bounces += 1
+}
+
+fn move(mx: i8, my: i8) {
+    // frac + speed: the whole pixels (arithmetic shift, so negative sums step left/up) and the new fraction
+    var t: i8 = (x_frac as i8) + mx
+    x_frac = (t as u8) & 15
+    var d: i8 = t >> 4
+    if d < 0 {
+        var left: u8 = (-d) as u8
+        if x < left {
+            x = 0
+            x_frac = 0
+        } else {
+            x -= left
+        }
+    } else if d > 0 {
+        x += d as u8
+        if x > MAX_X {
+            x = MAX_X
+            x_frac = 0
+        }
+    }
+
+    t = (y_frac as i8) + my
+    y_frac = (t as u8) & 15
+    d = t >> 4
+    if d < 0 {
+        var up: u8 = (-d) as u8
+        if y < up {
+            y = 0
+            y_frac = 0
+        } else {
+            y -= up
+        }
+    } else if d > 0 {
+        y += d as u8
+        if y > MAX_Y {
+            y = MAX_Y
+            y_frac = 0
+        }
+    }
+}
+
+fn spin() {
+    // Called on frames the player moves. Clockwise plays the frames forward.
+    anim_timer += 1
+    if boost_left == 0 && invincible == 0 && anim_timer < SPIN_DELAY {
+        return
+    }
+    anim_timer = 0
+    if spin_ccw {
+        if anim_frame == 0 {
+            anim_frame = SPIN_FRAMES
+        }
+        anim_frame -= 1
+    } else {
+        anim_frame += 1
+        if anim_frame == SPIN_FRAMES {
+            anim_frame = 0
+        }
+    }
+}
+
+fn draw() {
+    // Sprite shadow registers. At the top/left edges the frame starts at -4: the u16/u8 wrap-around
+    // in set_sprite still gives the right hardware position. Blinks while safe.
+    if gone || (safe != 0 && (safe >> SAFE_BLINK_SHIFT) & 1 != 0) {
+        video.hide_sprite(0)
+        return
+    }
+    var frame: u8 = assets.SPR_PLAYER_0 + anim_frame
+    if dying != 0 && dying <= SHRINK_START {
+        frame = assets.SPR_DIE_2
+        if dying > SHRINK_START - 10 {
+            frame = assets.SPR_DIE_0
+        } else if dying > SHRINK_START - 20 {
+            frame = assets.SPR_DIE_1
+        }
+    }
+    video.set_sprite(0, frame, color, x - BOX_INSET, y - BOX_INSET)
+}

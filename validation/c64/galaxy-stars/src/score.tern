@@ -1,0 +1,298 @@
+// Score, multiplier, lives and the galaxy timer (spec section 8 and 10). Port of ../src/score.p8.
+// Score events in play come from a table of every base value times x1-x9 (init()), so each is one BCD add. The
+// score digits are drawn once at the end of the frame when the score changed (flush()); the other HUD digits are
+// redrawn when their value changes (video.put_digit skips unchanged digits).
+import sound
+import video
+
+const START_LIVES: u8 = 3
+const MAX_LIVES: u8 = 9
+// [TUNE] BCD hundreds: the first extra life at 100,000 points, then every 300,000 (designer, 2026-10-19: was
+// every 50,000)
+const EXTRA_LIFE_FIRST: u16 = $1000
+const EXTRA_LIFE_EVERY: u16 = $3000
+const EVERY_LO: u8 = EXTRA_LIFE_EVERY & $FF     // its bytes, for the assembly
+const EVERY_MID: u8 = EXTRA_LIFE_EVERY >> 8
+const MAX_MULT: u8 = 9
+const GALAXY_TIME: u8 = $60         // BCD seconds
+const FRAMES_PER_SECOND: u8 = 50
+// [TUNE] frames before the multiplier drops by 1, indexed by its current value (x2 to x9)
+data drop_frames: [u8; MAX_MULT + 1] = [0, 0, 175, 157, 139, 121, 104, 86, 68, 50]
+// hostile chain steps in hundreds, BCD: 500, 1000, 2000, 4000, 8000, 16000 (the cap from the 6th kill on, the
+// most hostiles at once; designer, 2026-10-18: was the 8th, 64000) [TUNE]
+const CHAIN_STEPS: u8 = 6
+// score table types: 0 = supernova (100), 1-6 = chain steps 1-6; base values in BCD hundreds
+const T_SUPERNOVA: u8 = 0
+const TYPES: u8 = 1 + CHAIN_STEPS
+data base_lo: [u8; TYPES] = [$01, $05, $10, $20, $40, $80, $60]
+data base_mid: [u8; TYPES] = [$00, $00, $00, $00, $00, $00, $01]
+data type_start: [u8; TYPES] = [0, 9, 18, 27, 36, 45, 54]   // type * MAX_MULT
+// base value times x1-x9 at type_start[type] + mult - 1 (BCD hundreds, at most 16,000 x 9 = 1440), by init()
+var table_lo: [u8; TYPES * MAX_MULT]
+var table_mid: [u8; TYPES * MAX_MULT]
+var dirty: bool                     // the score changed: flush() draws it
+
+// score in hundreds, 6 BCD digits (the HUD appends "00")
+var points_hi: u8
+var points_mid: u8
+var points_lo: u8
+var mult: u8
+var mult_timer: u8                  // frames left before the multiplier drops (mult > 1)
+var lives: u8
+var galaxy: u8                      // 1-based
+var time: u8                        // BCD seconds left
+var time_frames: u8                 // frames left in the current second
+var chain: u8                       // hostile kills in the current chain
+// next extra life at this score (BCD hundreds); no_more_lives once it would pass 99,999,900
+var next_hi: u8
+var next_mid: u8
+var next_lo: u8
+var no_more_lives: bool
+// session high score (BCD hundreds)
+var high_hi: u8
+var high_mid: u8
+var high_lo: u8
+// last galaxy clear bonus (BCD hundreds, already times the multiplier)
+var bonus_mid: u8
+var bonus_lo: u8
+
+private var bcd_in: u8              // add_acc / add_once: the low byte to add
+
+fn init() {
+    // Once at startup: the score table, by repeated BCD adds (bonus_lo/bonus_mid as the sum).
+    var k: u8 = 0
+    for t in 0..TYPES {
+        bonus_lo = 0
+        bonus_mid = 0
+        for _ in 0..MAX_MULT {
+            add_acc(base_lo[t], base_mid[t])
+            table_lo[k] = bonus_lo
+            table_mid[k] = bonus_mid
+            k += 1
+        }
+    }
+}
+
+fn new_game() {
+    points_hi = 0
+    points_mid = 0
+    points_lo = 0
+    mult = 1
+    mult_timer = 0
+    chain = 0
+    lives = START_LIVES
+    galaxy = 1
+    next_hi = 0
+    next_mid = EXTRA_LIFE_FIRST >> 8
+    next_lo = EXTRA_LIFE_FIRST & $FF
+    no_more_lives = false
+    video.hud_score(0, 0, 0)
+    video.hud_mult(mult)
+    video.hud_lives(lives)
+}
+
+fn start_galaxy() {
+    time = GALAXY_TIME
+    time_frames = FRAMES_PER_SECOND
+    chain = 0
+    video.hud_time(time)
+}
+
+fn chain_kill() {
+    // A hostile destroyed: the next chain step times the multiplier.
+    var step: u8 = chain
+    if step >= CHAIN_STEPS {
+        step = CHAIN_STEPS - 1
+    }
+    add_type(1 + step)
+    if chain != 255 {
+        chain += 1
+    }
+}
+
+fn supernova() {
+    // 100 points times the multiplier before the raise; then +1, or at x9 only the drop timer restarts.
+    add_type(T_SUPERNOVA)
+    if mult < MAX_MULT {
+        mult += 1
+        video.hud_mult(mult)
+    }
+    mult_timer = drop_frames[mult]
+}
+
+fn add_type(t: u8) {
+    // A score event from the table: its base value times the multiplier, one BCD add.
+    var k: u8 = type_start[t] + mult - 1
+    add_once(table_lo[k], table_mid[k])
+    dirty = true
+    check_extra()
+}
+
+fn add(bcd_lo: u8, bcd_mid: u8) {
+    // Adds any BCD value in hundreds (bcd_mid:bcd_lo, up to 9999) times the multiplier, by repeated adds (the
+    // time bonus; score events in play use add_type).
+    for _ in 0..mult {
+        add_once(bcd_lo, bcd_mid)
+    }
+    dirty = true
+    check_extra()
+}
+
+fn flush() {
+    // End of frame: the score digits, if the score changed.
+    if dirty {
+        dirty = false
+        video.hud_score(points_hi, points_mid, points_lo)
+    }
+}
+
+fn check_extra() {
+    // An extra life for each threshold the score has reached (one event can pass several). Past
+    // MAX_LIVES none is given, but the threshold still moves on.
+    while !no_more_lives && reached_next() {
+        if lives < MAX_LIVES {
+            lives += 1
+            video.hud_lives(lives)
+            sound.play(sound.EXTRA_LIFE)
+        }
+        if raise_next() != 0 {
+            no_more_lives = true
+        }
+    }
+}
+
+fn reached_next() -> bool {
+    // points >= next (BCD bytes compare like plain numbers)
+    if points_hi != next_hi {
+        return points_hi > next_hi
+    }
+    if points_mid != next_mid {
+        return points_mid > next_mid
+    }
+    return points_lo >= next_lo
+}
+
+asm fn raise_next() -> u8 {
+    // next += EXTRA_LIFE_EVERY in BCD. Returns 1 when it overflowed 999999.
+    php
+    sei
+    sed
+    clc
+    lda next_lo
+    adc #EVERY_LO
+    sta next_lo
+    lda next_mid
+    adc #EVERY_MID
+    sta next_mid
+    lda next_hi
+    adc #0
+    sta next_hi
+    lda #0
+    rol                     // the carry out (rol ignores decimal mode)
+    plp
+}
+
+fn time_bonus() {
+    // Galaxy clear: 100 x seconds left, times the multiplier; then the multiplier resets to x1.
+    // The seconds (BCD) are the bonus in hundreds, added `mult` times into bonus_mid:bonus_lo.
+    bonus_lo = 0
+    bonus_mid = 0
+    for _ in 0..mult {
+        add_acc(time, 0)
+    }
+    mult = 1
+    add(bonus_lo, bonus_mid)        // already multiplied: added once
+    flush()
+    mult_timer = 0
+    video.hud_mult(mult)
+}
+
+asm fn add_acc(bcd_lo: u8 using A, bcd_mid: u8 using Y) {
+    // bonus_mid:bonus_lo += bcd_mid:bcd_lo in BCD (time bonus and the score table).
+    sta bcd_in
+    php
+    sei
+    sed
+    clc
+    lda bonus_lo
+    adc bcd_in
+    sta bonus_lo
+    tya
+    adc bonus_mid
+    sta bonus_mid
+    plp
+}
+
+fn update_high() {
+    // Game over: the session high score.
+    if points_hi > high_hi || (points_hi == high_hi && (points_mid > high_mid
+            || (points_mid == high_mid && points_lo > high_lo))) {
+        high_hi = points_hi
+        high_mid = points_mid
+        high_lo = points_lo
+    }
+}
+
+asm fn add_once(bcd_lo: u8 using A, bcd_mid: u8 using Y) {
+    // 3-byte BCD add, interrupts off while decimal mode is on. Stops at 999999 (99,999,900 points).
+    sta bcd_in
+    php
+    sei
+    sed
+    clc
+    lda points_lo
+    adc bcd_in
+    sta points_lo
+    tya
+    adc points_mid
+    sta points_mid
+    lda points_hi
+    adc #0
+    sta points_hi
+    bcc .done
+    lda #$99
+    sta points_hi
+    sta points_mid
+    sta points_lo
+.done:
+    plp
+}
+
+fn lose_life() {
+    // The count and the multiplier; player.hurt() starts the death effect.
+    if lives != 0 {
+        lives -= 1
+    }
+    video.hud_lives(lives)
+    mult = 1
+    mult_timer = 0
+    video.hud_mult(mult)
+}
+
+fn update() {
+    // Once per frame: multiplier drop and galaxy timer.
+    if mult > 1 {
+        mult_timer -= 1
+        if mult_timer == 0 {
+            mult -= 1
+            mult_timer = drop_frames[mult]
+            video.hud_mult(mult)
+        }
+    }
+    if time != 0 {
+        time_frames -= 1
+        if time_frames == 0 {
+            time_frames = FRAMES_PER_SECOND
+            time = bcd_dec(time)
+            video.hud_time(time)
+        }
+    }
+}
+
+fn bcd_dec(value: u8) -> u8 {
+    // BCD minus 1 for value > 0, without decimal mode
+    if value & 15 == 0 {
+        return value - 7            // $x0 -> $(x-1)9
+    }
+    return value - 1
+}

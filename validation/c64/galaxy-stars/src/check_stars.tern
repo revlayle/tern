@@ -1,0 +1,24 @@
+// Reaches every routine of stars.tern, so that compare.py can call them in the 6502 simulator (not part of
+// the game). `tern run src/check_stars.tern --dump ...` also runs this sequence on its own.
+import video
+import stars
+
+var picked: u8
+var started: bool
+
+fn main() {
+    stars.place(55)
+    stars.hide_for_reveal()
+    while stars.revealed < stars.count {
+        stars.reveal_next()
+    }
+    video.draw_playfield()
+    stars.start_countdown(0)
+    stars.start_warning(1)
+    stars.hit(2, 1)
+    started = stars.caught(3, stars.STAGGER)
+    stars.blow(4)
+    picked = stars.pick_hostile()
+    stars.player_contact()
+    stars.update()
+}

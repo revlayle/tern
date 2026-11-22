@@ -1,0 +1,53 @@
+// Constants from ../src/gen_assets.p8 (written by ../tools/gfx.py), copied by hand: gfx.py has no
+// Tern output yet. Only the ones the ported modules use so far. Keep them equal to gen_assets.p8.
+
+const FIRST_CHAR: u8 = 64           // chars.bin starts at this char code
+
+const SPR_PLAYER_0: u8 = 160
+const SPR_HOSTILE_0: u8 = 166
+const SPR_DIE_0: u8 = 172
+const SPR_DIE_1: u8 = 173
+const SPR_DIE_2: u8 = 174
+const SPR_QUASAR_0: u8 = 175
+const SPR_FLY: u8 = 179
+
+const TILE_STAR_0_TL: u8 = 64
+const TILE_STAR_0_COLOR: u8 = 7
+const TILE_STAR_1_TL: u8 = 68
+const TILE_STAR_1_COLOR: u8 = 1
+const TILE_STAR_2_TL: u8 = 72
+const TILE_STAR_2_COLOR: u8 = 3
+const TILE_STAR_3_TL: u8 = 76
+const TILE_STAR_3_COLOR: u8 = 4
+const TILE_STAR_4_TL: u8 = 80
+const TILE_STAR_4_COLOR: u8 = 3
+const TILE_STAR_5_TL: u8 = 84
+const TILE_STAR_5_COLOR: u8 = 7
+const TILE_STAR_6_TL: u8 = 88
+const TILE_STAR_6_COLOR: u8 = 5
+const TILE_STAR_7_TL: u8 = 92
+const TILE_STAR_7_COLOR: u8 = 6
+const TILE_SWELL_0_TL: u8 = 96
+const TILE_SWELL_0_COLOR: u8 = 7
+const TILE_SWELL_1_TL: u8 = 100
+const TILE_EXPLODE_0_TL: u8 = 104
+const TILE_EXPLODE_0_COLOR: u8 = 7
+const TILE_EXPLODE_1_TL: u8 = 140
+const TILE_EXPLODE_1_COLOR: u8 = 7
+const TILE_EXPLODE_2_TL: u8 = 176
+const CHAR_SPECK_0: u8 = 212
+const CHAR_SPECK_0_COLOR: u8 = 6
+const CHAR_SPECK_1: u8 = 213
+const CHAR_SPECK_2: u8 = 214
+const CHAR_SPECK_3: u8 = 215
+const CHAR_SPECK_4: u8 = 216
+
+const CHAR_TIME: u8 = 217
+const CHAR_TIME_COLOR: u8 = 1
+const CHAR_MULT: u8 = 218
+const CHAR_MULT_COLOR: u8 = 1
+const CHAR_LIVES: u8 = 219
+const CHAR_LIVES_COLOR: u8 = 7
+const CHAR_QUASAR: u8 = 220
+const CHAR_QUASAR_COLOR: u8 = 3
+const CHAR_LOGO: u8 = 221
