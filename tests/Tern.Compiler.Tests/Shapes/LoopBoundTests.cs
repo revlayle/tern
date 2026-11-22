@@ -62,15 +62,18 @@ public class LoopBoundTests
             var r0: u8
             var r1: u8
             var m: [u8; 40]
+            var p: ptr u8
             fn global() { for t in r0..=r1 { m[t] = 1 } }
             fn from_zero() { for t in 0..=r1 { m[t] = 2 } }
             fn writes() { for t in r0..=r1 { m[t] = 3; r1 = 3 } }
             fn calls() { for t in r0..=r1 { m[t] = 4; from_zero() } }
+            fn pointer() { for t in r0..=r1 { p[t] = 5 } }
             fn main() {
                 global()
                 from_zero()
                 writes()
                 calls()
+                pointer()
             }
             """);
         Assert.Matches(@"^ldx r0\|cpx r1\|beq global\.eq\d+\|bcs global\.fend\d+\|lda #\$01\|sta m,x\|cpx r1\|", Listing.Code(r, "global"));
@@ -78,5 +81,9 @@ public class LoopBoundTests
         // A body that assigns the end, or calls a function (which may), reads a copy.
         Assert.StartsWith("lda r1|sta writes._t", Listing.Code(r, "writes"));
         Assert.StartsWith("lda r1|sta calls._t", Listing.Code(r, "calls"));
+        // Review V1 fixes, suggestion 3: r1 is not address-taken here, so this reaches the pointer rule.
+        // A pointer can reach a global without addr() of it: from a constant ($0002 as ptr u8) or from
+        // another variable's address plus an offset.
+        Assert.StartsWith("lda r1|sta pointer._t", Listing.Code(r, "pointer"));
     }
 }
