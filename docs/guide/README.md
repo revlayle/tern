@@ -2,7 +2,7 @@
 
 <img src="../logo.svg" alt="Tern logo: a bird made of five purple triangles" width="120">
 
-A guide to the Tern language and compiler as built for the first release (through milestone M27): the Commodore 64, the Atari 8-bit, the Apple II and the NES. The full rules are in [`docs/spec-v0.md`](../spec-v0.md), with the whole grammar in its [Appendix A](../spec-v0.md#appendix-a-grammar); this guide shows how to use them. Every example here compiles with the current compiler.
+A guide to the Tern language and compiler as built for the first release (through milestone M27): the Commodore 64, the Atari 8-bit, the Apple II and the NES. The full rules are in [`docs/spec-v0.md`](../spec-v0.md); this guide shows how to use them. Every example here compiles with the current compiler.
 
 ## What Tern is
 
@@ -34,6 +34,7 @@ Read chapters 1 to 3 in order, then the chapter for your machine; the others whe
 | [10. How Tern programs behave](10-behavior.md) | The developer guide: what the machine does with your code, each behavior with an example |
 | [11. Writing fast Tern](11-fast.md) | Measured advice, and measuring with `tern run` and `tern bench` |
 | [12. Running and measuring](12-run-and-bench.md) | `tern run` and `tern bench` in full: options, output, input and frames, profiles, the index check, JSON, runs as tests |
+| [13. Grammar](13-grammar.md) | The whole syntax in EBNF, for reference: tokens, keywords, declarations, statements, expressions, assembly |
 
 ## Not supported yet
 
