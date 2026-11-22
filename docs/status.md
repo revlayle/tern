@@ -5,7 +5,7 @@ Owned by the coding session. Updated at the end of every coding session.
 ## Current
 
 - **Milestone:** V1 fixes, code from Galaxy Stars (roadmap "V1 fixes"; decision 2026-11-21, questions 180-181). Between V1 batch 1 (merged at `49d2888`, no review) and batch 2.
-- **Branch:** `v1-fixes`, from `main` at `3625a31`. Every item of the roadmap's list is built, each with its listing tests; the suite passes (11,786 on the C64; 11,164 with `TERN_TARGET` atari, apple2 and nes and `Platform!=c64`).
+- **Branch:** `v1-fixes`, from `main` at `3625a31` (`main` merged in at `43c7a10` for the review). Every item of the roadmap's list is built, each with its listing tests; the review's finding 1 and suggestions 2-3 are fixed (table below); the suite passes (11,790 on the C64; 11,164 with `TERN_TARGET` atari, apple2 and nes and `Platform!=c64`).
 - **Done**, one commit each, measured over the benchmarks and Galaxy Stars (the port at its `fb0db78`, built with this worktree's compiler, `compare.py --scenario game`, all 13,211 frames the same each time):
 
   | Commit | Item | Galaxy Stars bytes | cycles per play frame |
@@ -26,6 +26,15 @@ Owned by the coding session. Updated at the end of every coding session.
 - **Tools used, not in either repository:** `compare.py` needs py65 (`pip install --target <dir> py65`, then `--py65 <dir>`) and the Prog8 build in `C:\game-dev\galaxy-star\build`: `python tools/compare.py ../build <prg> --py65 <dir> --scenario game` from `tern/`, about 20 seconds. This session built the port with `dotnet <worktree>/src/Tern.Cli/bin/Debug/net10.0/tern.dll --target c64 src/main.tern -o <dir>/gs.prg` from `tern/`, into a scratch folder, leaving the port's `build/` alone; the baseline compiler was a scratch worktree of `main`.
 - **Methods over 100 lines:** none added.
 - **Done when** (roadmap V1 fixes): each item has its listing test and matches its spec 11 row (done); the benchmark baseline is rewritten with each change (nothing moved); the plain versions of Galaxy Stars' assembly routines are measured again and the numbers recorded in the port's `gaps.md` (not done: the next step).
+
+### Review findings handled by V1 fixes (`docs/reviews/v1-fixes.md`)
+
+| Finding | Commit | Guarded by | State |
+|---|---|---|---|
+| finding 1 (`MoveParameterToIndex` can write a register the function keeps) | `7d8a633` | `KeepsTests.The_optimizer_leaves_a_kept_register_alone` (4 rows: the review's program, `keeps Y` with X taken by a parameter, `keeps X, Y` with either loop; each failed before) | fixed: `Optimizer.Returned`, what `rts` reads, has the kept registers too, so `RegistersLive` and every pass that picks a register by liveness sees them in use; the review's program now moves the parameter to Y. Checked by hand on a Release build: the loop runs 4 times |
+| suggestion 2 (the check after the optimizer is Debug only) | `7d8a633` | | done: `CheckKeptAfterOptimizer` runs in every build |
+| suggestion 3 (the loop bound test's pointer case is address-taken) | `fe5a0a6` | `LoopBoundTests.The_end_is_read_in_place_and_0_to_n_has_no_empty_check` (`pointer`) | done: a body writing `p[t]`, with `r1` not address-taken, reads a copy. The rule stays: a pointer from a constant address, or from another variable's address plus an offset, can reach a global without `addr()` of it |
+| "done when": Galaxy Stars' plain routines measured again | | | open: the next step |
 
 ### Review findings handled by R8
 
