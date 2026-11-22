@@ -1,0 +1,280 @@
+// Title screen (spec section 9): SMASHY SMASHY in block letters smoothed with corner triangles, hi-res
+// character mode. The letters smash in from above with a screen shake, then rainbow colour bands roll
+// vertically through them. Port of ../src/title.p8.
+// PRESS FIRE blinks under the title, with the session high score. Shown for a while between the attract
+// pages (pages.tern) until fire starts a game.
+import c64
+import mem
+import video
+import input
+import score
+
+// Letter shapes: '#' = block, '.' = empty, and triangles named by the filled corner like the numpad:
+// '7' upper left, '9' upper right, '1' lower left, '3' lower right. Rows separated by spaces, 5 rows
+// each. Any width up to 5.
+data shape_s = "3## #.. 9#1 ..# ##7"
+data shape_m = "#1.3# #9#7# #...# #...# #...#"
+data shape_a = "3#1 #.# ### #.# #.#"
+data shape_h = "#.# #.# ### #.# #.#"
+data shape_y = "#.# 9#7 .#. .#. .#."
+const SHAPES: u8 = 5
+const SH_S: u8 = 0
+const SH_M: u8 = 1
+const SH_A: u8 = 2
+const SH_H: u8 = 3
+const SH_Y: u8 = 4
+const LETTER_ROWS: u8 = 5
+
+// The 12 letters in drop order. The bottom line drops first, so a falling letter never passes through
+// a letter that has already landed.
+const LETTERS: u8 = 12
+data l_shape: [u8; LETTERS] = [SH_S, SH_M, SH_A, SH_S, SH_H, SH_Y,   SH_S, SH_M, SH_A, SH_S, SH_H, SH_Y]
+data l_col: [u8; LETTERS] = [11, 15, 21, 25, 29, 33,   4, 8, 14, 18, 22, 26]
+data l_row: [u8; LETTERS] = [10, 10, 10, 10, 10, 10,   3, 3, 3, 3, 3, 3]
+var l_top: [i8; LETTERS]            // current top row while falling (negative = above the screen)
+
+// [TUNE]
+const TEXT_COLOR: u8 = 1
+const DROP_GAP: u8 = 4              // frames between letters starting to fall
+const START_TOP: i8 = -5            // letter fully above the screen
+const SHAKE_FRAMES: u8 = 8
+const SHAKE_SCROLL: u8 = 5          // $D011 fine scroll during a shake: 2 px below the normal 3
+const NORMAL_SCROLL: u8 = 3
+const WORK_LINE: u8 = 180           // raster line just below the title letters: drawing starts here, so
+                                    // it is done before the beam comes back to them
+const SWEEP_FRAMES: u8 = 2          // colour sweep step every 2 frames
+const BLINK_FRAMES: u8 = 25         // PRESS FIRE on 25 frames, off 25
+data sweep: [u8; 16] = [9, 2, 8, 10, 15, 7, 1, 1, 7, 15, 10, 8, 2, 9, 6, 6]
+
+const FIRE_ROW: u8 = 19
+const FIRE_COL: u8 = 15
+const HIGH_ROW: u8 = 22
+const HIGH_COL: u8 = 11
+data PRESS_FIRE = screen"press fire"
+data HIGH_SCORE = screen"high score"
+
+// Per shape, 8 rows: index i = letter row i - 1, so i = 0 and 6-7 are empty rows above and below it.
+var row_l: [u8; SHAPES * 8]         // bit c set = a block or triangle in column c
+var cell_ch: [u8; SHAPES * 40]      // char of the cell in row i, column c at sh * 40 + i * 5 + c
+var widths: [u8; SHAPES]
+// screen address of char row t (-6 to 15) at index t + 6 (title.p8 fills it in init(); video.text_row has
+// the rows 0-24, title.p8's row_addr)
+data top_addr: [ptr u8; 22] = [video.SCREEN - 6 * 40 + r * 40 for r in 0..22]
+data bit: [u8; _] = [1, 2, 4, 8, 16, 32, 64, 128]   // 1 << c
+
+// letter cells after landing, for the sweep: colour RAM address and row & 15
+const MAX_BLOCKS: u8 = 200
+var blk_addr: [ptr u8; MAX_BLOCKS]
+var blk_base: [u8; MAX_BLOCKS]
+var blk_count: u8
+
+var phase: u8                       // sweep phase (0 during the intro)
+var shake: u8
+
+fn init() {
+    // Once at startup: parse the shapes and list the landed letters' blocks.
+    parse(SH_S, addr(shape_s), len(shape_s))
+    parse(SH_M, addr(shape_m), len(shape_m))
+    parse(SH_A, addr(shape_a), len(shape_a))
+    parse(SH_H, addr(shape_h), len(shape_h))
+    parse(SH_Y, addr(shape_y), len(shape_y))
+    blk_count = 0
+    for k in 0..LETTERS {
+        var sh: u8 = l_shape[k]
+        for r in 0..LETTER_ROWS {
+            var m: u8 = row_l[(sh << 3) + r + 1]
+            var row: u8 = l_row[k] + r
+            var col: u8 = l_col[k]
+            while m != 0 {
+                if m & 1 != 0 && blk_count < MAX_BLOCKS {
+                    blk_addr[blk_count] = video.text_row[row] + col + (video.COLOR_RAM - video.SCREEN)
+                    blk_base[blk_count] = row & 15
+                    blk_count += 1
+                }
+                m >>= 1
+                col += 1
+            }
+        }
+    }
+}
+
+fn parse(sh: u8, text: ptr u8, n: u8) {
+    var r: u8 = 1                   // row index in row_l and cell_ch
+    var c: u8 = 0
+    var w: u8 = 0
+    for i in 0..n {
+        match text[i] {
+            '.' => c += 1
+            ' ' => {
+                r += 1
+                c = 0
+            }
+            _ => {
+                var ch: u8 = video.CHAR_BLOCK
+                match text[i] {
+                    '7' => ch = video.CHAR_TRI_7
+                    '9' => ch = video.CHAR_TRI_9
+                    '1' => ch = video.CHAR_TRI_1
+                    '3' => ch = video.CHAR_TRI_3
+                    _ => {}
+                }
+                row_l[(sh << 3) + r] |= bit[c]
+                cell_ch[(sh << 5) + (sh << 3) + (r << 2) + r + c] = ch     // sh * 40 + r * 5 + c
+                c += 1
+            }
+        }
+        if c > w {
+            w = c
+        }
+    }
+    widths[sh] = w
+}
+
+fn run(frames: u16) -> bool {
+    // Show the title (intro first) for the given frames. True if fire was pressed.
+    video.set_title_mode()
+    for k in 0..LETTERS {
+        l_top[k] = START_TOP
+    }
+    phase = 0
+    shake = 0
+    video.message(FIRE_ROW, FIRE_COL, addr(PRESS_FIRE), len(PRESS_FIRE))
+    video.message(HIGH_ROW, HIGH_COL, addr(HIGH_SCORE), len(HIGH_SCORE))
+    var hs: ptr u8 = video.text_row[HIGH_ROW] + (HIGH_COL + 11)
+    video.put_digits(hs, score.high, 4)
+    video.put_digits(hs + 4, 0, 2)
+    mem.fill(hs + (video.COLOR_RAM - video.SCREEN), TEXT_COLOR, 6)
+    var fire_color: ptr u8 = video.text_row[FIRE_ROW] + FIRE_COL + (video.COLOR_RAM - video.SCREEN)
+
+    var t: u8 = 0                   // intro frame, stops counting once all letters are down
+    var landed: u8 = 0
+    var sweep_timer: u8 = SWEEP_FRAMES
+    var blink: u8 = 0
+    var shown: u16 = 0
+    var last: u8 = video.frames
+    var fire: bool = false
+    while true {
+        // once per frame, from the line below the letters (the frame IRQ sets the fine scroll in the border)
+        while c64.vic.raster != WORK_LINE { }
+        if shake != 0 {
+            shake -= 1
+        }
+        if shake & 1 != 0 {
+            video.scroll_y = SHAKE_SCROLL
+        } else {
+            video.scroll_y = NORMAL_SCROLL
+        }
+
+        input.read()
+        if input.pressed & input.FIRE != 0 {
+            fire = true
+            break
+        }
+        var passed: u8 = video.frames - last
+        last = video.frames
+        shown += passed
+        if shown >= frames {
+            break
+        }
+
+        if landed < LETTERS {
+            // the top line's letters first: the beam reaches them first
+            for k in LETTERS - 1..=0 step -1 {
+                if t >= k << 2 && l_top[k] != l_row[k] as i8 {     // k * DROP_GAP
+                    move_letter(k)
+                    if l_top[k] == l_row[k] as i8 {
+                        landed += 1
+                        shake = SHAKE_FRAMES
+                    }
+                }
+            }
+            t += 1
+        } else {
+            sweep_timer -= 1
+            if sweep_timer == 0 {
+                sweep_timer = SWEEP_FRAMES
+                phase = (phase + 1) & 15
+                do_sweep()
+            }
+        }
+
+        // PRESS FIRE: colour on or off (background colour)
+        if blink == 0 {
+            mem.fill(fire_color, TEXT_COLOR, 10)
+        } else if blink == BLINK_FRAMES {
+            mem.fill(fire_color, video.COLOR_BG, 10)
+        }
+        blink += 1
+        if blink == BLINK_FRAMES * 2 {
+            blink = 0
+        }
+    }
+    video.scroll_y = NORMAL_SCROLL
+    return fire
+}
+
+// move_rows() arguments
+var pl_skip: u8                     // rows above the screen, not drawn
+var pl_base: u8                     // index of the letter's shape in row_l
+var pl_cbase: u8                    // index of the letter's shape in cell_ch
+var pl_cidx: u8                     // sweep index of the letter's old top row
+
+fn move_letter(k: u8) {
+    // Move letter k down one row in a single pass over the 6 rows involved, so a row is never seen half
+    // drawn: cells it leaves are cleared, the rest are drawn at the new position.
+    var top: i8 = l_top[k]
+    pl_skip = 0
+    if top < 0 {
+        pl_skip = (-top) as u8
+    }
+    var sh: u8 = l_shape[k]
+    pl_base = sh << 3
+    pl_cbase = (sh << 5) + (sh << 3)        // sh * 40
+    pl_cidx = ((top as u8) + phase) & 15
+    move_rows(top_addr[(top + 6) as u8] + l_col[k])
+    l_top[k] = top + 1
+}
+
+fn move_rows(scr0: ptr u8) {
+    // scr0 = the letter's old top row. For box row s = 0-5 from there, the old cells are
+    // row_l[pl_base + s + 1] and the new ones row_l[pl_base + s], with chars from cell_ch.
+    // Every cell in screen row s gets the colour sweep[pl_cidx + s]. Rows s < pl_skip are skipped.
+    // Plain Tern; the Prog8 version is assembly.
+    var scr: ptr u8 = scr0
+    var cidx: u8 = pl_cidx
+    var ci: u8 = pl_cbase
+    for s in 0..6 {
+        if s >= pl_skip {
+            var col: u8 = sweep[cidx & 15]
+            var l: u8 = row_l[s + pl_base]
+            var e: u8 = ~l & row_l[s + pl_base + 1]     // old cells that stay empty now
+            var clr: ptr u8 = scr + (video.COLOR_RAM - video.SCREEN)
+            var x: u8 = ci
+            var y: u8 = 0
+            while l | e != 0 {
+                if e & 1 != 0 {
+                    scr[y] = video.CHAR_SPACE
+                }
+                e >>= 1
+                if l & 1 != 0 {
+                    scr[y] = cell_ch[x]
+                    clr[y] = col
+                }
+                l >>= 1
+                x += 1
+                y += 1
+            }
+        }
+        cidx += 1
+        ci += 5
+        scr += 40
+    }
+}
+
+fn do_sweep() {
+    // Recolour the letter cells only (empty cells are never touched).
+    for i in 0..blk_count {
+        var p: ptr u8 = blk_addr[i]
+        p[0] = sweep[(blk_base[i] + phase) & 15]
+    }
+}
