@@ -4,13 +4,28 @@ Owned by the coding session. Updated at the end of every coding session.
 
 ## Current
 
-- **Milestone:** V1, validation programs (roadmap "V1"; decisions 2026-11-21). Batch 1 is Galaxy Stars. R8 is merged (`0cfe416`).
-- **Branch:** `v1-galaxy-stars`, from `main` at `b409d9a`. It changes nothing in `src/` or `tests/`: V1 programs are written in sessions that do not change the compiler, and the developer chose (this session) to work in the port's own repository, `C:\game-dev\galaxy-star\tern` (branch `tern-port`), and to log compiler bugs there rather than fix them on this branch.
-- **Done in batch 1:** step 1 was the spec session's (at `cf0a585`). Step 1 again at `b409d9a`: 18,993 bytes, 4,782 cycles per play frame (Prog8 5,586), all 13,211 `compare.py` game frames the same, the title screen in VICE. Step 2: each of the 14 `asm fn`s written in plain Tern again (except the three BCD adds in `score`, decimal mode), checked for the same results (screen and color RAM in a `tern bench` harness, or every game frame in `compare.py`), and measured. None is as fast yet, so all stay assembly; the port's source is unchanged. The closest: `title.sweep_all` 4,947 cycles against 4,750 (6,063 at the port), `hostiles.move` (906 against 878 cycles a frame) and `hostiles.draw` (253 against 237). The frame IRQ's 32 sprite copies as an M22 generator give the same 229 bytes and 330 cycles, so the plain statements stay. Step 3: three new gaps in the port's `gaps.md` (its commit `fb0db78`, section "V1"): 27, a 16-bit `a - b` or `a + b` with a variable or constant on the right is compiled as a copy and an in-place add (34 cycles for `dx = cx - pcx` against 20; `C + x[i]` is direct, `x[i] + C` is not); 28, `m[i] -= 1` then `if m[i] == 0` reloads `m[i]` after the `dec`; 29, a `for ... using Y` loop cannot call a compiled function, even an `inline fn` that never writes Y. Also noted there, not numbered: `d > 0` on an `i8` is a full signed compare, and a `jmp` that lands on a `jmp`.
-- **Tools used, not in either repository:** `compare.py` needs py65 (`pip install --target <dir> py65`, then `--py65 <dir>`) and the Prog8 build in `C:\game-dev\galaxy-star\build` (`main.prg`, `main.vice-mon-list`, `main.asm`): `python tools/compare.py ../build build/galaxy-stars.prg --py65 <dir> --scenario game` from `tern/`, about 20 seconds. The port's `build.cmd` uses the compiler in the main checkout (`C:\game-dev\6502-language`); this session built with the worktree's, at the same commit. The bench harnesses (a `main` that imports the game's modules, in a copy of `src/`) were scratch files.
-- **Next step:** a spec session settles questions 179-181 (where V1 programs live; gaps 27-29; code generation improvements and a threshold for plain Tern). Then V1 batch 2, smashy smashy, which first needs where its source is and the answers to question 179. The V1 "done when" also needs Galaxy Stars' known result checked by the suite and by `TERN_REAL=1` (question 179), which batch 1 has not done.
+- **Milestone:** V1 fixes, code from Galaxy Stars (roadmap "V1 fixes"; decision 2026-11-21, questions 180-181). Between V1 batch 1 (merged at `49d2888`, no review) and batch 2.
+- **Branch:** `v1-fixes`, from `main` at `3625a31`. Every item of the roadmap's list is built, each with its listing tests; the suite passes (11,786 on the C64; 11,164 with `TERN_TARGET` atari, apple2 and nes and `Platform!=c64`).
+- **Done**, one commit each, measured over the benchmarks and Galaxy Stars (the port at its `fb0db78`, built with this worktree's compiler, `compare.py --scenario game`, all 13,211 frames the same each time):
+
+  | Commit | Item | Galaxy Stars bytes | cycles per play frame |
+  |---|---|---|---|
+  | (main) | before | 18,991 | 4,782 |
+  | `ef0b4d5` | gap 27: 16-bit `t = a ± b` straight into `t`, either order; a constant with low byte 0 adds the high byte only (`Arith16`, `HighByteConstant`) | 18,810 | 4,742 |
+  | `089387c` | gap 26: constant parts of a 16-bit sum folded, into the high-byte add of `q + e` (`FoldedSum`, `AddConstant16`) | 18,771 | 4,709 |
+  | `0ed5385` | gap 28: no reload after `inc`/`dec` before a zero test (`Optimizer.ReuseIncDecFlags`); signed `> 0` / `<= 0` from the load's flags (`SignedPositive`) | 18,711 | 4,691 |
+  | `2208eda` | gap 28: a bool just returned in the carry tested with `bcc`/`bcs` (`Optimizer.TestCarryDirectly`; `NzLiveAfter` is now `FlagsLiveAfter`) | 18,711 | 4,691 |
+  | `59e91e4` | gap 29: `keeps` on a function with a body (parser, `DeclareKeeps`, `CodeGen.Keeps.cs`; skill updated) | 18,711 | 4,691 |
+  | `3d46254` | small: a jump that lands on a `jmp`, threaded again after the other passes (`ThreadJumpsAgain`) | 18,711 | 4,691 |
+  | `e191a0a` | small: a `for` end read in place (a global too, `BoundStays`), and `0..=n` has no empty check | 18,682 | 4,680 |
+  | `f9e7a6d` | small: a `using A` parameter read after A changes is kept in X or Y (`Optimizer.MoveParameterToIndex`, `RemoveDeadTransfers`) | 18,682 | 4,680 |
+
+  The benchmarks did not move with any of them (no benchmark has these shapes), so the baseline is unchanged. Where a part's cycles rose by a few (`hostiles.draw` 237 to 241, `demo.steer`, `explode.update`), its code was the same: page crossings after the program shrank. Moved by the changes and rewritten in their commits: the float library's cycles (`FloatTests.Cycle_counts`: add 108-960, sub 116-950, dec 1251-91222, below 65536 1251-7633), the skill's `bad.tern` (243 cycles) and `costs.md` section 7 (`bigger_r` 9,206 cycles).
+- **The bool item** (a bool just computed tested from the flags or A): a local bool from a compare was already held in A and tested with `beq`, with no store; a bool returned in the carry is now tested from the carry. A bool used later (after other statements) is still stored, as it must be.
+- **Next step:** the last "done when" item: the plain versions of Galaxy Stars' assembly routines measured again and the numbers recorded in the port's `gaps.md` (section "V1"; the port's repository is `C:\game-dev\galaxy-star`, branch `tern-port`). The plain versions and their `tern bench` harnesses of batch 1 were scratch files and are gone, so they have to be written again from the table in `gaps.md` (its "best plain Tern" column names the form of each), now with `keeps Y` on `explode.hits` for `explosion_hit`'s slot loop. Then `/review`. Batch 2 starts by moving the routines that are then within 5% (average and worst frame) into plain Tern, and with copying Galaxy Stars into `validation/c64/galaxy-stars/` (question 179's answer; batch 1's last step, not done yet).
+- **Tools used, not in either repository:** `compare.py` needs py65 (`pip install --target <dir> py65`, then `--py65 <dir>`) and the Prog8 build in `C:\game-dev\galaxy-star\build`: `python tools/compare.py ../build <prg> --py65 <dir> --scenario game` from `tern/`, about 20 seconds. This session built the port with `dotnet <worktree>/src/Tern.Cli/bin/Debug/net10.0/tern.dll --target c64 src/main.tern -o <dir>/gs.prg` from `tern/`, into a scratch folder, leaving the port's `build/` alone; the baseline compiler was a scratch worktree of `main`.
 - **Methods over 100 lines:** none added.
-- **Done when** (roadmap V1, the whole milestone): every program builds, gives its known result in `tern run` and on its emulator(s) with `TERN_REAL=1`, each port's source and license is recorded and approved, and every gap is sorted and each bug fixed.
+- **Done when** (roadmap V1 fixes): each item has its listing test and matches its spec 11 row (done); the benchmark baseline is rewritten with each change (nothing moved); the plain versions of Galaxy Stars' assembly routines are measured again and the numbers recorded in the port's `gaps.md` (not done: the next step).
 
 ### Review findings handled by R8
 
@@ -1011,7 +1026,7 @@ Cycles including `jsr` and `rts`, best and worst over the test values (`FloatTes
 
 | Routine | Bytes | Cycles | Notes |
 |---|---|---|---|
-| `add` / `sub` | 22 / 28, + 329 shared | 108-961 / 116-951 | the most after cancelling, with a long normalization |
+| `add` / `sub` | 22 / 28, + 329 shared | 108-960 / 116-950 | the most after cancelling, with a long normalization |
 | `mul` | 32 + 128 | 153-2490 | 153 when an operand is 0 |
 | `div` | 37 + 146 | 218-4418 | 32 steps of shift-and-subtract |
 | `neg` / `abs` | 14 / 9 | 22-36 / 27 | |
@@ -1023,7 +1038,7 @@ Cycles including `jsr` and `rts`, best and worst over the test values (`FloatTes
 | `to_i16` / `round_i16` | 13 / 13, + 76 + `int_part` | 164-469 / 164-495 | |
 | `trunc` | 31 + 60 + 8 | 94-307 | `chop` and a mask table |
 | `floor` | 116 + `chop` + 8 | 94-395 | |
-| `dec` | 225 + 363 + 16 | 1262-7651 below 65536; up to 91233 | the most for 39-digit values near 1.7e38; the 16 are `text_digits.DIGITS`, shared with `text` and `wide` |
+| `dec` | 225 + 363 + 16 | 1251-7633 below 65536; up to 91222 | the most for 39-digit values near 1.7e38; the 16 are `text_digits.DIGITS`, shared with `text` and `wide` |
 | `of` | none | none | compile time |
 
 ## Known limitations and technical debt
@@ -1111,21 +1126,15 @@ Not bugs; things to improve, mostly in M7 (optimizer).
 - An asm `jmp` that leaves the function (a tail call into ROM, as `atari.put`'s `jmp CIOV`) adds no register effects to the block's summary: the listing says `put` changes only X. Callers are safe (the optimizer forgets every register after a `jsr`, and a register loop rejects any call), but the summary comment is wrong; it should count such a `jmp` like a `jsr`.
 - `w = addr(map) - 1` (or `+`) into a 16-bit variable stores `addr(map)` and then subtracts at run time; `CodeGen.AddressBytes` could make it two `lda #` / `sta` pairs, as it already does for `.lo` / `.hi`.
 
+- Seen while building V1 fixes, not in its list (candidates for a later code-shape pass): a 16-bit value stored into an element with a constant index (`r[3] = a - b`) goes through a temporary; `t = q + c as u16 + 3` adds the 3 after the byte add, through `t`, where one chain would do; `u = q - v` with `v` in A stores `v` (`eor #$FF` / `sec` / `adc q` would not); a parameter whose store the optimizer removes keeps its frame byte.
+
 ## Questions for the spec session
 
-- **181 (V1, Galaxy Stars): code generation improvements, and when plain Tern replaces assembly.** From the listings of V1's plain versions (the port's `gaps.md`, section "V1"); the gains below are estimates, except where measured. An analysis session could measure each fix over the benchmarks and these routines before a milestone is planned; each fix moves the benchmarks. By likely payoff:
-  1. **A 16-bit `t = a + b` or `a - b` with a variable or constant on the right** is compiled as `t = a` and an in-place add (gap 27): 34 cycles for `dx = cx - pcx` against 20, and `x[i] + C` is slower than `C + x[i]`, against rule 4. It affects most 16-bit code. A backend fix.
-  2. **Flags the last instruction set are not reused:** `m[i] -= 1; if m[i] == 0` reloads after the `dec` (gap 28); `d > 0` on an `i8` right after a shift is a 10-cycle signed compare where `beq`/`bmi` would do; a bool result is stored as `lda #1`/`lda #0` and reloaded to test it. Rules on the generated instructions.
-  3. **A constant with a zero low byte** (`$D800`, `$1800`) still gets `clc`/`adc #$00` on the low byte (gap 26); most of `title.sweep_all`'s remaining 4%.
-  4. **Registers a compiled function leaves alone** (gap 29): the compiler could work them out and allow the call in a `using Y` loop, or the spec could allow `keeps` on `fn`/`asm fn`. A spec question. Measured: 11 cycles per pass in `explosion_hit`, up to 48 passes a frame.
-  5. **A value kept in A across a run of stores:** `ch + 1`, `ch + 2`, `ch + 3` each reload `ch` and clear the carry; a known range (`ch` at most 252) would let the adds chain (gap 16). Larger optimizer work; it is what the tile and explosion drawing loses.
-  6. **Small:** a `jmp` that lands on a `jmp`; `for a..=b` copies its bound and checks for an empty range even when the body cannot change the bound; register parameters stored to memory on entry when used once.
+- **182 (V1 fixes): spec text that no longer matches what is built.** (a) Spec 10.1's float table gives `add` / `sub` 108-961 / 116-951 and `dec` 1262-7651 below 65536, up to 91233; with V1 fixes they are 108-960 / 116-950 and 1251-7633, up to 91222 (`FloatTests.Cycle_counts`; a loop's end now read in place). (b) The spec 11 rows `t = a + b` / `a - b`, `p = q + e + K`, `x -= 1` then `if x == 0`, `if d > 0`, and spec 6.1's `keeps` on a function with a body, say "planned, roadmap V1 fixes": built on `v1-fixes`. (c) The guide says `keeps` is for routines at a fixed address (`docs/guide/10-behavior.md`, the bullet on `keeps`), and its chapter on functions does not have `keeps` on a function with a body; the skill has it now.
 
-  Estimate: 1-3 and 6 would bring `sweep_all`, `hostiles.move` and `hostiles.draw` within a few percent of the assembly, 4 `explosion_hit`, 5 the drawing routines. **Policy:** the roadmap keeps assembly unless plain Tern "is as fast"; the developer said (2026-11-21) that they do not expect as fast and that close is good. To settle: a threshold (e.g. within 5%, with no worse worst frame) at which a V1 routine moves to plain Tern; by it `sweep_all` (4,947 against 4,750 cycles) nearly qualifies today.
+- **183 (V1 fixes): provisional choices for `keeps` on a function with a body.** (a) `keeps` on an `interrupt fn` that only the CPU runs is an error ("... saves and restores what it changes, so 'keeps' has no use. Remove 'keeps'"); an interrupt part, called from another handler, is checked as a `fn`. (b) Written before `@` on a routine at a fixed address, it says to write it after the address. (c) `keeps A` on a compiled `fn` is allowed and checked like X and Y, so it suits only a body that never needs A (`n += 1` is `inc n`). (d) The errors are at the statement's position (the `=` of an assignment, the `{` of an `asm` block, the `[` of `p[i]`), as other code generator errors are. (e) A `for` loop's end is read in place when it is a global, not volatile or at a fixed address or address-taken, and the body never assigns it, calls nothing (any call) and assigns through no pointer or field; the spec's "the end is evaluated once" (5.1) is kept since nothing can change it.
 
-- **180 (V1, Galaxy Stars): gaps 27-29 to sort.** In the port's `gaps.md`, section "V1" (commit `fb0db78` in `C:\game-dev\galaxy-star`): 27 (16-bit `a - b` / `a + b` with a variable or constant on the right: a copy and an in-place op; operand order changes the code), 28 (`m[i] -= 1; if m[i] == 0` reloads after `dec`), 29 (`using Y` loops cannot call a compiled or inline function that keeps Y; only fixed-address routines can say `keeps`). Each is a code shape or a small language change; 27 is the largest (14 cycles per subtract in `demo.dist`, with no workaround for `-`). A fix would move the benchmarks.
-
-- **179 (V1): where V1 programs live and how the suite checks them.** The roadmap's layout is `validation/<platform>/<program>/` in this repository with the source, expected results, `README` and `gaps.md`, but `validation/` is not in the workflow's ownership table, and Galaxy Stars lives in its own repository with its Prog8 original, its art pipeline (`tools/gfx.py`) and `compare.py` (Python, py65, the Prog8 build). For batch 1 the developer chose to work in the port's repository and copy it later. To settle: whether Galaxy Stars is copied into `validation/c64/galaxy-stars/` (all of the game's source and art in this repository), who owns `validation/`, what known result the test suite checks for it in `tern run` (memory or the screen after N frames, since `compare.py` needs Python and the Prog8 build), and how `TERN_REAL=1` runs it in VICE.
+Questions 179-181 were settled on 2026-11-21 (decisions.md): 181's fixes are the V1 fixes milestone (built on `v1-fixes`) and its 5% threshold is in the roadmap; 180's gaps 27-29 are spec 11 rows and `keeps` on functions (built); 179, `validation/`, is the coding session's (Galaxy Stars is copied there at the end of batch 1, not done yet).
 
 - **178 (R8, review R6 suggestion 7): the bool-to-number message for a literal.** Built: `x = b` says "Convert with 'b as u8' (0 or 1), or use 'if' to choose another number", as the roadmap gives it; for the literal `true` or `false` it says "Write 1 for true, 0 for false" instead, since converting a literal is not what a user means. Provisional. Keep the literal's own message, or use the one message everywhere ("Convert with 'as u8' ...")? The skill's example (`total = true`) now shows the literal's message.
 
@@ -1186,4 +1195,4 @@ Questions 1-63 and 65-75 are settled (decisions.md; 44, 45 and 59-63 on 2026-11-
 
 ## Provisional choices made while coding
 
-Listed as questions 32-37 above. Also: `import`, `private` and `volatile` are reserved words.
+Listed as questions 32-37 and 183 above. Also: `import`, `private` and `volatile` are reserved words.
