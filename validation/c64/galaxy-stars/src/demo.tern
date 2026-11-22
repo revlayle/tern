@@ -1,0 +1,472 @@
+// Demo play in the attract cycle (spec section 11): a game in galaxy 3-5 played by a simple pilot, with DEMO on
+// the HUD, for 30 s, until the pilot loses a life or after GALAXY CLEAR. Fire on the real joystick starts a game.
+// The high score isn't touched (only the game over updates it). Port of ../src/demo.p8, without self-test 40.
+// The pilot writes joystick bits in place of the stick (input.read() calls steer() while input.pilot is on). It
+// looks at the game's own state each frame: away from nearby countdown stars, explosions and stars turning
+// hostile; a boost into a close hostile (away from it during the cooldown); else to the nearest safe star, with a
+// boost into it. It doesn't have to play well, only look busy and mostly safe.
+// Frame time: the threats are checked by tile before any distance is measured, and the search for the next star
+// looks at SCAN_PER_FRAME stars per frame.
+import input
+import video
+import player
+import stars
+import hostiles
+import explode
+import score
+import game
+
+// [TUNE]
+const PLAY_FRAMES: u16 = 1500       // 30 s of play
+const FIRST_GALAXY: u8 = 3          // a random galaxy 3-5
+const GALAXIES: u8 = 3
+const HUD_COL: u8 = 16              // DEMO in the free HUD columns, before the invincibility field (20-21)
+// [TUNE] pilot distances between centres in px (the longer axis plus half the shorter, as explode.hits)
+const FLEE_COUNTDOWN: u8 = 44       // an explosion's core reaches 22
+const FLEE_BLAST: u8 = 40
+const FLEE_WARNING: u8 = 32         // a hostile appears there
+const FLEE_HOSTILE: u8 = 52
+const HURL_REACH: u8 = 44           // boost into a hostile this close
+const HURL_UNLESS: u8 = 12          // but not when a blast threat is this far inside its flee distance
+const BOOST_REACH: u8 = 72          // boost into the target star this close
+const BOOST_FLEE: u8 = 16           // boost away from a threat this far inside its flee distance
+const NEAR_TILES: u8 = 3            // threats are only measured within this many tiles
+const SCAN_PER_FRAME: u8 = 2
+const HOLD_FRAMES: u8 = 8           // walking to a star: a new stick direction is held at least this long
+
+data demo_text = screen"DEMO\0"
+
+var on: bool                        // a demo game is running
+var quit: bool                      // fire on the real joystick: start a game
+var frames_left: u16
+
+var target: u8                      // star the pilot heads for, 255 = none
+var scan_i: u8                      // next star the search looks at
+var scan_best: u8                   // nearest safe star so far in this pass, 255 = none
+var scan_best_d: u8
+var hold_dir: u8                    // stick direction being held, and frames it must still be held
+var hold_left: u8
+var reacting: bool                  // think() is fleeing or going for a hostile this frame: no hold
+var fired: bool                     // fire was in the last bits: a new press needs a frame without it
+var pcx: u16                        // player's centre (dist() reads them)
+var pcy: u8
+var pcol: u8                        // and its tile (find_near() reads them)
+var prow: u8
+var d_ax: u8                        // dist(): distance along each axis and the direction
+var d_ay: u8
+var d_left: bool
+var d_up: bool
+const MAX_NEAR: u8 = 8              // frame time: at most this many are weighed
+var near_list: [u8; MAX_NEAR]       // find_near(): nearby threats
+var n_near: u8
+var urgency: u8                     // threat(): the most any threat is inside its flee distance
+var wx: i16                         // flee direction: the threats' pushes added up
+var wy: i16
+
+fn run() -> bool {
+    // One demo game. True if fire was pressed.
+    video.hide_sprites()
+    video.wait_frame()
+    video.clear_screen()
+    video.game_mode()
+    game.new_game()
+    video.hud_text(HUD_COL, addr(demo_text))
+    score.galaxy = FIRST_GALAXY + stars.rand_below(GALAXIES)
+    on = true
+    quit = false
+    frames_left = PLAY_FRAMES
+    target = 255
+    scan_i = 0
+    scan_best = 255
+    scan_best_d = 255
+    fired = false
+    hold_dir = 0
+    hold_left = 0
+    input.start_pilot()
+    game.galaxy_start()             // stops early on fire
+    // play stops on fire, at the time limit or when the death effect has played; a cleared galaxy shows
+    // GALAXY CLEAR and ends the demo too
+    if !quit && game.play() {
+        game.galaxy_clear()
+    }
+    input.stop_pilot()
+    on = false
+    video.hide_sprites()
+    var fire: bool = quit
+    quit = false                    // galaxy_start() checks it in every game
+    return fire
+}
+
+fn over() -> bool {
+    // End of each play frame.
+    frames_left -= 1
+    return quit || frames_left == 0 || player.dying == 1
+}
+
+fn steer() -> u8 {
+    // This frame's joystick bits. Fire only as a new press.
+    var bits: u8 = think()
+    // Smooth movement: walking to a star, a new direction is kept at least HOLD_FRAMES frames (also the last
+    // flee direction once the threats are out of range). Fleeing and going for a hostile react at once, as
+    // does a boost: holding a direction there led the pilot into explosions.
+    var dir: u8 = bits & 15
+    if dir != hold_dir {
+        if hold_left != 0 && bits & input.FIRE == 0 && !reacting {
+            bits = (bits & ~15) | hold_dir
+            hold_left -= 1
+        } else {
+            hold_dir = dir
+            hold_left = HOLD_FRAMES
+        }
+    } else if hold_left != 0 {
+        hold_left -= 1
+    }
+    if reacting {
+        hold_left = HOLD_FRAMES     // the last flee direction is kept after the threats are out of range
+    }
+    if fired {
+        bits &= ~input.FIRE
+    }
+    fired = bits & input.FIRE != 0
+    return bits
+}
+
+fn think() -> u8 {
+    urgency = 0
+    reacting = false
+    if player.dying != 0 {
+        return 0
+    }
+    pcx = player.x + player.BOX / 2
+    pcy = player.y + player.BOX / 2
+    pcol = (pcx >> 4) as u8
+    prow = pcy >> 4
+    scan()
+    if target != 255 && stars.state[target] != stars.IDLE {
+        target = 255
+        if scan_best != 255 && stars.state[scan_best] == stars.IDLE {
+            target = scan_best
+        }
+    }
+    var can_boost: bool = player.boost_left == 0 && player.cooldown == 0 && player.invincible == 0 &&
+        player.knock_left == 0
+    if player.invincible == 0 {
+        // threats near the player: countdown stars, stars turning hostile, explosions
+        urgency = 0
+        wx = 0
+        wy = 0
+        find_near()
+        for k in 0..n_near {
+            var i: u8 = near_list[k]
+            if i & 128 == 0 {
+                var sx: u16 = ((stars.col[i] as u16) << 4) + 8
+                var sy: u8 = (stars.row[i] << 4) + 8
+                if stars.state[i] == stars.COUNTDOWN {
+                    threat(sx, sy, FLEE_COUNTDOWN)
+                } else {
+                    threat(sx, sy, FLEE_WARNING)
+                }
+            } else {
+                var s: u8 = i & 127
+                threat(explode.core_x[s], explode.core_y[s], FLEE_BLAST)
+            }
+        }
+        // the nearest chasing hostile: boost into it, or keep away from it
+        var near_h: u8 = 255
+        var near_d: u8 = 255
+        for h in 0..hostiles.MAX {
+            if hostiles.state[h] == hostiles.CHASE {
+                var d: u8 = dist(hostiles.x[h] + hostiles.BOX / 2, hostiles.y[h] + hostiles.BOX / 2)
+                if d < near_d {
+                    near_d = d
+                    near_h = h
+                }
+            }
+        }
+        if near_h != 255 {
+            var hx: u16 = hostiles.x[near_h] + hostiles.BOX / 2
+            var hy: u8 = hostiles.y[near_h] + hostiles.BOX / 2
+            if near_d < HURL_REACH && urgency < HURL_UNLESS && (can_boost || player.boost_left != 0) {
+                reacting = true
+                if can_boost {
+                    return toward(hx, hy) | input.FIRE
+                }
+                return toward(hx, hy)
+            }
+            if player.boost_left == 0 {
+                threat(hx, hy, FLEE_HOSTILE)
+            }
+        }
+        if urgency != 0 {
+            reacting = true
+            if can_boost && urgency >= BOOST_FLEE {
+                return flee() | input.FIRE      // escape at boost speed; a hostile touched meanwhile is hurled
+            }
+            return flee()
+        }
+    }
+    if target == 255 {
+        return toward(160, 96)      // nothing safe to go for yet: towards the centre
+    }
+    var tx: u16 = ((stars.col[target] as u16) << 4) + 8
+    var ty: u8 = (stars.row[target] << 4) + 8
+    var td: u8 = dist(tx, ty)
+    var bits: u8 = dir_bits()
+    if can_boost && td < BOOST_REACH {
+        bits |= input.FIRE
+    }
+    return bits
+}
+
+fn find_near() {
+    // Into near_list (n_near): countdown and warning stars, then running explosions (slot + 128), on tiles
+    // within NEAR_TILES of the player's tile (pcol, prow). It runs over every star each frame.
+    n_near = 0
+    for i in 0..stars.count {
+        var s: u8 = stars.state[i]
+        if s == stars.COUNTDOWN || s == stars.WARNING {
+            if stars.col[i] - pcol + NEAR_TILES < NEAR_TILES * 2 + 1 && stars.row[i] - prow + NEAR_TILES < NEAR_TILES * 2 + 1 {
+                near_list[n_near] = i
+                n_near += 1
+                if n_near == MAX_NEAR {
+                    return
+                }
+            }
+        }
+    }
+    for e in 0..explode.MAX {
+        if explode.timer[e] != 0 {
+            if explode.col[e] - pcol + NEAR_TILES < NEAR_TILES * 2 + 1 && explode.row[e] - prow + NEAR_TILES < NEAR_TILES * 2 + 1 {
+                near_list[n_near] = e | 128
+                n_near += 1
+                if n_near == MAX_NEAR {
+                    return
+                }
+            }
+        }
+    }
+}
+
+fn threat(cx: u16, cy: u8, reach: u8) {
+    // A threat closer than `reach` pushes the flee direction away from it, harder the closer it is.
+    var d: u8 = dist(cx, cy)
+    if d >= reach {
+        return
+    }
+    var u: u8 = reach - d
+    if u > urgency {
+        urgency = u
+    }
+    var b: u8 = dir_bits()          // towards it, from the dist() above
+    if b == 0 {
+        b = input.DOWN              // on top of it: flee up
+    }
+    if b & input.LEFT != 0 {
+        wx += u as i16
+    }
+    if b & input.RIGHT != 0 {
+        wx -= u as i16
+    }
+    if b & input.UP != 0 {
+        wy += u as i16
+    }
+    if b & input.DOWN != 0 {
+        wy -= u as i16
+    }
+}
+
+fn flee() -> u8 {
+    // The added-up push (wx, wy) as joystick bits. Into a playfield edge: along it.
+    var ax: u16 = wx as u16
+    var h: u8 = input.RIGHT
+    if wx < 0 {
+        ax = (-wx) as u16
+        h = input.LEFT
+    }
+    var ay: u16 = wy as u16
+    var v: u8 = input.DOWN
+    if wy < 0 {
+        ay = (-wy) as u16
+        v = input.UP
+    }
+    var bits: u8 = 0
+    if ax != 0 && ax << 1 >= ay {
+        bits = h
+    }
+    if ay != 0 && ay << 1 >= ax {
+        bits |= v
+    }
+    if bits == 0 {
+        bits = input.UP             // pushes that cancel out
+    }
+    var h_blocked: bool = false
+    var v_blocked: bool = false
+    if (bits & input.LEFT != 0 && player.x < 2) || (bits & input.RIGHT != 0 && player.x >= player.MAX_X - 1) {
+        bits &= ~(input.LEFT | input.RIGHT)
+        h_blocked = true
+    }
+    if (bits & input.UP != 0 && player.y < 2) || (bits & input.DOWN != 0 && player.y >= player.MAX_Y - 1) {
+        bits &= ~(input.UP | input.DOWN)
+        v_blocked = true
+    }
+    if h_blocked && bits & (input.UP | input.DOWN) == 0 {
+        if wy < 0 || (wy == 0 && pcy >= 96) {
+            bits |= input.UP
+        } else {
+            bits |= input.DOWN
+        }
+    }
+    if v_blocked && bits & (input.LEFT | input.RIGHT) == 0 {
+        if wx < 0 || (wx == 0 && pcx >= 160) {
+            bits |= input.LEFT
+        } else {
+            bits |= input.RIGHT
+        }
+    }
+    return bits
+}
+
+fn scan() {
+    // The search for the next target, up to SCAN_PER_FRAME stars per frame: the nearest IDLE star with no
+    // countdown, warning or explosion on its own or a neighbouring tile. A finished pass sets the target.
+    for _ in 0..SCAN_PER_FRAME {
+        if scan_i >= stars.count {
+            target = scan_best
+            scan_i = 0
+            scan_best = 255
+            scan_best_d = 255
+        }
+        var i: u8 = scan_i
+        scan_i += 1
+        if stars.state[i] == stars.IDLE {
+            var d: u8 = dist(((stars.col[i] as u16) << 4) + 8, (stars.row[i] << 4) + 8)
+            if d <= scan_best_d {
+                if safe_spot(stars.col[i], stars.row[i]) {
+                    scan_best_d = d
+                    scan_best = i
+                }
+                break                       // frame time: one tile check per frame
+            }
+        }
+    }
+}
+
+fn safe_spot(c: u8, r: u8) -> bool {
+    // No explosion over tile (c, r) or its 8 neighbours, and no countdown or warning star on them.
+    var c0: u8 = c
+    if c0 != 0 {
+        c0 -= 1
+    }
+    var c1: u8 = c
+    if c1 != video.MAP_W - 1 {
+        c1 += 1
+    }
+    var r0: u8 = r
+    if r0 != 0 {
+        r0 -= 1
+    }
+    var r1: u8 = r
+    if r1 != video.MAP_H - 1 {
+        r1 += 1
+    }
+    for rr in r0..=r1 {
+        var idx: u8 = video.row_start[rr] + c0
+        for _ in 0..(c1 - c0 + 1) {
+            if explode.cover[idx] != 0 {
+                return false
+            }
+            var t: u8 = video.tiles[idx]
+            if t != 0 {
+                var s: u8 = stars.state[t - 1]
+                if s == stars.COUNTDOWN || s == stars.WARNING {
+                    return false
+                }
+            }
+            idx += 1
+        }
+    }
+    return true
+}
+
+asm fn dist(cx: u16 using AY, cy: u8 using X) -> u8 {
+    // From the player's centre (pcx, pcy) to (cx, cy): the longer axis plus half the shorter, 255 at most.
+    // Also leaves the distance along each axis (255 at most) in d_ax, d_ay and the direction in d_left, d_up,
+    // for dir_bits().
+    var hi: u8
+    sec
+    sbc pcx
+    sta d_ax
+    tya
+    sbc pcx+1
+    ldy #0
+    bcs .xpos               // cx >= pcx: A is the high byte
+    iny                     // to the left: negate the 16-bit difference
+    eor #255
+    sta hi
+    lda d_ax
+    eor #255
+    clc
+    adc #1
+    sta d_ax
+    lda hi
+    adc #0
+.xpos:
+    sty d_left
+    cmp #0
+    beq .xnear
+    lda #255                // 256 or more apart
+    sta d_ax
+.xnear:
+    ldy #0
+    txa
+    sec
+    sbc pcy
+    bcs .ypos
+    iny                     // above: negate
+    eor #255
+    adc #1                  // carry is clear
+.ypos:
+    sty d_up
+    sta d_ay
+    cmp d_ax
+    bcs .ylonger
+    lsr                     // x is longer: ax + ay / 2
+    clc
+    adc d_ax
+    bcc .done
+    lda #255
+    rts
+.ylonger:
+    lda d_ax                // y is longer: ay + ax / 2
+    lsr
+    clc
+    adc d_ay
+    bcc .done
+    lda #255
+.done:
+}
+
+fn dir_bits() -> u8 {
+    // Joystick bits towards the point of the last dist(), nearest of 8 directions: an axis counts when it is
+    // at least half the other (as player.bounce).
+    var bits: u8 = 0
+    if d_ax != 0 && (d_ax as u16) << 1 >= d_ay {
+        bits = input.RIGHT
+        if d_left {
+            bits = input.LEFT
+        }
+    }
+    if d_ay != 0 && (d_ay as u16) << 1 >= d_ax {
+        if d_up {
+            bits |= input.UP
+        } else {
+            bits |= input.DOWN
+        }
+    }
+    return bits
+}
+
+fn toward(cx: u16, cy: u8) -> u8 {
+    dist(cx, cy)
+    return dir_bits()
+}

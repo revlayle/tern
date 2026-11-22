@@ -1,0 +1,237 @@
+// Smashy Smashy, a C64 platformer: the Tern port of ../src/main.p8. Game flow (spec section 9): title, READY?
+// pause, play, level complete dissolve, game over.
+// Not ported: main.p8's self-test switches and readouts (DEBUG_HUD, REGEN_KEY, GEN_STATS, GEN_SOAK,
+// FRAME_STATS, TEST and its scenarios, NAV_DEBUG, POSE_STATS).
+import mem
+import video
+import sound
+import input
+import actors
+import enemies
+import player
+import score
+import popup
+import levelgen
+import nav
+import title
+import pages
+
+// [TUNE]
+const READY_FRAMES: u8 = 150        // READY? pause, 3 s
+const DISSOLVE_RATE: u8 = 8         // tiles erased per frame at level complete
+const GAME_OVER_WAIT: u8 = 50       // frames before fire returns to the title
+const MSG_ROW: u8 = 12              // centre of the playfield
+const LEVEL_DONE_FRAMES: u8 = 100   // level complete lasts at least 2 s, so its text can be read
+
+data READY = screen"ready?"
+data PAUSED = screen"paused"
+data GAME_OVER = screen"game over"
+data HIGH_SCORE = screen"high score"
+data LEVEL_COMPLETE = screen"level complete"
+data NO_KILL = screen"no kill bonus 2500"
+data TIME_BONUS = screen"time +60"
+
+var dissolve_order: [u8; levelgen.CELLS]
+
+fn main() {
+    video.init()
+    sound.init()
+    title.init()
+    popup.init()
+    video.start_frame_irq()         // first, so the frame counter counts while generating
+    while true {
+        attract()                   // returns when fire is pressed, with the RNG seeded
+        new_game()
+        while true {
+            level_start()
+            if !play() {
+                break
+            }
+            level_complete()
+        }
+        game_over()
+    }
+}
+
+fn attract() {
+    // Title, HOW TO PLAY and SCORING in turn until fire starts a game from any of them; then seed the RNG.
+    while true {
+        if title.run(pages.TITLE_FRAMES) {
+            break
+        }
+        if pages.how_to_play() {
+            break
+        }
+        if pages.scoring() {
+            break
+        }
+    }
+    levelgen.seed()
+}
+
+fn new_game() {
+    video.set_game_mode()
+    video.draw_hud_labels()
+    score.new_game()
+    // empty playfield with the floor, the player at the start
+    mem.fill(addr(video.tiles), video.T_EMPTY, levelgen.CELLS)
+    mem.fill(addr(video.tiles) + levelgen.CELLS, video.T_FLOOR, video.MAP_W)
+    video.draw_level()
+    player.init()
+}
+
+fn level_start() {
+    // READY? for 3 s (spec section 9). The next level is generated and drawn meanwhile; the timer is paused.
+    var t0: u8 = video.frames
+    player.hold_at_start()
+    player.draw()
+    video.message(MSG_ROW, 17, addr(READY), len(READY))
+    load_level()
+    video.message(MSG_ROW, 17, addr(READY), len(READY))
+    while video.frames - t0 < READY_FRAMES { }
+    video.restore_tiles(MSG_ROW, 17, 6)
+    player.init()                   // falling from the start
+    player.draw()
+    video.frame_ready = false       // start the first frame on a fresh one
+}
+
+fn load_level() {
+    // Generate and draw the level for score.level and place the enemies (shown once play starts).
+    levelgen.generate(score.level)
+    video.draw_level()
+    score.new_level()
+    nav.new_level()
+    enemies.new_level(score.level)
+    enemies.place_all()
+}
+
+fn play() -> bool {
+    // PLAYING. Returns true when the level is complete, false when the time has run out.
+    while true {
+        video.wait_frame()
+        input.read()
+        if input.pressed & input.STOP != 0 {
+            pause()
+        }
+        score.flash_step()
+        player.update()
+        enemies.update()
+        enemies.contact()
+        player.draw()
+        enemies.draw()
+        popup.update()
+        video.shake_step()
+        if score.treasures_left == 0 {
+            video.stop_shake()
+            return true
+        }
+        if score.tick() {
+            video.stop_shake()
+            return false
+        }
+        nav.idle_build()            // last: map rebuild slices only use the time left in the frame
+    }
+}
+
+fn pause() {
+    // Run/Stop again resumes. Everything is frozen meanwhile, the timer too.
+    video.stop_shake()
+    video.message(MSG_ROW, 17, addr(PAUSED), len(PAUSED))
+    while true {
+        video.wait_frame()
+        input.read()
+        if input.pressed & input.STOP != 0 {
+            break
+        }
+    }
+    video.restore_tiles(MSG_ROW, 17, 6)
+    player.show_target()
+    input.pressed = 0               // the resume press is not a game input
+}
+
+fn level_complete() {
+    // Enemies and popups vanish, the platforms dissolve in random order and the player floats back to the
+    // start, under the level-complete text (at least LEVEL_DONE_FRAMES). The timer is paused. Then the next
+    // level number and +60 s.
+    for i in enemies.FIRST..=enemies.LAST {
+        video.hide_sprite(i)
+    }
+    popup.clear()
+    var bonus: bool = enemies.kills == 0
+    if bonus {
+        score.add_points(score.NO_KILL_BONUS)
+    }
+    sound.play(sound.LEVEL_DONE)
+    player.start_float()
+    for i in 0..levelgen.CELLS {
+        dissolve_order[i] = i
+    }
+    var n: u8 = 0                   // cells done; the order is shuffled as it goes (Fisher-Yates)
+    var floating: bool = true
+    var frames: u8 = 0
+    while n != levelgen.CELLS || floating || frames < LEVEL_DONE_FRAMES {
+        video.wait_frame()
+        frames += 1
+        score.flash_step()
+        for _ in 0..DISSOLVE_RATE {
+            if n == levelgen.CELLS {
+                break
+            }
+            var j: u8 = n + levelgen.rand_below(levelgen.CELLS - n)
+            var idx: u8 = dissolve_order[j]
+            dissolve_order[j] = dissolve_order[n]
+            n += 1
+            if video.tiles[idx] != video.T_EMPTY {
+                video.tiles[idx] = video.T_EMPTY
+                video.draw_tile(levelgen.cell_col[idx], levelgen.cell_row[idx])
+            }
+        }
+        if floating {
+            player.update()
+            if actors.state[0] != player.FLOATING {
+                floating = false
+                player.hold_at_start()
+            }
+        }
+        player.draw()
+        done_text(bonus)            // over the tiles the dissolve just drew (still in the border)
+    }
+    for i in 10..=14 step 2 {
+        video.restore_tiles(i, 11, 18)
+    }
+    score.next_level()
+}
+
+fn done_text(bonus: bool) {
+    // Centred lines from char row 10; the values match score.NO_KILL_BONUS and score.LEVEL_TIME_BONUS.
+    video.message(10, 13, addr(LEVEL_COMPLETE), len(LEVEL_COMPLETE))
+    var row: u8 = 12
+    if bonus {
+        video.message(12, 11, addr(NO_KILL), len(NO_KILL))
+        row = 14
+    }
+    video.message(row, 16, addr(TIME_BONUS), len(TIME_BONUS))
+}
+
+fn game_over() {
+    // Final score and level stay on the HUD row. Fire (after a short wait) returns to the title.
+    popup.clear()
+    score.stop_flash()
+    score.update_high()
+    video.message(10, 15, addr(GAME_OVER), len(GAME_OVER))
+    video.message(14, 11, addr(HIGH_SCORE), len(HIGH_SCORE))
+    var hs: ptr u8 = video.SCREEN + 14 * 40 + 22
+    video.put_digits(hs, score.high, 4)
+    video.put_digits(hs + 4, 0, 2)
+    mem.fill(hs + (video.COLOR_RAM - video.SCREEN), video.COLOR_HUD, 6)
+    for _ in 0..GAME_OVER_WAIT {
+        video.wait_frame()
+    }
+    while true {
+        video.wait_frame()
+        input.read()
+        if input.pressed & input.FIRE != 0 {
+            break
+        }
+    }
+}

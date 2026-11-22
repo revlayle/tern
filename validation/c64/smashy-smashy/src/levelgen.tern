@@ -1,0 +1,478 @@
+// Level generation and validation (spec section 7): shelf bands of jittered platforms, an enemy route check
+// (nav.tern), a reachability BFS over standing cells, treasure placement, retries and a fixed fallback layout.
+// Port of ../src/levelgen.p8, with Prog8's math.rnd and math.rndseed (rnd, seed), so a seed gives the same
+// level. Not ported: FORCE_FAIL and FRAME_SEED (self-tests).
+import c64
+import mem
+import video
+import nav
+
+const MAX_ATTEMPTS: u8 = 30
+const MIN_REACHABLE: u8 = 30
+const TREASURES: u8 = 10
+const TREASURE_SPACING: u8 = 3      // min distance between treasures: |dcol| >= 3 or |drow| >= 3
+const MAX_JUMP_UP: u8 = 5           // tiles
+const MAX_JUMP_SIDE: u8 = 3         // columns
+const SPAWN_COL_L: u8 = 8           // spawn zone: columns 8-11, rows 0-1, kept clear
+const SPAWN_COL_R: u8 = 11
+const START_COL_L: u8 = 9           // columns under the player's box at the start (x 154-165)
+const CELLS: u8 = 220               // tile rows 0-10 (row 11 is the floor)
+
+var attempts: u8                    // attempts made by the last generate()
+var used_fallback: bool
+
+// ---- platform segments, up to 4 per band ----
+const BANDS: u8 = 3
+const MAX_SEGS: u8 = 4            // a band's segments start at band << 2 (band * MAX_SEGS)
+data band_base: [u8; BANDS] = [2, 5, 8]
+var seg_count: [u8; BANDS]
+var seg_start: [u8; BANDS * MAX_SEGS]
+var seg_end: [u8; BANDS * MAX_SEGS]    // inclusive
+var seg_row: [u8; BANDS * MAX_SEGS]
+var seg_len: [u8; MAX_SEGS]
+var gap_extra: [u8; MAX_SEGS + 1]   // extra tiles before each segment, and after the last
+
+// ---- BFS over standing cells (tile map index 0-219) ----
+const C_NONE: u8 = 0                // solid, or nothing to stand on
+const C_STAND: u8 = 1               // empty with a solid tile below, not reached (yet)
+const C_REACHED: u8 = 2             // reachable standing cell, free for a treasure
+const C_BLOCKED: u8 = 3             // reachable, but in the spawn zone or too close to a treasure
+var cell: [u8; CELLS]
+// tile map index -> column and row (levelgen.p8 fills these in init())
+data cell_col: [u8; CELLS] = [i % 20 for i in 0..220]
+data cell_row: [u8; CELLS] = [i / 20 for i in 0..220]
+var queue: [u8; CELLS]              // reachable cells in BFS order, `reached` of them
+var row_stand: [u8; video.MAP_H - 1]   // standing cells per row (a jump only lands in rows that have some)
+var reached: u8
+var start_cells: u8                 // queue[0] (and queue[1]): where the player lands from the spawn point
+var tr_count: u8
+data strides: [u8; _] = [7, 11, 13, 17, 19, 23]    // primes below MIN_REACHABLE, for the treasure walk
+
+// Fallback layout, as segments per band: (start, end, row). Used after MAX_ATTEMPTS failures.
+data fb_count: [u8; BANDS] = [2, 1, 2]
+data fb_start: [u8; BANDS * MAX_SEGS] = [1, 13, 0, 0,   4, 0, 0, 0,   0, 15, 0, 0]
+data fb_end: [u8; BANDS * MAX_SEGS] = [6, 18, 0, 0,   15, 0, 0, 0,   4, 19, 0, 0]
+data fb_row: [u8; BANDS * MAX_SEGS] = [2, 2, 0, 0,   5, 0, 0, 0,   8, 8, 0, 0]
+
+// ---- random numbers: Prog8's math.rnd (the x-abc generator), so the game's random choices match ----
+var rnd_x: u8
+var rnd_c: u8 = $C2
+var rnd_a: u8 = $11
+var rnd_b: u8 = $37
+
+fn seed() {
+    // Called when fire starts a game on the title or an attract page (spec section 7).
+    // As math.rndseed(mkword(c64.CIA1TAL, c64.RASTER), mkword(c64.RASTER, c64.CIA1TAH)).
+    rnd_b = c64.vic.raster
+    rnd_a = c64.cia1.timer_a.hi
+    rnd_c = c64.cia1.timer_a.lo
+    rnd_x = c64.vic.raster
+}
+
+asm fn rnd() -> u8 {
+    // Assembly: the carry from lsr goes into the last adc, which plain Tern cannot say.
+    inc rnd_x
+    clc
+    lda rnd_x
+    eor rnd_c
+    eor rnd_a
+    sta rnd_a
+    adc rnd_b
+    sta rnd_b
+    lsr
+    eor rnd_a
+    adc rnd_c
+    sta rnd_c
+}
+
+fn rand_below(n: u8) -> u8 {
+    // Random 0 to n-1 (n >= 1). Masks rnd() and retries out-of-range values: under 2 tries on
+    // average, and much faster than math.randrange(), which does a 16-bit multiply.
+    var mask: u8 = 255
+    if n <= 2 {
+        mask = 1
+    } else if n <= 4 {
+        mask = 3
+    } else if n <= 8 {
+        mask = 7
+    } else if n <= 16 {
+        mask = 15
+    } else if n <= 32 {
+        mask = 31
+    } else if n <= 64 {
+        mask = 63
+    } else if n <= 128 {
+        mask = 127
+    }
+    while true {
+        var r: u8 = rnd() & mask
+        if r < n {
+            return r
+        }
+    }
+}
+
+fn generate(level: u8) {
+    // Fill video.tiles with a new level for `level` (1-based). Does not draw it.
+    used_fallback = false
+    attempts = 0
+    for _ in 0..MAX_ATTEMPTS {
+        attempts += 1
+        make_layout()
+        if !bands_connected() {
+            continue
+        }
+        if !nav.enemies_reach_top() {
+            continue
+        }
+        if !explore() {
+            continue
+        }
+        if !place_treasures(level) {
+            continue
+        }
+        return
+    }
+    used_fallback = true
+    mem.copy(addr(seg_count), addr(fb_count), len(seg_count))
+    mem.copy(addr(seg_start), addr(fb_start), len(seg_start))
+    mem.copy(addr(seg_end), addr(fb_end), len(seg_end))
+    mem.copy(addr(seg_row), addr(fb_row), len(seg_row))
+    fill_tiles()
+    explore()
+    place_treasures(level)
+}
+
+fn make_layout() {
+    for band in 0..BANDS {
+        make_band(band)
+    }
+    fill_tiles()
+}
+
+fn fill_tiles() {
+    // Tile map from the segment lists: empty, platforms, full floor row.
+    mem.fill(addr(video.tiles), video.T_EMPTY, CELLS)
+    mem.fill(addr(video.tiles) + CELLS, video.T_FLOOR, video.MAP_W)
+    for band in 0..BANDS {
+        var i: u8 = band << 2
+        for _ in 0..seg_count[band] {
+            mem.fill(addr(video.tiles) + video.row_start[seg_row[i]] + seg_start[i], video.T_SOLID,
+                seg_end[i] - seg_start[i] + 1)
+            i += 1
+        }
+    }
+}
+
+fn make_band(band: u8) {
+    // 2-4 segments, 3-8 tiles long, at least 2 tiles apart, each jittered +-1 row from the band's base row.
+    var n: u8 = 2 + rand_below(3)
+    var free: i8 = (video.MAP_W - ((n - 1) << 1)) as i8
+    for s in 0..n {
+        seg_len[s] = 3 + rand_below(6)
+        free -= seg_len[s] as i8
+    }
+    var s: u8 = rand_below(n)
+    while free < 0 {
+        // too long for the row: shorten segments in turn, from a random one
+        if seg_len[s] > 3 {
+            seg_len[s] -= 1
+            free += 1
+        }
+        s += 1
+        if s == n {
+            s = 0
+        }
+    }
+    mem.fill(addr(gap_extra), 0, len(gap_extra))
+    while free > 0 {
+        var g: u8 = rand_below(n + 1)
+        gap_extra[g] += 1
+        free -= 1
+    }
+
+    seg_count[band] = n
+    var base: u8 = band_base[band]
+    var i: u8 = band << 2
+    var col: u8 = gap_extra[0]
+    for k in 0..n {
+        var last: u8 = col + seg_len[k] - 1
+        var row: u8 = base - 1 + rand_below(3)
+        if row < 2 && col <= SPAWN_COL_R && last >= SPAWN_COL_L {
+            row = 2                 // keep the spawn zone clear
+        }
+        seg_start[i] = col
+        seg_end[i] = last
+        seg_row[i] = row
+        col = last + 3 + gap_extra[k + 1]
+        i += 1
+    }
+}
+
+fn bands_connected() -> bool {
+    // Each band needs a platform 1-3 rows above, and within 3 columns of, a platform in the band below
+    // (the floor for the bottom band), so enemies can climb.
+    for band in 0..BANDS {
+        if !band_connected(band) {
+            return false
+        }
+    }
+    return true
+}
+
+fn band_connected(band: u8) -> bool {
+    var i: u8 = band << 2
+    for _ in 0..seg_count[band] {
+        if band == BANDS - 1 {
+            if seg_row[i] >= video.MAP_H - 4 {
+                return true         // 3 or fewer rows above the floor
+            }
+        } else {
+            var j: u8 = (band + 1) << 2
+            for _ in 0..seg_count[band + 1] {
+                if seg_row[j] - seg_row[i] <= 3 && seg_start[j] <= seg_end[i] + 3 && seg_start[i] <= seg_end[j] + 3 {
+                    return true
+                }
+                j += 1
+            }
+        }
+        i += 1
+    }
+    return false
+}
+
+fn explore() -> bool {
+    // BFS from where the player lands below the spawn point. Marks the reachable standing cells C_REACHED
+    // and lists them in queue. Edges: walk left/right, walk off an edge and fall straight down, jump up to
+    // 5 rows up (or across on the same row) landing within 3 columns. A jump rises straight up in the start
+    // column, then moves sideways along the top row of the rise; every cell on that path must be empty.
+    // Returns true when at least MIN_REACHABLE cells are reachable.
+
+    // standing cells: all of row 10 (platforms are in rows 1-9), and the empty cells on top of each segment
+    mem.fill(addr(cell), C_NONE, CELLS - video.MAP_W)
+    mem.fill(addr(cell) + (CELLS - video.MAP_W), C_STAND, video.MAP_W)
+    mem.fill(addr(row_stand), 0, len(row_stand))
+    row_stand[video.MAP_H - 2] = video.MAP_W
+    var idx: u8 = 0
+    for band in 0..BANDS {
+        var i: u8 = band << 2
+        for _ in 0..seg_count[band] {
+            var r: u8 = seg_row[i] - 1
+            idx = video.row_start[r] + seg_start[i]
+            for _ in 0..seg_end[i] - seg_start[i] + 1 {
+                if video.tiles[idx] == video.T_EMPTY {
+                    cell[idx] = C_STAND
+                    row_stand[r] += 1
+                }
+                idx += 1
+            }
+            i += 1
+        }
+    }
+    reached = 0
+
+    // the player's box spans columns 9 and 10 while it drops from the spawn point
+    idx = START_COL_L
+    while cell[idx] == C_NONE && cell[idx + 1] == C_NONE {
+        idx += video.MAP_W          // the spawn zone is clear and row 10 always stands, so this stops
+    }
+    if cell[idx] == C_STAND {
+        reach(idx)
+    }
+    if cell[idx + 1] == C_STAND {
+        reach(idx + 1)
+    }
+    start_cells = reached
+
+    var head: u8 = 0
+    while head < reached {
+        idx = queue[head]
+        head += 1
+        var c: u8 = cell_col[idx]
+        var p: u8 = 0
+
+        // walk, or walk off the edge and fall straight down
+        if c != 0 {
+            p = idx - 1
+            if video.tiles[p] == video.T_EMPTY {
+                while cell[p] == C_NONE {
+                    p += video.MAP_W
+                }
+                if cell[p] == C_STAND {
+                    reach(p)
+                }
+            }
+        }
+        if c != video.MAP_W - 1 {
+            p = idx + 1
+            if video.tiles[p] == video.T_EMPTY {
+                while cell[p] == C_NONE {
+                    p += video.MAP_W
+                }
+                if cell[p] == C_STAND {
+                    reach(p)
+                }
+            }
+        }
+
+        // jump: rise k rows in this column, then move up to 3 columns sideways along that row.
+        // A side is skipped while the neighbour cell on that side is a standing cell whose own column is
+        // clear as high: it is reached by walking, and its jump covers the same targets.
+        // Rows without standing cells are skipped too (except k = 1, which also lands across gaps).
+        var left_covered: bool = c != 0 && cell[idx - 1] != C_NONE
+        var right_covered: bool = c != video.MAP_W - 1 && cell[idx + 1] != C_NONE
+        var rr: u8 = cell_row[idx]
+        var top: u8 = rr
+        if top > MAX_JUMP_UP {
+            top = MAX_JUMP_UP
+        }
+        var rise: u8 = idx
+        var k: u8 = 1
+        while k <= top {
+            rise -= video.MAP_W
+            if video.tiles[rise] != video.T_EMPTY {
+                break
+            }
+            rr -= 1
+            if video.tiles[rise + 1] != video.T_EMPTY {
+                right_covered = false
+            }
+            if video.tiles[rise - 1] != video.T_EMPTY {
+                left_covered = false
+            }
+            if k != 1 && row_stand[rr] == 0 {
+                k += 1
+                continue
+            }
+            if !right_covered {
+                var cc: u8 = c
+                p = rise
+                for _ in 0..MAX_JUMP_SIDE {
+                    cc += 1
+                    if cc == video.MAP_W {
+                        break
+                    }
+                    p += 1
+                    if video.tiles[p] != video.T_EMPTY {
+                        break
+                    }
+                    if cell[p] == C_STAND {
+                        reach(p)
+                    }
+                    if k == 1 && cell[p + video.MAP_W] == C_STAND {
+                        reach(p + video.MAP_W)  // across a gap on the same row
+                    }
+                }
+            }
+            if !left_covered {
+                var cc: u8 = c
+                p = rise
+                for _ in 0..MAX_JUMP_SIDE {
+                    if cc == 0 {
+                        break
+                    }
+                    cc -= 1
+                    p -= 1
+                    if video.tiles[p] != video.T_EMPTY {
+                        break
+                    }
+                    if cell[p] == C_STAND {
+                        reach(p)
+                    }
+                    if k == 1 && cell[p + video.MAP_W] == C_STAND {
+                        reach(p + video.MAP_W)
+                    }
+                }
+            }
+            k += 1
+        }
+    }
+    return reached >= MIN_REACHABLE
+}
+
+fn reach(idx: u8) {
+    cell[idx] = C_REACHED
+    queue[reached] = idx
+    reached += 1
+}
+
+fn place_treasures(level: u8) -> bool {
+    // 10 treasures on reachable standing cells outside the spawn zone and off the start landing cells
+    // (the player would collect those on arrival), spaced TREASURE_SPACING apart.
+    // Walks the reachable list from a random start with a random prime stride (this visits every cell
+    // unless the stride divides `reached`), then a plain scan fills any that are missing.
+    for i in SPAWN_COL_L..=SPAWN_COL_R {
+        if cell[i] == C_REACHED {
+            cell[i] = C_BLOCKED
+        }
+        if cell[i + video.MAP_W] == C_REACHED {
+            cell[i + video.MAP_W] = C_BLOCKED
+        }
+    }
+    cell[queue[0]] = C_BLOCKED
+    cell[queue[start_cells - 1]] = C_BLOCKED
+    tr_count = 0
+    var q: u8 = rand_below(reached)
+    var stride: u8 = strides[rand_below(len(strides))]
+    for _ in 0..reached {
+        if cell[queue[q]] == C_REACHED {
+            put_treasure(queue[q], level)
+            if tr_count == TREASURES {
+                return true
+            }
+        }
+        q += stride
+        if q >= reached {
+            q -= reached
+        }
+    }
+    for k in 0..reached {
+        if cell[queue[k]] == C_REACHED {
+            put_treasure(queue[k], level)
+            if tr_count == TREASURES {
+                return true
+            }
+        }
+    }
+    return false
+}
+
+fn put_treasure(idx: u8, level: u8) {
+    tr_count += 1
+    // type = min(14, (level - 1) + randrange(5))
+    var t: u8 = level - 1 + rand_below(5)
+    if t > 14 {
+        t = 14
+    }
+    video.tiles[idx] = video.T_TREASURE + t
+
+    // block every cell less than TREASURE_SPACING rows and columns away, this one included
+    const RADIUS: u8 = TREASURE_SPACING - 1
+    var r: u8 = cell_row[idx]
+    var c: u8 = cell_col[idx]
+    var r0: u8 = 0
+    var r1: u8 = r + RADIUS
+    var c0: u8 = 0
+    var c1: u8 = c + RADIUS
+    if r >= RADIUS {
+        r0 = r - RADIUS
+    }
+    if r1 > video.MAP_H - 2 {
+        r1 = video.MAP_H - 2
+    }
+    if c >= RADIUS {
+        c0 = c - RADIUS
+    }
+    if c1 > video.MAP_W - 1 {
+        c1 = video.MAP_W - 1
+    }
+    for rr in r0..=r1 {
+        var p: u8 = video.row_start[rr] + c0
+        for _ in 0..c1 - c0 + 1 {
+            if cell[p] == C_REACHED {
+                cell[p] = C_BLOCKED
+            }
+            p += 1
+        }
+    }
+}

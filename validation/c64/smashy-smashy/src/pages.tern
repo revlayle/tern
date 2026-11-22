@@ -1,0 +1,193 @@
+// Attract pages (spec section 9): HOW TO PLAY and SCORING, shown after the title between games. The game's
+// multicolour mode so tiles and sprites look as in play, text in hi-res cells from the HUD font.
+// All page text is in the tables below. Port of ../src/pages.p8.
+import c64
+import mem
+import assets
+import video
+import input
+import score
+import enemies
+import popup
+
+// [TUNE] frames each page is shown
+const TITLE_FRAMES: u16 = 500
+const HOW_FRAMES: u16 = 500
+const SCORING_FRAMES: u16 = 600
+
+// A line of page text: char row, column, the text and its length.
+struct Line { row: u8, col: u8, text: ptr u8, n: u8 }
+
+// ---- HOW TO PLAY ----
+data H0 = screen"how to play"
+data H1 = screen"left/right"
+data H2 = screen"run"
+data H3 = screen"fire"
+data H4 = screen"jump - hold for higher"
+data H5 = screen"down in air"
+data H6 = screen"smash down"
+data H7 = screen"smash a brick twice to break it"
+data H8 = screen"land on enemies to bonk them"
+data H9 = screen"smash them to destroy them"
+data H10 = screen"grab all 10 treasures"
+data H11 = screen"enemies steal them - bonk them back!"
+data H12 = screen"beat the clock"
+data how: [Line; _] = [
+    Line { row = 1, col = 14, text = addr(H0), n = len(H0) },
+    Line { row = 4, col = 4, text = addr(H1), n = len(H1) },
+    Line { row = 4, col = 16, text = addr(H2), n = len(H2) },
+    Line { row = 7, col = 4, text = addr(H3), n = len(H3) },
+    Line { row = 7, col = 16, text = addr(H4), n = len(H4) },
+    Line { row = 10, col = 4, text = addr(H5), n = len(H5) },
+    Line { row = 10, col = 16, text = addr(H6), n = len(H6) },
+    Line { row = 13, col = 6, text = addr(H7), n = len(H7) },
+    Line { row = 16, col = 4, text = addr(H8), n = len(H8) },
+    Line { row = 17, col = 4, text = addr(H9), n = len(H9) },
+    Line { row = 20, col = 4, text = addr(H10), n = len(H10) },
+    Line { row = 21, col = 4, text = addr(H11), n = len(H11) },
+    Line { row = 22, col = 4, text = addr(H12), n = len(H12) },
+]
+// sprites 0-3 at column 1, art centred on the rows of the single lines, top-aligned with the enemy's two
+data how_frame: [u8; _] = [assets.SPR_PLAYER_RUN_R_0, assets.SPR_PLAYER_JUMP_R_0, assets.SPR_PLAYER_FASTFALL_0,
+                           assets.SPR_ENEMY_WALK_R_0]
+data how_spr_col: [u8; _] = [video.PLAYER_COLOR, video.PLAYER_COLOR, video.PLAYER_COLOR, video.ENEMY_COLOR]
+data how_spr_y: [u8; _] = [4 * 8 - 4, 7 * 8 - 4, 10 * 8 - 4, 16 * 8]     // screen pixel rows from char row 0
+const HOW_SPR_X: u16 = 8
+// tiles: (char row, column, tile)
+data how_tile_row: [u8; _] = [13, 13, 20]
+data how_tile_col: [u8; _] = [1, 3, 1]
+data how_tile: [u8; _] = [video.T_SOLID, video.T_DAMAGED, video.T_TREASURE]
+
+// ---- SCORING ----
+data S0 = screen"scoring"
+data S1 = screen"smash chain"
+data S2 = screen"no kill bonus 2500"
+data S3 = screen"time +60 per level"
+data S4 = screen"hit -10 seconds"
+data S5 = screen"high score"
+data scoring_lines: [Line; _] = [
+    Line { row = 1, col = 16, text = addr(S0), n = len(S0) },
+    Line { row = 16, col = 1, text = addr(S1), n = len(S1) },
+    Line { row = 18, col = 1, text = addr(S2), n = len(S2) },
+    Line { row = 18, col = 22, text = addr(S3), n = len(S3) },
+    Line { row = 20, col = 1, text = addr(S4), n = len(S4) },
+    Line { row = 20, col = 22, text = addr(S5), n = len(S5) },
+]
+const GRID_ROW: u8 = 3              // first row of treasure tiles; 4 rows per line (tile, value, gap)
+const GRID_COL: u8 = 3              // first column; 8 columns per treasure
+const CHAIN_ROW: u8 = 16
+const CHAIN_COL: u8 = 14
+const HIGH_ROW: u8 = 20
+const HIGH_COL: u8 = 33
+// The chain colours (popup.rank_color) include 8 and 10, which a multicolour-mode cell can't show in
+// hi-res. So the text rows below the treasures are shown in hi-res character mode: from this raster line
+// (char row 15, empty) to the frame IRQ.
+const SPLIT_LINE: u8 = 50 + 15 * 8
+
+fn how_to_play() -> bool {
+    // Show HOW TO PLAY for HOW_FRAMES frames. True if fire was pressed.
+    video.set_game_mode()
+    for i in 0..len(how) {
+        video.message(how[i].row, how[i].col, how[i].text, how[i].n)
+    }
+    for i in 0..len(how_tile) {
+        put_tile(how_tile_row[i], how_tile_col[i], how_tile[i])
+    }
+    for i in 0..len(how_frame) {
+        video.set_sprite(i, how_frame[i], how_spr_col[i], HOW_SPR_X, how_spr_y[i] - 8)
+    }
+    return wait(HOW_FRAMES, false)
+}
+
+fn scoring() -> bool {
+    // Show SCORING for SCORING_FRAMES frames. True if fire was pressed.
+    video.set_game_mode()
+    for i in 0..len(scoring_lines) {
+        video.message(scoring_lines[i].row, scoring_lines[i].col, scoring_lines[i].text, scoring_lines[i].n)
+    }
+    // the 15 treasures in 3 lines of 5, each value centred under its tile
+    var row: u8 = GRID_ROW
+    var col: u8 = GRID_COL
+    for i in 0..15 {
+        put_tile(row, col, video.T_TREASURE + i)
+        var p: u8 = score.treasure_points[i]
+        var at: ptr u8 = video.text_row[row + 2] + col
+        if p >= $10 {
+            at -= 1
+        }
+        put_value(at, p)
+        col += 8
+        if col > GRID_COL + 4 * 8 {
+            col = GRID_COL
+            row += 4
+        }
+    }
+    // chain values in the popup colours
+    var at: ptr u8 = video.text_row[CHAIN_ROW] + CHAIN_COL
+    for i in 0..len(enemies.kill_points) {
+        var n: u8 = put_value(at, enemies.kill_points[i])
+        mem.fill(at + (video.COLOR_RAM - video.SCREEN), popup.rank_color[i + 1], n)
+        at += n + 1
+    }
+    at = video.text_row[HIGH_ROW] + HIGH_COL
+    video.put_digits(at, score.high, 4)
+    video.put_digits(at + 4, 0, 2)
+    return wait(SCORING_FRAMES, true)
+}
+
+fn wait(frames: u16, split: bool) -> bool {
+    // Wait the given frames or until fire (true), then hide the page's sprites.
+    // split: hi-res character mode from SPLIT_LINE down, multicolour again from the frame IRQ.
+    // The first wait_frame() must wait for the frame IRQ: a frame_ready left over from before the page was
+    // drawn would start the loop mid-frame, and past SPLIT_LINE the split would then lock one frame out of
+    // step (multicolour back on just below the split). Not in pages.p8, whose slower drawing happens to end
+    // where the race does not show (gaps.md, step 5).
+    video.frame_ready = false
+    var fire: bool = false
+    for _ in 0..frames {
+        video.wait_frame()
+        if split {
+            c64.vic.control2 |= 0b0001_0000
+        }
+        input.read()
+        if input.pressed & input.FIRE != 0 {
+            fire = true
+            break
+        }
+        if split {
+            while c64.vic.raster != SPLIT_LINE { }
+            c64.vic.control2 &= 0b1110_1111
+        }
+    }
+    video.spr_ena = 0
+    return fire
+}
+
+fn put_tile(row: u8, col: u8, t: u8) {
+    // A 2x2-char tile at any char position, with its normal chars and colour.
+    var ch: u8 = video.tile_char[t]
+    var co: u8 = video.tile_color[t]
+    var scr: ptr u8 = video.text_row[row] + col
+    scr[0] = ch
+    scr[1] = ch + 1
+    scr[40] = ch + 2
+    scr[41] = ch + 3
+    scr += video.COLOR_RAM - video.SCREEN
+    scr[0] = co
+    scr[1] = co
+    scr[40] = co
+    scr[41] = co
+}
+
+fn put_value(at: ptr u8, bcd_hundreds: u8) -> u8 {
+    // Points given in BCD hundreds as 3 or 4 digits (no leading zero) at `at`. Returns the width.
+    var n: u8 = 3
+    if bcd_hundreds >= $10 {
+        video.put_digits(at, bcd_hundreds as u16, 2)
+        n = 4
+    } else {
+        video.put_digits(at, bcd_hundreds as u16, 1)
+    }
+    video.put_digits(at + (n - 2), 0, 2)
+    return n
+}

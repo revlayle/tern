@@ -1,0 +1,175 @@
+// Shared actor state and physics (spec section 4). Index 0 = player, 1-5 = enemies. Port of ../src/actors.p8.
+// Positions are the top-left of the 12x16 collision box in playfield pixels, plus a 1/16 px fraction.
+// Tiles only ever become less solid (solid -> damaged -> gone; treasures don't block), so a box that is clear
+// now can only meet a wall, floor or ceiling when its leading edge enters a new tile column or row. The move
+// routines skip the tile checks when it doesn't (moves are under 16 px, so at most one boundary is crossed).
+import video
+
+const COUNT: u8 = 6
+const BOX_W: u8 = 12
+const BOX_H: u8 = 16
+const BOX_INSET: u8 = 2             // box left edge is this far right of the sprite's left edge
+const HURT_INSET: u8 = 3            // [TUNE] player hurt box (enemy hits only): the box inset this far left, right and at the top
+
+const FACE_RIGHT: u8 = 0
+const FACE_LEFT: u8 = 1
+
+var x: [u16; COUNT]
+var y: [u8; COUNT]
+var x_frac: [u8; COUNT]
+var y_frac: [u8; COUNT]
+var vy: [i8; COUNT]                 // 1/16 px per frame, + = down
+var state: [u8; COUNT]
+var facing: [u8; COUNT]
+var anim_frame: [u8; COUNT]
+var anim_timer: [u8; COUNT]         // walk cycle: px moved since the last picture change
+var anim_x: [u8; COUNT]             // low byte of x at the last walk_anim() call
+var anim_still: [u8; COUNT]         // frames without moving
+
+var new_frac: u8                    // second result of advance()
+
+fn advance(frac: u8, speed: u8) -> u8 {
+    // Add an unsigned speed (1/16 px) to a fraction. Returns whole pixels moved; the new fraction is in new_frac.
+    var s: u8 = frac + speed
+    new_frac = s & 15
+    return s >> 4
+}
+
+fn walk_anim(i: u8, frames: u8, step: u8) -> u8 {
+    // Walk cycle by distance: returns the picture (0 to frames-1) for actor i, the next one every `step` px
+    // moved. Once per frame while on the ground. Picture 0 (standing) after 4 frames without moving, so slow
+    // walkers that skip a pixel now and then don't flicker back to it. A jump in position (landing,
+    // respawn) counts as at most `step` px. Plain Tern; the Prog8 version is assembly.
+    var lo: u8 = x[i] as u8
+    var dx: u8 = lo - anim_x[i]
+    anim_x[i] = lo
+    if dx >= $80 {
+        dx = 0 - dx                 // |dx|
+    }
+    if dx == 0 {
+        if anim_still[i] < 4 {
+            anim_still[i] += 1
+            return anim_frame[i]
+        }
+        anim_frame[i] = 0
+        anim_timer[i] = 0
+        return 0
+    }
+    if dx >= step {
+        dx = step
+    }
+    var t: u8 = dx + anim_timer[i]
+    if t >= step {
+        anim_timer[i] = t - step
+        var f: u8 = anim_frame[i] + 1
+        if f >= frames {
+            f = 0
+        }
+        anim_frame[i] = f
+    } else {
+        anim_timer[i] = t
+    }
+    anim_still[i] = 0
+    return anim_frame[i]
+}
+
+fn solid_at(px: u16, py: u8) -> bool {
+    // Tiles 1-3 (solid, damaged, floor) block. Callers keep px in 0-319 and py in 0-191.
+    var t: u8 = video.tiles[video.row_start[py >> 4] + (px >> 4) as u8]
+    return t - 1 < 3
+}
+
+fn move_right(i: u8, d: u8) -> bool {
+    // Move d px (< 16) right. Returns true when stopped by a wall or the screen edge.
+    if (((x[i] as u8) + BOX_W - 1) & 15) + d < 16 {
+        x[i] += d                   // leading edge stays in its tile column
+        return false
+    }
+    var right: u16 = x[i] + (BOX_W - 1) + d
+    if right > 319 {
+        x[i] = 320 - BOX_W
+        return true
+    }
+    if side_blocked(right, y[i]) {
+        x[i] = (right & $FFF0) - BOX_W
+        return true
+    }
+    x[i] += d
+    return false
+}
+
+fn move_left(i: u8, d: u8) -> bool {
+    if ((x[i] as u8) & 15) >= d {
+        x[i] -= d                   // leading edge stays in its tile column
+        return false
+    }
+    if x[i] < d {
+        x[i] = 0
+        return true
+    }
+    var left: u16 = x[i] - d
+    if side_blocked(left, y[i]) {
+        x[i] = (left & $FFF0) + 16
+        return true
+    }
+    x[i] = left
+    return false
+}
+
+fn side_blocked(px: u16, py: u8) -> bool {
+    // Box side at column px, rows py to py + BOX_H - 1. A tile-aligned box covers one row.
+    if solid_at(px, py) {
+        return true
+    }
+    return py & 15 != 0 && solid_at(px, py + BOX_H - 1)
+}
+
+fn level_blocked(i: u8, py: u8) -> bool {
+    // Box edge (top or bottom) at row py, columns x to x + BOX_W - 1. Both corners may be in one column.
+    if solid_at(x[i], py) {
+        return true
+    }
+    return (x[i] as u8) & 15 > 16 - BOX_W && solid_at(x[i] + (BOX_W - 1), py)
+}
+
+fn move_down(i: u8, d: u8) -> bool {
+    // Move d px (< 16) down. Returns true on landing; the box then rests on the tile top.
+    if ((y[i] + BOX_H - 1) & 15) + d < 16 {
+        y[i] += d                   // bottom edge stays in its tile row
+        return false
+    }
+    var bottom: u8 = y[i] + BOX_H - 1 + d
+    if level_blocked(i, bottom) {
+        y[i] = (bottom & $F0) - BOX_H
+        return true
+    }
+    y[i] += d
+    return false
+}
+
+fn move_up(i: u8, d: u8) -> bool {
+    // Returns true when the head hits a tile or the top of the playfield.
+    if y[i] & 15 >= d {
+        y[i] -= d                   // top edge stays in its tile row (row 0 included: y >= d)
+        return false
+    }
+    if y[i] < d {
+        y[i] = 0
+        return true
+    }
+    var top: u8 = y[i] - d
+    if level_blocked(i, top) {
+        y[i] = (top & $F0) + 16
+        return true
+    }
+    y[i] = top
+    return false
+}
+
+fn on_ground(i: u8) -> bool {
+    var below: u8 = y[i] + BOX_H
+    if below & 15 != 0 {
+        return false
+    }
+    return level_blocked(i, below)
+}

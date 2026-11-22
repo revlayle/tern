@@ -1,0 +1,53 @@
+// Galaxy Stars, a C64 action game: the Tern port of ../src/main.p8.
+// Startup and the attract cycle (title, pages, demo); the game flow itself is in game.tern.
+// Not ported: main.p8's self-tests (TEST, DEBUG_HUD, PROFILE and their readouts).
+import video
+import stars
+import score
+import sound
+import title
+import pages
+import demo
+import game
+
+fn main() {
+    video.init()
+    sound.init()
+    score.init()
+    video.start_frame_irq()
+    while true {
+        attract()                   // seeds the RNG
+        game.new_game()
+        while true {
+            game.galaxy_start()
+            if !game.play() {
+                break
+            }
+            game.galaxy_clear()
+        }
+        title.game_over()
+    }
+}
+
+fn attract() {
+    // TITLE, HOW TO PLAY and SCORING in turn until fire starts a game from any of them; then seed the RNG
+    // and switch back to the game's multicolor mode.
+    while true {
+        if title.run() {
+            break
+        }
+        if pages.how_to_play() {
+            break
+        }
+        if pages.scoring() {
+            break
+        }
+        if demo.run() {
+            break
+        }
+    }
+    video.wait_frame()
+    video.clear_screen()
+    video.game_mode()
+    stars.seed()
+}

@@ -1,0 +1,72 @@
+// Sound effects (spec section 13): SID voice 1, one effect at a time, table-driven. Port of ../src/sound.p8.
+// play() only leaves a request; the frame IRQ calls step(), which
+// starts it and then slides the pitch once per frame. A new effect cuts off the one playing, and of two requests in the same frame only the later one plays.
+import c64
+
+const BOOST: u8 = 0
+const HIT: u8 = 1                   // a star hit (a bounce off a stationary star)
+const SUPERNOVA: u8 = 2             // also a hurled hostile's explosion
+const WARNING: u8 = 3               // a star starts turning hostile
+const HURL: u8 = 4                  // a hostile hurled by a boost, or destroyed by the invincible player
+const LIFE_LOST: u8 = 5
+const EXTRA_LIFE: u8 = 6
+const QUASAR: u8 = 7                // quasar pickup
+const CLEAR: u8 = 8                 // galaxy clear
+const EFFECTS: u8 = 9
+
+// [TUNE] one column per effect, in the order above. Waveform bits (the gate, bit 0, is added by step()):
+// $10 triangle, $20 saw, $40 pulse, $80 noise. Pitch = SID frequency value (PAL: Hz * 17.03), slide = added per
+// frame (signed). The gate opens at the start and closes after `length` frames, then the release (SR low nibble)
+// runs. Pitch + slide * length must stay within 0-$FFFF.
+//                               boost  hit    nova   warn   hurl   life-  life+  quasar clear
+data wave: [u8; EFFECTS] =      [$20,   $10,   $80,   $40,   $20,   $10,   $40,   $10,   $40]
+data ad: [u8; EFFECTS] =        [$00,   $00,   $00,   $00,   $00,   $00,   $00,   $00,   $00]
+data sr: [u8; EFFECTS] =        [$A4,   $A2,   $A9,   $A3,   $A4,   $A6,   $A5,   $A6,   $A8]
+data pitch: [u16; EFFECTS] =    [$0A00, $2000, $1800, $2C00, $4000, $1800, $1000, $0C00, $0800]
+data slide: [i16; EFFECTS] =    [$0200, -$0200, -$0060, $0000, -$0400, -$0030, $0200, $0300, $0080]
+data length: [u8; EFFECTS] =    [12,    3,     20,    8,     10,    50,    25,    30,    60]
+
+const PULSE_WIDTH: u16 = $0800      // 50% square for the pulse effects
+
+var request: u8                     // 1 + effect, taken by the next step()
+var left: u8                        // frames until the gate closes, 0 = nothing playing
+var cur_wave: u8
+var cur_pitch: u16
+var cur_slide: i16
+
+fn init() {
+    c64.sid.voice1.pulse = PULSE_WIDTH
+    c64.sid.voice1.control = 0
+    c64.sid.volume = 15             // no filters, full volume
+}
+
+fn play(effect: u8) {
+    request = effect + 1
+}
+
+fn step() {
+    // In the frame IRQ.
+    if request != 0 {
+        var e: u8 = request - 1
+        request = 0
+        c64.sid.voice1.control = 0  // gate off first, so the new effect's envelope starts again
+        c64.sid.voice1.attack_decay = ad[e]
+        c64.sid.voice1.sustain_release = sr[e]
+        cur_pitch = pitch[e]
+        cur_slide = slide[e]
+        left = length[e]
+        cur_wave = wave[e]
+        c64.sid.voice1.control = cur_wave | 1
+    } else {
+        if left == 0 {
+            return
+        }
+        left -= 1
+        if left == 0 {
+            c64.sid.voice1.control = cur_wave       // last frame: gate off, release
+            return
+        }
+        cur_pitch += cur_slide as u16
+    }
+    c64.sid.voice1.freq = cur_pitch
+}

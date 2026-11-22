@@ -1,0 +1,69 @@
+// Logic check for player.tern, run with `tern run src/check_player.tern --dump ...` (not part of the game).
+// Each case starts from player.init(), holds joystick bits for n frames and records the results.
+import input
+import player
+
+var xs: [u16; 8]                    // player.x after each case
+var ys: [u8; 8]
+var xf: [u8; 8]                     // x_frac
+var yf: [u8; 8]
+var boost: [u8; 8]                  // boost_left
+var cool: [u8; 8]                   // cooldown
+var anim: [u8; 8]                   // anim_frame
+var knock: [i8; 6]                  // knock_vx, knock_vy of three bounces
+
+fn hold(bits: u8, frames: u8) {
+    for _ in 0..frames {
+        input.pressed = bits & ~input.prev
+        input.held = bits
+        input.prev = bits
+        player.update()
+    }
+}
+
+fn record(n: u8) {
+    xs[n] = player.x
+    ys[n] = player.y
+    xf[n] = player.x_frac
+    yf[n] = player.y_frac
+    boost[n] = player.boost_left
+    cool[n] = player.cooldown
+    anim[n] = player.anim_frame
+}
+
+fn main() {
+    // 0: right for 10 frames
+    player.init(); input.prev = 0
+    hold(input.RIGHT, 10); record(0)
+    // 1: up-left for 10 frames
+    player.init(); input.prev = 0
+    hold(input.UP | input.LEFT, 10); record(1)
+    // 2: left and up for 200 frames: clamped at 0, 0
+    player.init(); input.prev = 0
+    hold(input.UP | input.LEFT, 200); record(2)
+    // 3: right and down for 250 frames: clamped at MAX_X, MAX_Y
+    player.init(); input.prev = 0
+    hold(input.DOWN | input.RIGHT, 250); record(3)
+    // 4: from x 0, fire + right once, then right: the boost runs 75 frames
+    player.init(); input.prev = 0
+    hold(input.UP | input.LEFT, 200)
+    hold(input.RIGHT | input.FIRE, 1)
+    hold(input.RIGHT, 74); record(4)
+    // 5: fire again during the cooldown (ignored), 10 frames in all
+    hold(input.RIGHT | input.FIRE, 1)
+    hold(input.RIGHT, 9); record(5)
+    // 6: 15 more frames: the cooldown is over, a new press boosts
+    hold(input.RIGHT, 15)
+    hold(input.RIGHT | input.FIRE, 1); record(6)
+    // 7: spin: right 9 frames (3 pictures clockwise), then left 3 frames (1 picture back)
+    player.init(); input.prev = 0
+    hold(input.RIGHT, 9)
+    hold(input.LEFT, 3); record(7)
+
+    player.bounce(10, -3)
+    knock[0] = player.knock_vx; knock[1] = player.knock_vy
+    player.bounce(-5, -5)
+    knock[2] = player.knock_vx; knock[3] = player.knock_vy
+    player.bounce(0, 0)
+    knock[4] = player.knock_vx; knock[5] = player.knock_vy
+}

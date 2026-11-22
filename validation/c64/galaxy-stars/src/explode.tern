@@ -1,0 +1,514 @@
+// Explosions (spec section 6): the list, drawing over the 3x3 tiles, and the area checks. Port of ../src/explode.p8.
+// An explosion covers the 3x3 tiles around its centre tile, clipped to the playfield, for FRAMES frames. Stationary
+// stars in those tiles are set off; the player and hostile stars are hit only within its round core (hits()).
+// `cover` counts the explosions over each tile: star color changes skip covered tiles, and a tile is
+// redrawn from the map only when its last explosion ends.
+// Stars caught by one explosion explode one after another: in random order, each STAGGER frames after the last.
+// Animation (spec section 12): 3 frames, flash, burst, embers. Every explosion runs the same timeline, so on a tile
+// shared by several the newest one has the brightest frame: `owner` holds the newest explosion over each tile and
+// only that one draws there. Frame time: at most one explosion steps its animation per frame.
+// Frame time: the tiles of an ended explosion are restored through a queue, one explosion per frame (the danger
+// ends on time); stars.update starts at most one supernova per frame (`starts`).
+import mem
+import video
+import stars
+import player
+import assets
+
+const MAX: u8 = 8                   // [TUNE] explosions at once; a new one takes the oldest slot when full
+const FRAMES: u8 = 30               // [TUNE] 0.6 s, dangerous for the whole time
+const COLOR: u8 = assets.TILE_EXPLODE_0_COLOR | video.MC
+const ART: u8 = assets.TILE_EXPLODE_0_TL       // first char of the explosion art (for the assembly)
+var cover: [u8; video.MAP_W * video.MAP_H] @ $C600
+var owner: [u8; video.MAP_W * video.MAP_H] @ $C700     // slot of the newest explosion over each tile
+// [TUNE] animation: flash for the first 6 frames, burst until frame 20, then embers
+const FLASH_END: u8 = 6
+const BURST_END: u8 = 20
+const MAX_LATE: u8 = 4              // an animation step waits for a quiet frame at most this many frames
+data stage_art: [u8; _] = [assets.TILE_EXPLODE_0_TL, assets.TILE_EXPLODE_1_TL, assets.TILE_EXPLODE_2_TL]
+var stage: [u8; MAX]                // animation frame drawn: 0 flash, 1 burst, 2 embers
+var step_at: [u8; MAX]              // timer value at which the next frame is due (0: no more)
+var cur_slot: u8                    // draw_area / draw_frame: the explosion being drawn
+var art_base: u8                    // draw_frame: first char of its animation frame
+
+var col: [u8; MAX]
+var row: [u8; MAX]
+var timer: [u8; MAX]                // frames left, 0 = free slot
+var core_x: [u16; MAX]              // each explosion's centre in playfield pixels (centre of its centre tile)
+var core_y: [u8; MAX]
+// [TUNE] the round core that hurts the player and destroys hostiles (designer, 2026-10-18; was the whole 3x3
+// square): their centre closer than REACH to the explosion's centre, measured as the longer side plus half the
+// shorter (an octagon). The bright part of the art is about 36 px across; 22 adds a little for the body.
+const REACH: u8 = 22
+var obj_x: u16                      // hits(): centre of the object to test
+var obj_y: u8
+var started: u8                     // explosions started (debug readout)
+var starts: u8                      // explosions started this frame
+var live: u8                        // explosions running
+const QUEUE: u8 = 16
+var queue_col: [u8; QUEUE]          // centres of ended explosions whose tiles are still to restore
+var queue_row: [u8; QUEUE]
+var queued: u8
+var caught_stars: [u8; 9]           // stars in the area of the explosion being started (a hurl's centre tile can hold one)
+
+// area set by area_at()
+var c0: u8
+var c1: u8
+var r0: u8
+var r1: u8
+
+fn clear() {
+    mem.fill(addr(cover), 0, len(cover))
+    for s in 0..MAX {
+        timer[s] = 0
+    }
+    queued = 0
+    starts = 0
+    live = 0
+}
+
+fn area_at(c: u8, r: u8) {
+    // The 3x3 tiles around tile (c, r), clipped to the playfield, in c0-c1, r0-r1.
+    c0 = c - 1
+    if c == 0 {
+        c0 = 0
+    }
+    c1 = c + 1
+    if c1 == video.MAP_W {
+        c1 -= 1
+    }
+    r0 = r
+    if r0 != 0 {
+        r0 -= 1
+    }
+    r1 = r + 1
+    if r1 == video.MAP_H {
+        r1 -= 1
+    }
+}
+
+fn start(c: u8, r: u8) {
+    var s: u8 = free_slot()
+    col[s] = c
+    row[s] = r
+    timer[s] = FRAMES
+    stage[s] = 0
+    step_at[s] = FRAMES - FLASH_END
+    cur_slot = s
+    started += 1
+    starts += 1
+    live += 1
+    core_x[s] = ((c as u16) << 4) + 8
+    core_y[s] = (r << 4) + 8
+    area_at(c, r)
+    var n: u8 = draw_area(c, r)
+    // shuffle, then stagger the countdowns of the stars that start one
+    var j: u8 = n
+    while j > 1 {
+        var k: u8 = stars.rand_below(j)
+        j -= 1
+        var tmp: u8 = caught_stars[k]
+        caught_stars[k] = caught_stars[j]
+        caught_stars[j] = tmp
+    }
+    var extra: u8 = 0
+    for k in 0..n {
+        if stars.caught(caught_stars[k], extra) {
+            extra += stars.STAGGER
+        }
+    }
+}
+
+fn free_slot() -> u8 {
+    // A free slot, or the oldest explosion (least time left), which is ended first.
+    var oldest: u8 = 0
+    for s in 0..MAX {
+        if timer[s] == 0 {
+            return s
+        }
+        if timer[s] < timer[oldest] {
+            oldest = s
+        }
+    }
+    finish(oldest)
+    return oldest
+}
+
+fn finish(s: u8) {
+    // The danger ends now; the tiles are restored from the queue (at once if it is full).
+    timer[s] = 0
+    live -= 1
+    if queued == QUEUE {
+        restore(col[s], row[s])
+        return
+    }
+    queue_col[queued] = col[s]
+    queue_row[queued] = row[s]
+    queued += 1
+}
+
+fn step(s: u8) {
+    cur_slot = s
+    art_base = stage_art[stage[s]]
+    area_at(col[s], row[s])
+    draw_frame(col[s], row[s])
+}
+
+fn restore(c: u8, r: u8) {
+    area_at(c, r)
+    restore_area()
+}
+
+asm fn draw_area(c: u8 using A, r: u8 using Y) -> u8 {
+    // Explosion start, the tiles of the area c0-c1, r0-r1 (set by area_at) around centre tile (c, r): the flash
+    // art (stored tile by tile, row by row, 4 chars each), one more in cover, cur_slot in owner, and the stars
+    // there listed in caught_stars. Returns how many stars. Assembly: 36 chars and 36 colors (frame time).
+    var mid_c: u8
+    var mid_r: u8
+    var tr: u8
+    var tc: u8
+    var ch: u8
+    var n: u8
+    var scr: ptr u8
+    var clr: ptr u8
+    sta mid_c
+    sty mid_r
+    lda #0
+    sta n
+    lda r0
+    sta tr
+.row:
+    // first char of the row's first tile: art + ((tr - r + 1) * 3 + (c0 - c + 1)) * 4
+    lda tr
+    sec
+    sbc mid_r
+    clc
+    adc #1                  // 0-2
+    sta ch
+    asl
+    clc
+    adc ch               // * 3
+    sta ch
+    lda c0
+    sec
+    sbc mid_c
+    clc
+    adc #1                  // 0-2
+    clc
+    adc ch
+    asl
+    asl
+    clc
+    adc #ART
+    sta ch
+    // screen and color RAM pointers of tile (c0, tr)
+    ldy tr
+    lda c0
+    sta tc
+    asl
+    clc
+    adc video.tile_row_addr,y
+    sta scr
+    sta clr
+    lda video.tile_row_addr+video.MAP_H,y      // the high bytes
+    adc #0
+    sta scr+1
+    clc
+    adc #video.COLOR_PAGES
+    sta clr+1
+.tile:
+    ldy tr
+    lda video.row_start,y
+    clc
+    adc tc
+    tax                     // tile index
+    inc cover,x
+    lda cur_slot
+    sta owner,x             // the newest explosion here
+    lda video.tiles,x
+    beq .art
+    ldy n
+    sec
+    sbc #1
+    sta caught_stars,y
+    inc n
+.art:
+    lda ch
+    ldy #0
+    sta (scr),y
+    clc
+    adc #1
+    iny
+    sta (scr),y
+    adc #1
+    ldy #40
+    sta (scr),y
+    adc #1
+    iny
+    sta (scr),y
+    lda #COLOR
+    ldy #0
+    sta (clr),y
+    iny
+    sta (clr),y
+    ldy #40
+    sta (clr),y
+    iny
+    sta (clr),y
+    // next tile in the row
+    lda tc
+    cmp c1
+    beq .rowdone
+    inc tc
+    lda ch
+    clc
+    adc #4
+    sta ch
+    lda scr
+    clc
+    adc #2
+    sta scr
+    sta clr
+    bcc .tile
+    inc scr+1
+    inc clr+1
+    jmp .tile
+.rowdone:
+    lda tr
+    cmp r1
+    beq .done
+    inc tr
+    jmp .row
+.done:
+    lda n
+}
+
+asm fn draw_frame(c: u8 using A, r: u8 using Y) {
+    // Animation step of explosion cur_slot around centre tile (c, r), area c0-c1, r0-r1 (set by area_at): the
+    // chars of the frame starting at art_base, only on the tiles it owns (the colors stay). Assembly.
+    var mid_c: u8
+    var mid_r: u8
+    var tr: u8
+    var tc: u8
+    var ch: u8
+    var scr: ptr u8
+    sta mid_c
+    sty mid_r
+    lda r0
+    sta tr
+.row:
+    // first char of the row's first tile: art_base + ((tr - r + 1) * 3 + (c0 - c + 1)) * 4
+    lda tr
+    sec
+    sbc mid_r
+    clc
+    adc #1
+    sta ch
+    asl
+    clc
+    adc ch
+    sta ch
+    lda c0
+    sec
+    sbc mid_c
+    clc
+    adc #1
+    clc
+    adc ch
+    asl
+    asl
+    clc
+    adc art_base
+    sta ch
+    ldy tr
+    lda c0
+    sta tc
+    asl
+    clc
+    adc video.tile_row_addr,y
+    sta scr
+    lda video.tile_row_addr+video.MAP_H,y
+    adc #0
+    sta scr+1
+.tile:
+    ldy tr
+    lda video.row_start,y
+    clc
+    adc tc
+    tax
+    lda owner,x
+    cmp cur_slot
+    bne .next
+    lda ch
+    ldy #0
+    sta (scr),y
+    clc
+    adc #1
+    iny
+    sta (scr),y
+    adc #1
+    ldy #40
+    sta (scr),y
+    adc #1
+    iny
+    sta (scr),y
+.next:
+    lda tc
+    cmp c1
+    beq .rowdone
+    inc tc
+    lda ch
+    clc
+    adc #4
+    sta ch
+    lda scr
+    clc
+    adc #2
+    sta scr
+    bcc .tile
+    inc scr+1
+    jmp .tile
+.rowdone:
+    lda tr
+    cmp r1
+    beq .done
+    inc tr
+    jmp .row
+.done:
+}
+
+fn restore_area() {
+    // Explosion end, the tiles of the area c0-c1, r0-r1 (set by area_at): one less in cover, and a tile with no
+    // explosion left over it is redrawn from the map.
+    var tr: u8 = r0
+    while true {
+        var i: u8 = video.row_start[tr] + c0
+        var tc: u8 = c0
+        while true {
+            cover[i] -= 1
+            if cover[i] == 0 {
+                video.draw_tile(tc, tr)
+            }
+            if tc == c1 {
+                break
+            }
+            tc += 1
+            i += 1
+        }
+        if tr == r1 {
+            break
+        }
+        tr += 1
+    }
+}
+
+fn update() {
+    // Timers, then at most one animation step, then one queued restore. Frame time: a step waits while this
+    // frame already starts an explosion or restores one (the heaviest work), up to MAX_LATE frames.
+    var stepped: bool = false
+    for s in 0..MAX {
+        var t: u8 = timer[s]
+        if t != 0 {
+            t -= 1
+            timer[s] = t
+            if t == 0 {
+                finish(s)
+            } else if t <= step_at[s] {
+                if stepped {
+                    continue
+                }
+                if (starts == 0 && queued == 0) || step_at[s] - t >= MAX_LATE {
+                    stage[s] += 1
+                    step_at[s] = 0
+                    if stage[s] == 1 {
+                        step_at[s] = FRAMES - BURST_END
+                    }
+                    step(s)
+                    stepped = true
+                }
+            }
+        }
+    }
+    if queued != 0 {
+        restore(queue_col[0], queue_row[0])
+        queued -= 1
+        for k in 0..queued {
+            queue_col[k] = queue_col[k + 1]
+            queue_row[k] = queue_row[k + 1]
+        }
+    }
+    starts = 0
+}
+
+fn check_player() {
+    // The player's centre in a running explosion's core. Not while dying or safe after reappearing.
+    if live == 0 || !player.hurtable() {
+        return
+    }
+    obj_x = player.x + player.BOX / 2
+    obj_y = player.y + player.BOX / 2
+    for s in 0..MAX {
+        if timer[s] != 0 && hits(s) {
+            player.hurt()
+            return
+        }
+    }
+}
+
+asm fn hits(s: u8 using Y) -> bool using carry {
+    // Carry set when (obj_x, obj_y) is within REACH of explosion s's centre: dx, dy are the distances along
+    // each axis, and longer + shorter / 2 < REACH (an octagon close to a circle). Assembly: called for every
+    // hostile and running explosion each frame.
+    // dx = |obj_x - core_x|, a miss when 256 or more
+    var ax: u8
+    var ay: u8
+    sec
+    lda obj_x
+    sbc core_x,y
+    sta ax
+    lda obj_x+1
+    sbc core_x+MAX,y        // the high bytes
+    beq .xok
+    cmp #$FF
+    bne .miss
+    lda ax
+    beq .miss               // -256
+    eor #$FF
+    clc
+    adc #1
+    sta ax
+.xok:
+    lda ax
+    cmp #REACH
+    bcs .miss
+    // dy = |obj_y - core_y|
+    lda obj_y
+    sec
+    sbc core_y,y
+    bcs .yabs
+    eor #$FF
+    adc #1                  // carry is clear: negate
+.yabs:
+    cmp #REACH
+    bcs .miss
+    sta ay
+    // longer + shorter / 2
+    cmp ax
+    bcc .xlonger
+    lda ax
+    lsr
+    clc
+    adc ay
+    jmp .cmp
+.xlonger:
+    lsr                     // A = dy, the shorter
+    clc
+    adc ax
+.cmp:
+    cmp #REACH
+    bcs .miss
+    sec
+    rts
+.miss:
+    clc
+}

@@ -1,0 +1,422 @@
+// VIC setup (bank 3), charset and sprite upload, HUD labels, sprite shadows and the frame IRQ.
+// Port of ../src/video.p8. Not ported: the DEBUG_HUD self-test switch.
+import c64
+import mem
+import assets
+import stars
+import sound
+
+// ---- colors ----
+const COLOR_BORDER: u8 = 0
+const COLOR_BG: u8 = 0              // $D021, art symbol '.' in chars
+const COLOR_CHAR_MC1: u8 = 1        // $D022, art symbol '2' in chars: white, hot cores (spec section 12)
+const COLOR_CHAR_MC2: u8 = 8        // $D023, art symbol '3' in chars: orange, glows and rays
+const QUASAR_SPRITE_BIT: u8 = 0b1000_0000  // sprite 7 (the quasar) is multicolor, the others hi-res
+const COLOR_SPRITE_MC0: u8 = 1      // $D025, art symbol '2' in msprites: white (the quasar's core)
+const COLOR_SPRITE_MC1: u8 = 3      // $D026, art symbol '3' in msprites: cyan (the quasar's jets)
+const COLOR_HUD: u8 = 1             // hi-res text, must be 0-7
+const MC: u8 = 8                    // color RAM bit 3: the cell is multicolor
+
+// ---- memory (spec section 3) ----
+const SCREEN = $C000
+const COLOR_RAM = $D800
+const CHARSET = $E000
+const SPRITE_DATA = $E800
+const HUD_FONT_CHARS = 64           // ROM screen codes 0-63: @, A-Z, space, digits, punctuation
+const CHAR_SPACE: u8 = 32
+
+// ---- tile map (spec section 4) ----
+const MAP_W: u8 = 20
+const MAP_H: u8 = 12
+var tiles: [u8; MAP_W * MAP_H] @ $C400      // 0 = empty, 1 + i = stationary star i
+var specks: [u8; MAP_W * MAP_H] @ $C500     // 0 = none, else (speck kind + 1) << 2 | char (0 TL, 1 TR, 2 BL, 3 BR)
+data row_start: [u8; _] = [0, 20, 40, 60, 80, 100, 120, 140, 160, 180, 200, 220]
+// screen address of the top-left char of tile column 0 in each tile row (char row 1 + 2*row)
+data tile_row_addr: [ptr u8; _] = [SCREEN + 40, SCREEN + 120, SCREEN + 200, SCREEN + 280,
+                                   SCREEN + 360, SCREEN + 440, SCREEN + 520, SCREEN + 600,
+                                   SCREEN + 680, SCREEN + 760, SCREEN + 840, SCREEN + 920]
+data quad_offset: [u8; _] = [0, 1, 40, 41]
+
+// star kind -> top-left char and color (the tiles star_0, star_1, ... in assets/tiles.txt). The colors
+// include MC (video.p8 adds it in init()).
+data star_char: [u8; _] = [assets.TILE_STAR_0_TL, assets.TILE_STAR_1_TL, assets.TILE_STAR_2_TL, assets.TILE_STAR_3_TL,
+                           assets.TILE_STAR_4_TL, assets.TILE_STAR_5_TL, assets.TILE_STAR_6_TL, assets.TILE_STAR_7_TL]
+data star_color: [u8; len(star_char)] = [assets.TILE_STAR_0_COLOR | MC, assets.TILE_STAR_1_COLOR | MC,
+                            assets.TILE_STAR_2_COLOR | MC, assets.TILE_STAR_3_COLOR | MC,
+                            assets.TILE_STAR_4_COLOR | MC, assets.TILE_STAR_5_COLOR | MC,
+                            assets.TILE_STAR_6_COLOR | MC, assets.TILE_STAR_7_COLOR | MC]
+const STAR_KINDS: u8 = len(star_char)
+data speck_char: [u8; _] = [assets.CHAR_SPECK_0, assets.CHAR_SPECK_1, assets.CHAR_SPECK_2,
+                            assets.CHAR_SPECK_3, assets.CHAR_SPECK_4]
+const SPECK_KINDS: u8 = len(speck_char)
+const SPECK_COLOR: u8 = assets.CHAR_SPECK_0_COLOR   // hi-res cell (no MC bit): 1-px dots, own color only
+
+var cpu_port: u8 @ $01              // memory configuration (bits 0-2)
+var hibase: u8 @ $0288              // the KERNAL's screen page (cbm.HIBASE)
+var sprite_ptrs: [u8; 8] @ $C3F8    // read by the VIC, so written every frame
+
+data chars_bin = include_bytes("../data/chars.bin")
+data sprites_bin = include_bytes("../data/sprites.bin")
+
+fn init() {
+    c64.vic.sprite_enable = 0
+    clear_screen()
+
+    // HUD font from the character ROM. With CHAREN=0 the ROM replaces I/O at $D000, so no IRQs meanwhile.
+    c64.interrupts_off()
+    cpu_port = $32                  // char ROM, KERNAL, no BASIC
+    mem.copy(CHARSET, $D000, HUD_FONT_CHARS * 8)
+    cpu_port = $36                  // I/O, KERNAL, no BASIC
+    c64.interrupts_on()
+
+    // CPU writes to $E000-$FFFF reach the RAM under the KERNAL ROM
+    mem.copy(CHARSET + assets.FIRST_CHAR * 8, addr(chars_bin), len(chars_bin))
+    mem.copy(SPRITE_DATA, addr(sprites_bin), len(sprites_bin))
+
+    // VIC bank 3: $DD00 bits 0-1 = %00. Screen at +$0000, charset at +$2000.
+    c64.cia2.ddr_a |= 0b0000_0011
+    c64.cia2.port_a &= 0b1111_1100
+    c64.vic.memory = $08
+    hibase = $C0
+
+    c64.vic.control2 |= 0b0001_0000     // multicolor chars
+    c64.vic.sprite_multicolor = QUASAR_SPRITE_BIT   // hi-res sprites but the quasar
+    c64.vic.sprite_mc0 = COLOR_SPRITE_MC0
+    c64.vic.sprite_mc1 = COLOR_SPRITE_MC1
+    c64.vic.border = COLOR_BORDER
+    c64.vic.background = COLOR_BG
+    c64.vic.background1 = COLOR_CHAR_MC1
+    c64.vic.background2 = COLOR_CHAR_MC2
+}
+
+const COLOR_PAGES: u8 = (COLOR_RAM - SCREEN) >> 8     // color RAM is this many pages after the screen
+
+
+asm fn draw_tile(col: u8 using A, row: u8 using Y) {
+    // One tile from the tile map: a star (its shown chars in its shown color) or empty space with its speck.
+    // Assembly, as in video.p8: explosions restore 9 tiles at a time (frame time).
+    var scr: ptr u8
+    var clr: ptr u8
+    var co: u8
+    tax                             // col
+    asl
+    clc
+    adc tile_row_addr,y
+    sta scr
+    sta clr
+    lda tile_row_addr+MAP_H,y       // the high bytes
+    adc #0
+    sta scr+1
+    clc
+    adc #COLOR_PAGES
+    sta clr+1
+    txa
+    clc
+    adc row_start,y
+    tax                             // tile index
+    lda tiles,x
+    beq .empty
+    tay                             // star index + 1
+    lda stars.shown-1,y
+    sta co
+    lda stars.shown_char-1,y
+    ldy #0
+    sta (scr),y
+    clc
+    adc #1
+    iny
+    sta (scr),y
+    adc #1
+    ldy #40
+    sta (scr),y
+    adc #1
+    iny
+    sta (scr),y
+    jmp .color
+.empty:
+    lda #SPECK_COLOR
+    sta co
+    lda #CHAR_SPACE
+    ldy #0
+    sta (scr),y
+    iny
+    sta (scr),y
+    ldy #40
+    sta (scr),y
+    iny
+    sta (scr),y
+    lda specks,x
+    beq .color
+    pha
+    and #3
+    tay
+    lda quad_offset,y
+    tay                             // offset of the speck's char in the tile
+    pla
+    lsr
+    lsr
+    tax                             // speck kind + 1
+    lda speck_char-1,x
+    sta (scr),y
+.color:
+    lda co
+    ldy #0
+    sta (clr),y
+    iny
+    sta (clr),y
+    ldy #40
+    sta (clr),y
+    iny
+    sta (clr),y
+}
+
+fn draw_playfield() {
+    for row in 0..MAP_H {
+        for col in 0..MAP_W {
+            draw_tile(col, row)
+        }
+    }
+}
+
+// ---- HUD (char row 0, spec section 2) ----
+//  SCORE 00000000          T60   x1   *3      (T, x and * are the icon chars)
+const HUD_SCORE_COL: u8 = 7         // 8 digits
+const HUD_TIME_COL: u8 = 27         // icon, then 2 digits
+const HUD_MULT_COL: u8 = 32         // icon, then 1 digit
+const HUD_LIVES_COL: u8 = 36        // icon, then 1 digit
+const HUD_INV_COL: u8 = 20          // invincibility: icon, then seconds left; in the free columns 18-23 (PAUSED)
+
+data score_text = screen"SCORE\0"
+
+fn draw_hud() {
+    // Labels and icons. The values are drawn by the hud_* routines (not ported yet).
+    mem.fill(SCREEN, CHAR_SPACE, 40)
+    mem.fill(COLOR_RAM, COLOR_HUD, 40)
+    hud_text(1, addr(score_text))
+    hud_icon(HUD_TIME_COL, assets.CHAR_TIME, assets.CHAR_TIME_COLOR)
+    hud_icon(HUD_MULT_COL, assets.CHAR_MULT, assets.CHAR_MULT_COLOR)
+    hud_icon(HUD_LIVES_COL, assets.CHAR_LIVES, assets.CHAR_LIVES_COLOR)
+}
+
+fn hud_text(col: u8, s: ptr u8) {
+    // Text ending in a 0 byte, at a column of the HUD row (its color is already set).
+    var scr: ptr u8 = SCREEN
+    scr += col
+    var i: u8 = 0
+    while s[i] != 0 {
+        scr[i] = s[i]
+        i += 1
+    }
+}
+
+fn hud_icon(col: u8, ch: u8, color: u8) {
+    var scr: ptr u8 = SCREEN
+    var clr: ptr u8 = COLOR_RAM
+    scr[col] = ch
+    clr[col] = color
+}
+
+fn hud_score(bcd_hi: u8, bcd_mid: u8, bcd_lo: u8) {
+    // Score in hundreds, 6 BCD digits, shown with a fixed "00": 8 digits.
+    put_score(SCREEN + HUD_SCORE_COL, bcd_hi, bcd_mid, bcd_lo)
+}
+
+fn put_score(dst: ptr u8, bcd_hi: u8, bcd_mid: u8, bcd_lo: u8) {
+    // A score in hundreds (6 BCD digits) as 8 digits at dst. (Assembly in video.p8; plain here: at most once a
+    // frame.)
+    dst[0] = (bcd_hi >> 4) | '0'
+    dst[1] = (bcd_hi & 15) | '0'
+    dst[2] = (bcd_mid >> 4) | '0'
+    dst[3] = (bcd_mid & 15) | '0'
+    dst[4] = (bcd_lo >> 4) | '0'
+    dst[5] = (bcd_lo & 15) | '0'
+    dst[6] = '0'
+    dst[7] = '0'
+}
+
+fn hud_time(bcd: u8) {
+    put_bcd2(SCREEN + HUD_TIME_COL + 1, bcd)
+}
+
+fn hud_mult(n: u8) {
+    put_digit(SCREEN + HUD_MULT_COL + 1, n)
+}
+
+fn hud_lives(n: u8) {
+    put_digit(SCREEN + HUD_LIVES_COL + 1, n)
+}
+
+fn put_bcd2(dst: ptr u8, bcd: u8) {
+    put_digit(dst, bcd >> 4)
+    put_digit(dst + 1, bcd & 15)
+}
+
+fn put_digit(dst: ptr u8, n: u8) {
+    // Only writes when the digit on screen differs.
+    var ch: u8 = '0' + n
+    if dst[0] != ch {
+        dst[0] = ch
+    }
+}
+
+fn hud_invincible(secs: u8) {
+    // Seconds of invincibility left (spec section 9); 0 clears the field.
+    // (video.p8 skips this with main.DEBUG_HUD on; that switch comes with the self-tests.)
+    var scr: ptr u8 = SCREEN
+    if secs == 0 {
+        scr[HUD_INV_COL] = CHAR_SPACE
+        scr[HUD_INV_COL + 1] = CHAR_SPACE
+        return
+    }
+    hud_icon(HUD_INV_COL, assets.CHAR_QUASAR, assets.CHAR_QUASAR_COLOR)
+    scr[HUD_INV_COL + 1] = '0' + secs
+}
+
+fn put_hundreds(dst: ptr u8, bcd_mid: u8, bcd_lo: u8) -> u8 {
+    // A value in hundreds (4 BCD digits) without leading zeros, then "00"; just "0" for 0.
+    // Returns the number of chars written.
+    var n: u8 = 0
+    var lead: bool = true
+    for k in 0..4 {
+        var d: u8 = bcd_lo & 15
+        match k {
+            0 => d = bcd_mid >> 4
+            1 => d = bcd_mid & 15
+            2 => d = bcd_lo >> 4
+            _ => {}
+        }
+        if d != 0 {
+            lead = false
+        }
+        if !lead {
+            dst[n] = '0' + d
+            n += 1
+        }
+    }
+    dst[n] = '0'
+    n += 1
+    if n == 1 {
+        return n
+    }
+    dst[n] = '0'
+    return n + 1
+}
+
+// ---- messages over the playfield (game flow) ----
+
+fn row_addr(row: u8) -> ptr u8 {
+    var w: u16 = row
+    var p: ptr u8 = SCREEN
+    p += (w << 5) + (w << 3)        // row * 40
+    return p
+}
+
+fn message(row: u8, col: u8, s: ptr u8, color: u8) {
+    // Hi-res text (color 0-7, ending in a 0 byte) at a char row. draw_playfield() or restore_tiles() erases it.
+    var scr: ptr u8 = row_addr(row) + col
+    var i: u8 = 0
+    while s[i] != 0 {
+        scr[i] = s[i]
+        i += 1
+    }
+    mem.fill(scr + (COLOR_RAM - SCREEN), color, i)
+}
+
+fn restore_tiles(row: u8, col: u8, n: u8) {
+    // Redraw the tiles under n chars of a message at char row 1-24, starting at col.
+    var trow: u8 = (row - 1) >> 1
+    for tcol in (col >> 1)..=((col + n - 1) >> 1) {
+        draw_tile(tcol, trow)
+    }
+}
+
+fn clear_screen() {
+    mem.fill(SCREEN, CHAR_SPACE, 1000)
+    mem.fill(COLOR_RAM, COLOR_HUD, 1000)
+}
+
+fn hide_sprites() {
+    spr_ena = 0
+}
+
+fn title_mode() {
+    // Hi-res chars and sprites: the title logo uses all 16 colors.
+    c64.vic.control2 &= 0b1110_1111
+    c64.vic.sprite_multicolor = 0
+}
+
+fn game_mode() {
+    // Multicolor chars, the quasar sprite multicolor (as set up by init()).
+    c64.vic.control2 |= 0b0001_0000
+    c64.vic.sprite_multicolor = QUASAR_SPRITE_BIT
+}
+
+// ---- sprites and frame IRQ (spec section 1) ----
+// Game code writes these shadows; the frame IRQ copies them to the VIC at the start of the next frame.
+const FRAME_IRQ_LINE: u8 = 251      // first line of the bottom border (PAL)
+var spr_ptr: [u8; 8]
+var spr_col: [u8; 8]
+var spr_x: [u8; 8]
+var spr_y: [u8; 8]
+var spr_msb: u8
+var spr_ena: u8
+var frame_ready: bool
+var frames: u8                      // counts frame IRQs
+
+fn start_frame_irq() {
+    // As Prog8's sys.set_rasterirq: the KERNAL stays in and the IRQ goes through $0314. The handler
+    // replaces the KERNAL's IRQ work (no keyboard scan: input reads the matrix itself).
+    c64.interrupts_off()
+    c64.cia_irqs_off()              // no CIA interrupts (the KERNAL's timer), pending ones cleared
+    c64.vic.control1 &= $7F         // raster line bit 8 = 0
+    c64.vic.raster = FRAME_IRQ_LINE
+    c64.vic.irq_enable = 1          // raster interrupt on
+    c64.vic.irq_status = $FF        // clear one that is pending
+    c64.set_kernal_irq(addr(frame_irq))
+    c64.interrupts_on()
+}
+
+interrupt fn frame_irq() {
+    // Nothing slow here. Unrolled copy of the 8 sprites' pointer, color, x and y.
+    c64.vic.irq_status = $FF        // acknowledge
+    sprite_ptrs[0] = spr_ptr[0]; c64.vic.sprite_color[0] = spr_col[0]; c64.sprite_xy[0] = spr_x[0]; c64.sprite_xy[1] = spr_y[0]
+    sprite_ptrs[1] = spr_ptr[1]; c64.vic.sprite_color[1] = spr_col[1]; c64.sprite_xy[2] = spr_x[1]; c64.sprite_xy[3] = spr_y[1]
+    sprite_ptrs[2] = spr_ptr[2]; c64.vic.sprite_color[2] = spr_col[2]; c64.sprite_xy[4] = spr_x[2]; c64.sprite_xy[5] = spr_y[2]
+    sprite_ptrs[3] = spr_ptr[3]; c64.vic.sprite_color[3] = spr_col[3]; c64.sprite_xy[6] = spr_x[3]; c64.sprite_xy[7] = spr_y[3]
+    sprite_ptrs[4] = spr_ptr[4]; c64.vic.sprite_color[4] = spr_col[4]; c64.sprite_xy[8] = spr_x[4]; c64.sprite_xy[9] = spr_y[4]
+    sprite_ptrs[5] = spr_ptr[5]; c64.vic.sprite_color[5] = spr_col[5]; c64.sprite_xy[10] = spr_x[5]; c64.sprite_xy[11] = spr_y[5]
+    sprite_ptrs[6] = spr_ptr[6]; c64.vic.sprite_color[6] = spr_col[6]; c64.sprite_xy[12] = spr_x[6]; c64.sprite_xy[13] = spr_y[6]
+    sprite_ptrs[7] = spr_ptr[7]; c64.vic.sprite_color[7] = spr_col[7]; c64.sprite_xy[14] = spr_x[7]; c64.sprite_xy[15] = spr_y[7]
+    c64.vic.sprite_x_msb = spr_msb
+    c64.vic.sprite_enable = spr_ena
+    frame_ready = true
+    frames += 1
+    sound.step()
+}
+
+fn wait_frame() {
+    while !frame_ready { }
+    frame_ready = false
+}
+
+data sprite_bit: [u8; _] = [1, 2, 4, 8, 16, 32, 64, 128]
+
+fn set_sprite(n: u8, frame: u8, color: u8, px: u16, py: u8) {
+    // Playfield coordinates of the sprite's top-left -> hardware position (spec section 2).
+    var bit: u8 = sprite_bit[n]
+    var x: u16 = px + 24
+    spr_ptr[n] = frame
+    spr_col[n] = color
+    spr_x[n] = x.lo
+    spr_y[n] = py + 50 + 8
+    if x.hi != 0 {
+        spr_msb |= bit
+    } else {
+        spr_msb &= ~bit
+    }
+    spr_ena |= bit
+}
+
+fn hide_sprite(n: u8) {
+    spr_ena &= ~sprite_bit[n]
+}

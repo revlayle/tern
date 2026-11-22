@@ -1,0 +1,518 @@
+// Stationary stars (spec sections 4, 6 and 10): placement, background specks, player hits, countdowns.
+// Port of ../src/stars.p8.
+import sound
+import c64
+import mem
+import video
+import player
+import assets
+import explode
+import score
+import hostiles
+import quasar
+
+const MAX: u8 = 55                  // [TUNE] stars at most (designer, 2026-10-18: was 45)
+// tiles kept free around the player's start (spec section 10)
+const FREE_COL: u8 = 8              // columns 8-11
+const FREE_ROW: u8 = 4              // rows 4-7
+const SPECK_ONE_IN: u8 = 4          // about one empty tile in four has a speck [TUNE]
+
+// states (spec section 4)
+const IDLE: u8 = 0
+const WARNING: u8 = 1
+const COUNTDOWN: u8 = 2
+const GONE: u8 = 3
+
+const HITS_TO_NOVA: u8 = 3
+const BOOST_HITS: u8 = 3
+const COUNTDOWN_FRAMES: u8 = 100    // 2 s
+const FAST_FLASH: u8 = 25           // [TUNE] last half second flashes faster
+const NO_HIT_FRAMES: u8 = 10        // [TUNE] a star counts one hit per contact
+const STAGGER: u8 = 6               // [TUNE] extra countdown frames per further star caught by one explosion
+// Hit feedback (spec section 12): the star's own color only, indexed by its own color: hits 1 and 2.
+// Mostly yellow then white; yellow and white stars use white/yellow then cyan.
+data hit1_color: [u8; _] = [7, 7, 7, 7, 7, 7, 7, 1]
+data hit2_color: [u8; _] = [1, 3, 1, 1, 1, 1, 1, 3]
+// Countdown: every kind turns into the shared swelling star, alternating its two frames (big and white,
+// small and yellow) every 8 frames; in the last half second the big one flashes white and yellow every 2 frames
+// (colors only: frame time, many stars can be in their last half second at once).
+const SWELL_BIG: u8 = assets.TILE_SWELL_1_TL
+const SWELL_BIG_COLOR: u8 = 1
+const SWELL_SMALL: u8 = assets.TILE_SWELL_0_TL
+const SWELL_SMALL_COLOR: u8 = 7
+// turning hostile (spec section 7): flashes red for 1 s, alternating with its own color every 4 frames
+const WARNING_FRAMES: u8 = 50
+const WARNING_COLOR: u8 = 2
+
+var col: [u8; MAX]
+var row: [u8; MAX]
+var kind: [u8; MAX]
+var state: [u8; MAX]
+var hits: [u8; MAX]
+var timer: [u8; MAX]
+var no_hit: [u8; MAX]               // frames before this star can count a hit again
+var shown: [u8; MAX]                // color RAM value it is drawn with (MC bit included)
+var shown_char: [u8; MAX]           // top-left char it is drawn with (its kind, or the swelling star)
+var count: u8
+var left: u8                        // stars not destroyed yet: stationary stars plus active hostiles
+var warnings: u8                    // stars in WARNING
+var novas_due: bool                 // a countdown reached 0: update() makes it go supernova next frame
+var pick_far: [u8; MAX]             // pick_hostile() candidates, filled by scan_idle()
+var pick_any: [u8; MAX]
+var n_far: u8
+var n_any: u8
+var reveal_order: [u8; MAX]         // galaxy start: stars in the order they appear
+var revealed: u8
+var stops: u8                       // knockbacks stopped by a second star (debug readout)
+
+// ---- random numbers: Prog8's math.rnd (the x-abc generator), so the game's random choices match ----
+var rnd_x: u8
+var rnd_c: u8 = $C2
+var rnd_a: u8 = $11
+var rnd_b: u8 = $37
+
+fn seed() {
+    // As math.rndseed(mkword(c64.CIA1TAL, c64.RASTER), mkword(c64.RASTER, c64.CIA1TAH)).
+    rnd_b = c64.vic.raster
+    rnd_a = c64.cia1.timer_a.hi
+    rnd_c = c64.cia1.timer_a.lo
+    rnd_x = c64.vic.raster
+}
+
+asm fn rnd() -> u8 {
+    inc rnd_x
+    clc
+    lda rnd_x
+    eor rnd_c
+    eor rnd_a
+    sta rnd_a
+    adc rnd_b
+    sta rnd_b
+    lsr
+    eor rnd_a
+    adc rnd_c               // with the carry from lsr
+    sta rnd_c
+}
+
+fn rand_below(n: u8) -> u8 {
+    // Random 0 to n-1 (n >= 1). Masks rnd() and retries out-of-range values: under 2 tries on
+    // average, and much faster than a multiply.
+    var mask: u8 = 255
+    if n <= 2 {
+        mask = 1
+    } else if n <= 4 {
+        mask = 3
+    } else if n <= 8 {
+        mask = 7
+    } else if n <= 16 {
+        mask = 15
+    } else if n <= 32 {
+        mask = 31
+    } else if n <= 64 {
+        mask = 63
+    } else if n <= 128 {
+        mask = 127
+    }
+    while true {
+        var r: u8 = rnd() & mask
+        if r < n {
+            return r
+        }
+    }
+}
+
+fn for_galaxy(g: u8) -> u8 {
+    // min(55, 15 + 2 * (g - 1)) stars: 55 from galaxy 21
+    if g >= 21 {
+        return MAX
+    }
+    return 13 + (g << 1)
+}
+
+fn place(n: u8) {
+    // n stars on random free tiles outside the start area, each with a random kind; then the specks.
+    clear()
+    for _ in 0..n {
+        var c: u8 = 0
+        var r: u8 = 0
+        while true {
+            c = rand_below(video.MAP_W)
+            r = rand_below(video.MAP_H)
+            if video.tiles[video.row_start[r] + c] == 0 && !in_free_area(c, r) {
+                break
+            }
+        }
+        add(c, r, rand_below(video.STAR_KINDS))
+    }
+    place_specks()
+}
+
+fn clear() {
+    mem.fill(addr(video.tiles), 0, len(video.tiles))
+    count = 0
+    left = 0
+    warnings = 0
+    novas_due = false
+}
+
+fn add(c: u8, r: u8, k: u8) {
+    // One star on a free tile (placement and self-tests).
+    var i: u8 = count
+    col[i] = c
+    row[i] = r
+    kind[i] = k
+    state[i] = IDLE
+    hits[i] = 0
+    timer[i] = 0
+    no_hit[i] = 0
+    shown[i] = video.star_color[k]
+    shown_char[i] = video.star_char[k]
+    video.tiles[video.row_start[r] + c] = i + 1
+    count += 1
+    left += 1
+}
+
+fn hide_for_reveal() {
+    // Galaxy start: take the placed stars off the map (the specks stay) and shuffle the order they come back.
+    mem.fill(addr(video.tiles), 0, len(video.tiles))
+    for i in 0..count {
+        reveal_order[i] = i
+    }
+    var j: u8 = count
+    while j > 1 {
+        var i: u8 = rand_below(j)
+        j -= 1
+        var tmp: u8 = reveal_order[i]
+        reveal_order[i] = reveal_order[j]
+        reveal_order[j] = tmp
+    }
+    revealed = 0
+}
+
+fn reveal_next() {
+    // The next star back on the map and the screen (nothing when all are back).
+    if revealed >= count {
+        return
+    }
+    var i: u8 = reveal_order[revealed]
+    revealed += 1
+    video.tiles[video.row_start[row[i]] + col[i]] = i + 1
+    video.draw_tile(col[i], row[i])
+}
+
+fn in_free_area(c: u8, r: u8) -> bool {
+    return c - FREE_COL < 4 && r - FREE_ROW < 4     // unsigned wrap: below the start also counts as outside
+}
+
+fn place_specks() {
+    // Decoration only: specks live on the screen and in video.specks, not in the tile map.
+    for i in 0..len(video.specks) {
+        video.specks[i] = 0
+        if video.tiles[i] == 0 && rand_below(SPECK_ONE_IN) == 0 {
+            video.specks[i] = (rand_below(video.SPECK_KINDS) + 1) << 2 | rand_below(4)
+        }
+    }
+}
+
+// ---- hits, countdowns, explosions (spec section 6) ----
+
+fn player_contact() {
+    // Player box against the 12x12 boxes (tile pixels 2-13) of the stars in the tiles it overlaps.
+    var px: u16 = player.x
+    var py: u8 = player.y
+    var c0: u8 = (px >> 4) as u8
+    var c1: u8 = ((px + player.BOX - 1) >> 4) as u8
+    var r0: u8 = py >> 4
+    var r1: u8 = (py + player.BOX - 1) >> 4
+    for r in r0..=r1 {
+        for c in c0..=c1 {
+            var t: u8 = video.tiles[video.row_start[r] + c]
+            if t != 0 {
+                var sx: u16 = ((c as u16) << 4) + 2
+                var sy: u8 = (r << 4) + 2
+                if px <= sx + 11 && sx <= px + player.BOX - 1 && py <= sy + 11 && sy <= py + player.BOX - 1 {
+                    touch(t - 1, (px.lo - sx.lo) as i8, (py - sy) as i8)
+                }
+            }
+        }
+    }
+}
+
+fn touch(i: u8, dx: i8, dy: i8) {
+    // dx, dy: player box minus star box (both corners); equal sizes but one, so close to centre minus centre.
+    // A different star touched during a knockback that started in an earlier frame stops the knockback there:
+    // no second bounce, so the player can't be trapped bouncing between two stars. The touch still counts.
+    // The invincible player passes through and the star explodes at once.
+    if player.invincible != 0 {
+        blow(i)
+        return
+    }
+    if player.knock_left != 0 && player.knock_left < player.KNOCK_FRAMES && i != player.knock_star {
+        player.knock_left = 0
+        stops += 1
+        if no_hit[i] == 0 {
+            no_hit[i] = NO_HIT_FRAMES
+            sound.play(sound.HIT)
+            if state[i] != COUNTDOWN {
+                if player.boosted {
+                    hit(i, BOOST_HITS)
+                } else {
+                    hit(i, 1)
+                }
+            }
+        }
+        return
+    }
+    if no_hit[i] != 0 {
+        return
+    }
+    no_hit[i] = NO_HIT_FRAMES
+    sound.play(sound.HIT)
+    if state[i] != COUNTDOWN {
+        if player.boosted {
+            hit(i, BOOST_HITS)
+        } else {
+            hit(i, 1)
+        }
+    }
+    player.bounce(dx, dy)
+    player.knock_star = i
+}
+
+fn hit(i: u8, n: u8) {
+    hits[i] += n
+    if hits[i] >= HITS_TO_NOVA {
+        start_countdown(i)
+    } else if hits[i] == 1 {
+        set_color(i, hit1_color[video.star_color[kind[i]] & 7])
+    } else {
+        set_color(i, hit2_color[video.star_color[kind[i]] & 7])
+    }
+}
+
+fn blow(i: u8) {
+    // Touched by the invincible player: a supernova with no countdown. update() sets it off this frame, or
+    // the next when an explosion has already started this frame (frame time).
+    if state[i] != COUNTDOWN {
+        start_countdown(i)
+    }
+    timer[i] = 0
+    novas_due = true
+}
+
+fn caught(i: u8, extra: u8) -> bool {
+    // The star's tile is in an explosion: straight to a full countdown plus `extra` frames, unless one
+    // is running. Returns true when a countdown started.
+    if state[i] != IDLE && state[i] != WARNING {
+        return false
+    }
+    start_countdown(i)
+    timer[i] += extra
+    return true
+}
+
+fn start_countdown(i: u8) {
+    // Also ends a warning: the star goes supernova instead of hostile.
+    if state[i] == WARNING {
+        warnings -= 1
+    }
+    state[i] = COUNTDOWN
+    hits[i] = HITS_TO_NOVA
+    timer[i] = COUNTDOWN_FRAMES
+    set_look(i, SWELL_BIG, SWELL_BIG_COLOR)
+}
+
+fn set_color(i: u8, color: u8) {
+    // Recolors the star's tile (its chars stay), unless an explosion is drawn over it.
+    var co: u8 = color | video.MC
+    if shown[i] == co {
+        return
+    }
+    shown[i] = co
+    var c: u8 = col[i]
+    var r: u8 = row[i]
+    if explode.cover[video.row_start[r] + c] == 0 {
+        var p: ptr u8 = video.tile_row_addr[r] + (c << 1)
+        p += video.COLOR_RAM - video.SCREEN    // one statement is slower (gap 26)
+        p[0] = co
+        p[1] = co
+        p[40] = co
+        p[41] = co
+    }
+}
+
+fn set_look(i: u8, ch: u8, color: u8) {
+    // Redraws the star's tile with chars ch.. and color co, unless an explosion is drawn over it (draw_tile
+    // uses `shown_char` and `shown` later). Nothing when both are unchanged.
+    var co: u8 = color | video.MC
+    if shown[i] == co && shown_char[i] == ch {
+        return
+    }
+    shown[i] = co
+    shown_char[i] = ch
+    var c: u8 = col[i]
+    var r: u8 = row[i]
+    if explode.cover[video.row_start[r] + c] == 0 {
+        var p: ptr u8 = video.tile_row_addr[r] + (c << 1)
+        p[0] = ch
+        p[1] = ch + 1
+        p[40] = ch + 2
+        p[41] = ch + 3
+        p += video.COLOR_RAM - video.SCREEN
+        p[0] = co
+        p[1] = co
+        p[40] = co
+        p[41] = co
+    }
+}
+
+fn update() {
+    // Once per frame: supernovas whose countdown ended last frame, then hit lockouts, warnings, countdown
+    // timers and flashing. Supernovas go first, so a countdown started by their explosion also counts this
+    // frame: every countdown lasts COUNTDOWN_FRAMES frames, including the frame it started.
+    // At most one explosion start per frame here (frame time): a further supernova waits a frame.
+    if novas_due {
+        novas_due = false
+        for i in 0..count {
+            if state[i] == COUNTDOWN && timer[i] == 0 {
+                if explode.starts != 0 {
+                    novas_due = true
+                    break
+                }
+                supernova(i)
+            }
+        }
+    }
+    var i: u8 = 0
+    while true {
+        i = next_busy(i)
+        if i == 255 {
+            break
+        }
+        if state[i] == WARNING {
+            warning(i)
+        } else {
+            var t: u8 = timer[i]
+            if t != 0 {
+                t -= 1
+                timer[i] = t
+                if t == 0 {
+                    novas_due = true
+                }
+            }
+            if t <= FAST_FLASH {
+                // last half second: the big swell, flashing by color
+                var co: u8 = SWELL_BIG_COLOR
+                if (t >> 1) & 1 != 0 {
+                    co = SWELL_SMALL_COLOR
+                }
+                if shown_char[i] != SWELL_BIG {
+                    set_look(i, SWELL_BIG, co)
+                } else {
+                    set_color(i, co)
+                }
+            } else if (t >> 3) & 1 == 0 {
+                // a countdown star's color goes with its swell frame here, so the char tells if the look changes
+                if shown_char[i] != SWELL_BIG {
+                    set_look(i, SWELL_BIG, SWELL_BIG_COLOR)
+                }
+            } else if shown_char[i] != SWELL_SMALL {
+                set_look(i, SWELL_SMALL, SWELL_SMALL_COLOR)
+            }
+        }
+        i += 1
+    }
+}
+
+fn next_busy(from: u8) -> u8 {
+    // From star `from` on: counts down the hit lockouts (no_hit) and returns the first star in WARNING or
+    // COUNTDOWN (its lockout counted down too), or 255 when there is none. It runs over every star each frame.
+    for i in from..count using X {
+        if no_hit[i] != 0 {
+            no_hit[i] -= 1
+        }
+        var s: u8 = state[i]
+        if s == WARNING || s == COUNTDOWN {
+            return i
+        }
+    }
+    return 255
+}
+
+fn start_warning(i: u8) {
+    state[i] = WARNING
+    timer[i] = WARNING_FRAMES
+    warnings += 1
+    set_color(i, WARNING_COLOR)
+    sound.play(sound.WARNING)
+}
+
+fn warning(i: u8) {
+    // Flashing, then the tile is cleared and a hostile star takes its place (`left` stays the same).
+    timer[i] -= 1
+    if timer[i] == 0 {
+        state[i] = GONE
+        warnings -= 1
+        var idx: u8 = video.row_start[row[i]] + col[i]
+        video.tiles[idx] = 0
+        if explode.cover[idx] == 0 {
+            video.draw_tile(col[i], row[i])
+        }
+        hostiles.appear(col[i], row[i])
+    } else if (timer[i] >> 2) & 1 == 0 {
+        set_color(i, WARNING_COLOR)
+    } else {
+        set_color(i, video.star_color[kind[i]])
+    }
+}
+
+fn pick_hostile() -> u8 {
+    // A random IDLE star outside the 9x9 tiles around the player (the tile under the player's centre),
+    // else any IDLE star. 255 = none.
+    scan_idle(((player.x + 6) >> 4) as u8, (player.y + 6) >> 4)
+    if n_far != 0 {
+        return pick_far[rand_below(n_far)]
+    }
+    if n_any != 0 {
+        return pick_any[rand_below(n_any)]
+    }
+    return 255
+}
+
+fn scan_idle(pc: u8, pr: u8) {
+    // IDLE stars into pick_any (n_any), and those at least hostiles.FAR tiles from tile (pc, pr) in either
+    // direction into pick_far (n_far). It runs over every star.
+    n_far = 0
+    n_any = 0
+    for i in 0..count {
+        if state[i] == IDLE {
+            pick_any[n_any] = i
+            n_any += 1
+            // distances are under 128, so a negative difference is negative as an i8
+            var d: u8 = col[i] - pc
+            if (d as i8) < 0 {
+                d = 0 - d
+            }
+            if d < hostiles.FAR {
+                d = row[i] - pr
+                if (d as i8) < 0 {
+                    d = 0 - d
+                }
+            }
+            if d >= hostiles.FAR {
+                pick_far[n_far] = i
+                n_far += 1
+            }
+        }
+    }
+}
+
+fn supernova(i: u8) {
+    state[i] = GONE
+    left -= 1
+    video.tiles[video.row_start[row[i]] + col[i]] = 0
+    sound.play(sound.SUPERNOVA)     // first: an extra life reached by its points replaces it (one request a frame)
+    score.supernova()
+    explode.start(col[i], row[i])   // draws over the tile; it is restored as empty space afterwards
+    quasar.chance(col[i], row[i])
+}

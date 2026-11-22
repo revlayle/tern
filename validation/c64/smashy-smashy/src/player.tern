@@ -1,0 +1,386 @@
+// Player states and movement (spec section 5). Run, jump, fall, fast-fall with tile damage, treasure pickup,
+// kill launch, stomp bounce, and the float back to the start after a hit. Port of ../src/player.p8.
+import actors
+import assets
+import input
+import nav
+import popup
+import score
+import sound
+import video
+
+const GROUNDED: u8 = 0
+const RISING: u8 = 1
+const FALLING: u8 = 2
+const FASTFALL: u8 = 3
+const LAUNCHED: u8 = 4              // rising after a kill or stomp: no fire control, air control
+const FLOATING: u8 = 5              // flying back to the start after a hit
+
+// [TUNE] speeds in 1/16 px per frame
+const RUN_SPEED: u8 = 24
+const RISE_SPEED: u8 = 40
+const JUMP_HEIGHT: u8 = 96          // px
+const GRAVITY: i8 = 4
+const MAX_FALL: i8 = 64
+const FASTFALL_SPEED: i8 = 96
+const KILL_LAUNCH: u8 = 32          // px
+const BOUNCE: u8 = 24               // px
+const FLOAT_SPEED: u8 = 4           // px per frame along the longer axis
+const INVULN_FRAMES: u8 = 100
+const FF_MIN_DIST: u8 = 8           // px of fast-fall before it can damage a tile
+const TREASURE_COVER: u8 = 8        // px the box must cover a treasure tile on each axis to collect it
+
+// [TUNE] animation
+const RUN_STEP: u8 = 6              // px moved per run picture (4 pictures)
+const FLOAT_SHIFT: u8 = 3           // float pictures change every 2^n frames
+
+const START_X: u16 = 152 + actors.BOX_INSET     // sprite at px 152 (tile column 9.5)
+const START_Y: u8 = 0
+
+var rise_left: u8                   // px of jump height (or launch) left
+var chain: u8                       // fast-fall kills this airborne trip (index into the kill points)
+var invuln_timer: u8                // frames
+var down_lock: bool                 // after a kill, down must be released before it fast-falls again
+var ff_start_y: u8                  // box y when the current fast-fall started
+
+// float back to the start: Bresenham line, one pixel step at a time
+var float_dx: u8
+var float_dy: u8
+var float_err: i16
+var float_left: bool
+
+const NO_TARGET: u8 = 255
+var target_idx: u8 = NO_TARGET      // tile map index of the highlighted fast-fall target
+var target_col: u8
+var target_row: u8
+
+fn init() {
+    actors.x[0] = START_X
+    actors.y[0] = START_Y
+    actors.x_frac[0] = 0
+    actors.y_frac[0] = 0
+    actors.vy[0] = 0
+    actors.state[0] = FALLING
+    actors.facing[0] = actors.FACE_RIGHT
+    target_idx = NO_TARGET
+    chain = 0
+    invuln_timer = 0
+    down_lock = false
+}
+
+fn update() {
+    var st: u8 = actors.state[0]
+    var d: u8 = 0
+
+    if invuln_timer != 0 {
+        invuln_timer -= 1
+    }
+    if st == FLOATING {
+        float_step()
+        update_target()
+        return
+    }
+    if input.held & input.DOWN == 0 {
+        down_lock = false
+    }
+
+    // horizontal: full air control, except fast-fall drops straight down
+    if st != FASTFALL {
+        if input.held & input.LEFT != 0 {
+            actors.facing[0] = actors.FACE_LEFT
+            d = actors.advance(actors.x_frac[0], RUN_SPEED)
+            actors.x_frac[0] = actors.new_frac
+            actors.move_left(0, d)
+        } else if input.held & input.RIGHT != 0 {
+            actors.facing[0] = actors.FACE_RIGHT
+            d = actors.advance(actors.x_frac[0], RUN_SPEED)
+            actors.x_frac[0] = actors.new_frac
+            actors.move_right(0, d)
+        }
+    }
+
+    // state changes from input and ground
+    match st {
+        GROUNDED => {
+            if input.pressed & input.FIRE != 0 {
+                st = RISING
+                rise_left = JUMP_HEIGHT
+                actors.y_frac[0] = 0
+                sound.play(sound.JUMP)
+            } else if !actors.on_ground(0) {
+                st = FALLING
+                actors.vy[0] = 0
+            }
+        }
+        RISING => {
+            if input.held & input.DOWN != 0 {
+                st = FASTFALL
+                ff_start_y = actors.y[0]
+            } else if input.held & input.FIRE == 0 {
+                st = FALLING
+                actors.vy[0] = 0
+            }
+        }
+        FALLING, LAUNCHED => {
+            if input.held & input.DOWN != 0 && !down_lock {
+                st = FASTFALL
+                ff_start_y = actors.y[0]
+            }
+        }
+        _ => {}
+    }
+
+    // vertical movement
+    match st {
+        RISING, LAUNCHED => {
+            d = actors.advance(actors.y_frac[0], RISE_SPEED)
+            actors.y_frac[0] = actors.new_frac
+            if d > rise_left {
+                d = rise_left
+            }
+            rise_left -= d
+            if actors.move_up(0, d) || rise_left == 0 {
+                st = FALLING
+                actors.vy[0] = 0
+            }
+        }
+        FALLING, FASTFALL => {
+            if st == FASTFALL {
+                actors.vy[0] = FASTFALL_SPEED
+            } else {
+                actors.vy[0] += GRAVITY
+                if actors.vy[0] > MAX_FALL {
+                    actors.vy[0] = MAX_FALL
+                }
+            }
+            d = actors.advance(actors.y_frac[0], actors.vy[0] as u8)
+            actors.y_frac[0] = actors.new_frac
+            if actors.move_down(0, d) {
+                // A fast-fall that destroys a damaged tile keeps falling through the hole. One shorter than
+                // FF_MIN_DIST lands like a normal fall (no drill hop from standing).
+                if st != FASTFALL || actors.y[0] - ff_start_y < FF_MIN_DIST || !damage_below() {
+                    st = GROUNDED
+                    actors.vy[0] = 0
+                    actors.y_frac[0] = 0
+                    chain = 0
+                    down_lock = false
+                }
+            }
+        }
+        _ => {}
+    }
+
+    actors.state[0] = st
+    collect_treasures()
+    update_target()
+}
+
+fn update_target() {
+    // In the air, highlight the tile a fast-fall from here would damage: find the row where a straight drop
+    // stops (first solid tile under either box edge), then take the tile under the box centre in that row.
+    // Nothing is highlighted when that tile is the floor or empty (the drop would land on an edge).
+    var new_idx: u8 = NO_TARGET
+    var col: u8 = 0
+    var row: u8 = 0
+    if actors.state[0] != GROUNDED && actors.state[0] != FLOATING {
+        var left: u8 = (actors.x[0] >> 4) as u8
+        var right: u8 = ((actors.x[0] + (actors.BOX_W - 1)) >> 4) as u8
+        col = ((actors.x[0] + actors.BOX_W / 2) >> 4) as u8
+        row = ((actors.y[0] + actors.BOX_H - 1) >> 4) + 1
+        while video.tiles[video.row_start[row] + left] - 1 >= 3 &&
+            video.tiles[video.row_start[row] + right] - 1 >= 3 {
+            row += 1                // row 11 is floor, so this stops
+        }
+        var idx: u8 = video.row_start[row] + col
+        var t: u8 = video.tiles[idx]
+        if t == video.T_SOLID || t == video.T_DAMAGED {
+            new_idx = idx
+        }
+    }
+    if new_idx == target_idx {
+        return
+    }
+    if target_idx != NO_TARGET {
+        video.draw_tile(target_col, target_row)
+    }
+    target_idx = new_idx
+    target_col = col
+    target_row = row
+    if new_idx != NO_TARGET {
+        video.highlight_tile(col, row)
+    }
+}
+
+fn damage_below() -> bool {
+    // Fast-fall landing: damage the tile under the box centre (solid -> damaged -> gone).
+    // Returns true when the tile was destroyed. The floor and non-solid tiles are left alone.
+    var col: u8 = ((actors.x[0] + actors.BOX_W / 2) >> 4) as u8
+    var row: u8 = (actors.y[0] + actors.BOX_H) >> 4
+    var idx: u8 = video.row_start[row] + col
+    match video.tiles[idx] {
+        video.T_SOLID => video.tiles[idx] = video.T_DAMAGED
+        video.T_DAMAGED => video.tiles[idx] = video.T_EMPTY
+        _ => return false
+    }
+    video.draw_tile(col, row)
+    if idx == target_idx {
+        target_idx = NO_TARGET      // the redraw removed the highlight
+    }
+    sound.play(sound.DAMAGE)
+    if video.tiles[idx] != video.T_EMPTY {
+        video.shake(video.SHAKE_CRACK)
+        return false                // was solid, now damaged: normal landing
+    }
+    video.shake(video.SHAKE_SMASH)
+    // destroyed: the enemies' platform map changes. Centre the box over the hole so the fast-fall continues.
+    nav.tile_destroyed()
+    actors.x[0] = ((col as u16) << 4) + (16 - actors.BOX_W) / 2
+    actors.x_frac[0] = 0
+    return true
+}
+
+fn collect_treasures() {
+    // Collect the treasure tiles the box covers by at least TREASURE_COVER px on both axes. The 12 px wide
+    // box covers at most one column that much; the 16 px high box covers one row, or two at 8 px into a tile.
+    var col: u8 = (actors.x[0] >> 4) as u8
+    var xo: u8 = (actors.x[0] as u8) & 15
+    if xo > 16 - TREASURE_COVER {
+        if xo < 16 + TREASURE_COVER - actors.BOX_W {
+            return
+        }
+        col += 1
+    }
+    var row: u8 = actors.y[0] >> 4
+    var yo: u8 = actors.y[0] & 15
+    if yo <= 16 - TREASURE_COVER {
+        check_treasure(col, row)
+    }
+    if yo >= TREASURE_COVER {
+        check_treasure(col, row + 1)
+    }
+}
+
+fn check_treasure(col: u8, row: u8) {
+    var idx: u8 = video.row_start[row] + col
+    var t: u8 = video.tiles[idx]
+    if t >= video.T_TREASURE {
+        video.tiles[idx] = video.T_EMPTY
+        video.draw_tile(col, row)
+        score.collect(t - video.T_TREASURE)
+        popup.show(((col as u16) << 4) + 8, (row << 4) + 8, score.treasure_points[t - video.T_TREASURE], popup.TREASURE)
+        sound.play(sound.COLLECT)
+    }
+}
+
+fn launch(height: u8) {
+    actors.state[0] = LAUNCHED
+    rise_left = height
+    actors.vy[0] = 0
+    actors.y_frac[0] = 0
+}
+
+fn launch_from_kill() {
+    launch(KILL_LAUNCH)
+    down_lock = true
+}
+
+fn bounce(enemy_y: u8) {
+    // Stomp: put the box on top of the enemy, then bounce.
+    actors.move_up(0, actors.y[0] + actors.BOX_H - enemy_y)
+    launch(BOUNCE)
+}
+
+fn hit() {
+    // Lose time, then float back to the start.
+    score.lose_time(score.HIT_PENALTY)
+    sound.play(sound.HIT)
+    start_float()
+}
+
+fn start_float() {
+    // Float in a straight line to the start point (ignoring tiles, enemies and input).
+    actors.state[0] = FLOATING
+    actors.vy[0] = 0
+    actors.x_frac[0] = 0
+    actors.y_frac[0] = 0
+    float_left = actors.x[0] > START_X
+    if float_left {
+        float_dx = (actors.x[0] - START_X) as u8
+    } else {
+        float_dx = (START_X - actors.x[0]) as u8
+    }
+    float_dy = actors.y[0] - START_Y        // the start is at the top, so the float goes up
+    float_err = (float_dx as i16) - (float_dy as i16)
+}
+
+fn float_step() {
+    // FLOAT_SPEED single-pixel steps along the line; each moves the longer axis by 1 px.
+    for _ in 0..FLOAT_SPEED {
+        if actors.x[0] == START_X && actors.y[0] == START_Y {
+            actors.state[0] = FALLING
+            invuln_timer = INVULN_FRAMES
+            return
+        }
+        var e2: i16 = float_err << 1
+        if e2 > -(float_dy as i16) {
+            float_err -= float_dy as i16
+            if float_left {
+                actors.x[0] -= 1
+            } else {
+                actors.x[0] += 1
+            }
+        }
+        if e2 < float_dx as i16 {
+            float_err += float_dx as i16
+            actors.y[0] -= 1
+        }
+    }
+}
+
+fn hold_at_start() {
+    // At the start point in the float pose, with no control (level transitions). init() ends it.
+    actors.x[0] = START_X
+    actors.y[0] = START_Y
+    actors.state[0] = FLOATING
+    invuln_timer = 0
+}
+
+fn show_target() {
+    // Highlight the fast-fall target again after something redrew its tile (a message).
+    if target_idx != NO_TARGET {
+        video.highlight_tile(target_col, target_row)
+    }
+}
+
+fn draw() {
+    if invuln_timer & 4 != 0 {
+        video.hide_sprite(0)
+        return
+    }
+    var frame: u8 = 0
+    var left: bool = actors.facing[0] == actors.FACE_LEFT
+    match actors.state[0] {
+        GROUNDED => {
+            frame = assets.SPR_PLAYER_RUN_R_0
+            if left {
+                frame = assets.SPR_PLAYER_RUN_L_0
+            }
+            frame += actors.walk_anim(0, 4, RUN_STEP)
+        }
+        RISING, LAUNCHED => {
+            frame = assets.SPR_PLAYER_JUMP_R_0
+            if left {
+                frame = assets.SPR_PLAYER_JUMP_L_0
+            }
+        }
+        FALLING => {
+            frame = assets.SPR_PLAYER_FALL_R_0
+            if left {
+                frame = assets.SPR_PLAYER_FALL_L_0
+            }
+        }
+        FASTFALL => frame = assets.SPR_PLAYER_FASTFALL_0
+        _ => frame = assets.SPR_PLAYER_FLOAT_0 + ((video.frames >> FLOAT_SHIFT) & 1)
+    }
+    video.set_sprite(0, frame, video.PLAYER_COLOR, actors.x[0] - actors.BOX_INSET, actors.y[0])
+}

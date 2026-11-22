@@ -1,0 +1,184 @@
+// Score popups (spec section 8): the points of a score event as hi-res digits in sprites 6 and 7, rising from
+// where it happened. Each slot has its own sprite frame. Events close together in time merge into one popup;
+// a popup that would overlap the other one starts directly above it. Port of ../src/popup.p8.
+import c64
+import mem
+import bcd
+import video
+
+const SLOTS: u8 = 2
+const FIRST_SPRITE: u8 = 6
+const FRAME_0: u8 = 253                     // sprite frames 253-254, one per slot (spec section 3)
+var frame_data: [u8; SLOTS * 64] @ video.SCREEN + FRAME_0 * 64
+data slot_bit: [u8; SLOTS] = [1 << FIRST_SPRITE, 1 << (FIRST_SPRITE + 1)]
+const BLANK: u8 = 10                        // font entry with no pixels
+
+// [TUNE]
+const LIFE: u8 = 50                         // frames; rises 1 px every 2 frames
+const BLINK_AT: u8 = 10                     // the last frames blink, 2 on and 2 off
+const MERGE_FRAMES: u8 = 8                  // an event this soon after the newest popup's latest one adds to it
+const STACK_GAP: u8 = 9                     // 7 px digits + 2 px gap
+const TREASURE: u8 = 0                      // rank of a treasure; a kill's rank is its chain step + 1
+data rank_color: [u8; 6] = [7, 1, 10, 8, 2, 2]  // treasure yellow, then kills by chain step
+
+const RISE: u8 = LIFE / 2
+const MAX_X: u16 = 320 - 24                 // the whole sprite stays on the playfield
+const MAX_Y: u8 = 192 - 21
+
+var timer: [u8; SLOTS]                      // frames left, 0 = free
+var value: [u8; SLOTS]                      // BCD hundreds shown
+var rank: [u8; SLOTS]                       // highest rank merged so far (the colour)
+var pos_x: [u16; SLOTS]                     // playfield x of the sprite
+var dirty: [bool; SLOTS]                    // digits to draw in update()
+var newest: u8                              // slot of the last popup started
+
+// 5x7 digits 0-9 and a blank, one byte per row, pixels in bits 4-0
+data font: [u8; 77] = [
+    $0E, $11, $11, $11, $11, $11, $0E,      // 0
+    $04, $0C, $04, $04, $04, $04, $0E,      // 1
+    $0E, $11, $01, $02, $04, $08, $1F,      // 2
+    $1F, $02, $04, $02, $01, $11, $0E,      // 3
+    $02, $06, $0A, $12, $1F, $02, $02,      // 4
+    $1F, $10, $1E, $01, $01, $11, $0E,      // 5
+    $06, $08, $10, $1E, $11, $11, $0E,      // 6
+    $1F, $01, $02, $04, $08, $08, $08,      // 7
+    $0E, $11, $11, $0E, $11, $11, $0E,      // 8
+    $0E, $11, $11, $0F, $01, $02, $0C,      // 9
+    $00, $00, $00, $00, $00, $00, $00,      // blank
+]
+// A row of 4 digits is 24 bits: digit k at bit offset 6 * k from the left. Digits 2 and 3 are always "00".
+// So a row is two table lookups: byte 0 = d0 << 3 | d1 >> 3, byte 1 = d1 << 5 | "0" >> 1,
+// byte 2 = "0" << 7 | "0" << 1. Built at compile time (popup.p8 builds them in init()).
+data font_shl3: [u8; 77] = [(font[i] << 3) & $FF for i in 0..77]
+data font_shr3: [u8; 77] = [font[i] >> 3 for i in 0..77]
+data font_shl5: [u8; 77] = [(font[i] << 5) & $FF for i in 0..77]
+data zeros_1: [u8; 7] = [font[i] >> 1 for i in 0..7]
+data zeros_2: [u8; 7] = [(font[i] << 7 | font[i] << 1) & $FF for i in 0..7]
+
+fn init() {
+    mem.fill(addr(frame_data), 0, len(frame_data))     // the digits only ever write rows 0-6
+    clear()
+}
+
+fn clear() {
+    timer[0] = 0
+    timer[1] = 0
+    dirty[0] = false
+    dirty[1] = false
+    video.spr_ena &= ~(slot_bit[0] | slot_bit[1])
+}
+
+fn show(cx: u16, cy: u8, points: u8, rk: u8) {
+    // points: BCD hundreds ($01-$99), shown as 3 or 4 digits centred on (cx, cy), playfield coordinates.
+    // rk: TREASURE or chain step + 1. Only sets the slot up; update() draws the digits, at most once a frame.
+    // Within MERGE_FRAMES of the newest popup's latest event (a free slot has timer 0, so never): adds to it
+    // and restarts its life where it is. Otherwise takes a free slot, else the oldest (least time left).
+    var s: u8 = newest
+    if LIFE - timer[s] <= MERGE_FRAMES {
+        bcd.add_byte(addr(value) + s, 1, points)
+        if rk > rank[s] {
+            rank[s] = rk
+            video.spr_col[FIRST_SPRITE + s] = rank_color[rk]
+        }
+        timer[s] = LIFE
+        dirty[s] = true
+        return
+    }
+    s = 0
+    if timer[0] != 0 && (timer[1] == 0 || timer[1] < timer[0]) {
+        s = 1
+    }
+    c64.vic.sprite_enable &= ~slot_bit[s]  // a reused slot must not show the new digits at the old spot
+    newest = s
+    value[s] = points
+    rank[s] = rk
+    dirty[s] = true
+
+    // 4 digits fill sprite px 0-22; 3 digits get a blank first digit and fill px 6-22
+    var half: u8 = 12
+    if points < $10 {
+        half = 14
+    }
+    var x: u16 = 0
+    if cx > half as u16 {
+        x = cx - half
+    }
+    if x > MAX_X {
+        x = MAX_X
+    }
+    var y: u8 = RISE                        // low enough that the rise ends below the HUD row
+    if cy > RISE + 3 {
+        y = cy - 3
+    }
+    if y > MAX_Y {
+        y = MAX_Y
+    }
+    // Closer than 2 px to the other popup: start directly above it, or below if above would rise into the
+    // HUD row.
+    var o: u8 = s ^ 1
+    if timer[o] != 0 {
+        var dx: u16 = x - pos_x[o]
+        if x < pos_x[o] {
+            dx = pos_x[o] - x
+        }
+        var oy: u8 = video.spr_y[FIRST_SPRITE + o] - 58   // back to playfield y (see video.set_sprite)
+        var dy: u8 = y - oy
+        if y < oy {
+            dy = oy - y
+        }
+        if dx < 24 && dy < STACK_GAP {
+            if oy >= RISE + STACK_GAP {
+                y = oy - STACK_GAP
+            } else {
+                y = oy + STACK_GAP
+            }
+        }
+    }
+    pos_x[s] = x
+    timer[s] = LIFE
+    video.set_sprite(FIRST_SPRITE + s, FRAME_0 + s, rank_color[rk], x, y)
+}
+
+fn draw(s: u8) {
+    // The digits of value[s] into slot s's sprite frame. Plain Tern; the Prog8 version is unrolled assembly.
+    var d0: u8 = value[s] >> 4
+    if d0 == 0 {
+        d0 = BLANK
+    }
+    var f0: u8 = (d0 << 3) - d0             // font index: digit * 7
+    var d1: u8 = value[s] & 15
+    var f1: u8 = (d1 << 3) - d1
+    var o: u8 = 0                           // the slot's frame: 64 bytes each
+    if s != 0 {
+        o = 64
+    }
+    for r in 0..7 {
+        frame_data[o] = font_shl3[f0 + r] | font_shr3[f1 + r]
+        frame_data[o + 1] = font_shl5[f1 + r] | zeros_1[r]
+        frame_data[o + 2] = zeros_2[r]
+        o += 3
+    }
+}
+
+fn update() {
+    // Once per play frame, after every score event of the frame. show() set the sprite up; this draws its
+    // digits if they changed, moves it up and blinks it.
+    for s in 0..SLOTS {
+        if dirty[s] {
+            dirty[s] = false
+            draw(s)
+        }
+        if timer[s] == 0 {
+            continue
+        }
+        timer[s] -= 1
+        if timer[s] & 1 == 0 && video.spr_y[FIRST_SPRITE + s] > 58 {   // a merge restarts the rise: stop at y 0
+            video.spr_y[FIRST_SPRITE + s] -= 1
+        }
+        if timer[s] == 0 || (timer[s] < BLINK_AT && timer[s] & 2 != 0) {
+            video.spr_ena &= ~slot_bit[s]
+        } else {
+            video.spr_ena |= slot_bit[s]
+        }
+    }
+}

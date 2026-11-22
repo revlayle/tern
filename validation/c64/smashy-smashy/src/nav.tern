@@ -1,0 +1,872 @@
+// Navigation AI (spec section 6, phases 5b and 6): platform map, routes between platforms, enemy roles and the
+// carrier role (an enemy holding a treasure flees to a hideout far from the player). Port of ../src/nav.p8.
+// Not ported: the self-test switch no_mistakes and the debug readouts (dbg_*, n_routes, n_mistakes, n_wanders).
+// The map is built after level generation. When a tile is destroyed it is rebuilt into a second table set in
+// slices (build_step()) run at the end of frames with time left (idle_build()), and swapped in when complete;
+// decisions use the front set meanwhile.
+// decide() picks what to do (table lookups only); steer() carries it out every frame by setting the enemy's
+// goal x, edge mode and jump request for enemies.move().
+import mem
+import video
+import actors
+import levelgen
+import player
+import enemies
+
+const MAX_PLAT: u8 = 32
+const MAX_LINKS: u8 = 128           // per set; 127 usable, so a global link index is never NONE
+const NONE: u8 = 255
+const OVERFLOW: u8 = 254            // inside a run of standing cells past MAX_PLAT (not mapped)
+const CELLS: u8 = levelgen.CELLS
+const MAX_JUMP_ROWS: u8 = 4         // enemy jump links reach platforms 1-4 rows higher (80 px jump)
+
+// link kinds: bit 0 = goes right, bit 1 = jump (rise in the take-off column, then 1 column sideways)
+const WALK_LEFT: u8 = 0
+const WALK_RIGHT: u8 = 1
+const JUMP_LEFT: u8 = 2
+const JUMP_RIGHT: u8 = 3
+
+// ---- two table sets: the front one is used by the AI, the back one is being built ----
+// Per-platform and per-link arrays hold both sets (index + set offset). Link indices stored in the
+// tables include the set offset. Platform ids are 0-31 in both sets.
+var plat_row: [u8; MAX_PLAT * 2]    // row of the standing cells
+var plat_start: [u8; MAX_PLAT * 2]  // first and last column
+var plat_end: [u8; MAX_PLAT * 2]
+var plat_link: [u8; MAX_PLAT * 2]   // first outgoing link (global index); walk-offs come first
+var plat_nlinks: [u8; MAX_PLAT * 2]
+var link_col: [u8; MAX_LINKS * 2]   // take-off column: the empty cell past the end (walk-off) or the
+                                    // cell on the platform to rise from (jump)
+var link_kind: [u8; MAX_LINKS * 2]
+var link_to: [u8; MAX_LINKS * 2]
+noinit var pof_mem: [u8; CELLS * 2]
+noinit var next_mem: [u8; MAX_PLAT * MAX_PLAT * 2]
+noinit var hops_mem: [u8; MAX_PLAT * MAX_PLAT * 2]
+
+var front: u8                       // 0 or 1
+var f_pof: ptr u8                   // platform_of[CELLS] (NONE = not a mapped standing cell)
+var f_next: ptr u8                  // next_link[P * 32 + Q]
+var f_hops: ptr u8                  // hops[P * 32 + Q]
+var fp: u8                          // set offset into the plat_* arrays
+var f_count: u8                     // platforms
+var b_pof: ptr u8
+var b_next: ptr u8
+var b_hops: ptr u8
+var bp: u8
+var bl: u8                          // set offset into the link_* arrays
+var b_count: u8
+var b_links: u8
+
+// ---- rebuild state ----
+const ST_IDLE: u8 = 0
+const ST_ROWS: u8 = 1               // one row of the tile map per step
+const ST_LINKS: u8 = 2              // one platform's links per step
+const ST_ROUTES: u8 = 3             // BFS from each platform, ROUTE_WORK queue entries and links per step
+const ROUTE_WORK: u8 = 24
+var stage: u8
+var pos: u8
+var row_first: [u8; video.MAP_H]    // first platform id of each row (ids are given in row order)
+var rebuilds: u8                    // time-sliced rebuilds finished this level (self-test readout)
+var build_frames: u8                // frames since the rebuild started
+var slowest_build: u8               // most frames a finished rebuild took (self-test readout)
+
+// ---- treasures for the hunters: tile map indices, listed at level start ----
+var tr_cell: [u8; levelgen.TREASURES]
+var tr_count: u8
+
+// ---- per enemy (index 1-5) ----
+const CHASER: u8 = 0
+const AMBUSHER: u8 = 1
+const HUNTER: u8 = 2
+data role: [u8; actors.COUNT] = [CHASER, CHASER, CHASER, AMBUSHER, HUNTER, HUNTER]
+
+const PLAN_STAND: u8 = 0
+const PLAN_GOTO: u8 = 1             // walk to goal x on this platform
+const PLAN_WANDER: u8 = 2           // walk, turning at edges and walls
+const PLAN_WALKOFF: u8 = 3          // link: walk past the platform end and fall straight down
+const PLAN_JUMP: u8 = 4             // link: walk to the take-off column, rise, move sideways onto the target
+const COMMIT_FRAMES: u8 = 60        // a link not finished by then is re-decided
+var plan: [u8; actors.COUNT]
+var airborne: [bool; actors.COUNT]  // the link's take-off has happened
+var commit: [u8; actors.COUNT]      // frames left; no decisions while non-zero
+var land_x: [u16; actors.COUNT]     // jump: goal x once the box is above the target's tiles
+var land_y: [u8; actors.COUNT]      // jump: box y at or above which the sideways move starts
+
+// carrier role
+const REPLAN_DECISIONS: u8 = 4      // pick the hideout again every 4th decision (32 frames) ...
+const NEAR_TILES: u8 = 5            // ... or at every decision while the player is this close (Manhattan)
+const NEAR_BEST: u8 = 1             // [TUNE] hideout candidates: hops from the player at least best - this
+var hideout: [u8; actors.COUNT]     // platform id in the front set, NONE = pick one at the next decision;
+                                    // claimed: other carriers avoid it
+var claimed: [u8; MAX_PLAT]         // find_hideout(): non-zero = another carrier's hideout (cleared after)
+var cand: [u8; MAX_PLAT]            // find_hideout(): candidate platforms
+var cand_h: [u8; MAX_PLAT]          // find_hideout(): their hops from the player's platform
+var replan: [u8; actors.COUNT]      // decisions left until the hideout is picked again
+
+fn new_level() {
+    // Build the platform map at once (level load, outside the frame budget) and list the treasures.
+    start_build()
+    while build_step() { }
+    rebuilds = 0
+    tr_count = 0
+    for idx in 0..CELLS {
+        if video.tiles[idx] >= video.T_TREASURE && tr_count < len(tr_cell) {
+            tr_cell[tr_count] = idx
+            tr_count += 1
+        }
+    }
+}
+
+const TOP_BAND_ROW: u8 = 2          // standing rows 0-2 are the top band (platform tiles in rows 1-3)
+
+fn enemies_reach_top() -> bool {
+    // Level generation check (spec section 7): true when an enemy on the floor can reach a platform in the
+    // top band by the map's links. Builds rows and links into the back set and one BFS from the floor, and
+    // leaves no rebuild running; new_level() builds the real map afterwards.
+    start_build()
+    while stage != ST_ROUTES {
+        build_step()
+    }
+    stage = ST_IDLE
+    var fl: u8 = b_pof[video.row_start[video.MAP_H - 2]]   // the floor's standing row (row 10)
+    if fl == NONE {
+        return false                // over MAX_PLAT platforms before row 10
+    }
+    while !routes_from(fl) { }
+    var hrow: ptr u8 = b_hops + ((fl as u16) << 5)
+    var p: u8 = 0
+    while p != b_count && plat_row[bp + p] <= TOP_BAND_ROW {
+        if hrow[p] != NONE {
+            return true
+        }
+        p += 1
+    }
+    return false
+}
+
+fn tile_destroyed() {
+    // (Re)start a time-sliced rebuild into the back set. A rebuild in progress starts over.
+    start_build()
+}
+
+// ---- platform map build ----
+fn start_build() {
+    if front == 0 {
+        b_pof = addr(pof_mem) + CELLS
+        b_next = addr(next_mem) + MAX_PLAT * MAX_PLAT
+        b_hops = addr(hops_mem) + MAX_PLAT * MAX_PLAT
+        bp = MAX_PLAT
+        bl = MAX_LINKS
+    } else {
+        b_pof = addr(pof_mem)
+        b_next = addr(next_mem)
+        b_hops = addr(hops_mem)
+        bp = 0
+        bl = 0
+    }
+    b_count = 0
+    b_links = 0
+    stage = ST_ROWS
+    pos = 0
+    bfs_started = false
+    build_frames = 0
+}
+
+fn build_step() -> bool {
+    // Do one slice of the build. Returns true while the build is still running.
+    match stage {
+        ST_ROWS => {
+            row_first[pos] = b_count
+            scan_row(pos)
+            pos += 1
+            if pos == video.MAP_H - 1 {
+                row_first[pos] = b_count
+                stage = ST_LINKS
+                pos = 0
+            }
+        }
+        ST_LINKS => {
+            make_links(pos)
+            pos += 1
+            if pos == b_count {
+                stage = ST_ROUTES
+                pos = 0
+            }
+        }
+        ST_ROUTES => {
+            if !routes_from(pos) {
+                return true
+            }
+            pos += 1
+            if pos == b_count {
+                swap_sets()
+                stage = ST_IDLE
+                rebuilds += 1
+                if build_frames > slowest_build {
+                    slowest_build = build_frames
+                }
+            }
+        }
+        _ => return false
+    }
+    return true
+}
+
+// A slice takes up to about 70 raster lines (measured, also with the 32-platform maximum). Slices only start
+// while the frame update is less than this many lines past the frame IRQ, so a frame stays under 260.
+const BUILD_START_LINES: u8 = 185
+
+fn idle_build() {
+    // Rebuild slices in the time left at the end of the frame update.
+    if stage != ST_IDLE {
+        build_frames += 1
+    }
+    while stage != ST_IDLE && !video.frame_ready && video.frame_lines() < BUILD_START_LINES {
+        build_step()
+    }
+}
+
+fn swap_sets() {
+    mem.fill(addr(hideout), NONE, len(hideout))     // platform ids change with the map
+    front ^= 1
+    f_pof = b_pof
+    f_next = b_next
+    f_hops = b_hops
+    fp = bp
+    f_count = b_count
+}
+
+fn scan_row(row: u8) {
+    // Platforms are maximal runs of standing cells (not solid, solid tile below) on one row.
+    // Plain Tern; the Prog8 version is assembly (it runs for every row of every map build and of the level
+    // generator's check).
+    var idx: u8 = video.row_start[row]
+    var run: u8 = NONE              // id of the current run, NONE outside one, OVERFLOW past MAX_PLAT
+    for col in 0..video.MAP_W {
+        var id: u8 = NONE
+        // tiles 1-3 are solid: (t - 1) < 3
+        if video.tiles[idx] - 1 >= 3 && video.tiles[idx + video.MAP_W] - 1 < 3 {
+            if run == NONE {
+                // a new run: next platform id, or OVERFLOW when the table is full
+                run = OVERFLOW
+                if b_count < MAX_PLAT {
+                    run = b_count
+                    b_count += 1
+                    plat_row[bp + run] = row
+                    plat_start[bp + run] = col
+                }
+            }
+            if run != OVERFLOW {
+                plat_end[bp + run] = col
+                id = run
+            }
+        } else {
+            run = NONE
+        }
+        b_pof[idx] = id
+        idx += 1
+    }
+}
+
+fn make_links(p: u8) {
+    var row: u8 = plat_row[bp + p]
+    var s: u8 = plat_start[bp + p]
+    var e: u8 = plat_end[bp + p]
+    var first: u8 = b_links
+    plat_link[bp + p] = bl + first
+    var rs: u8 = video.row_start[row]
+
+    // walk off either end
+    if s != 0 {
+        walk_off(rs + s - 1, s - 1, WALK_LEFT)
+    }
+    if e != video.MAP_W - 1 {
+        walk_off(rs + e + 1, e + 1, WALK_RIGHT)
+    }
+
+    // jump up to a platform 1-4 rows higher. Take-off column: just past the target's end, on this platform.
+    // Ids are given in row order, so the candidates are the ids from row_first[row - 4] up to row_first[row].
+    // Row 0 targets are left out: they need headroom above them (see jump_clear).
+    if row >= 2 {
+        var q: u8 = row_first[1]
+        if row > MAX_JUMP_ROWS + 1 {
+            q = row_first[row - MAX_JUMP_ROWS]
+        }
+        while q != row_first[row] {
+            var qr: u8 = plat_row[bp + q]
+            var t: u8 = plat_start[bp + q]
+            if t != 0 {
+                t -= 1
+                if t >= s && t <= e && jump_clear(t, row, qr, t + 1) {
+                    add_link(t, JUMP_RIGHT, q)
+                }
+            }
+            t = plat_end[bp + q]
+            if t != video.MAP_W - 1 {
+                t += 1
+                if t >= s && t <= e && jump_clear(t, row, qr, t - 1) {
+                    add_link(t, JUMP_LEFT, q)
+                }
+            }
+            q += 1
+        }
+    }
+    plat_nlinks[bp + p] = b_links - first
+}
+
+fn walk_off(idx0: u8, col: u8, kind: u8) {
+    // From the cell past a platform end (idx0), if it is not a wall, fall straight down to a standing cell.
+    var idx: u8 = idx0
+    if video.tiles[idx] - 1 < 3 {
+        return
+    }
+    while video.tiles[idx + video.MAP_W] - 1 >= 3 {
+        idx += video.MAP_W          // row 11 is floor, so this stops
+    }
+    var q: u8 = b_pof[idx]
+    if q != NONE {
+        add_link(col, kind, q)
+    }
+}
+
+fn jump_clear(t: u8, row: u8, qr: u8, land: u8) -> bool {
+    // The rise in column t from `row` up to one row above the target row qr must be clear, and so must the
+    // cell above the target's end column (`land`). That headroom row gives the enemy time to move sideways
+    // onto the target before it drops back below the target's tiles.
+    var idx: u8 = video.row_start[row] + t
+    for _ in 0..row - qr + 1 {
+        idx -= video.MAP_W
+        if video.tiles[idx] - 1 < 3 {
+            return false
+        }
+    }
+    return video.tiles[video.row_start[qr - 1] + land] - 1 >= 3
+}
+
+fn add_link(col: u8, kind: u8, q: u8) {
+    if b_links == MAX_LINKS - 1 {
+        return                      // table full: extra links are dropped
+    }
+    var l: u8 = bl + b_links
+    link_col[l] = col
+    link_kind[l] = kind
+    link_to[l] = q
+    b_links += 1
+}
+
+// BFS state, kept between slices
+var bfs_queue: [u8; MAX_PLAT]
+var bfs_started: bool
+var bfs_head: u8
+var bfs_tail: u8
+var bfs_l: u8                       // next link of the platform being expanded
+var bfs_left: u8                    // its links left
+var bfs_h: u8                       // hops to its targets
+var bfs_first: u8                   // first link of the route to it (NONE for the source)
+
+fn routes_from(src: u8) -> bool {
+    // BFS over the links from platform src: hops and the first link of a shortest route to each platform.
+    // Does at most ROUTE_WORK queue entries and links per call. Returns true when src is finished.
+    var off: u16 = (src as u16) << 5
+    var hrow: ptr u8 = b_hops + off
+    var nrow: ptr u8 = b_next + off
+    if !bfs_started {
+        mem.fill(hrow, NONE, MAX_PLAT)
+        mem.fill(nrow, NONE, MAX_PLAT)
+        hrow[src] = 0
+        bfs_queue[0] = src
+        bfs_head = 0
+        bfs_tail = 1
+        bfs_left = 0
+        bfs_started = true
+    }
+    for _ in 0..ROUTE_WORK {
+        if bfs_left == 0 {
+            if bfs_head == bfs_tail {
+                bfs_started = false
+                return true
+            }
+            var p: u8 = bfs_queue[bfs_head]
+            bfs_head += 1
+            bfs_h = hrow[p] + 1
+            bfs_first = nrow[p]
+            bfs_l = plat_link[bp + p]
+            bfs_left = plat_nlinks[bp + p]
+        } else {
+            var q: u8 = link_to[bfs_l]
+            if hrow[q] == NONE {
+                hrow[q] = bfs_h
+                if bfs_first == NONE {
+                    nrow[q] = bfs_l
+                } else {
+                    nrow[q] = bfs_first
+                }
+                bfs_queue[bfs_tail] = q
+                bfs_tail += 1
+            }
+            bfs_l += 1
+            bfs_left -= 1
+        }
+    }
+    return false
+}
+
+fn treasure_settled(idx: u8) {
+    // A dropped treasure came to rest at tile map index idx: list it for the hunters, in the slot of a
+    // treasure that is gone if there is one.
+    var k: u8 = 0
+    var free: u8 = NONE
+    while k != tr_count {
+        if tr_cell[k] == idx {
+            return
+        }
+        if free == NONE && video.tiles[tr_cell[k]] < video.T_TREASURE {
+            free = k
+        }
+        k += 1
+    }
+    if free != NONE {
+        tr_cell[free] = idx
+    } else if tr_count < len(tr_cell) {
+        tr_cell[tr_count] = idx
+        tr_count += 1
+    }
+}
+
+// ---- lookups in the front set ----
+fn platform_at(idx: u8) -> u8 {
+    return f_pof[idx]
+}
+
+fn next_link(p: u8, q: u8) -> u8 {
+    var row: ptr u8 = f_next + ((p as u16) << 5)
+    return row[q]
+}
+
+fn hops(p: u8, q: u8) -> u8 {
+    var row: ptr u8 = f_hops + ((p as u16) << 5)
+    return row[q]
+}
+
+fn platform_under(bx: u16, by: u8, grounded: bool) -> u8 {
+    // The platform under a box. Grounded: the cell under the box centre, else under either box edge.
+    // Airborne: the first standing cell straight down from the box centre.
+    var row: u8 = (by + actors.BOX_H - 1) >> 4
+    if row >= video.MAP_H - 1 {
+        return NONE
+    }
+    var rs: u8 = video.row_start[row]
+    var idx: u8 = rs + ((bx + actors.BOX_W / 2) >> 4) as u8
+    var p: u8 = f_pof[idx]
+    if p != NONE {
+        return p
+    }
+    if grounded {
+        p = f_pof[rs + (bx >> 4) as u8]
+        if p != NONE {
+            return p
+        }
+        return f_pof[rs + ((bx + (actors.BOX_W - 1)) >> 4) as u8]
+    }
+    while true {
+        idx += video.MAP_W
+        if idx >= CELLS {
+            return NONE
+        }
+        p = f_pof[idx]
+        if p != NONE {
+            return p
+        }
+    }
+}
+
+// ---- decisions ----
+fn decide(i: u8) {
+    // Called on the enemy's decision frame while it is grounded and not committed to a link.
+    var px: u16 = actors.x[0]
+    var e: u8 = platform_under(actors.x[i], actors.y[i], true)
+    var t: u8 = platform_under(px, actors.y[0], actors.state[0] == player.GROUNDED)
+    var tx: u16 = px
+    if enemies.carrying[i] != 0 {
+        carry_decide(i, e, t)
+        return
+    }
+    match role[i] {
+        AMBUSHER => {
+            // the end of the player's platform in the player's facing direction (airborne: landing platform)
+            if t != NONE && actors.state[0] == player.GROUNDED {
+                if actors.facing[0] == actors.FACE_LEFT {
+                    tx = (plat_start[fp + t] as u16) << 4
+                } else {
+                    tx = ((plat_end[fp + t] as u16) << 4) + 16 - actors.BOX_W
+                }
+            }
+        }
+        HUNTER => {
+            // the nearest platform (by hops) with a free treasure, else the player's platform
+            if e != NONE {
+                var hrow: ptr u8 = f_hops + ((e as u16) << 5)
+                var best: u8 = NONE
+                var k: u8 = 0
+                while k != tr_count {
+                    var idx: u8 = tr_cell[k]
+                    k += 1
+                    if video.tiles[idx] >= video.T_TREASURE {
+                        var q: u8 = f_pof[idx]
+                        if q != NONE {
+                            var h: u8 = hrow[q]
+                            if h < best {
+                                best = h
+                                t = q
+                                tx = ((levelgen.cell_col[idx] as u16) << 4) + (16 - actors.BOX_W) / 2
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        _ => {}
+    }
+    if e == NONE || t == NONE {
+        wander(i)
+        return
+    }
+    if e == t {
+        go_to(i, e, tx)
+        return
+    }
+    var l: u8 = next_link(e, t)
+    if l == NONE {
+        // no route: head for the reachable platform nearest the target, and wait there
+        var near: u8 = nearest_reachable(e, t)
+        if near == e {
+            go_to(i, e, tx)
+            return
+        }
+        l = next_link(e, near)
+    }
+    if levelgen.rnd() & 63 < mistake_rate() {
+        l = plat_link[fp + e] + levelgen.rand_below(plat_nlinks[fp + e])
+    }
+    take_link(i, l)
+}
+
+fn carry_decide(i: u8, e: u8, p: u8) {
+    // Carrier: head for the hideout, or keep away from the player on it. e = its platform, p = the player's.
+    if e == NONE {
+        wander(i)
+        return
+    }
+    if p != NONE {
+        var dc: u8 = abs_diff(enemies.col_of(0), enemies.col_of(i))
+        var dr: u8 = abs_diff((actors.y[0] + actors.BOX_H / 2) >> 4, (actors.y[i] + actors.BOX_H / 2) >> 4)
+        var near: bool = p == e || dc + dr <= NEAR_TILES
+        if near || hideout[i] == NONE || replan[i] == 0 || shared(i) {
+            hideout[i] = find_hideout(i, e, p, near)
+            replan[i] = REPLAN_DECISIONS
+        }
+        replan[i] -= 1
+    }
+    var h: u8 = hideout[i]
+    var l: u8 = NONE
+    if h != NONE && h != e {
+        l = next_link(e, h)
+    }
+    if l == NONE {
+        // at the hideout (or no hideout yet): wait at an end of the platform
+        go_to(i, e, wait_x(i, e))
+        return
+    }
+    if levelgen.rnd() & 63 < mistake_rate() {
+        l = plat_link[fp + e] + levelgen.rand_below(plat_nlinks[fp + e])
+    }
+    take_link(i, l)
+}
+
+fn shared(i: u8) -> bool {
+    // Another carrier claims the same hideout.
+    var h: u8 = hideout[i]
+    if h == NONE {
+        return false
+    }
+    for j in enemies.FIRST..=enemies.LAST {
+        if j != i && hideout[j] == h && enemies.carrying[j] != 0 {
+            return true
+        }
+    }
+    return false
+}
+
+fn find_hideout(i: u8, e: u8, p: u8, sharp: bool) -> u8 {
+    // Carrier i on platform e, the player on p. Candidates: platforms reachable from e that no other carrier
+    // claims (all reachable ones if every one is claimed), with hops from p at least the best - NEAR_BEST
+    // (sharp: the best only; no route from p counts as the most). Platforms with more than one outgoing
+    // link beat dead ends. Leaves out p itself and any platform whose route from e starts with a link onto
+    // p. Keeps the current hideout if it is a candidate, else picks one at random. Returns e when nothing
+    // qualifies. Plain Tern; its two passes are assembly in Prog8.
+    for j in enemies.FIRST..=enemies.LAST {
+        if j != i && hideout[j] != NONE && enemies.carrying[j] != 0 {
+            claimed[hideout[j]] = 1
+        }
+    }
+    // Pass 1: the reachable platforms (cand, their hops from p in cand_h), and the most hops from p among
+    // the unclaimed ones and among all.
+    var he: ptr u8 = f_hops + ((e as u16) << 5)     // hops from e
+    var ne: ptr u8 = f_next + ((e as u16) << 5)     // first link of the route from e
+    var hp: ptr u8 = f_hops + ((p as u16) << 5)     // hops from p
+    var n: u8 = 0
+    var n_free: u8 = 0
+    var best_free: u8 = 0
+    var best_all: u8 = 0
+    for q in 0..f_count {
+        if q == p || he[q] == NONE {
+            continue
+        }
+        if q != e && link_to[ne[q]] == p {
+            continue
+        }
+        var h: u8 = hp[q]
+        cand[n] = q
+        cand_h[n] = h
+        n += 1
+        if h >= best_all {
+            best_all = h
+        }
+        if claimed[q] == 0 {
+            n_free += 1
+            if h >= best_free {
+                best_free = h
+            }
+        }
+    }
+    if n == 0 {
+        mem.fill(addr(claimed), 0, MAX_PLAT)
+        return e
+    }
+    var lo: u8 = best_all
+    if n_free != 0 {
+        lo = best_free
+    }
+    if !sharp {
+        if lo >= NEAR_BEST {
+            lo -= NEAR_BEST
+        } else {
+            lo = 0
+        }
+    }
+    // Pass 2: keep the candidates in place that are unclaimed (if any are) and within the margin.
+    var m: u8 = 0
+    var n_multi: u8 = 0
+    for k in 0..n {
+        if cand_h[k] < lo {
+            continue
+        }
+        var q: u8 = cand[k]
+        if n_free != 0 && claimed[q] != 0 {
+            continue
+        }
+        cand[m] = q
+        m += 1
+        if plat_nlinks[fp + q] >= 2 {
+            n_multi += 1
+        }
+    }
+    mem.fill(addr(claimed), 0, MAX_PLAT)
+    if n_multi != 0 && n_multi != m {
+        // dead ends lose
+        var all: u8 = m
+        m = 0
+        for k in 0..all {
+            var q: u8 = cand[k]
+            if plat_nlinks[fp + q] > 1 {
+                cand[m] = q
+                m += 1
+            }
+        }
+    }
+    var cur: u8 = hideout[i]
+    for k in 0..m {
+        if cand[k] == cur {
+            return cur
+        }
+    }
+    return cand[levelgen.rand_below(m)]
+}
+
+fn wait_x(i: u8, e: u8) -> u16 {
+    // Where a carrier waits on platform e: the end away from the player. Carriers sharing it as their
+    // hideout spread out by slot: the lowest slot takes that end, the next the other end, the third the
+    // middle (on a platform shorter than 4 tiles: the middle, then the other end). Further ones the middle.
+    var tx: u16 = 0
+    if actors.x[0] < actors.x[i] {
+        tx = 319
+    }
+    var h: u8 = hideout[i]
+    if h != e {
+        return tx
+    }
+    var n: u8 = 0                   // lower slots sharing it
+    var first: u8 = 0               // the lowest of them
+    var j: u8 = enemies.FIRST
+    while j != i {
+        if hideout[j] == h && enemies.carrying[j] != 0 {
+            if n == 0 {
+                first = j
+            }
+            n += 1
+        }
+        j += 1
+    }
+    if n == 0 {
+        return tx
+    }
+    if n <= 2 && plat_end[fp + e] - plat_start[fp + e] < 3 {
+        n ^= 3                      // short: 1 <-> 2
+    }
+    if n == 1 {
+        if actors.x[0] < actors.x[first] {
+            return 0                // it waits at the right end
+        }
+        return 319
+    }
+    var lo: u16 = (plat_start[fp + e] as u16) << 4
+    return (lo + ((plat_end[fp + e] as u16) << 4) + 16 - actors.BOX_W) >> 1
+}
+
+fn nearest_reachable(e: u8, t: u8) -> u8 {
+    // The platform reachable from e (e included) nearest to platform t: rows apart plus the column gap
+    // between them (0 when they overlap). Ties go to fewer hops.
+    var hrow: ptr u8 = f_hops + ((e as u16) << 5)
+    var t_row: u8 = plat_row[fp + t]
+    var t_start: u8 = plat_start[fp + t]
+    var t_end: u8 = plat_end[fp + t]
+    var best: u8 = e
+    var best_dist: u8 = 255
+    var best_hops: u8 = 255
+    for q in 0..f_count {
+        var h: u8 = hrow[q]
+        if h != NONE {
+            var d: u8 = abs_diff(plat_row[fp + q], t_row)
+            if plat_end[fp + q] < t_start {
+                d += t_start - plat_end[fp + q]
+            } else if plat_start[fp + q] > t_end {
+                d += plat_start[fp + q] - t_end
+            }
+            if d < best_dist || (d == best_dist && h < best_hops) {
+                best = q
+                best_dist = d
+                best_hops = h
+            }
+        }
+    }
+    return best
+}
+
+fn abs_diff(a: u8, b: u8) -> u8 {
+    if a >= b {
+        return a - b
+    }
+    return b - a
+}
+
+fn mistake_rate() -> u8 {
+    // max(16 - level, 4) in 64
+    if enemies.level >= 12 {
+        return 4
+    }
+    return 16 - enemies.level
+}
+
+fn go_to(i: u8, p: u8, tx0: u16) {
+    // Walk to tx0, kept on platform p.
+    var tx: u16 = tx0
+    var lo: u16 = (plat_start[fp + p] as u16) << 4
+    var hi: u16 = ((plat_end[fp + p] as u16) << 4) + 16 - actors.BOX_W
+    if tx < lo {
+        tx = lo
+    } else if tx > hi {
+        tx = hi
+    }
+    plan[i] = PLAN_GOTO
+    enemies.goal_on[i] = true
+    enemies.goal_x[i] = tx
+    enemies.edge_mode[i] = enemies.EDGE_STOP
+}
+
+fn wander(i: u8) {
+    enemies.goal_on[i] = false
+    enemies.edge_mode[i] = enemies.EDGE_TURN
+    if plan[i] != PLAN_WANDER || enemies.walk_dir[i] == enemies.DIR_NONE {
+        enemies.set_dir(i, enemies.DIR_RIGHT + levelgen.rand_below(2))
+    }
+    plan[i] = PLAN_WANDER
+}
+
+fn take_link(i: u8, l: u8) {
+    var kind: u8 = link_kind[l]
+    var cx: u16 = ((link_col[l] as u16) << 4) + (16 - actors.BOX_W) / 2    // box centred in the column
+    commit[i] = COMMIT_FRAMES
+    airborne[i] = false
+    enemies.goal_on[i] = true
+    enemies.goal_x[i] = cx
+    if kind & 2 == 0 {
+        plan[i] = PLAN_WALKOFF
+        enemies.edge_mode[i] = enemies.EDGE_DROP
+    } else {
+        plan[i] = PLAN_JUMP
+        enemies.edge_mode[i] = enemies.EDGE_STOP
+        if kind & 1 != 0 {
+            land_x[i] = cx + 16
+        } else {
+            land_x[i] = cx - 16
+        }
+        land_y[i] = plat_row[fp + link_to[l]] << 4
+    }
+}
+
+fn reset(i: u8) {
+    // At spawn: stand until the first decision.
+    plan[i] = PLAN_STAND
+    commit[i] = 0
+    hideout[i] = NONE
+    enemies.goal_on[i] = false
+}
+
+// ---- carrying out a plan, every frame ----
+fn steer(i: u8) {
+    if commit[i] != 0 {
+        commit[i] -= 1
+    }
+    var st: u8 = actors.state[i]
+    match plan[i] {
+        PLAN_JUMP => {
+            if !airborne[i] {
+                if st == player.GROUNDED && actors.x[i] == enemies.goal_x[i] {
+                    enemies.jump_req[i] = true
+                    airborne[i] = true
+                }
+            } else if st == player.GROUNDED {
+                link_done(i)
+            } else if actors.y[i] <= land_y[i] {
+                enemies.goal_x[i] = land_x[i]
+            }
+        }
+        PLAN_WALKOFF => {
+            if !airborne[i] {
+                if st != player.GROUNDED {
+                    airborne[i] = true
+                }
+            } else if st == player.GROUNDED {
+                link_done(i)
+            }
+        }
+        _ => {}
+    }
+}
+
+fn link_done(i: u8) {
+    // Landed: stand until the next decision.
+    plan[i] = PLAN_STAND
+    commit[i] = 0
+    enemies.goal_on[i] = true
+    enemies.goal_x[i] = actors.x[i]
+}

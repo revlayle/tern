@@ -1,0 +1,123 @@
+// BCD score, level timer and treasure count (spec section 8). The HUD is redrawn only when a value changes.
+// Port of ../src/score.p8. Prog8's bcd.adduw and friends return the sum; Tern's bcd library adds to a
+// counter in memory, so the values are added in place.
+import bcd
+import mem
+import video
+
+const START_TIME: u16 = $0060       // BCD seconds
+const LEVEL_TIME_BONUS: u8 = $60    // BCD seconds added on level completion
+const TREASURES_PER_LEVEL: u8 = 10
+const FRAMES_PER_SECOND: u8 = 50
+const HIT_PENALTY: u8 = $10         // BCD seconds
+const NO_KILL_BONUS: u8 = $25       // BCD hundreds, level completed without destroying an enemy
+
+const MAX_POINTS: u16 = $9999       // BCD hundreds, shown as 999900
+
+// HUD score flash on every score event [TUNE]. HUD cells are hi-res (colours 0-7).
+const FLASH_FRAMES: u8 = 8
+const FLASH_COLOR: u8 = 7           // yellow: COLOR_HUD is white (1); use 1 if that changes
+var flash_left: u8
+
+var points: u16                     // BCD, in units of 100 points (4 digits, shown with a fixed "00")
+var time: u16                       // BCD seconds, 3 digits
+var time_frames: u8                 // frames left in the current second
+var treasures_left: u8
+var level: u8                       // 1-based
+var level_bcd: u8                   // the same for the HUD
+var high: u16                       // session high score, BCD hundreds
+
+// treasure type t is worth t + 1 hundred points, as BCD
+data treasure_points: [u8; 15] = [$01, $02, $03, $04, $05, $06, $07, $08,
+                                  $09, $10, $11, $12, $13, $14, $15]
+
+fn new_game() {
+    points = 0
+    time = START_TIME
+    time_frames = FRAMES_PER_SECOND
+    level = 1
+    level_bcd = $01
+    flash_left = 0
+    video.hud_score(points)
+    video.hud_time(time)
+    video.hud_level(level_bcd)
+}
+
+fn next_level() {
+    level += 1
+    bcd.inc(addr(level_bcd), 1)
+    video.hud_level(level_bcd)
+    add_time(LEVEL_TIME_BONUS)
+}
+
+fn update_high() {
+    // BCD values compare like plain numbers
+    if points > high {
+        high = points
+    }
+}
+
+fn new_level() {
+    treasures_left = TREASURES_PER_LEVEL
+}
+
+fn collect(t: u8) {
+    add_points(treasure_points[t])
+    treasures_left -= 1
+}
+
+fn add_points(bcd_hundreds: u8) {
+    // Clamps at MAX_POINTS. The largest add is far below $9999, so a wrap always ends below the old value.
+    var old: u16 = points
+    bcd.add_byte(addr(points) as ptr u8, 2, bcd_hundreds)
+    if points < old {
+        points = MAX_POINTS
+    }
+    video.hud_score(points)
+    flash_left = FLASH_FRAMES
+    mem.fill(video.COLOR_RAM + video.HUD_SCORE_COL, FLASH_COLOR, 6)
+}
+
+fn flash_step() {
+    // Once per frame, before anything can score.
+    if flash_left != 0 {
+        flash_left -= 1
+        if flash_left == 0 {
+            mem.fill(video.COLOR_RAM + video.HUD_SCORE_COL, video.COLOR_HUD, 6)
+        }
+    }
+}
+
+fn stop_flash() {
+    flash_left = 1
+    flash_step()
+}
+
+fn add_time(bcd_seconds: u8) {
+    bcd.add_byte(addr(time) as ptr u8, 2, bcd_seconds)
+    video.hud_time(time)
+}
+
+fn lose_time(bcd_seconds: u8) {
+    // Clamps at 0.
+    if time < bcd_seconds as u16 {
+        time = 0
+    } else {
+        bcd.sub_byte(addr(time) as ptr u8, 2, bcd_seconds)
+    }
+    video.hud_time(time)
+}
+
+fn tick() -> bool {
+    // Count down one frame. Returns true when the time has run out.
+    if time == 0 {
+        return true                 // a hit took the last seconds
+    }
+    time_frames -= 1
+    if time_frames == 0 {
+        time_frames = FRAMES_PER_SECOND
+        bcd.dec(addr(time) as ptr u8, 2)
+        video.hud_time(time)
+    }
+    return time == 0
+}

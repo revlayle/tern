@@ -1,0 +1,370 @@
+// VIC setup (bank 3), charset and sprite upload, tile map drawing, HUD, sprite shadows and the frame IRQ.
+// Port of ../src/video.p8. Not ported: late_frames (FRAME_STATS self-test).
+import c64
+import mem
+import text
+import assets
+import sound
+
+// ---- all colors ----
+const COLOR_BORDER: u8 = 0
+const COLOR_BG: u8 = 0              // $D021, art symbol '.' in tiles
+const COLOR_CHAR_MC1: u8 = 11       // $D022, art symbol '2' in tiles
+const COLOR_CHAR_MC2: u8 = 15       // $D023, art symbol '3' in tiles
+const COLOR_SPR_MC1: u8 = 10        // $D025, art symbol '2' in sprites
+const COLOR_SPR_MC2: u8 = 11        // $D026, art symbol '3' in sprites
+const COLOR_HUD: u8 = 1             // hi-res text, must be 0-7
+const PLAYER_COLOR: u8 = 14         // art symbol '1' in player sprites
+const ENEMY_COLOR: u8 = 2
+const ENEMY_CARRY_COLOR: u8 = 7
+const TARGET_COLOR: u8 = 1          // fast-fall target tile highlight, must be 0-7
+const MC: u8 = 8                    // color RAM bit 3: the cell is multicolor
+// tile colors come from assets/tiles.txt (assets.TILE_*_COLOR)
+
+// ---- memory (spec section 3) ----
+const SCREEN = $C000
+const COLOR_RAM = $D800
+const CHARSET = $E000
+const SPRITE_DATA = $E800
+const HUD_FONT_CHARS = 64           // ROM screen codes 0-63: @, A-Z, space, digits, punctuation
+const CHAR_SPACE: u8 = 32
+const CHAR_0: u8 = $30              // screen code of the digit 0
+const CHAR_BLOCK: u8 = 255          // solid 8x8 block (title letters), set up by init()
+// title letter corner triangles (chars 251-254), named by the filled corner like the numpad: 7 = upper left
+const CHAR_TRI_7: u8 = 251
+const CHAR_TRI_9: u8 = 252
+const CHAR_TRI_1: u8 = 253
+const CHAR_TRI_3: u8 = 254
+// Each half includes the diagonal pixels, the same rule for all four, so diagonals line up across cells.
+data tri_chars: [u8; _] = [
+    $FF, $FE, $FC, $F8, $F0, $E0, $C0, $80,     // 7: pixel x + row <= 7
+    $FF, $7F, $3F, $1F, $0F, $07, $03, $01,     // 9: x >= row
+    $80, $C0, $E0, $F0, $F8, $FC, $FE, $FF,     // 1: x <= row
+    $01, $03, $07, $0F, $1F, $3F, $7F, $FF,     // 3: x + row >= 7
+]
+
+// ---- tile map (spec section 4) ----
+const MAP_W: u8 = 20
+const MAP_H: u8 = 12
+const T_EMPTY: u8 = 0
+const T_SOLID: u8 = 1
+const T_DAMAGED: u8 = 2
+const T_FLOOR: u8 = 3
+const T_TREASURE: u8 = 16           // 16 + type (0-14)
+
+var tiles: [u8; MAP_W * MAP_H] @ $C400
+data row_start: [u8; _] = [0, 20, 40, 60, 80, 100, 120, 140, 160, 180, 200, 220]
+// screen address of the top-left char of tile column 0 in each tile row (char row 1 + 2*row)
+data tile_row_addr: [ptr u8; _] = [SCREEN + 40, SCREEN + 120, SCREEN + 200, SCREEN + 280,
+                                   SCREEN + 360, SCREEN + 440, SCREEN + 520, SCREEN + 600,
+                                   SCREEN + 680, SCREEN + 760, SCREEN + 840, SCREEN + 920]
+// screen address of each char row, for message()
+data text_row: [ptr u8; _] = [SCREEN + r * 40 for r in 0..25]
+
+// tile value -> top-left char and color RAM value (with MC: video.p8 adds it in init()). Values 4-15 are
+// unused and draw as empty.
+data tile_char: [u8; _] = [
+    assets.TILE_EMPTY_TL, assets.TILE_SOLID_TL, assets.TILE_DAMAGED_TL, assets.TILE_FLOOR_TL,
+    assets.TILE_EMPTY_TL, assets.TILE_EMPTY_TL, assets.TILE_EMPTY_TL, assets.TILE_EMPTY_TL,
+    assets.TILE_EMPTY_TL, assets.TILE_EMPTY_TL, assets.TILE_EMPTY_TL, assets.TILE_EMPTY_TL,
+    assets.TILE_EMPTY_TL, assets.TILE_EMPTY_TL, assets.TILE_EMPTY_TL, assets.TILE_EMPTY_TL,
+    assets.TILE_TREASURE_0_TL, assets.TILE_TREASURE_1_TL, assets.TILE_TREASURE_2_TL,
+    assets.TILE_TREASURE_3_TL, assets.TILE_TREASURE_4_TL, assets.TILE_TREASURE_5_TL,
+    assets.TILE_TREASURE_6_TL, assets.TILE_TREASURE_7_TL, assets.TILE_TREASURE_8_TL,
+    assets.TILE_TREASURE_9_TL, assets.TILE_TREASURE_10_TL, assets.TILE_TREASURE_11_TL,
+    assets.TILE_TREASURE_12_TL, assets.TILE_TREASURE_13_TL, assets.TILE_TREASURE_14_TL,
+]
+data tile_color: [u8; len(tile_char)] = [
+    assets.TILE_EMPTY_COLOR | MC, assets.TILE_SOLID_COLOR | MC, assets.TILE_DAMAGED_COLOR | MC,
+    assets.TILE_FLOOR_COLOR | MC,
+    assets.TILE_EMPTY_COLOR | MC, assets.TILE_EMPTY_COLOR | MC, assets.TILE_EMPTY_COLOR | MC,
+    assets.TILE_EMPTY_COLOR | MC, assets.TILE_EMPTY_COLOR | MC, assets.TILE_EMPTY_COLOR | MC,
+    assets.TILE_EMPTY_COLOR | MC, assets.TILE_EMPTY_COLOR | MC, assets.TILE_EMPTY_COLOR | MC,
+    assets.TILE_EMPTY_COLOR | MC, assets.TILE_EMPTY_COLOR | MC, assets.TILE_EMPTY_COLOR | MC,
+    assets.TILE_TREASURE_0_COLOR | MC, assets.TILE_TREASURE_1_COLOR | MC, assets.TILE_TREASURE_2_COLOR | MC,
+    assets.TILE_TREASURE_3_COLOR | MC, assets.TILE_TREASURE_4_COLOR | MC, assets.TILE_TREASURE_5_COLOR | MC,
+    assets.TILE_TREASURE_6_COLOR | MC, assets.TILE_TREASURE_7_COLOR | MC, assets.TILE_TREASURE_8_COLOR | MC,
+    assets.TILE_TREASURE_9_COLOR | MC, assets.TILE_TREASURE_10_COLOR | MC, assets.TILE_TREASURE_11_COLOR | MC,
+    assets.TILE_TREASURE_12_COLOR | MC, assets.TILE_TREASURE_13_COLOR | MC, assets.TILE_TREASURE_14_COLOR | MC,
+]
+
+// ---- HUD layout (char row 0): "SCORE 000000   TIME 060   LEVEL 01" ----
+const HUD_SCORE_COL: u8 = 9
+const HUD_TIME_COL: u8 = 23
+const HUD_LEVEL_COL: u8 = 35
+data SCORE_LABEL = screen"score"
+data TIME_LABEL = screen"time"
+data LEVEL_LABEL = screen"level"
+
+var cpu_port: u8 @ $01              // memory configuration (bits 0-2)
+var hibase: u8 @ $0288              // the KERNAL's screen page (cbm.HIBASE)
+var sprite_ptrs: [u8; 8] @ $C3F8    // read by the VIC, so written every frame
+
+data chars_bin = include_bytes("../data/chars.bin")
+data sprites_bin = include_bytes("../data/sprites.bin")
+
+fn init() {
+    c64.vic.sprite_enable = 0
+    mem.fill(SCREEN, CHAR_SPACE, 1000)
+    mem.fill(COLOR_RAM, COLOR_HUD, 1000)
+
+    // HUD font from the character ROM. With CHAREN=0 the ROM replaces I/O at $D000, so no IRQs meanwhile.
+    c64.interrupts_off()
+    cpu_port = $32                  // char ROM, KERNAL, no BASIC
+    mem.copy(CHARSET, $D000, HUD_FONT_CHARS * 8)
+    cpu_port = $36                  // I/O, KERNAL, no BASIC
+    c64.interrupts_on()
+
+    // CPU writes to $E000-$FFFF reach the RAM under the KERNAL ROM
+    mem.copy(CHARSET + assets.TILE_FIRST_CHAR * 8, addr(chars_bin), assets.TILE_COUNT * 32)
+    mem.copy(SPRITE_DATA, addr(sprites_bin), assets.SPRITE_COUNT * 64)
+    mem.fill(CHARSET + CHAR_BLOCK * 8, $FF, 8)
+    mem.copy(CHARSET + CHAR_TRI_7 * 8, addr(tri_chars), len(tri_chars))
+
+    // VIC bank 3: $DD00 bits 0-1 = %00. Screen at +$0000, charset at +$2000.
+    c64.cia2.ddr_a |= 0b0000_0011
+    c64.cia2.port_a &= 0b1111_1100
+    c64.vic.memory = $08
+    hibase = $C0
+
+    c64.vic.control2 |= 0b0001_0000     // multicolor chars
+    c64.vic.sprite_multicolor = 0b0011_1111     // sprites 6-7 (score popups) are hi-res
+    c64.vic.border = COLOR_BORDER
+    c64.vic.background = COLOR_BG
+    c64.vic.background1 = COLOR_CHAR_MC1
+    c64.vic.background2 = COLOR_CHAR_MC2
+    c64.vic.sprite_mc0 = COLOR_SPR_MC1
+    c64.vic.sprite_mc1 = COLOR_SPR_MC2
+}
+
+fn set_title_mode() {
+    // Blank screen in hi-res character mode (all 16 colours per cell), no sprites.
+    spr_ena = 0
+    mem.fill(SCREEN, CHAR_SPACE, 1000)
+    c64.vic.control2 &= 0b1110_1111
+}
+
+fn set_game_mode() {
+    // Blank screen in the game's character mode. Sprites come back as the game draws them.
+    // Colour RAM too: the title leaves letter colours (multicolour values) where the HUD goes.
+    mem.fill(SCREEN, CHAR_SPACE, 1000)
+    mem.fill(COLOR_RAM, COLOR_HUD, 1000)
+    c64.vic.control2 |= 0b0001_0000
+}
+
+fn draw_tile(col: u8, row: u8) {
+    var t: u8 = tiles[row_start[row] + col]
+    var ch: u8 = tile_char[t]
+    var co: u8 = tile_color[t]
+    var scr: ptr u8 = tile_row_addr[row] + (col << 1)
+    scr[0] = ch
+    scr[1] = ch + 1
+    scr[40] = ch + 2
+    scr[41] = ch + 3
+    scr += COLOR_RAM - SCREEN
+    scr[0] = co
+    scr[1] = co
+    scr[40] = co
+    scr[41] = co
+}
+
+fn highlight_tile(col: u8, row: u8) {
+    // Recolor a drawn tile with TARGET_COLOR. draw_tile() restores its own color.
+    var scr: ptr u8 = tile_row_addr[row] + (col << 1) + (COLOR_RAM - SCREEN)
+    scr[0] = TARGET_COLOR | MC
+    scr[1] = TARGET_COLOR | MC
+    scr[40] = TARGET_COLOR | MC
+    scr[41] = TARGET_COLOR | MC
+}
+
+fn draw_level() {
+    for row in 0..MAP_H {
+        for col in 0..MAP_W {
+            draw_tile(col, row)
+        }
+    }
+}
+
+fn put_digits(dst: ptr u8, bcd: u16, digits: u8) {
+    // Print the low `digits` BCD nibbles of bcd, most significant first, starting at screen address dst.
+    // Only digits that differ from what is on screen are written.
+    var scr: ptr u8 = dst + (digits - 1)
+    var b: u16 = bcd
+    for _ in 0..digits {
+        var ch: u8 = CHAR_0 + ((b as u8) & 15)
+        if scr[0] != ch {
+            scr[0] = ch
+        }
+        b >>= 4
+        scr -= 1
+    }
+}
+
+fn hud_digits(col: u8, bcd: u16, digits: u8) {
+    put_digits((SCREEN + col as u16) as ptr u8, bcd, digits)
+}
+
+fn message(row: u8, col: u8, s: ptr u8, n: u8) {
+    // Hi-res text over the playfield. draw_level() or restore_tiles() erases it.
+    var scr: ptr u8 = text_row[row] + col
+    text.put(scr, s, n)
+    mem.fill(scr + (COLOR_RAM - SCREEN), COLOR_HUD, n as u16)
+}
+
+fn restore_tiles(row: u8, col: u8, n: u8) {
+    // Redraw the tiles under n chars of a message at char row 1-24, starting at col.
+    var trow: u8 = (row - 1) >> 1
+    for tcol in col >> 1..=(col + n - 1) >> 1 {
+        draw_tile(tcol, trow)
+    }
+}
+
+fn draw_hud_labels() {
+    text.put(SCREEN + 3, addr(SCORE_LABEL), len(SCORE_LABEL))
+    text.put(SCREEN + 18, addr(TIME_LABEL), len(TIME_LABEL))
+    text.put(SCREEN + 29, addr(LEVEL_LABEL), len(LEVEL_LABEL))
+}
+
+fn hud_score(bcd_hundreds: u16) {
+    hud_digits(HUD_SCORE_COL, bcd_hundreds, 4)
+    hud_digits(HUD_SCORE_COL + 4, 0, 2)
+}
+
+fn hud_time(bcd: u16) {
+    hud_digits(HUD_TIME_COL, bcd, 3)
+}
+
+fn hud_level(bcd: u8) {
+    hud_digits(HUD_LEVEL_COL, bcd as u16, 2)
+}
+
+// ---- sprites and frame IRQ (spec section 1) ----
+// Game code writes these shadows; the frame IRQ copies them to the VIC at the start of the next frame.
+const FRAME_IRQ_LINE: u8 = 251      // first line of the bottom border (PAL)
+var spr_ptr: [u8; 8]
+var spr_col: [u8; 8]
+var spr_x: [u8; 8]
+var spr_y: [u8; 8]
+var spr_msb: u8
+var spr_ena: u8
+var frame_ready: bool
+var scroll_y: u8 = NORMAL_SCROLL    // vertical fine scroll ($D011 bits 0-2), set by the frame IRQ (shakes)
+var spr_dy: u8                      // added to every sprite's y by the frame IRQ, so sprites shake with the screen
+var frames: u8                      // counts frame IRQs (replaces the KERNAL jiffy clock)
+data sprite_bit: [u8; _] = [1, 2, 4, 8, 16, 32, 64, 128]
+
+// ---- gameplay screen shake [TUNE] ----
+const NORMAL_SCROLL: u8 = 3
+const SHAKE_PX: u8 = 2              // the screen and sprites drop this far on alternate frames
+const SHAKE_CRACK: u8 = 4           // frames: fast-fall cracks a tile
+const SHAKE_SMASH: u8 = 8           // frames: fast-fall destroys a tile, or kills an enemy
+var shake_left: u8
+
+fn shake(n: u8) {
+    // Start a shake, or restart it if this one is longer than what is left (shakes don't stack).
+    if n > shake_left {
+        shake_left = n
+    }
+}
+
+fn shake_step() {
+    // Once per play frame.
+    if shake_left != 0 {
+        shake_left -= 1
+    }
+    if shake_left & 1 != 0 {
+        scroll_y = NORMAL_SCROLL + SHAKE_PX
+        spr_dy = SHAKE_PX
+    } else {
+        scroll_y = NORMAL_SCROLL
+        spr_dy = 0
+    }
+}
+
+fn stop_shake() {
+    shake_left = 0
+    shake_step()
+}
+
+fn start_frame_irq() {
+    // As Prog8's sys.set_rasterirq: the KERNAL stays in and the IRQ goes through $0314. The handler
+    // replaces the KERNAL's IRQ work (no keyboard scan: input reads the matrix itself).
+    c64.interrupts_off()
+    c64.cia_irqs_off()              // no CIA interrupts (the KERNAL's timer), pending ones cleared
+    c64.vic.control1 &= $7F         // raster line bit 8 = 0
+    c64.vic.raster = FRAME_IRQ_LINE
+    c64.vic.irq_enable = 1          // raster interrupt on
+    c64.vic.irq_status = $FF        // clear one that is pending
+    c64.set_kernal_irq(addr(frame_irq))
+    c64.interrupts_on()
+}
+
+interrupt fn frame_irq() {
+    // Nothing slow here. Unrolled copy of the 8 sprites' pointer, color, x and y; y gets spr_dy added (screen shake).
+    c64.vic.irq_status = $FF        // acknowledge
+    sprite_ptrs[0] = spr_ptr[0]; c64.vic.sprite_color[0] = spr_col[0]; c64.sprite_xy[0] = spr_x[0]; c64.sprite_xy[1] = spr_y[0] + spr_dy
+    sprite_ptrs[1] = spr_ptr[1]; c64.vic.sprite_color[1] = spr_col[1]; c64.sprite_xy[2] = spr_x[1]; c64.sprite_xy[3] = spr_y[1] + spr_dy
+    sprite_ptrs[2] = spr_ptr[2]; c64.vic.sprite_color[2] = spr_col[2]; c64.sprite_xy[4] = spr_x[2]; c64.sprite_xy[5] = spr_y[2] + spr_dy
+    sprite_ptrs[3] = spr_ptr[3]; c64.vic.sprite_color[3] = spr_col[3]; c64.sprite_xy[6] = spr_x[3]; c64.sprite_xy[7] = spr_y[3] + spr_dy
+    sprite_ptrs[4] = spr_ptr[4]; c64.vic.sprite_color[4] = spr_col[4]; c64.sprite_xy[8] = spr_x[4]; c64.sprite_xy[9] = spr_y[4] + spr_dy
+    sprite_ptrs[5] = spr_ptr[5]; c64.vic.sprite_color[5] = spr_col[5]; c64.sprite_xy[10] = spr_x[5]; c64.sprite_xy[11] = spr_y[5] + spr_dy
+    sprite_ptrs[6] = spr_ptr[6]; c64.vic.sprite_color[6] = spr_col[6]; c64.sprite_xy[12] = spr_x[6]; c64.sprite_xy[13] = spr_y[6] + spr_dy
+    sprite_ptrs[7] = spr_ptr[7]; c64.vic.sprite_color[7] = spr_col[7]; c64.sprite_xy[14] = spr_x[7]; c64.sprite_xy[15] = spr_y[7] + spr_dy
+    c64.vic.sprite_x_msb = spr_msb
+    c64.vic.sprite_enable = spr_ena
+    c64.vic.control1 = (c64.vic.control1 & 0b0111_1000) | scroll_y   // bit 7 (raster compare bit 8) stays 0
+    sound.step()
+    frame_ready = true
+    frames += 1
+}
+
+fn frame_lines() -> u8 {
+    // Raster lines since the frame IRQ line (0-255; later lines read as 255). Only meaningful while the
+    // update hasn't run past the next frame IRQ (frame_ready still false).
+    var hi: u8 = 0
+    var lo: u8 = 0
+    while true {
+        hi = c64.vic.control1 & $80
+        lo = c64.vic.raster
+        if hi == c64.vic.control1 & $80 {
+            break
+        }
+    }
+    const TO_WRAP: u8 = 312 - FRAME_IRQ_LINE    // lines from the IRQ line to line 0
+    const TO_256: u8 = 256 - FRAME_IRQ_LINE
+    if hi != 0 {
+        return lo + TO_256                      // lines 256-311
+    }
+    if lo >= FRAME_IRQ_LINE {
+        return lo - FRAME_IRQ_LINE
+    }
+    if lo >= 255 - TO_WRAP {
+        return 255
+    }
+    return lo + TO_WRAP                         // lines 0-250 of the next screen
+}
+
+fn wait_frame() {
+    while !frame_ready { }
+    frame_ready = false
+}
+
+fn set_sprite(n: u8, frame: u8, color: u8, px: u16, py: u8) {
+    // Playfield coordinates of the sprite's top-left -> hardware position (spec section 2).
+    // px may be slightly negative (wrapped u16); the +24 brings it back into range.
+    spr_ptr[n] = frame
+    spr_col[n] = color
+    var sx: u16 = px + 24
+    spr_x[n] = sx as u8
+    spr_y[n] = py + 50 + 8
+    if sx >> 8 != 0 {
+        spr_msb |= sprite_bit[n]
+    } else {
+        spr_msb &= ~sprite_bit[n]
+    }
+    spr_ena |= sprite_bit[n]
+}
+
+fn hide_sprite(n: u8) {
+    spr_ena &= ~sprite_bit[n]
+}

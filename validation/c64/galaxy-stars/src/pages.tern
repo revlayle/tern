@@ -1,0 +1,201 @@
+// Attract pages: HOW TO PLAY and SCORING, shown after the title (main.attract). The game's multicolor mode, so
+// tiles and sprites look as in play; text in hi-res cells from the HUD font. All page text is in the tables
+// below. Graphics are centred on pixel column 32, text starts at column 9. Port of ../src/pages.p8.
+import mem
+import video
+import input
+import score
+import player
+import hostiles
+import quasar
+import assets
+
+// [TUNE] frames each page is shown
+const HOW_FRAMES: u16 = 500         // 10 s
+const SCORING_FRAMES: u16 = 600     // 12 s
+const HEAD_COLOR: u8 = 7            // page titles, yellow
+const TEXT_COLOR: u8 = 1
+const TEXT_COL: u8 = 9
+const SPR_X: u16 = 22               // sprites' art centre (frame pixel 10) on pixel column 32
+
+// A line of page text: char row, column, text (ending in a 0 byte). The first line of a page is its title.
+struct Line { row: u8, col: u8, text: ptr u8 }
+
+// ---- HOW TO PLAY ----
+data H0 = screen"HOW TO PLAY\0"
+data H1 = screen"MOVE WITH THE STICK\0"
+data H2 = screen"FIRE TO BOOST\0"
+data H3 = screen"RAM STARS TO MAKE THEM GO\0"
+data H4 = screen"SUPERNOVA: 3 BUMPS OR 1 BOOST\0"
+data H5 = screen"HIT STARS SWELL, THEN EXPLODE\0"
+data H6 = screen"GET CLEAR BEFORE THEY BLOW\0"
+data H7 = screen"HURL HOSTILES WITH A BOOST\0"
+data H8 = screen"DON'T LET THEM TOUCH YOU\0"
+data H9 = screen"GRAB A QUASAR FOR 8 SECONDS\0"
+data H10 = screen"OF INVINCIBILITY\0"
+data H11 = screen"CLEAR ALL STARS TO REACH THE NEXT GALAXY\0"
+data how: [Line; _] = [
+    Line { row = 1, col = 14, text = addr(H0) },
+    Line { row = 3, col = TEXT_COL, text = addr(H1) },
+    Line { row = 4, col = TEXT_COL, text = addr(H2) },
+    Line { row = 6, col = TEXT_COL, text = addr(H3) },
+    Line { row = 7, col = TEXT_COL, text = addr(H4) },
+    Line { row = 11, col = TEXT_COL, text = addr(H5) },
+    Line { row = 12, col = TEXT_COL, text = addr(H6) },
+    Line { row = 16, col = TEXT_COL, text = addr(H7) },
+    Line { row = 17, col = TEXT_COL, text = addr(H8) },
+    Line { row = 19, col = TEXT_COL, text = addr(H9) },
+    Line { row = 20, col = TEXT_COL, text = addr(H10) },
+    Line { row = 23, col = 0, text = addr(H11) },
+]
+// sprites: player rows 3-4, hostile rows 16-17, quasar rows 19-20 (art centred on the line pair)
+const HOW_PLAYER_Y: u8 = 3 * 8 - 10
+const HOW_HOSTILE_Y: u8 = 16 * 8 - 10
+const HOW_QUASAR_Y: u8 = 19 * 8 - 10
+
+// ---- SCORING ----
+data S0 = screen"SCORING\0"
+data S1 = screen"SUPERNOVA\0"
+data S2 = screen"AND MULTIPLIER +1\0"
+data S3 = screen"HOSTILE CHAIN\0"
+data S4 = screen"TIME BONUS 100 PER SECOND\0"
+data S5 = screen"ALL POINTS X MULTIPLIER\0"
+data S6 = screen"EXTRA LIFE AT\0"
+data S7 = screen"THEN EVERY\0"
+data scoring_lines: [Line; _] = [
+    Line { row = 1, col = 16, text = addr(S0) },
+    Line { row = 4, col = TEXT_COL, text = addr(S1) },
+    Line { row = 5, col = TEXT_COL, text = addr(S2) },
+    Line { row = 8, col = TEXT_COL, text = addr(S3) },
+    Line { row = 12, col = TEXT_COL, text = addr(S4) },
+    Line { row = 15, col = TEXT_COL, text = addr(S5) },
+    Line { row = 18, col = TEXT_COL, text = addr(S6) },
+    Line { row = 19, col = TEXT_COL, text = addr(S7) },
+]
+const SCORE_HOSTILE_Y: u8 = 8 * 8 - 10
+const ICON_COL: u8 = 4
+
+fn how_to_play() -> bool {
+    // Show HOW TO PLAY for HOW_FRAMES frames. True if fire was pressed.
+    start_page()
+    for i in 0..len(how) {
+        var color: u8 = TEXT_COLOR
+        if i == 0 {
+            color = HEAD_COLOR
+        }
+        video.message(how[i].row, how[i].col, how[i].text, color)
+    }
+    put_tile(6, 3, video.star_char[1], video.star_color[1])
+    put_tile(11, 0, assets.TILE_SWELL_0_TL, assets.TILE_SWELL_0_COLOR | video.MC)
+    // the explosion's burst frame, 3 x 3 tiles at char rows 9-14, columns 2-7
+    var ch: u8 = assets.TILE_EXPLODE_1_TL
+    for ty in 0..3 {
+        for tx in 0..3 {
+            put_tile(9 + (ty << 1), 2 + (tx << 1), ch, assets.TILE_EXPLODE_1_COLOR | video.MC)
+            ch += 4
+        }
+    }
+    video.set_sprite(0, assets.SPR_PLAYER_0, player.COLOR, SPR_X, HOW_PLAYER_Y)
+    video.set_sprite(1, assets.SPR_HOSTILE_0, hostiles.COLOR, SPR_X, HOW_HOSTILE_Y)
+    video.set_sprite(7, assets.SPR_QUASAR_0, quasar.COLOR, SPR_X, HOW_QUASAR_Y)
+    return wait(HOW_FRAMES)
+}
+
+fn scoring() -> bool {
+    // Show SCORING for SCORING_FRAMES frames. True if fire was pressed. The values come from the score
+    // tables and constants, so they stay right after tuning.
+    start_page()
+    for i in 0..len(scoring_lines) {
+        var color: u8 = TEXT_COLOR
+        if i == 0 {
+            color = HEAD_COLOR
+        }
+        video.message(scoring_lines[i].row, scoring_lines[i].col, scoring_lines[i].text, color)
+    }
+    put_tile(4, 3, video.star_char[5], video.star_color[5])
+    put_value(4, TEXT_COL + 10, score.base_mid[score.T_SUPERNOVA], score.base_lo[score.T_SUPERNOVA])
+    // the hostile chain steps on one line
+    var col: u8 = TEXT_COL
+    for i in 1..=score.CHAIN_STEPS {
+        col += put_value(9, col, score.base_mid[i], score.base_lo[i]) + 1
+    }
+    put_char(12, ICON_COL, assets.CHAR_TIME, assets.CHAR_TIME_COLOR)
+    put_char(15, ICON_COL, assets.CHAR_MULT, assets.CHAR_MULT_COLOR)
+    put_char(18, ICON_COL, assets.CHAR_LIVES, assets.CHAR_LIVES_COLOR)
+    put_value(18, TEXT_COL + 14, score.EXTRA_LIFE_FIRST >> 8, score.EXTRA_LIFE_FIRST & $FF)
+    put_value(19, TEXT_COL + 11, score.EVERY_MID, score.EVERY_LO)
+    video.set_sprite(1, assets.SPR_HOSTILE_0, hostiles.COLOR, SPR_X, SCORE_HOSTILE_Y)
+    return wait(SCORING_FRAMES)
+}
+
+fn start_page() {
+    // Empty screen in the game's multicolor mode, switched in the border.
+    video.hide_sprites()
+    video.wait_frame()
+    video.clear_screen()
+    video.game_mode()
+}
+
+fn wait(frames: u16) -> bool {
+    // Wait the given frames or until fire (true), spinning the page's sprites; then hide them.
+    var fire: bool = false
+    var spin: u8 = 0
+    var frame: u8 = 0
+    var q_delay: u8 = 0
+    var q_frame: u8 = 0
+    for _ in 0..frames {
+        video.wait_frame()
+        input.read()
+        if input.pressed & input.FIRE != 0 {
+            fire = true
+            break
+        }
+        spin += 1
+        if spin == player.SPIN_DELAY {
+            spin = 0
+            frame += 1
+            if frame == player.SPIN_FRAMES {
+                frame = 0
+            }
+            video.spr_ptr[0] = assets.SPR_PLAYER_0 + frame
+            video.spr_ptr[1] = assets.SPR_HOSTILE_0 + frame
+        }
+        q_delay += 1
+        if q_delay == quasar.ANIM_DELAY {
+            q_delay = 0
+            q_frame = (q_frame + 1) & (quasar.ANIM_FRAMES - 1)
+            video.spr_ptr[7] = assets.SPR_QUASAR_0 + q_frame
+        }
+    }
+    video.hide_sprites()
+    return fire
+}
+
+fn put_tile(row: u8, col: u8, ch: u8, color: u8) {
+    // A 2x2-char tile (chars ch to ch + 3: TL, TR, BL, BR) at any char position.
+    var scr: ptr u8 = video.row_addr(row) + col
+    scr[0] = ch
+    scr[1] = ch + 1
+    scr[40] = ch + 2
+    scr[41] = ch + 3
+    scr += video.COLOR_RAM - video.SCREEN
+    scr[0] = color
+    scr[1] = color
+    scr[40] = color
+    scr[41] = color
+}
+
+fn put_char(row: u8, col: u8, ch: u8, color: u8) {
+    var a: ptr u8 = video.row_addr(row) + col
+    a[0] = ch
+    a += video.COLOR_RAM - video.SCREEN
+    a[0] = color
+}
+
+fn put_value(row: u8, col: u8, bcd_mid: u8, bcd_lo: u8) -> u8 {
+    // Points given in BCD hundreds, without leading zeros, in the text color. Returns the width.
+    var a: ptr u8 = video.row_addr(row) + col
+    var n: u8 = video.put_hundreds(a, bcd_mid, bcd_lo)
+    mem.fill(a + (video.COLOR_RAM - video.SCREEN), TEXT_COLOR, n)
+    return n
+}

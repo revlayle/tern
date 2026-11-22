@@ -1,0 +1,576 @@
+// Enemies (spec section 6): 5 enemies on sprites 1-5 with the shared actor physics, contact with the player
+// (kill, stomp, hit), respawning with a warning flicker, and treasure carrying (pickup, drop, falling treasures).
+// The navigation AI (nav.tern) decides where to go. Port of ../src/enemies.p8. Not ported: the self-test
+// switch frozen and the counters n_kills, n_bonks, n_hits, n_pickups, n_drops.
+import actors
+import assets
+import levelgen
+import nav
+import player
+import popup
+import score
+import sound
+import video
+
+const FIRST: u8 = 1
+const LAST: u8 = 5
+
+// states in actors.state[1-5]
+const GROUNDED: u8 = player.GROUNDED
+const RISING: u8 = player.RISING
+const FALLING: u8 = player.FALLING
+const DEAD: u8 = 6                  // destroyed, waiting to respawn; not shown
+const WARNING: u8 = 7               // flickering at its spawn spot: doesn't move, no contact at all
+
+// [TUNE]
+const BASE_SPEED: u8 = 12           // 1/16 px per frame at level 1, +1 per level
+const MAX_SPEED: u8 = 22
+const JUMP_HEIGHT: u8 = 80          // px, at the player's rise speed
+const RESPAWN_SECS: u8 = 10         // at level 1, -1 per level
+const MIN_RESPAWN_SECS: u8 = 3
+const WARNING_FRAMES: u8 = 50
+const PICKUP_COOLDOWN: u8 = 150     // frames (3 s) an enemy that lost a treasure can't pick one up
+const WALK_STEP: u8 = 5             // px moved per walk picture (3 pictures)
+const FALL_MASK: u8 = 3             // a dropped treasure falls one tile on frames where (frame & 3) == 0
+const DECIDE_MASK: u8 = 7           // enemy i may decide on frames where (frame & 7) == i, so one per frame
+
+const PLAYER_DIST: u8 = 8           // spawn at least this far from the player (Manhattan, tiles)
+const ENEMY_SPACING: u8 = 3         // and this far from other enemies (|dcol| >= 3 or |drow| >= 3)
+const SPAWN_TRIES: u8 = 20
+const PICK_WORK: u8 = 4             // spawn tries or fallback-scan cells per frame, shared by all enemies
+                                    // (only on frames without an AI decision, so the two never add up)
+
+// set by the navigation AI, carried out by move()
+const DIR_NONE: u8 = 0
+const DIR_RIGHT: u8 = 1
+const DIR_LEFT: u8 = 2
+const EDGE_STOP: u8 = 0             // stand still at a platform edge
+const EDGE_TURN: u8 = 1             // turn around at a platform edge or a wall
+const EDGE_DROP: u8 = 2             // walk off platform edges
+
+var level: u8
+var speed: u8                       // walk speed this level
+var respawn_secs: u8                // respawn delay this level
+var frame: u8
+var kills: u8                       // enemies destroyed this level (no-kill bonus)
+
+var walk_dir: [u8; actors.COUNT]
+var goal_on: [bool; actors.COUNT]   // walk toward goal_x (never past it) instead of in walk_dir
+var goal_x: [u16; actors.COUNT]
+var edge_mode: [u8; actors.COUNT]
+var jump_req: [bool; actors.COUNT]
+var rise_left: [u8; actors.COUNT]
+var respawn_timer: [u8; actors.COUNT]   // seconds left while DEAD; at 0 the enemy is picking its spawn spot
+var timer_frames: [u8; actors.COUNT]    // frames left in the current second (DEAD) or of the warning (WARNING)
+var carrying: [u8; actors.COUNT]    // 0 = none, else 1 + treasure type
+var cooldown: [u8; actors.COUNT]    // frames until it may pick up a treasure again
+
+// dropped treasures that haven't come to rest on a solid tile yet: tile map indices
+var falling: [u8; levelgen.TREASURES]
+var fall_count: u8
+
+// standing cells of the level (empty, solid tile below), listed at level start for spawn picks
+var spots: [u8; levelgen.CELLS]
+var spot_count: u8
+
+// kill points by chain, BCD hundreds
+data kill_points: [u8; _] = [$02, $04, $08, $16, $32]
+
+fn new_level(lvl: u8) {
+    level = lvl
+    kills = 0
+    // speed = min(12 + (level - 1), 22), respawn = max(10 - (level - 1), 3) s
+    speed = MAX_SPEED
+    if level <= MAX_SPEED - BASE_SPEED {
+        speed = BASE_SPEED - 1 + level
+    }
+    respawn_secs = MIN_RESPAWN_SECS
+    if level <= RESPAWN_SECS - MIN_RESPAWN_SECS {
+        respawn_secs = RESPAWN_SECS + 1 - level
+    }
+}
+
+fn place_all() {
+    // Level start: list the standing cells, then spawn all enemies (with the warning flicker).
+    // Call after the level is generated and the player is at the start.
+    fall_count = 0
+    spot_count = 0
+    for idx in 0..levelgen.CELLS {
+        if video.tiles[idx] == video.T_EMPTY && video.tiles[idx + video.MAP_W] - 1 < 3 {
+            spots[spot_count] = idx
+            spot_count += 1
+        }
+    }
+    for i in FIRST..=LAST {
+        actors.state[i] = DEAD      // not counted for spacing until placed
+        video.hide_sprite(i)
+    }
+    for i in FIRST..=LAST {
+        start_pick(i)
+        while true {
+            pick_work = 255
+            if pick(i) {
+                break
+            }
+        }
+    }
+}
+
+fn place(i: u8, idx: u8) {
+    actors.x[i] = ((levelgen.cell_col[idx] as u16) << 4) + (16 - actors.BOX_W) / 2
+    actors.y[i] = levelgen.cell_row[idx] << 4
+    actors.x_frac[i] = 0
+    actors.y_frac[i] = 0
+    actors.vy[i] = 0
+    actors.state[i] = WARNING
+    timer_frames[i] = WARNING_FRAMES
+    walk_dir[i] = DIR_NONE
+    edge_mode[i] = EDGE_STOP
+    jump_req[i] = false
+    carrying[i] = 0
+    cooldown[i] = 0
+    nav.reset(i)
+}
+
+// Spawn spot picking, spread over frames: each random try or fallback-scan cell costs one unit of
+// pick_work, and update() hands out PICK_WORK units per frame.
+var pick_work: u8
+var pick_tries: [u8; actors.COUNT]  // random tries left
+var pick_n: [u8; actors.COUNT]      // fallback scan position in spots
+var pick_best: [u8; actors.COUNT]
+var pick_best_score: [u8; actors.COUNT]
+var pcol: u8                        // player's cell
+var prow: u8
+
+fn start_pick(i: u8) {
+    respawn_timer[i] = 0
+    pick_tries[i] = SPAWN_TRIES
+    pick_n[i] = 0
+    pick_best[i] = spots[0]
+    pick_best_score[i] = 0
+}
+
+fn pick(i: u8) -> bool {
+    // Continue picking a spawn spot for enemy i while pick_work lasts. Returns true when it was placed.
+    // A spot is a standing cell, still empty with a solid tile below, at least PLAYER_DIST from the player
+    // and ENEMY_SPACING from the other enemies. Up to SPAWN_TRIES random picks, then the farthest valid one
+    // (preferring cells that keep the spacing; row 10 always has standing cells).
+    pcol = ((actors.x[0] + actors.BOX_W / 2) >> 4) as u8
+    prow = (actors.y[0] + actors.BOX_H / 2) >> 4
+    while pick_work != 0 {
+        pick_work -= 1
+        if pick_tries[i] != 0 {
+            pick_tries[i] -= 1
+            var idx: u8 = spots[levelgen.rand_below(spot_count)]
+            if standing(idx) && dist(idx) >= PLAYER_DIST && spaced(idx, i) {
+                place(i, idx)
+                return true
+            }
+        } else {
+            var idx: u8 = spots[pick_n[i]]
+            if standing(idx) {
+                var s: u8 = dist(idx)
+                if spaced(idx, i) {
+                    s += 64
+                }
+                if s > pick_best_score[i] {
+                    pick_best_score[i] = s
+                    pick_best[i] = idx
+                }
+            }
+            pick_n[i] += 1
+            if pick_n[i] == spot_count {
+                place(i, pick_best[i])
+                return true
+            }
+        }
+    }
+    return false
+}
+
+fn standing(idx: u8) -> bool {
+    return video.tiles[idx] == video.T_EMPTY && video.tiles[idx + video.MAP_W] - 1 < 3
+}
+
+fn dist(idx: u8) -> u8 {
+    return abs_diff(levelgen.cell_col[idx], pcol) + abs_diff(levelgen.cell_row[idx], prow)
+}
+
+fn spaced(idx: u8, i: u8) -> bool {
+    var c: u8 = levelgen.cell_col[idx]
+    var r: u8 = levelgen.cell_row[idx]
+    for j in FIRST..=LAST {
+        if j != i && actors.state[j] != DEAD {
+            if abs_diff(c, col_of(j)) < ENEMY_SPACING && abs_diff(r, actors.y[j] >> 4) < ENEMY_SPACING {
+                return false
+            }
+        }
+    }
+    return true
+}
+
+fn col_of(i: u8) -> u8 {
+    // column under the box centre
+    return ((actors.x[i] + actors.BOX_W / 2) >> 4) as u8
+}
+
+fn abs_diff(a: u8, b: u8) -> u8 {
+    if a >= b {
+        return a - b
+    }
+    return b - a
+}
+
+fn update() {
+    frame += 1
+    // At most one enemy decides per frame. Frames without a decision do spawn picking.
+    var decider: u8 = frame & DECIDE_MASK
+    if decider < FIRST || decider > LAST || actors.state[decider] != GROUNDED || nav.commit[decider] != 0 {
+        decider = 0
+    }
+    pick_work = 0
+    if decider == 0 {
+        pick_work = PICK_WORK
+    }
+
+    for i in FIRST..=LAST {
+        if cooldown[i] != 0 {
+            cooldown[i] -= 1
+        }
+        match actors.state[i] {
+            DEAD => {
+                if respawn_timer[i] == 0 {
+                    pick(i)
+                } else {
+                    timer_frames[i] -= 1
+                    if timer_frames[i] == 0 {
+                        timer_frames[i] = score.FRAMES_PER_SECOND
+                        respawn_timer[i] -= 1
+                        if respawn_timer[i] == 0 {
+                            start_pick(i)
+                        }
+                    }
+                }
+            }
+            WARNING => {
+                timer_frames[i] -= 1
+                if timer_frames[i] == 0 {
+                    actors.state[i] = FALLING   // settles onto its tile on the next move
+                }
+            }
+            _ => {
+                if i == decider {
+                    nav.decide(i)
+                }
+                nav.steer(i)
+                move(i)
+                if carrying[i] == 0 && cooldown[i] == 0 {
+                    pick_up(i)
+                }
+            }
+        }
+    }
+    if frame & FALL_MASK == 0 && fall_count != 0 {
+        fall_treasures()
+    }
+}
+
+// ---- treasure carrying (spec section 6, treasure handling) ----
+fn pick_up(i: u8) {
+    // Take the first treasure tile the box overlaps (up to 2 x 2 tiles).
+    var left: u8 = (actors.x[i] >> 4) as u8
+    var idx: u8 = video.row_start[actors.y[i] >> 4] + left
+    var two_cols: bool = ((actors.x[i] + (actors.BOX_W - 1)) >> 4) as u8 != left
+    if take(i, idx) {
+        return
+    }
+    if two_cols && take(i, idx + 1) {
+        return
+    }
+    if actors.y[i] & 15 != 0 {
+        idx += video.MAP_W
+        if take(i, idx) {
+            return
+        }
+        if two_cols {
+            take(i, idx + 1)
+        }
+    }
+}
+
+fn take(i: u8, idx: u8) -> bool {
+    var t: u8 = video.tiles[idx]
+    if t < video.T_TREASURE {
+        return false
+    }
+    carrying[i] = t - video.T_TREASURE + 1
+    nav.hideout[i] = nav.NONE       // pick a hideout at the next decision
+    video.tiles[idx] = video.T_EMPTY
+    video.draw_tile(levelgen.cell_col[idx], levelgen.cell_row[idx])
+    return true
+}
+
+fn drop(i: u8) {
+    // Lose the carried treasure (stomp or kill): it goes into the tile at the box centre, or the nearest empty
+    // tile above it, and falls from there (fall_treasures).
+    if carrying[i] == 0 {
+        return
+    }
+    var t: u8 = video.T_TREASURE + carrying[i] - 1
+    carrying[i] = 0
+    nav.hideout[i] = nav.NONE       // no longer claimed
+    cooldown[i] = PICKUP_COOLDOWN
+    var idx: u8 = video.row_start[(actors.y[i] + actors.BOX_H / 2) >> 4] + col_of(i)
+    while video.tiles[idx] != video.T_EMPTY {
+        if idx < video.MAP_W {
+            // the whole column above is taken: the first empty tile of the map instead
+            idx = 0
+            while video.tiles[idx] != video.T_EMPTY {
+                idx += 1
+            }
+            break
+        }
+        idx -= video.MAP_W
+    }
+    video.tiles[idx] = t
+    video.draw_tile(levelgen.cell_col[idx], levelgen.cell_row[idx])
+    if fall_count < len(falling) {
+        falling[fall_count] = idx
+        fall_count += 1
+    }
+}
+
+fn fall_treasures() {
+    // Move each dropped treasure one tile down into an empty tile. One resting on a solid tile is done
+    // (the hunters may target it from now on); one above another treasure waits until that cell is empty.
+    // A treasure taken while falling (by the player or an enemy) leaves the list.
+    var k: u8 = fall_count
+    while k != 0 {
+        k -= 1
+        var idx: u8 = falling[k]
+        var t: u8 = video.tiles[idx]
+        var done: bool = t < video.T_TREASURE
+        if !done {
+            var below: u8 = video.tiles[idx + video.MAP_W]
+            if below == video.T_EMPTY {
+                video.tiles[idx] = video.T_EMPTY
+                video.draw_tile(levelgen.cell_col[idx], levelgen.cell_row[idx])
+                idx += video.MAP_W
+                video.tiles[idx] = t
+                video.draw_tile(levelgen.cell_col[idx], levelgen.cell_row[idx])
+                falling[k] = idx
+            } else if below - 1 < 3 {
+                nav.treasure_settled(idx)
+                done = true
+            }
+        }
+        if done {
+            fall_count -= 1
+            falling[k] = falling[fall_count]
+        }
+    }
+}
+
+// ---- movement: the player's physics minus fast-fall ----
+fn move(i: u8) {
+    var st: u8 = actors.state[i]
+    var d: u8 = 0
+    var room: u16 = 0
+
+    // horizontal: toward the goal and never past it, or in walk_dir
+    if goal_on[i] {
+        var gx: u16 = goal_x[i]
+        var ex: u16 = actors.x[i]
+        if ex < gx {
+            set_dir(i, DIR_RIGHT)
+            room = gx - ex
+        } else if ex > gx {
+            set_dir(i, DIR_LEFT)
+            room = ex - gx
+        } else {
+            walk_dir[i] = DIR_NONE
+        }
+    }
+    if walk_dir[i] != DIR_NONE {
+        d = actors.advance(actors.x_frac[i], speed)
+        actors.x_frac[i] = actors.new_frac
+        if goal_on[i] && room < d as u16 {
+            d = room as u8
+        }
+        if st == GROUNDED && edge_mode[i] != EDGE_DROP && at_edge(i, d) {
+            if edge_mode[i] == EDGE_TURN {
+                turn(i)
+            }
+        } else {
+            var blocked: bool = false
+            if walk_dir[i] == DIR_RIGHT {
+                blocked = actors.move_right(i, d)
+            } else {
+                blocked = actors.move_left(i, d)
+            }
+            if blocked && edge_mode[i] == EDGE_TURN {
+                turn(i)
+            }
+        }
+    }
+
+    // vertical
+    if st == GROUNDED {
+        if jump_req[i] {
+            st = RISING
+            rise_left[i] = JUMP_HEIGHT
+            actors.y_frac[i] = 0
+        } else if !actors.on_ground(i) {
+            st = FALLING
+            actors.vy[i] = 0
+        }
+    }
+    jump_req[i] = false
+    match st {
+        RISING => {
+            d = actors.advance(actors.y_frac[i], player.RISE_SPEED)
+            actors.y_frac[i] = actors.new_frac
+            if d > rise_left[i] {
+                d = rise_left[i]
+            }
+            rise_left[i] -= d
+            if actors.move_up(i, d) || rise_left[i] == 0 {
+                st = FALLING
+                actors.vy[i] = 0
+            }
+        }
+        FALLING => {
+            actors.vy[i] += player.GRAVITY
+            if actors.vy[i] > player.MAX_FALL {
+                actors.vy[i] = player.MAX_FALL
+            }
+            d = actors.advance(actors.y_frac[i], actors.vy[i] as u8)
+            actors.y_frac[i] = actors.new_frac
+            if actors.move_down(i, d) {
+                st = GROUNDED
+                actors.vy[i] = 0
+                actors.y_frac[i] = 0
+            }
+        }
+        _ => {}
+    }
+    actors.state[i] = st
+}
+
+fn at_edge(i: u8, d: u8) -> bool {
+    // True when moving d px would put the leading bottom corner over a tile with nothing to stand on.
+    // Only possible when the corner enters a new tile column (see actors: tiles never become solid).
+    var lead: u16 = 0
+    if walk_dir[i] == DIR_RIGHT {
+        if (((actors.x[i] as u8) + actors.BOX_W - 1) & 15) + d < 16 {
+            return false
+        }
+        lead = actors.x[i] + (actors.BOX_W - 1) + d
+        if lead > 319 {
+            return false            // the screen edge stops it as a wall
+        }
+    } else {
+        if ((actors.x[i] as u8) & 15) >= d || actors.x[i] < d as u16 {
+            return false
+        }
+        lead = actors.x[i] - d
+    }
+    return !actors.solid_at(lead, actors.y[i] + actors.BOX_H)
+}
+
+fn turn(i: u8) {
+    if walk_dir[i] == DIR_RIGHT {
+        set_dir(i, DIR_LEFT)
+    } else if walk_dir[i] == DIR_LEFT {
+        set_dir(i, DIR_RIGHT)
+    }
+}
+
+fn set_dir(i: u8, dir: u8) {
+    walk_dir[i] = dir
+    if dir == DIR_RIGHT {
+        actors.facing[i] = actors.FACE_RIGHT
+    } else if dir == DIR_LEFT {
+        actors.facing[i] = actors.FACE_LEFT
+    }
+}
+
+// ---- contact with the player (spec section 6), after both have moved ----
+fn contact() {
+    // Checked in order: fast-fall kill, stomp, hit. The player's state from before this check is used for
+    // every enemy, so one fast-fall can kill (or one fall stomp) two overlapping enemies in the same frame.
+    // Kill and stomp use the full player box; a hit needs the smaller hurt box (HURT_INSET) to overlap too.
+    var pst: u8 = actors.state[0]
+    if pst == player.FLOATING {
+        return
+    }
+    var pbottom: u8 = actors.y[0] + actors.BOX_H - 1
+    for i in FIRST..=LAST {
+        if actors.state[i] >= DEAD {
+            continue
+        }
+        if actors.x[0] >= actors.x[i] + actors.BOX_W || actors.x[i] >= actors.x[0] + actors.BOX_W {
+            continue
+        }
+        if actors.y[0] >= actors.y[i] + actors.BOX_H || actors.y[i] >= actors.y[0] + actors.BOX_H {
+            continue
+        }
+        var top_half: bool = pbottom >= actors.y[i] && pbottom < actors.y[i] + actors.BOX_H / 2
+        if top_half && pst == player.FASTFALL {
+            kill(i)
+        } else if top_half && pst == player.FALLING {
+            drop(i)
+            player.bounce(actors.y[i])
+        } else if player.invuln_timer == 0 && actors.x[0] + actors.HURT_INSET < actors.x[i] + actors.BOX_W &&
+                actors.x[i] + actors.HURT_INSET < actors.x[0] + actors.BOX_W &&
+                actors.y[0] + actors.HURT_INSET < actors.y[i] + actors.BOX_H {
+            player.hit()
+            return
+        }
+    }
+}
+
+fn kill(i: u8) {
+    kills += 1
+    drop(i)
+    actors.state[i] = DEAD
+    respawn_timer[i] = respawn_secs
+    timer_frames[i] = score.FRAMES_PER_SECOND
+    score.add_points(kill_points[player.chain])
+    popup.show(actors.x[i] + actors.BOX_W / 2, actors.y[i] + actors.BOX_H / 2, kill_points[player.chain], player.chain + 1)
+    sound.play(sound.KILL)
+    if player.chain < len(kill_points) - 1 {
+        player.chain += 1
+    }
+    player.launch_from_kill()
+    video.shake(video.SHAKE_SMASH)
+}
+
+fn draw() {
+    for i in FIRST..=LAST {
+        var st: u8 = actors.state[i]
+        if st == DEAD || (st == WARNING && timer_frames[i] & 4 != 0) {
+            video.hide_sprite(i)
+            continue
+        }
+        var left: bool = actors.facing[i] == actors.FACE_LEFT
+        var spr: u8 = 0
+        if st == GROUNDED || st == WARNING {
+            spr = assets.SPR_ENEMY_WALK_R_0
+            if left {
+                spr = assets.SPR_ENEMY_WALK_L_0
+            }
+            spr += actors.walk_anim(i, 3, WALK_STEP)
+        } else {
+            spr = assets.SPR_ENEMY_AIR_R_0
+            if left {
+                spr = assets.SPR_ENEMY_AIR_L_0
+            }
+        }
+        var color: u8 = video.ENEMY_COLOR
+        if carrying[i] != 0 {
+            color = video.ENEMY_CARRY_COLOR
+        }
+        video.set_sprite(i, spr, color, actors.x[i] - actors.BOX_INSET, actors.y[i])
+    }
+}
