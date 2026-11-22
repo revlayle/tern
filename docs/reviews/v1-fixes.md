@@ -1,5 +1,24 @@
 # Review V1 fixes: code from Galaxy Stars
 
+## Second re-review (branch at `6b6a4a9`)
+
+New since the re-review: `fc900ab` (`main` merged in), `4df0268` (gap 28: flags reused after `inc` / `dec` on a fixed address outside the volatile areas) and `6b6a4a9` (status: Galaxy Stars measured again).
+
+**Ready to merge.** Every "done when" item is met. The suite passes in `../6502-language-dev` at `6b6a4a9`: 11,744 compiler tests, 1 skipped (`TERN_COMPARE`), 50 CPU tests.
+
+- **`4df0268` is right.** `ReuseIncDecFlags` now skips only `IsVolatile` memory instead of every fixed address. Spec 8.1 says a fixed address outside the volatile areas is ordinary memory (`var reg: u8 @ $C000`), and `IsVolatile` covers the cases where a read after the `dec` could differ: `volatile`, a fixed address or region overlapping the platform's `VolatileAreas` (C64 `$D000-$DFFF`, Atari `$D000-$D7FF`, Apple II `$C000-$CFFF`, NES `$2000-$401F`) or a memory block's volatile ranges (`MarkFixedGlobals`), a struct over hardware through `Storage`, and memory used from two roots. An array's span is checked over its whole size, so `dec t,x` on an array that runs into a volatile area is left alone. Nothing runs between the `dec` and the removed load, so aliasing between fixed addresses does not matter. The new test runs edge values (0, 1, 2, 255), checks memory and both listings, and failed before the change, as its commit says.
+- **The last "done when" item is done.** The port's `gaps.md` (`C:\game-dev\galaxy-star`, `tern-port`) has the section "V1 fixes: the assembly measured again" at `4df0268`: every routine, asm against best plain Tern, with the program's bytes and the three routines within 5% (`hostiles.move`, `explode.restore_area`, `title.sweep_all`). The plain versions and scripts are in `tern/plain/`. The port's changes are not committed yet, by that repository's rule (the designer approves first); the spec session has already sorted the gaps they found (decision 2026-11-22, gaps 30-33).
+
+### 4. `The_code_is_the_spec_shape` lost its `Shape` trait (suggestion)
+
+`FlagReuseTests.cs:146`: the new test was inserted between the existing `[Trait("Shape", "nmos6502")]` and the `[Fact]` of `The_code_is_the_spec_shape`. The new test now has the trait (by accident, and it needs it), and `The_code_is_the_spec_shape`, which reads the listing, has none. `dotnet test --filter "Shape!=nmos6502&FullyQualifiedName~FlagReuseTests.The_code_is_the_spec_shape"` runs it (1 test), where the status's filter is meant to leave out every listing test. Fix: put a `[Trait("Shape", "nmos6502")]` back above its `[Fact]`.
+
+### 5. The port's summary disagrees with its table (suggestion, port's file)
+
+`gaps.md` line 48 says `title.sweep_all` is "as fast"; the table and this repository's status say 0.2% slower (4,761 against 4,750 cycles). Within 5% either way; worth correcting before the port commits.
+
+Done when, now: every item checked (the list under the first review, with the last two lines now met).
+
 ## Re-review (branch at `376aff4`)
 
 Commits `7d8a633` (finding 1, suggestion 2), `fe5a0a6` (suggestion 3) and `376aff4` (status), after `main` was merged in at `43c7a10`.
