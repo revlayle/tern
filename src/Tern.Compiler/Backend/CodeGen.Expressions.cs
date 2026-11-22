@@ -600,6 +600,11 @@ public sealed partial class CodeGen
         }
 
         if (e is BinaryExpr eb && InSourceOrder(eb.Left, eb.Right, l => eb.Left = l, () => Gen16(eb, d))) return;
+        if (e is BinaryExpr sum && FoldedSum(sum, d) is var (rest, k))
+        {
+            AddConstant16(rest, k, sum, d);
+            return;
+        }
         switch (e)
         {
             case NameExpr { Symbol: { } v }:
@@ -754,16 +759,76 @@ public sealed partial class CodeGen
     }
 
     /// <summary>
+    /// A 16-bit sum <c>e</c> as <c>rest + k</c>: its constant terms taken out and added together (spec 11,
+    /// <c>p = q + e + K</c>), the runtime terms left in their order. Null for a sum with no runtime term,
+    /// one with a runtime term subtracted from a constant (<c>K - x</c>), or nothing to gain: one constant,
+    /// already last, and not one that can go into the high-byte add of <c>q + e</c>.
+    /// </summary>
+    private (Expr Terms, long K)? FoldedSum(BinaryExpr e, Loc d)
+    {
+        if (e.Op is not (TokenKind.Plus or TokenKind.Minus) || e.Type.Size != 2) return null;
+        int constants = 0;
+        bool negated = false;
+        var (rest, k) = Strip(e);
+        if (rest is null || constants == 0 || negated) return null;
+        bool alreadyLast = constants == 1 && e.Right.ConstValue is not null;
+        bool highByteAdd = (k & 0xFF) == 0 && rest is BinaryExpr { Op: TokenKind.Plus } q && ByteAddend(q, d) is not null;
+        return alreadyLast && !highByteAdd ? null : (rest, k);
+
+        // x as rest + k; rest is null for 0.
+        (Expr? Terms, long K) Strip(Expr x)
+        {
+            if (x.ConstValue is long c) { constants++; return (null, c); }
+            if (x is not BinaryExpr { Op: TokenKind.Plus or TokenKind.Minus, Type.Size: 2 } b) return (x, 0);
+            var (l, kl) = Strip(b.Left);
+            var (r, kr) = Strip(b.Right);
+            bool plus = b.Op == TokenKind.Plus;
+            if (r is null) return (l, plus ? kl + kr : kl - kr);
+            if (l is null)
+            {
+                if (plus) return (r, kl + kr);
+                negated = true;
+                return (x, 0);
+            }
+            var both = l == b.Left && r == b.Right ? b : new BinaryExpr(b.Pos, b.Op, l, r) { Type = b.Type };
+            return (both, plus ? kl + kr : kl - kr);
+        }
+    }
+
+    /// <summary><c>rest + k</c> into d: k in the high-byte add of <c>q + e</c> when its low byte is 0, else added once at the end.</summary>
+    private void AddConstant16(Expr rest, long k, BinaryExpr sum, Loc d)
+    {
+        if ((k & 0xFFFF) == 0) { Gen16(rest, d); return; }
+        if ((k & 0xFF) == 0 && rest is BinaryExpr { Op: TokenKind.Plus } q && ByteAddend(q, d) is var (wide, small))
+        {
+            // e in A / clc / adc q / sta p / lda q+1 / adc #>K / sta p+1.
+            GenA(small);
+            CarryFor(TokenKind.Plus, small);
+            wide(Adc, 0); Op(Sta, d.Lo);
+            wide(Lda, 1); Op(Adc, Byte(k >> 8)); Op(Sta, d.Hi);
+            return;
+        }
+        var constant = new NumberExpr(sum.Pos, k & 0xFFFF) { Type = sum.Type, ConstValue = k & 0xFFFF };
+        Arith16(new BinaryExpr(sum.Pos, TokenKind.Plus, rest, constant) { Type = sum.Type }, d);
+    }
+
+    /// <summary>
     /// <c>a + K</c> or <c>a - K</c> with K's low byte 0 and a used in place (spec 11): the low byte is
     /// copied and only the high byte added, <c>lda a / sta d / lda a+1 / clc / adc #&gt;K / sta d+1</c>.
     /// False if the expression is not of this form.
     /// </summary>
     private bool HighByteConstant(BinaryExpr b, Loc d)
     {
-        if (b.Op is not (TokenKind.Plus or TokenKind.Minus) || b.Right.ConstValue is not long k || (k & 0xFF) != 0 || d.Offset != 0
-            || InPlace16(b.Left, d.Var) is not { } left)
+        if (b.Op is not (TokenKind.Plus or TokenKind.Minus) || b.Right.ConstValue is not long k || (k & 0xFF) != 0 || d.Offset != 0)
             return false;
         bool leftIsDest = b.Left is NameExpr { Symbol: { } lv } && lv == d.Var;
+        if (InPlace16(b.Left, d.Var) is not { } left)
+        {
+            // a needs code: computed into d, then only d's high byte changes.
+            Gen16(b.Left, d);
+            left = (m, i) => Op(m, i == 0 ? d.Lo : d.Hi);
+            leftIsDest = true;
+        }
         if (leftIsDest && (k & 0xFF00) == 0) return true;
         if (!leftIsDest) { left(Lda, 0); Op(Sta, d.Lo); }
         left(Lda, 1);
