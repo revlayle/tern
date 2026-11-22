@@ -10,13 +10,15 @@ validation program, batch 2; roadmap V1, decisions 2026-11-21). MIT license (`LI
   (`chars.bin` and `sprites.bin`, which `gfx.py` writes; `video.tern` reads them from `../data/` here, from
   `../../build/` in the game's repository), `gaps.md` (the port's gap log).
 - **Build:** `tern --target c64 src/main.tern -o smashy-smashy.prg`: 21,436 bytes, `$0801-$5BBC`.
-- **Known result:** `expected/frame-3000.txt`, the score, time, level, treasures, kills and high score, the screen
-  (`$C000`), colour RAM and VIC registers after 3,000 frames of a scripted joystick (through the title into a
-  game, running, jumping and smashing; one game ends and the next starts), checked by
-  `ValidationTests.Smashy_smashy_plays_a_scripted_game` in the emulator. The game waits for raster lines and
-  scans the keyboard, so the run adds `C64Chips`: the raster line from the cycle count, and CIA 1 as the
-  scripted joystick and no keys. Its popups use the RAM under the KERNAL's IRQ entry at `$FF48`, so the run's
-  KERNAL IRQ entry stub is at `$FFC0` (`ValidationTests.KernalAt`).
+- **Known result:** `expected/frame-2500.txt`, the score, time, level, treasures, kills and high score, the screen
+  (`$C000`), colour RAM and VIC registers after 2,500 frames of a scripted joystick (through the title into a
+  game, running, jumping and smashing; the first game ends and the second is being played), checked by
+  `ValidationTests.Smashy_smashy_plays_a_scripted_game` in the test harness's emulator. The game waits for raster
+  lines, reads raster lines against its frame IRQ (`frame_lines`, for map rebuilds) and scans the keyboard, so the
+  run adds `C64Chips`: the raster line and the VIC's raster interrupt at the line the game sets, on one clock,
+  and CIA 1 as the scripted joystick (ANDed with the keyboard row the game drives) and no keys. Its popups use
+  the RAM under the KERNAL's IRQ entry at `$FF48`, so the run's KERNAL IRQ entry stub is at `$FFC0`
+  (`ValidationTests.Kernal`). `tern run` has none of these, so this result is the harness's, not `tern run`'s.
   With `TERN_REAL=1`, `Smashy_smashy_shows_its_scoring_page_in_vice` runs it in VICE (`C:/Vice/bin/x64sc.exe`)
   for 25 million cycles with no input (the SCORING page, whose chain values need its raster split) and compares
   the screenshot with `expected/vice-25M-cycles.png`, up to 1% of the pixels apart.

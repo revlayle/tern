@@ -52,6 +52,7 @@ public sealed class Run
         IBus bus = _machine.Load(Result, Ram, s.Buttons);
         s.Setup?.Invoke(Ram);
         if (s.Bus is not null) bus = s.Bus(bus);
+        var irqSource = bus as IIrqSource;
         if (s.Watch is not null) bus = Log = new BusLog(bus, s.Watch(Result));
         // As after reset: no IRQ until the program enables it.
         Cpu = new Cpu6502(bus, Result.Platform.Cpu) { PC = (ushort)Result.Entry, SP = 0xFF, I = true };
@@ -62,6 +63,8 @@ public sealed class Run
         Action<Run>? trap = null;
         while (Cpu.PC != Result.HaltAddress && s.Until?.Invoke(this) != true)
         {
+            // A chip's IRQ (C64Chips' raster interrupt), held until the program acknowledges it.
+            if (irqSource is not null && irqSource.IrqPending() && Cpu.Irq()) Interrupts++;
             if (s.IrqEvery > 0 && Cpu.Cycles >= nextIrq)
             {
                 // The IRQ line stays raised until the CPU takes it, as a VIC-II raster interrupt does.
@@ -146,7 +149,7 @@ public sealed class Run
 
     /// <summary>Runs a program compiled with <see cref="Compile"/>, as <c>Program</c> does, without the comparison with a plain build.</summary>
     /// <param name="until">Stops the run before the next instruction when it returns true, for a program whose main never returns (a game).</param>
-    /// <param name="bus">Wraps the machine's bus, for chips the run needs that the machine does not model (<see cref="C64Chips"/>).</param>
+    /// <param name="bus">Wraps the machine's bus, for chips the run needs that the machine does not model (<see cref="C64Chips"/>); a bus that is an <see cref="IIrqSource"/> raises IRQs itself.</param>
     public static Run Of(CompileResult result, long maxCycles = 5_000_000, Action<Ram>? setup = null, long irqEvery = 0,
         IReadOnlyDictionary<int, Action<Run>>? traps = null, bool checkIndexes = true, Func<long, int, byte>? buttons = null, bool standIns = false,
         Func<Run, bool>? until = null, Func<IBus, IBus>? bus = null) =>

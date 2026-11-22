@@ -10,11 +10,12 @@ namespace Tern.Compiler.Tests;
 /// <c>TERN_UPDATE_VALIDATION=1</c> rewrites the files; read the diff, since a change of result is a change of
 /// behavior. With <c>TERN_REAL=1</c> each also runs on its platform's emulator, whose screenshot is compared
 /// with the expected one, allowing for the frame or two by which the emulator's timing varies from run to run.
-/// Whole programs: they cover several spec sections.
+/// The C64 games run with <see cref="C64Chips"/> (the raster line and its interrupt, and CIA 1 as a joystick) and a
+/// KERNAL IRQ entry (<see cref="Kernal"/>), which <c>tern run</c> does not have, so their known results are the test
+/// harness's (docs/status.md, question 185). Whole programs: they cover several spec sections.
 /// </summary>
 public class ValidationTests
 {
-    private const int PalFrame = 63 * 312;   // cycles per frame on a PAL C64: the raster interrupt's period
     private const string Vice = "C:/Vice/bin/x64sc.exe";
 
     // The share of pixels that may differ from the expected screenshot. Five VICE runs of Galaxy Stars to the
@@ -27,16 +28,52 @@ public class ValidationTests
     public void Galaxy_stars_plays_its_demo()
     {
         // Idle input: the title, HOW TO PLAY, SCORING, then the demo, which plays the game; frame 3000 is in the demo.
+        // Frames are counted by the raster interrupt, from when the game enables it.
         string dir = FindValidation("c64", "galaxy-stars");
         string path = Path.Combine(dir, "src", "main.tern");
         var result = TernCompiler.Compile(File.ReadAllText(path), Platform.C64, sourcePath: path);
         const int frames = 3000;
-        var r = Run.Of(result, maxCycles: 70_000_000, setup: Kernal, irqEvery: PalFrame, standIns: true,
-            until: run => run.Interrupts >= frames);
+        var r = Run.Of(result, maxCycles: 70_000_000, setup: Kernal, standIns: true,
+            until: run => run.Interrupts >= frames, bus: b => new C64Chips(b, _ => 0));
         Expect(Path.Combine(dir, "expected", $"frame-{frames}.txt"), $"Galaxy Stars after {frames} frames in the emulator",
             ("screen $C000", Rows(r.Ram, 0xC000, 1000, 40, 0xFF)),
             ("color RAM $D800", Rows(r.Ram, 0xD800, 1000, 40, 0x0F)),
             ("VIC $D000-$D02E", Rows(r.Ram, 0xD000, 0x2F, 0x2F, 0xFF)));
+    }
+
+    [Trait("Platform", "c64")]
+    [Fact]
+    public void C64Chips_raises_the_raster_interrupt_at_the_compare_line_once_a_frame()
+    {
+        // Review V1 batch 2, finding 1: the IRQ on C64Chips' raster clock, at the line the program sets, held
+        // until acknowledged. The handler notes the line it sees (a few cycles in: the same line or the next).
+        var result = Run.Compile("""
+            import c64
+            var count: u8
+            var line: [u8; 8]
+            interrupt fn tick() {
+                line[count] = c64.vic.raster
+                c64.vic.irq_status = $FF
+                count += 1
+            }
+            fn main() {
+                c64.interrupts_off()
+                c64.vic.control1 &= $7F
+                c64.vic.raster = 100
+                c64.vic.irq_status = $FF
+                c64.vic.irq_enable = 1
+                c64.set_kernal_irq(addr(tick))
+                c64.interrupts_on()
+                while count != 8 { }
+                c64.vic.irq_enable = 0
+            }
+            """, platform: Platform.C64);
+        var r = Run.Of(result, maxCycles: 9 * C64Chips.FrameCycles, setup: Kernal, standIns: true,
+            bus: b => new C64Chips(b, _ => 0));
+        Assert.Equal(8, r.U8("count"));
+        Assert.Equal(8, r.Interrupts);
+        for (int i = 0; i < 8; i++) Assert.InRange(r.U8("line", i), 100, 101);
+        Assert.InRange(r.Cpu.Cycles, 7 * C64Chips.FrameCycles + 100 * 63, 8 * C64Chips.FrameCycles + 100 * 63);
     }
 
     [Trait("Platform", "c64")]
@@ -66,7 +103,7 @@ public class ValidationTests
         (6, Down), (35, 0),
     ];
 
-    /// <summary>The joystick bits of frame f of smashy smashy's script.</summary>
+    /// <summary>The joystick bits of frame f of smashy smashy's script (frames of C64Chips' clock, from the run's start).</summary>
     private static byte SmashyJoystick(long f)
     {
         foreach (var (n, bits) in SmashyStart)
@@ -93,9 +130,9 @@ public class ValidationTests
         string dir = FindValidation("c64", "smashy-smashy");
         string path = Path.Combine(dir, "src", "main.tern");
         var result = TernCompiler.Compile(File.ReadAllText(path), Platform.C64, sourcePath: path);
-        const int frames = 3000;
-        var r = Run.Of(result, maxCycles: 70_000_000, setup: ram => KernalAt(ram, 0xFFC0), irqEvery: PalFrame,
-            standIns: true, until: run => run.Interrupts >= frames, bus: b => new C64Chips(b, SmashyJoystick));
+        const int frames = 2500;     // in the second game's play (the first ended with 500 points)
+        var r = Run.Of(result, maxCycles: 70_000_000, setup: Kernal, standIns: true,
+            until: run => run.Interrupts >= frames, bus: b => new C64Chips(b, SmashyJoystick));
         string state = $"score {r.U16("score.points"):X4}00, time {r.U16("score.time"):X3}, level {r.U8("score.level")}, "
             + $"treasures left {r.U8("score.treasures_left")}, kills {r.U8("enemies.kills")}, high score {r.U16("score.high"):X4}00";
         Expect(Path.Combine(dir, "expected", $"frame-{frames}.txt"), $"Smashy smashy after {frames} frames in the emulator",
@@ -125,13 +162,11 @@ public class ValidationTests
     /// <summary>Runs a C64 program in VICE for a number of cycles, from the start of the machine, and saves the screen.</summary>
     private static void RunVice(string prg, long cycles, string screenshot)
     {
-        var start = new System.Diagnostics.ProcessStartInfo(Vice) { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true };
+        var start = new System.Diagnostics.ProcessStartInfo(Vice) { UseShellExecute = false };
         foreach (string a in new[] { "-default", "-silent", "-sounddev", "dummy", "-warp", "-autostartprgmode", "1",
             "-autostart", prg, "-limitcycles", cycles.ToString(), "-exitscreenshot", screenshot })
             start.ArgumentList.Add(a);
         using var vice = System.Diagnostics.Process.Start(start)!;
-        vice.StandardOutput.ReadToEndAsync();
-        vice.StandardError.ReadToEndAsync();
         if (!vice.WaitForExit(TimeSpan.FromMinutes(2)))
         {
             vice.Kill();
@@ -188,32 +223,20 @@ public class ValidationTests
     }
 
     /// <summary>
-    /// The KERNAL's IRQ entry (<see cref="C64LibraryTests.KernalIrqEntry"/>), and for the IRQs before the program
-    /// installs its handler, the KERNAL's own handler reduced to its exit (pull Y, X and A, rti) at $FF5B, after the
-    /// entry: a program may use the RAM under the ROM at $EA31, which the emulator's flat memory does not keep apart.
+    /// A KERNAL IRQ entry at $FFC0 (push A, X and Y, then jmp ($0314), as the KERNAL's at $FF48 without its brk test),
+    /// $FFFE pointing to it, and $0314 to the KERNAL's own handler reduced to its exit (pull Y, X and A, rti), just
+    /// after it, until the program installs its handler. Not at $FF48: the emulator's memory is flat, and smashy
+    /// smashy's popups use the RAM under the ROM at $FF40-$FFBF (Galaxy Stars its sprites at $E800 and up).
     /// </summary>
     internal static void Kernal(Ram ram)
     {
-        C64LibraryTests.KernalIrqEntry(ram);
-        byte[] exit = [0x68, 0xA8, 0x68, 0xAA, 0x68, 0x40];
-        exit.CopyTo(ram.Bytes, 0xFF5B);
-        ram.Bytes[0x0314] = 0x5B;
-        ram.Bytes[0x0315] = 0xFF;
-    }
-
-    /// <summary>
-    /// A KERNAL IRQ entry at <paramref name="entry"/> (push A, X and Y, then jmp ($0314), as the KERNAL's at $FF48 without
-    /// its brk test), $FFFE pointing to it, and the KERNAL's own handler reduced to its exit (pull Y, X and A, rti) just
-    /// after it, for the IRQs before the program installs its handler. For a program that uses the RAM under $FF48.
-    /// </summary>
-    internal static void KernalAt(Ram ram, int entry)
-    {
+        const int entry = 0xFFC0;
         byte[] stub = [0x48, 0x8A, 0x48, 0x98, 0x48, 0x6C, 0x14, 0x03, 0x68, 0xA8, 0x68, 0xAA, 0x68, 0x40];
         stub.CopyTo(ram.Bytes, entry);
-        ram.Bytes[0xFFFE] = (byte)entry;
-        ram.Bytes[0xFFFF] = (byte)(entry >> 8);
-        ram.Bytes[0x0314] = (byte)(entry + 8);
-        ram.Bytes[0x0315] = (byte)((entry + 8) >> 8);
+        ram.Bytes[0xFFFE] = entry & 0xFF;
+        ram.Bytes[0xFFFF] = entry >> 8;
+        ram.Bytes[0x0314] = (entry + 8) & 0xFF;
+        ram.Bytes[0x0315] = (entry + 8) >> 8;
     }
 
     /// <summary>A validation program's folder: validation/&lt;platform&gt;/name.</summary>
