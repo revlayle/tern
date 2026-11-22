@@ -223,6 +223,20 @@ chrout('A')                        // lda #$41 / jsr $FFD2
 
 `keeps` lists the registers the routine leaves alone; the compiler trusts it ([10.6](10-behavior.md#106-promises-the-compiler-trusts)).
 
+A loop with its counter in a register (`for ... using Y`) may call only functions that keep that register. A function with a body says so after its return type, and the compiler checks it: the body indexes with the other register, and a statement that needs Y (`p[i]`), a call to a function that does not keep Y, or a result in Y is an error at that statement.
+
+```
+fn hits(o: u8) -> bool using carry keeps Y {
+    return xs[o] >= limit            // indexes with X, leaves Y alone
+}
+
+for s in 0..SLOTS using Y {
+    if hits(slot[s]) { ... }         // allowed: hits keeps Y
+}
+```
+
+On an `asm fn`, `keeps` is a promise, as on a routine at a fixed address. An `interrupt fn` restores its registers anyway, so `keeps` on one is an error.
+
 ## 2.8 Flags as values
 
 A `bool` can live in a CPU flag, which removes the "load 0 or 1, then compare" step:
