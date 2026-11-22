@@ -26,10 +26,22 @@ public static partial class Optimizer
         if (startsProgram && RemoveStoresOfStartupZeros(code)) Improve(code, function, instructions);
     }
 
+    /// <summary>
+    /// A jump can land on a jmp once the code between them is removed (V1 fixes): it goes straight on,
+    /// and what that leaves unreachable goes. True if a jump changed.
+    /// </summary>
+    private static bool ThreadJumpsAgain(List<AsmItem> code)
+    {
+        if (!ThreadJumps(code)) return false;
+        RemoveUnreachable(code);
+        return true;
+    }
+
     private static void Improve(List<AsmItem> code, FunctionSymbol function, InstructionSet instructions)
     {
         while (RemoveRedundant(code, function) | FoldShiftTests(code, function) | UseOperandInA(code, function)
             | RemoveDeadLoads(code, function) | ReuseIncDecFlags(code, function) | TestCarryDirectly(code, function) | RemoveDeadStores(code, function) | ReadCopiesFromSource(code, function, instructions)
-            | SinkStoresFromLoops(code, function) | RemoveJumpsToNext(code) | GroupConstantStores(code)) { }
+            | SinkStoresFromLoops(code, function) | RemoveJumpsToNext(code) | GroupConstantStores(code)
+            | ThreadJumpsAgain(code)) { }
     }
 }

@@ -735,9 +735,10 @@ public static partial class Optimizer
     /// instead (<c>jmp endif</c> where <c>endif:</c> is followed by <c>jmp end</c>: an if at the end of a
     /// match arm). The skipped jump may become unreachable and is removed.
     /// </summary>
-    private static void ThreadJumps(List<AsmItem> code)
+    private static bool ThreadJumps(List<AsmItem> code)
     {
         var positions = Positions(code);
+        bool changed = false;
 
         // The label a jump to this one leads to, if its code is only a jmp.
         Label? Onward(Label label)
@@ -751,10 +752,19 @@ public static partial class Optimizer
         for (int k = 0; k < code.Count; k++)
         {
             if (code[k] is not Instr i || FromAsm(i) || Target(i) is not { } target) continue;
+            // A ring of jmps (a loop with no body) is entered where it starts, so another pass picks the same label.
             var final = target;
-            for (int hops = 0; hops < 8 && Onward(final) is { } next && next != target; hops++) final = next;
-            if (final != target) code[k] = i with { Operand = new LabelOperand(final) };
+            var seen = new HashSet<Label> { target };
+            while (Onward(final) is { } next)
+            {
+                final = next;
+                if (!seen.Add(next)) break;
+            }
+            if (final == target) continue;
+            code[k] = i with { Operand = new LabelOperand(final) };
+            changed = true;
         }
+        return changed;
     }
 
     /// <summary>A jump or branch to a label: the only way into a label the analysis can follow.</summary>
@@ -823,7 +833,7 @@ public static partial class Optimizer
     }
 
     /// <summary>Removes instructions that no path reaches, e.g. the <c>rts</c> after an endless loop.</summary>
-    private static void RemoveUnreachable(List<AsmItem> code)
+    private static bool RemoveUnreachable(List<AsmItem> code)
     {
         var positions = Positions(code);
         var reached = new bool[code.Count];
@@ -840,7 +850,9 @@ public static partial class Optimizer
             if (exits.Inside is int t) work.Push(t);
             if (exits.Next) work.Push(k + 1);
         }
+        int count = code.Count;
         for (int k = code.Count - 1; k >= 0; k--)
             if (!reached[k] && code[k] is Instr i && !FromAsm(i)) code.RemoveAt(k);
+        return code.Count != count;
     }
 }
