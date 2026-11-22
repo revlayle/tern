@@ -1189,3 +1189,11 @@ Spec 2.2; roadmap V1 (smashy smashy on the NES, the Atari and the Apple II), "V1
 - **The standard library and the examples are MIT No Attribution (MIT-0).** Reason: library code is compiled into every program built with Tern, and under MIT a user's game could owe Tern's notice; MIT-0 asks for none, the way compilers usually keep their runtime free of conditions (GCC's runtime exception). The examples are starting points to copy. `src/lib/LICENSE` is copied to `lib/` with the library.
 - **Klaus Dormann's 6502 functional test binary stays GPL-3.0**, named in the root `LICENSE` and the README as an exception: it is test data the CPU tests run, not part of the compiler or any program it builds.
 - **"Tern" is the final name** (spec 14.8), no longer a working name. Reason: the developer has used it throughout and keeps it.
+
+## 2026-11-22: a grammar of the syntax in the spec
+
+Spec Appendix A (new), spec 13 (a pointer to the keyword list); guide README. The developer's.
+
+- **The spec has a grammar in EBNF, as Appendix A**: tokens, keywords and words with a meaning in one place, files and declarations, statements, expressions, assembly, and the planned forms. Reason: the syntax was spread over sections 2-9 in prose, so a reader had to collect it, and a tool author had no single reference. EBNF, not plain BNF: its `{ }` and `[ ]` keep the rules short where BNF needs a recursive rule for every list.
+- **The grammar describes the syntax as built and gives no meaning.** It was written from the spec and checked against the parser (`Syntax/`), rule by rule. Types, constant rules and where each declaration may appear stay in the sections it names. When a section and the grammar disagree, one is wrong and both are fixed together.
+- **Two rules the prose did not state are written down as built.** (1) A line break ends a statement only after a token that can end one (a name, a literal, `)`, `]`, `}`, `true`, `false`, `zp`, `return`, `break`, `continue`), outside `( )` and `[ ]`. Spec 2's rule for a line ending with a binary operator follows from it, as do lines ending with `,`, `=` or `(`. (2) The 32 keywords are listed: spec 13 said "other keywords stay reserved everywhere" with no list. This settles the provisional choice in `docs/status.md` that `import`, `private` and `volatile` are reserved words, as built.
