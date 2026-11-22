@@ -38,6 +38,8 @@ Owned by the coding session. Updated at the end of every coding session.
 | suggestion 2 (the check after the optimizer is Debug only) | `7d8a633` | | done: `CheckKeptAfterOptimizer` runs in every build |
 | suggestion 3 (the loop bound test's pointer case is address-taken) | `fe5a0a6` | `LoopBoundTests.The_end_is_read_in_place_and_0_to_n_has_no_empty_check` (`pointer`) | done: a body writing `p[t]`, with `r1` not address-taken, reads a copy. The rule stays: a pointer from a constant address, or from another variable's address plus an offset, can reach a global without `addr()` of it |
 | "done when": Galaxy Stars' plain routines measured again | `4df0268` (the gap 28 fix it found) | `FlagReuseTests` | done: the port's `gaps.md`, section "V1 fixes" (above) |
+| second re-review, suggestion 4 (`The_code_is_the_spec_shape` lost its `Shape` trait) | `fe5a639` | `--filter "Shape!=nmos6502&FullyQualifiedName~FlagReuseTests.The_code_is_the_spec_shape"` matches no test | done |
+| second re-review, suggestion 5 (the port's summary said `sweep_all` "as fast") | | | done in the port's `gaps.md` (0.2% slower), not committed there yet |
 
 ### Review findings handled by R8
 
