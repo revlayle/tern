@@ -214,4 +214,46 @@ public class AParameterTests
         Assert.Equal([1, 0], new[] { (int)r.U8("out"), r.U8("out", 1) });
         Assert.Contains("stx f.v+1", Listing.Instructions(r, "f"));
     }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1)]
+    [InlineData(200)]
+    [InlineData(255)]
+    public void A_parameter_needed_after_A_changes_is_kept_in_X_or_Y(int v)
+    {
+        // V1 fixes: tax on entry in place of sta, when that leaves the parameter's memory unused.
+        var r = Run.Program($$"""
+            var q: u8 = 7
+            var u: u8
+            var w: u8
+            var xs: [u8; 256]
+            var ys: [u8; 256]
+            var p: ptr u8
+            fn later(v: u8 using A) { u = q; w = v }
+            fn inside(v: u8 using A) { if q != 0 { u = v + 1 } }
+            fn index(i: u8 using A) { xs[i] = q }
+            fn pointer(i: u8 using A) { p[i] = q }
+            fn first(v: u8 using A) -> u8 { return v + q }
+            fn main() {
+                p = addr(ys) as ptr u8
+                later({{v}})
+                inside({{v}})
+                index({{v}})
+                pointer({{v}})
+                q = first({{v}})
+            }
+            """);
+        Assert.Equal(v, r.U8("w"));
+        Assert.Equal((v + 1) & 0xFF, r.U8("u"));
+        Assert.Equal(7, r.U8("xs", v));
+        Assert.Equal(7, r.U8("ys", v));
+        Assert.Equal((v + 7) & 0xFF, r.U8("q"));
+        Assert.Equal("tax|lda q|sta u|txa|sta w|rts", Listing.Code(r, "later"));
+        Assert.Equal("tax|lda q|sta xs,x|rts", Listing.Code(r, "index"));
+        Assert.Equal("tay|lda q|sta (p),y|rts", Listing.Code(r, "pointer"));
+        // Read first, from A: nothing to move.
+        Assert.Equal("clc|adc q|rts", Listing.Code(r, "first"));
+        Assert.Matches(@"^tax\|lda q\|beq inside\.endif\d+\|txa\|clc\|adc #\$01\|sta u\|rts$", Listing.Code(r, "inside"));
+    }
 }

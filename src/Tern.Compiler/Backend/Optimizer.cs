@@ -22,6 +22,7 @@ public static partial class Optimizer
         ThreadJumps(code);
         RemoveUnreachable(code);
         Improve(code, function, instructions);
+        MoveParameterToIndex(code, function, instructions);
         // After the other changes, which may use what the stores tell them (A holds x after sta x).
         if (startsProgram && RemoveStoresOfStartupZeros(code)) Improve(code, function, instructions);
     }
@@ -37,10 +38,49 @@ public static partial class Optimizer
         return true;
     }
 
+    /// <summary>
+    /// A one-byte parameter passed in A is stored on entry (<c>sta v</c>). Where A is needed before it is
+    /// read, a copy in X or Y (<c>tax</c> after the store) lets the other passes read it from there:
+    /// <c>lda v</c> becomes <c>txa</c>, <c>ldx v</c> goes, and then the store too when nothing reads v's
+    /// memory any more (V1 fixes: a register parameter used once is not stored to memory). The copy is
+    /// kept only when no instruction uses v's memory then (so <c>tax</c> replaced the store and each read
+    /// got shorter), and the code is smaller, or as small and faster, counting each instruction once.
+    /// </summary>
+    private static void MoveParameterToIndex(List<AsmItem> code, FunctionSymbol function, InstructionSet instructions)
+    {
+        int k = code.FindIndex(i => i is Instr);
+        if (k < 0 || code[k] is not Instr { Mnemonic: Sta, AsmPos: null, Operand: VarOperand { Offset: 0, Variable: var v } }
+            || v.Kind != VariableKind.Parameter || v.PassedIn != Register.A || v.Type.Size != 1 || !function.Parameters.Contains(v))
+            return;
+        var live = RegistersLive(code, function, Positions(code))[k + 1];
+        var best = code;
+        foreach (var (reg, transfer) in new[] { (CpuState.X, Tax), (CpuState.Y, Tay) })
+        {
+            if ((live & reg) != 0) continue;
+            var trial = code.ToList();
+            trial.Insert(k + 1, new Instr(transfer));
+            Improve(trial, function, instructions);
+            if (trial.Any(i => i is Instr { Operand: VarOperand { Variable: var u } } && u == v)) continue;
+            if (Cost(trial, instructions).CompareTo(Cost(best, instructions)) < 0) best = trial;
+        }
+        if (best == code) return;
+        code.Clear();
+        code.AddRange(best);
+    }
+
+    /// <summary>Bytes, then cycles, of the instructions, each counted once (no branch taken, no page crossed).</summary>
+    private static (int Bytes, int Cycles) Cost(List<AsmItem> code, InstructionSet instructions)
+    {
+        int bytes = 0, cycles = 0;
+        foreach (var i in code.OfType<Instr>())
+            if (instructions.TryGet(i.Mnemonic, i.Mode, out var info)) { bytes += info.Size; cycles += info.Cycles; }
+        return (bytes, cycles);
+    }
+
     private static void Improve(List<AsmItem> code, FunctionSymbol function, InstructionSet instructions)
     {
         while (RemoveRedundant(code, function) | FoldShiftTests(code, function) | UseOperandInA(code, function)
-            | RemoveDeadLoads(code, function) | ReuseIncDecFlags(code, function) | TestCarryDirectly(code, function) | RemoveDeadStores(code, function) | ReadCopiesFromSource(code, function, instructions)
+            | RemoveDeadLoads(code, function) | RemoveDeadTransfers(code, function) | ReuseIncDecFlags(code, function) | TestCarryDirectly(code, function) | RemoveDeadStores(code, function) | ReadCopiesFromSource(code, function, instructions)
             | SinkStoresFromLoops(code, function) | RemoveJumpsToNext(code) | GroupConstantStores(code)
             | ThreadJumpsAgain(code)) { }
     }

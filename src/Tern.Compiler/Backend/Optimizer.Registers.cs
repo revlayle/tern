@@ -501,4 +501,25 @@ public static partial class Optimizer
         }
         return false;
     }
+
+    /// <summary>
+    /// A transfer (<c>tax</c>, <c>tay</c>, <c>txa</c>, <c>tya</c>) whose register and N and Z are not read
+    /// after it: a parameter moved on entry to X that the code read from A after all. Returns true if
+    /// any was removed.
+    /// </summary>
+    private static bool RemoveDeadTransfers(List<AsmItem> code, FunctionSymbol function)
+    {
+        Dictionary<Label, int>? positions = null;
+        CpuState[]? live = null;
+        for (int k = 0; k < code.Count; k++)
+        {
+            if (code[k] is not Instr { Mnemonic: Tax or Tay or Txa or Tya, AsmPos: null } i || Transfer(i.Mnemonic) is not var (_, to)) continue;
+            positions ??= Positions(code);
+            live ??= RegistersLive(code, function, positions);
+            if ((live[k + 1] & Flag(to)) != 0 || NzLiveAfter(code, k, function, positions)) continue;
+            code.RemoveAt(k);
+            return true;
+        }
+        return false;
+    }
 }
