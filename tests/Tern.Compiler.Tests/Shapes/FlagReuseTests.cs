@@ -180,6 +180,7 @@ public class FlagReuseTests
         Assert.Matches(@"^dec flags\|lda flags\|bne hardware\.endif\d+\|", Listing.Code(r, "hardware"));
     }
 
+    [Trait("Shape", "nmos6502")]
     [Fact]
     public void The_code_is_the_spec_shape()
     {
