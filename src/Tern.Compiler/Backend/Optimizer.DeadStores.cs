@@ -312,13 +312,20 @@ public static partial class Optimizer
 
     private static CpuState Flag(Reg r) => r switch { Reg.A => CpuState.A, Reg.X => CpuState.X, _ => CpuState.Y };
 
-    /// <summary>The registers (A, X, Y) that hold the function's return value, which its <c>rts</c> reads.</summary>
+    /// <summary>
+    /// The registers (A, X, Y) its <c>rts</c> reads: those that hold the function's return value, and
+    /// those it keeps (spec 6.1), whose value the caller goes on using, so that no pass treats a kept
+    /// register as free (review V1 fixes, finding 1).
+    /// </summary>
     private static CpuState Returned(FunctionSymbol function)
     {
         var returned = CpuState.None;
         foreach (var r in new[] { Reg.A, Reg.X, Reg.Y })
-            if (function.ReturnRegister is { } ret && ret.Uses(r switch { Reg.A => Register.A, Reg.X => Register.X, _ => Register.Y }))
+        {
+            var reg = r switch { Reg.A => Register.A, Reg.X => Register.X, _ => Register.Y };
+            if ((function.ReturnRegister is { } ret && ret.Uses(reg)) || function.Keeps.Contains(reg))
                 returned |= Flag(r);
+        }
         return returned;
     }
 

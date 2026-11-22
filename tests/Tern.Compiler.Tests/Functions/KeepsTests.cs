@@ -73,6 +73,36 @@ public class KeepsTests
         Assert.DoesNotContain(Listing.Instructions(r, "total"), i => i.StartsWith("ldx") || i.StartsWith("inx") || i.StartsWith("tax"));
     }
 
+    [Theory]
+    // Review V1 fixes, finding 1: the optimizer moved the A parameter into the kept register (tax),
+    // so each call set the loop counter to 9 and the loop never ended.
+    [InlineData("fn f(v: u8 using A) keeps X", "for i in 0..4 using X", "f(9)", "X")]
+    [InlineData("fn f(v: u8 using A, w: u8 using X) keeps Y", "for i in 0..4 using Y", "f(9, 1)", "Y")]
+    [InlineData("fn f(v: u8 using A) keeps X, Y", "for i in 0..4 using X", "f(9)", "X")]
+    [InlineData("fn f(v: u8 using A) keeps X, Y", "for i in 0..4 using Y", "f(9)", "Y")]
+    public void The_optimizer_leaves_a_kept_register_alone(string header, string loop, string call, string kept)
+    {
+        var r = Run.Program($$"""
+            var out: u8
+            var out2: u8
+            var count: u8
+            {{header}} {
+                out = 3
+                out2 = v
+            }
+            fn main() {
+                {{loop}} {
+                    {{call}}
+                    count += 1
+                }
+            }
+            """);
+        Assert.Equal(4, r.U8("count"));
+        Assert.Equal(9, r.U8("out2"));
+        var write = kept == "X" ? new[] { "tax", "ldx", "inx", "dex" } : ["tay", "ldy", "iny", "dey"];
+        Assert.DoesNotContain(Listing.Instructions(r, "f"), i => write.Any(w => i.StartsWith(w)));
+    }
+
     [Fact]
     public void An_asm_block_in_a_loop_may_call_a_function_that_keeps_the_register()
     {

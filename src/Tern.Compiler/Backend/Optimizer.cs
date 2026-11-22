@@ -56,6 +56,7 @@ public static partial class Optimizer
         var best = code;
         foreach (var (reg, transfer) in new[] { (CpuState.X, Tax), (CpuState.Y, Tay) })
         {
+            // live counts a register the function keeps as read at rts (Returned), so it is never chosen.
             if ((live & reg) != 0) continue;
             var trial = code.ToList();
             trial.Insert(k + 1, new Instr(transfer));
