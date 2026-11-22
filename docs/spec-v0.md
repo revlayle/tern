@@ -1,7 +1,5 @@
 # Tern language specification — v0 (draft)
 
-*Tern is a working name.*
-
 Tern is a programming language for 6502-family processors. It aims to be easy to read and write, and to compile to code close to what a skilled assembly programmer would write.
 
 ## 1. Goals and non-goals
@@ -1515,7 +1513,7 @@ Each item is decided when the feature it belongs to is built.
 5. **User-defined encodings.** Settled 2026-11-12: the `encoding` declaration and `default encoding` line (2.1).
 6. **`using` on local variables** (`var count: u8 using Y`). Not planned (2026-11-07). Loop counters and register parameters already go in registers, the optimizer removes reloads, and A, X and Y are needed by most expressions and indexing, so a local held in one would mostly produce errors; a hidden save and reload would break rule 1. The M17 analysis found no gap that needs it (its class 3 is empty): values held in registers across loops are an optimizer change (M18).
 7. **A general decorator syntax.** Settled 2026-11-12: none. Modifiers are keywords in front of the declaration (`private inline fn`), or words only in their place (13). Reconsidered only if a modifier needs arguments.
-8. **Language name.** "Tern" is kept for now (2026-11-02). Rejected: "Moss"/"Mossy" (after MOS Technology), since "Moss" is already the name of several small languages and of Stanford's MOSS plagiarism checker.
+8. **Language name.** Settled 2026-11-22: "Tern" is the final name (kept as the working name since 2026-11-02). Rejected: "Moss"/"Mossy" (after MOS Technology), since "Moss" is already the name of several small languages and of Stanford's MOSS plagiarism checker.
 9. **`data` at a fixed address.** Settled 2026-11-02: section 8.4.
 10. **Fixed-address RAM that is not volatile.** Settled 2026-11-02: platform volatile areas plus a `volatile` keyword (section 4).
 11. **Arrays of structs as struct fields.** Settled 2026-11-12: section 3.3 (array fields). Built after the first release, or when a program needs it.

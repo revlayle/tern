@@ -4,8 +4,6 @@
 
 Tern is a small, readable programming language for 6502 processors that compiles to compact, predictable machine code. It comes close to carefully hand-written assembly and makes it easy to drop into assembly where a routine needs it. The compiler is written in C# and has its own assembler and cycle-exact 6502 emulator. It builds programs for the Commodore 64, the Atari 8-bit computers, the Apple II and the NES. It was built by one developer working with Claude as a coding agent ([How Tern was made](#how-tern-was-made)).
 
-*Tern is a working name.*
-
 ```
 import c64
 import text
@@ -113,6 +111,10 @@ tests/               CPU tests, end-to-end compiler tests run in the emulator, b
 examples/            example programs, in examples/<platform>/
 ```
 
+## License
+
+The compiler, its tools and the Tern skill are under the [MIT license](LICENSE). The standard library (`src/lib/`) and the examples (`examples/`) are under [MIT No Attribution](src/lib/LICENSE) (MIT-0): library code is compiled into every program you build, and MIT-0 asks for no notice, so a program built with Tern carries no license conditions.
+
 ## Third-party files
 
-`tests/Tern.Cpu.Tests/TestData/6502_functional_test.bin` is from [Klaus Dormann's 6502 functional tests](https://github.com/Klaus2m5/6502_65C02_functional_tests), licensed GPL-3.0.
+`tests/Tern.Cpu.Tests/TestData/6502_functional_test.bin` is from [Klaus Dormann's 6502 functional tests](https://github.com/Klaus2m5/6502_65C02_functional_tests), licensed GPL-3.0. It is test data, run by the CPU tests; the compiler does not contain it.
