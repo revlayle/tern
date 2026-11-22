@@ -156,7 +156,7 @@ public class StructTests
 
         // The same shape as z = x + y with plain variables.
         var shape = Run.Program("struct S { a: u16, b: u16, w: u16 }\nvar s: S\nfn main() { s.w = s.a + s.b }");
-        Assert.Equal("lda s|sta s+4|lda s+1|sta s+5|clc|lda s+4|adc s+2|sta s+4|lda s+5|adc s+3|sta s+5|rts", Listing.Code(shape));
+        Assert.Equal("clc|lda s|adc s+2|sta s+4|lda s+1|adc s+3|sta s+5|rts", Listing.Code(shape));
     }
 
     [Fact]

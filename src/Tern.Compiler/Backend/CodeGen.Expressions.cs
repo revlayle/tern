@@ -753,14 +753,38 @@ public sealed partial class CodeGen
         Place(done);
     }
 
-    /// <summary>Any other 16-bit <c>+</c>, <c>-</c>, <c>&amp;</c>, <c>|</c> or <c>^</c>: an element in place, or the left side into the destination and the right side as the operand.</summary>
+    /// <summary>
+    /// <c>a + K</c> or <c>a - K</c> with K's low byte 0 and a used in place (spec 11): the low byte is
+    /// copied and only the high byte added, <c>lda a / sta d / lda a+1 / clc / adc #&gt;K / sta d+1</c>.
+    /// False if the expression is not of this form.
+    /// </summary>
+    private bool HighByteConstant(BinaryExpr b, Loc d)
+    {
+        if (b.Op is not (TokenKind.Plus or TokenKind.Minus) || b.Right.ConstValue is not long k || (k & 0xFF) != 0 || d.Offset != 0
+            || InPlace16(b.Left, d.Var) is not { } left)
+            return false;
+        bool leftIsDest = b.Left is NameExpr { Symbol: { } lv } && lv == d.Var;
+        if (leftIsDest && (k & 0xFF00) == 0) return true;
+        if (!leftIsDest) { left(Lda, 0); Op(Sta, d.Lo); }
+        left(Lda, 1);
+        if ((k & 0xFF00) != 0) { CarryFor(b.Op); Op(ArithMnemonic(b.Op), Byte(k >> 8)); }
+        Op(Sta, d.Hi);
+        return true;
+    }
+
+    /// <summary>Any other 16-bit <c>+</c>, <c>-</c>, <c>&amp;</c>, <c>|</c> or <c>^</c>: both operands in place, or the left side into the destination and the right side as the operand.</summary>
     private void Arith16(BinaryExpr b, Loc d)
     {
         if (ShiftedOperand16(b, d)) return;
+        // K + a is a + K, so the order of the operands does not change the code (spec 11).
+        if (b.Op == TokenKind.Plus && b.Left.ConstValue is not null && b.Right.ConstValue is null)
+            b = new BinaryExpr(b.Pos, b.Op, b.Right, b.Left) { Type = b.Type };
+        if (HighByteConstant(b, d)) return;
         var right = Simple2(b.Right);
-        // An element on either side: lda a,x / adc b,x / sta d. Not for w + (u8 operand), which adds with bcc / inc.
-        if (d.Offset == 0 && !(b.Op == TokenKind.Plus && right is { Hi: Imm { Value: 0 } })
-            && (right is null || Simple2(b.Left) is null)
+        // Both operands in place: lda a / adc b / sta d, one byte at a time (spec 11). Not for
+        // w = w + (u8 operand), which adds with bcc / inc.
+        bool leftIsDest = b.Left is NameExpr { Symbol: { } lv } && lv == d.Var;
+        if (d.Offset == 0 && !(leftIsDest && b.Op == TokenKind.Plus && right is { Hi: Imm { Value: 0 } })
             && Binary16InPlace(b, (m, k) => Op(m, k == 0 ? d.Lo : d.Hi), d.Var))
             return;
         if (right is not null && ReadsVar(b.Right, d.Var)) right = null;
