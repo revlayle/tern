@@ -97,6 +97,52 @@ public class FlagReuseTests
         Assert.Equal(expected, r.U8("hits"));
     }
 
+    [Theory]
+    [InlineData(3, 4)]
+    [InlineData(4, 3)]
+    [InlineData(0, 0)]
+    [InlineData(255, 0)]
+    public void A_bool_from_the_carry_is_tested_right(int y, int z)
+    {
+        var r = Run.Program($$"""
+            var y: u8 = {{y}}
+            var z: u8 = {{z}}
+            var hits: u8
+            var copy: u8
+            fn above() -> bool { return y > z }
+            fn main() {
+                var b: bool = above()
+                if b { hits |= 1 }
+                var c: bool = above()
+                if !c { hits |= 2 }
+                var d: bool = above()
+                if d { hits |= 4 }
+                copy = d as u8              // d is read after the test: it stays 0 or 1
+            }
+            """);
+        int above = y > z ? 1 : 0;
+        Assert.Equal(above * 5 | (1 - above) * 2, r.U8("hits"));
+        Assert.Equal(above, r.U8("copy"));
+    }
+
+    [Trait("Shape", "nmos6502")]
+    [Fact]
+    public void A_bool_just_returned_in_the_carry_is_tested_from_the_carry()
+    {
+        var r = Run.Program("""
+            var y: u8
+            var z: u8
+            var hit: u8
+            fn above() -> bool { return y > z }
+            fn test() {
+                var b: bool = above()
+                if b { hit = 1 }
+            }
+            fn main() { test() }
+            """);
+        Assert.Matches(@"^jsr above\|bcc test\.endif\d+\|lda #\$01\|sta hit\|rts$", Listing.Code(r, "test"));
+    }
+
     [Trait("Shape", "nmos6502")]
     [Fact]
     public void The_code_is_the_spec_shape()
