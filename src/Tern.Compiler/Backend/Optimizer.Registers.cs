@@ -449,7 +449,8 @@ public static partial class Optimizer
     /// <c>inc</c> or <c>dec</c> of a byte, then a load of the same byte that is there only for N and Z
     /// (the register it loads is not read after it): the load goes, since the <c>inc</c> or <c>dec</c>
     /// set N and Z for the same value (spec 11: <c>x -= 1</c> then <c>if x == 0</c> is <c>dec x / bne skip</c>).
-    /// Not for volatile memory or a fixed address, which may be hardware. Returns true if a load was removed.
+    /// Not for volatile memory, which covers hardware (the platform's volatile areas); a fixed address outside
+    /// them is ordinary memory (spec 4), such as a table at <c>@ $C600</c>. Returns true if a load was removed.
     /// </summary>
     private static bool ReuseIncDecFlags(List<AsmItem> code, FunctionSymbol function)
     {
@@ -458,7 +459,7 @@ public static partial class Optimizer
         for (int k = 0; k < code.Count; k++)
         {
             if (code[k] is not Instr { Mnemonic: Inc or Dec, AsmPos: null } step || step.Mode == Accumulator
-                || step.Operand is not VarOperand { Variable.IsVolatile: false, Variable.FixedAddress: null, Variable.Storage.FixedAddress: null })
+                || step.Operand is not VarOperand { Variable.IsVolatile: false })
                 continue;
             int j = NextReal(code, k + 1);
             if (j >= code.Count || code[j] is not Instr { AsmPos: null } load || Loaded(load.Mnemonic) is not Reg r

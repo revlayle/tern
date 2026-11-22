@@ -144,6 +144,42 @@ public class FlagReuseTests
     }
 
     [Trait("Shape", "nmos6502")]
+    [Theory]
+    [Trait("Platform", "c64")]
+    [InlineData(0)]
+    [InlineData(1)]
+    [InlineData(2)]
+    [InlineData(255)]
+    public void A_fixed_address_outside_the_volatile_areas_reuses_the_flags_and_a_volatile_one_reloads(int v)
+    {
+        // Galaxy Stars' explode.restore_area: `cover` is a table at $C600 (gap 28). $C000 is RAM on the C64.
+        var r = Run.Program($$"""
+            var cover: [u8; 4] @ $C600
+            volatile var flags: u8 @ $C000
+            var hits: u8
+            fn table(i: u8) {
+                cover[i] -= 1
+                if cover[i] == 0 { hits |= 1 }
+            }
+            fn hardware() {
+                flags -= 1
+                if flags == 0 { hits |= 2 }
+            }
+            fn main() {
+                cover[1] = {{v}}
+                flags = {{v}}
+                table(1)
+                hardware()
+            }
+            """);
+        int dec = (v - 1) & 0xFF;
+        Assert.Equal(dec == 0 ? 3 : 0, r.U8("hits"));
+        Assert.Equal(dec, r.Ram.Bytes[0xC601]);
+        Assert.Equal(dec, r.Ram.Bytes[0xC000]);
+        Assert.Matches(@"^ldx table\.i\|dec cover,x\|bne table\.endif\d+\|", Listing.Code(r, "table"));
+        Assert.Matches(@"^dec flags\|lda flags\|bne hardware\.endif\d+\|", Listing.Code(r, "hardware"));
+    }
+
     [Fact]
     public void The_code_is_the_spec_shape()
     {
