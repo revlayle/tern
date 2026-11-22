@@ -432,4 +432,34 @@ public static partial class Optimizer
         }
         return false;
     }
+
+    // ---------- Flags ----------
+
+    /// <summary>
+    /// <c>inc</c> or <c>dec</c> of a byte, then a load of the same byte that is there only for N and Z
+    /// (the register it loads is not read after it): the load goes, since the <c>inc</c> or <c>dec</c>
+    /// set N and Z for the same value (spec 11: <c>x -= 1</c> then <c>if x == 0</c> is <c>dec x / bne skip</c>).
+    /// Not for volatile memory or a fixed address, which may be hardware. Returns true if a load was removed.
+    /// </summary>
+    private static bool ReuseIncDecFlags(List<AsmItem> code, FunctionSymbol function)
+    {
+        Dictionary<Label, int>? positions = null;
+        CpuState[]? live = null;
+        for (int k = 0; k < code.Count; k++)
+        {
+            if (code[k] is not Instr { Mnemonic: Inc or Dec, AsmPos: null } step || step.Mode == Accumulator
+                || step.Operand is not VarOperand { Variable.IsVolatile: false, Variable.FixedAddress: null, Variable.Storage.FixedAddress: null })
+                continue;
+            int j = NextReal(code, k + 1);
+            if (j >= code.Count || code[j] is not Instr { AsmPos: null } load || Loaded(load.Mnemonic) is not Reg r
+                || load.Mode != step.Mode || load.Operand != step.Operand)
+                continue;
+            positions ??= Positions(code);
+            live ??= RegistersLive(code, function, positions);
+            if ((live[j + 1] & Flag(r)) != 0) continue;
+            code.RemoveAt(j);
+            return true;
+        }
+        return false;
+    }
 }

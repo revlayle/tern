@@ -29,7 +29,7 @@ public static partial class Optimizer
     private static void Improve(List<AsmItem> code, FunctionSymbol function, InstructionSet instructions)
     {
         while (RemoveRedundant(code, function) | FoldShiftTests(code, function) | UseOperandInA(code, function)
-            | RemoveDeadLoads(code, function) | RemoveDeadStores(code, function) | ReadCopiesFromSource(code, function, instructions)
+            | RemoveDeadLoads(code, function) | ReuseIncDecFlags(code, function) | RemoveDeadStores(code, function) | ReadCopiesFromSource(code, function, instructions)
             | SinkStoresFromLoops(code, function) | RemoveJumpsToNext(code) | GroupConstantStores(code)) { }
     }
 }
