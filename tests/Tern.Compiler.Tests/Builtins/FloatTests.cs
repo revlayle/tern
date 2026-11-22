@@ -480,9 +480,9 @@ public class FloatTests
             }
         }
         string actual = string.Join(", ", counts.Select(c => $"{c.Key} {c.Value.Min}-{c.Value.Max}"));
-        Assert.Equal("add 108-961, sub 116-951, mul 153-2490, div 218-4418, cmp 58-138, neg 22-36, abs 27-27, is_zero 19-19, " +
-            "to_u16 158-461, round_u16 158-487, to_i16 164-469, round_i16 164-495, trunc 94-307, floor 94-395, copy 77-77, dec 1262-91233," +
-            " dec below 65536 1262-7651, from_u16 102-509, from_i16 106-524", actual);
+        Assert.Equal("add 108-960, sub 116-950, mul 153-2490, div 218-4418, cmp 58-138, neg 22-36, abs 27-27, is_zero 19-19, " +
+            "to_u16 158-461, round_u16 158-487, to_i16 164-469, round_i16 164-495, trunc 94-307, floor 94-395, copy 77-77, dec 1251-91222," +
+            " dec below 65536 1251-7633, from_u16 102-509, from_i16 106-524", actual);
     }
 
     [Trait("Platform", "c64")]

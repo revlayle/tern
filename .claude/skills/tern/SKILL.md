@@ -119,7 +119,7 @@ fn main() {
 
 ```console
 $ tern run --target c64 bad.tern
-Main returned: 249 cycles (153 in main)
+Main returned: 243 cycles (147 in main)
 ...
 Index check (the program has no check; the emulator found these):
   bad.tern:7: Index 8 is outside 'hits', which has 8 elements
