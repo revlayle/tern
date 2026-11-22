@@ -2,7 +2,7 @@
 
 Branch at `61e08b5`, from `main` at `9462661`. Eight commits; the compiler is not changed. The branch adds the test harness's `C64Chips`, `Png` and two `Run.Of` parameters (`until`, `bus`), `ValidationTests` (two emulator runs, two `TERN_REAL` VICE checks), and `validation/c64/galaxy-stars/` and `validation/c64/smashy-smashy/`.
 
-**Not ready to merge**, for two small items: finding 1 (the harness's frame IRQ is not at the raster line the game sets, so smashy smashy's known result is not what a C64 does) and finding 2 (the known results cannot be reproduced in `tern run`, which decision 179 names, and the status does not say so). Everything else is done and checks out.
+**Not ready to merge**, for one small item: finding 1 (the harness's frame IRQ is not at the raster line the game sets, so smashy smashy's known result is not what a C64 does). Everything else is done and checks out. Finding 2 was a must-fix in the first version of this review; the developer ruled it out of scope (a whole game in `tern run` would need a full emulator of each machine), so it is now a note on the roadmap's wording, for the spec session.
 
 Checked:
 
@@ -26,14 +26,14 @@ The VICE check does not cover this: it stops on the SCORING page, before any pla
 
 Fix: make the raster and the IRQ one clock. For example, `C64Chips` raises the IRQ itself when its line reaches the compare line the program wrote to `$D012` (with bit 8 from `$D011`) and the raster interrupt is enabled in `$D01A`, or `Run` keeps a fixed schedule (`nextIrq += IrqEvery`) and `C64Chips`'s line is offset so that the IRQ falls on line 251. Index the joystick by the IRQ count (`Run.Interrupts`) or by the same frame clock. Then rewrite `expected/frame-3000.txt` and read the diff. Galaxy Stars runs without `C64Chips` and reads the raster only for its random seed (`stars.tern:76`), so its result only moves if `Run`'s schedule changes for it too; a fixed schedule is right for it as well (its IRQ is the VIC's), but its expected file would move.
 
-### 2. Neither known result can be reproduced in `tern run`, and the status does not say so (must fix)
+### 2. The roadmap says the known results are checked "in `tern run`"; they are checked in the suite's emulator (note for the spec session)
 
 Decision 179 and the roadmap's V1 ("The suite's known result is the screen and memory after a set number of frames in `tern run`"; done when "every program ... gives its known result in `tern run`") name the tool. Both results are checked only through the test harness, with parts `tern run` lacks:
 
 - Galaxy Stars: `tern run --target c64 src/main.tern --irq 19656 --cycles 58968000 --screen` stops with "Illegal opcode $54 at $69F2: 59804 cycles ..., 1 interrupts": the IRQ goes through `$FFFE` with no KERNAL IRQ entry (the test's `ValidationTests.Kernal` puts one in). `tern run` also has no stop after a number of frames, and `--screen` shows `$0400`, where both games use `$C000` (`--dump $C000:1000` works).
 - Smashy smashy: as above, plus the raster line and CIA 1 port A (`C64Chips`), which question 185 (gap 2) raises for port A and the raster only.
 
-The fix asked of this branch is in the status, not the compiler: say that the known results are the harness's, list what `tern run` would need (a KERNAL IRQ entry stand-in, a raster line, port A as a joystick ANDed with the keyboard scan, a stop after n frames, the screen at the VIC bank's address), and widen question 185 so the spec session decides whether "in `tern run`" means the tool (a coding item for V1 fixes 2) or the suite's emulator (a roadmap edit).
+The developer's ruling (2026-11-22, after the first version of this review): reproducing a whole game in `tern run` is out of scope for Tern, since it would need a full emulator of each machine. The test harness, with its small stand-ins (`C64Chips`, the KERNAL IRQ entry), is the right place for these checks, and the branch needs no change. For the spec session: decision 179 and the roadmap's V1 ("after a set number of frames in `tern run`", done when "gives its known result in `tern run`") should say the suite's emulator (`Run`, the test harness) instead. Question 185's gap 2 (whether `tern run` should model port A and the raster line) is asked in the same spirit and may be sorted the same way.
 
 ### 3. Two KERNAL stubs where one would do (suggestion)
 
@@ -57,7 +57,7 @@ The fix asked of this branch is in the status, not the compiler: say that the kn
 - [x] Galaxy Stars' Tern source and the files its build reads copied into `validation/c64/galaxy-stars/`, with `README`, `LICENSE` and `gaps.md`; the Prog8 original, `compare.py` and the art tools stay in the game's repository.
 - [x] Smashy smashy ported from the `tern` skill, natural Tern (one small `asm` block, in `levelgen.tern`), checked against the Prog8 build (200 levels, 60,000 play frames, 3 whole runs of 15,000 frames), copied into `validation/c64/smashy-smashy/`.
 - [x] A gap log for smashy smashy (gaps 1-3), sent to the spec session (question 185).
-- [ ] Each program gives its known result in `tern run`: in the test harness only (finding 2); smashy smashy's harness run does not model the frame IRQ's timing (finding 1).
+- [ ] Each program gives its known result in the suite's emulator (the roadmap says `tern run`; finding 2, a wording note): Galaxy Stars yes; smashy smashy's run does not model the frame IRQ's timing (finding 1).
 - [x] Each program gives its known result on its emulator with `TERN_REAL=1` (VICE, both pass; the 1% tolerance is question 184).
 - [x] The source and license of each port recorded (the developer's own games, MIT).
 - [ ] Every gap sorted and each bug fixed: for the spec session (question 185) and V1 fixes 2; not this branch's to finish.
