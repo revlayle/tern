@@ -516,7 +516,7 @@ inline fn wait_frame() { ... }
 - **Return values:** `u8`/`i8` in A; `u16`/`i16` in A (low) and X (high); `bool` in the carry flag. Other placements can be written out: `-> u8 using Y`, `-> u16 using XY` (any register pair `AX`, `AY`, `XY`, low byte first), `-> bool using zero` (the Z flag), `-> bool using negative` (the N flag).
 - **`-> bool using overflow`** (the V flag), for testing what `bit` copies from bit 6 of memory, or the signed overflow of an `adc`/`sbc`. Allowed on an `inline asm fn`, an `asm fn` and a routine at a fixed address (6.6), where the instructions that set V are visible or documented; not on a plain `fn`, since the 6502 has no instruction that sets V (`clv` only clears it), so `return true` would need a trick such as `bit` on a byte with bit 6 set. A return value only, never a fixed input (6.6). `if f()` is `bvc skip`; an empty body reads the V flag left by the `asm` block before it, under the rules of section 7.
 - Registers not used for return values may be changed by any call. The compiler knows each function's actual register use and uses that instead where it can.
-- **`keeps` on a function with a body** (planned, roadmap "V1 fixes"; decision 2026-11-21, question 181): `fn hits(o: u8) -> bool using carry keeps Y { ... }`, written after the return type and before the body, lists registers (`A`, `X`, `Y`) the function leaves unchanged, so a `for ... using Y` loop may call it (6.6). On a compiled `fn` or `inline fn` the compiler checks it: the body's code indexes with the other register, and a statement that needs the kept register (`p[i]` needs Y), a call to a function that does not keep it, or a return value in it is an error naming the statement. Nothing is saved and restored behind the program's back (rule 1). On an `asm fn` it is a promise, as on a routine at a fixed address (6.6): the compiler does not follow the block's code. The compiler's own knowledge of a function's register use (above) never allows such a call by itself, so changing a function's body cannot break a loop elsewhere without an error at the function.
+- **`keeps` on a function with a body** (roadmap "V1 fixes"; decision 2026-11-21, question 181): `fn hits(o: u8) -> bool using carry keeps Y { ... }`, written after the return type and before the body, lists registers (`A`, `X`, `Y`) the function leaves unchanged, so a `for ... using Y` loop may call it (6.6). On a compiled `fn` or `inline fn` the compiler checks it: the body's code indexes with the other register, and a statement that needs the kept register (`p[i]` needs Y), a call to a function that does not keep it, or a return value in it is an error naming the statement. Nothing is saved and restored behind the program's back (rule 1). On an `asm fn` it is a promise, as on a routine at a fixed address (6.6): the compiler does not follow the block's code. The compiler's own knowledge of a function's register use (above) never allows such a call by itself, so changing a function's body cannot break a loop elsewhere without an error at the function. `keeps A` is allowed and checked in the same way, so it suits a body that never needs A (`n += 1` is `inc n`). `keeps` on an `interrupt fn` that only the CPU runs is an error, since the handler saves and restores what it changes ("Remove 'keeps'"); an interrupt part called from another handler is checked as a `fn`. On a routine at a fixed address `keeps` comes after the address (6.6); written before `@` it is an error that says so (decision 2026-11-21, question 183).
 
 ### 6.2 Inline functions
 
@@ -976,7 +976,7 @@ Sizes and cycles (cycles include `jsr` and `rts`, best and worst over the test v
 
 | Routine | Bytes | Cycles | Notes |
 |---|---|---|---|
-| `add` / `sub` | 22 / 28, + 329 shared | 108-961 / 116-951 | the most after cancelling, with a long normalization |
+| `add` / `sub` | 22 / 28, + 329 shared | 108-960 / 116-950 | the most after cancelling, with a long normalization |
 | `mul` | 32 + 128 | 153-2490 | 153 when an operand is 0 |
 | `div` | 37 + 146 | 218-4418 | 32 steps of shift-and-subtract |
 | `neg` / `abs` | 14 / 9 | 22-36 / 27 | |
@@ -988,7 +988,7 @@ Sizes and cycles (cycles include `jsr` and `rts`, best and worst over the test v
 | `to_i16` / `round_i16` | 13 / 13, + 76, + the 130 shared with `to_u16` | 164-469 / 164-495 | |
 | `trunc` | 31, + 68 shared with `floor` | 94-307 | |
 | `floor` | 116, + 68 shared with `trunc` | 94-395 | |
-| `dec` | 225 + 375, + `text_digits.DIGITS` (16) | 1262-7651 below 65536; up to 91233 | |
+| `dec` | 225 + 375, + `text_digits.DIGITS` (16) | 1251-7633 below 65536; up to 91222 | |
 | `of` | none | none | compile time |
 
 **`random`**: xorshift generators
@@ -1214,8 +1214,8 @@ These are the intended translations. The optimizer may produce something shorter
 | `w += 1` (u16, not `volatile`) | `inc w` / `bne +` / `inc w+1` (a `volatile` `w` gets the add, which writes both bytes, 4) |
 | `w += b as u16` (b: u8) | `lda b` / `clc` / `adc w` / `sta w` / `bcc +` / `inc w+1` |
 | `p = q + e` (`q` a pointer or `u16`, `e` a `u8` expression such as `col << 1`) | `e` in A / `clc` / `adc q` / `sta p` / `lda q+1` / `adc #0` / `sta p+1`: an 8-bit add with the carry into the high byte, never a 16-bit temporary |
-| `p = q + e + K` (as above, `K` the constant parts of the sum, written anywhere in it, e.g. `COLOR_RAM - SCREEN`; planned, roadmap "V1 fixes") | the constants added together at compile time, the order of the terms does not change the code; `K` with a low byte of 0 goes into the high-byte add (`adc #>K` in place of `adc #0`), otherwise `K` is added once at the end |
-| `t = a + b`, `t = a - b` (16-bit; `b` a variable, an element or a constant; planned, roadmap "V1 fixes") | `lda a` / `clc` / `adc b` / `sta t` / `lda a+1` / `adc b+1` / `sta t+1` (`sec` / `sbc` for `-`): no copy of `a` into `t` first, and `b + a` gives the same code as `a + b`. A constant `b` with a low byte of 0 adds only the high byte (`lda a` / `sta t` / `lda a+1` / `clc` / `adc #>b` / `sta t+1`) |
+| `p = q + e + K` (as above, `K` the constant parts of the sum, written anywhere in it, e.g. `COLOR_RAM - SCREEN`) | the constants added together at compile time, the order of the terms does not change the code; `K` with a low byte of 0 goes into the high-byte add (`adc #>K` in place of `adc #0`), otherwise `K` is added once at the end |
+| `t = a + b`, `t = a - b` (16-bit; `b` a variable, an element or a constant) | `lda a` / `clc` / `adc b` / `sta t` / `lda a+1` / `adc b+1` / `sta t+1` (`sec` / `sbc` for `-`): no copy of `a` into `t` first, and `b + a` gives the same code as `a + b`. A constant `b` with a low byte of 0 adds only the high byte (`lda a` / `sta t` / `lda a+1` / `clc` / `adc #>b` / `sta t+1`) |
 | `v += 2`, `v -= 2` (one-byte variable held in X or Y, e.g. a loop counter) | `inx` / `inx`, `dex` / `dex` (`iny`, `dey` for Y) |
 | `p += 256`, `w -= 256` | `inc p+1`, `dec w+1` |
 | `b = a[i + 1]` in `for i in 0..last` (last: u8) | `lda a+1,x` / `sta b` (3.2) |
@@ -1237,8 +1237,8 @@ These are the intended translations. The optimizer may produce something shorter
 | `for i in a..b step 3 using X` (a, b: `i8`) | before the loop `lda b` / `eor #$80` / `sta e`; each pass `txa` / `clc` / `adc #3` / `bvs done` / `tax` / `eor #$80` / `cmp e` / `bcc loop` |
 | `for i in 5..=5` | the body once, with `i` = 5 |
 | `if a == 0 { }` | `lda a` / `bne skip` |
-| `x -= 1` then `if x == 0 { }` (x in memory or an element `a[i]`; planned, roadmap "V1 fixes") | `dec x` / `bne skip`: the `dec` set Z, so `x` is not loaded again (likewise `+= 1` and `inc`) |
-| `if d > 0 { }` (`i8`; planned, roadmap "V1 fixes") | `lda d` / `beq skip` / `bmi skip`, with no compare (`i16`: `lda d+1` / `bmi skip` / `ora d` / `beq skip`) |
+| `x -= 1` then `if x == 0 { }` (x in memory or an element `a[i]`) | `dec x` / `bne skip`: the `dec` set Z, so `x` is not loaded again (likewise `+= 1` and `inc`) |
+| `if d > 0 { }` (`i8`) | `lda d` / `beq skip` / `bmi skip`, with no compare (`i16`: `lda d+1` / `bmi skip` / `ora d` / `beq skip`) |
 | `if a < b { }` unsigned | `lda a` / `cmp b` / `bcs skip` |
 | `match` (compare chain) | the value is loaded into A once (`i8`: `eor #$80`, so signed order becomes unsigned order); per value `cmp #v` / `beq arm`; a range takes two compares, or one at either end of the byte; tests in source order, the last one inverted to branch to the default |
 | `indexed match` | `sec` / `sbc #low` (if the lowest value is not 0; for an `i8` the lowest value is subtracted as a byte, `sbc #$FC` for -4, with no `eor #$80`, since `v - low` is the same byte either way), `tax` (`tay` if X holds a loop variable), `lda hi,x` / `pha` / `lda lo,x` / `pha` / `rts`; the tables hold each target minus 1, and values in the span with no pattern go to `_` or past the match. No range check (5.2) |

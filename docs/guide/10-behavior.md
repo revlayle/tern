@@ -92,7 +92,7 @@ fn main() {
 
 ## 10.6 Promises the compiler trusts
 
-- **`keeps` on a routine at a fixed address** (`fn chrout(ch: u8 using A) @ $FFD2 keeps X, Y`) says which registers the routine leaves alone. The compiler cannot see the routine's code, so it believes the promise and keeps values in those registers across the call. Take it from the routine's documentation; a wrong `keeps` breaks the caller.
+- **`keeps` on a routine at a fixed address** (`fn chrout(ch: u8 using A) @ $FFD2 keeps X, Y`) says which registers the routine leaves alone. The compiler cannot see the routine's code, so it believes the promise and keeps values in those registers across the call. Take it from the routine's documentation; a wrong `keeps` breaks the caller. The same holds for `keeps` on an `asm fn`. On a `fn` or `inline fn` the compiler checks `keeps` against the body, so it is not a promise there ([2.7](02-language.md#27-functions)).
 - **A function reached only through `addr()`** has no known root: the compiler cannot see when it runs. Its frame shares memory with no other, and globals it shares with other code are volatile. Calling it from main and from a handler is your responsibility (10.8).
 - **An address passed as a handler is a plain `u16`**: `c64.set_irq(addr(plain_fn))` compiles, but a plain `fn` ends with `rts`, not `rti`. Install only `interrupt fn`s and `asm fn`s. (On the NES, vectors are checked: [9.3](09-nes.md#93-interrupt-vectors).)
 
