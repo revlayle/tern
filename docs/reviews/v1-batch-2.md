@@ -1,5 +1,20 @@
 # Review V1 batch 2: Galaxy Stars' last steps, smashy smashy (branch `v1-smashy`)
 
+## Re-review (branch at `3bf64ff`)
+
+New since the review: `b61e312` (`main` merged in, up to `c941d45`), `a18452e` (findings 1 and 3-6) and `3bf64ff` (status: finding 2, question 185 widened).
+
+**Ready to merge.** The suite passes in `../6502-language-dev` at `3bf64ff`: 11,747 compiler tests, 3 skipped (`TERN_COMPARE` and the two VICE checks), 50 CPU tests. With `TERN_REAL=1` the five `ValidationTests` pass, the two VICE checks included.
+
+- **Finding 1, fixed.** `C64Chips` is now an `IIrqSource` and raises the raster interrupt on its own clock. The latch is set when the raster passes the compare line the program wrote (`$D012`, bit 8 from the written `$D011`), whether or not the interrupt is enabled, as on the VIC. The IRQ line is held while `$D01A` bit 0 is set, until the program writes bit 0 of `$D019`. `Run` asks the source before each instruction, so the IRQ is taken within one instruction of the line, or at the `cli` after a `sei` section. A frame spent entirely under `sei` loses an IRQ, as on the machine. The raster line, the IRQ and the joystick's frame are now one clock, and both games run with no `irqEvery`. Smashy smashy's `frame_lines()` now counts from the line where its IRQ comes. The new test `C64Chips_raises_the_raster_interrupt_at_the_compare_line_once_a_frame` takes 8 IRQs, each seen at line 100 or 101, one per frame. The enable starting clear is right: the run's memory is seeded, and a stray bit 0 in `$D01A` would raise IRQs before the game installs its handler. Both expected files were rewritten. Smashy smashy's checkpoint moved to frame 2500 because frame 3000 is now the game-over screen; 2500 is in the second game's play (score 1300, 2 kills, high score 500 from the first game), which is a better check than a static screen.
+- **Finding 2, handled as the developer ruled.** The status says the known results come from the test harness, lists what `tern run` lacks, and records that making it a fuller machine is out of scope. Question 185 asks the spec session to change the wording of decision 179 and the roadmap. The READMEs say the same.
+- **Findings 3-6, done.** One stub, `Kernal`, with its entry at `$FFC0` for both games. Port A reads the written value ANDed with the joystick. The working copies have LF line endings, and the port's `assets.py` now writes LF. `RunVice` no longer redirects VICE's output.
+- **Note:** the message of `a18452e` lost its register names to the shell: "(, bit 8 from )", "(, clear at the start)", "bit 0 of ." (`$D012`, `$D011`, `$D01A`, `$D019` expanded as variables). The status table has the full text. Rewriting merged history is not worth it, but next time pass messages that contain `$` with single quotes or `-F`.
+
+Done when, now: every item for this batch is checked, apart from the gaps (question 185, for the spec session and V1 fixes 2). The `tern run` item becomes "in the suite's emulator" once the spec session changes the wording.
+
+## First review (branch at `61e08b5`)
+
 Branch at `61e08b5`, from `main` at `9462661`. Eight commits; the compiler is not changed. The branch adds the test harness's `C64Chips`, `Png` and two `Run.Of` parameters (`until`, `bus`), `ValidationTests` (two emulator runs, two `TERN_REAL` VICE checks), and `validation/c64/galaxy-stars/` and `validation/c64/smashy-smashy/`.
 
 **Not ready to merge**, for one small item: finding 1 (the harness's frame IRQ is not at the raster line the game sets, so smashy smashy's known result is not what a C64 does). Everything else is done and checks out. Finding 2 was a must-fix in the first version of this review; the developer ruled it out of scope (a whole game in `tern run` would need a full emulator of each machine), so it is now a note on the roadmap's wording, for the spec session.
