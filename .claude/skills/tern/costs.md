@@ -516,7 +516,7 @@ parameters are as fast or faster:
 $ tern bench --target c64 --decl 'var n: u8' --decl 'fn bigger(a: u8, b: u8) -> bool { return a > b }' --decl 'fn bigger_r(a: u8 using A, b: u8 using X) -> bool { return a > b }' --code 'for i in 0..200 { if bigger(i, 100) { n += 1 } }' --code 'for i in 0..200 { if bigger_r(i, 100) { n += 1 } }' --dump n
 variant   program  main bytes   calls     cycles  per call    zp  other
 code 1         55          26       1       9206      9206     2      0
-code 2         56          22       1       9606      9606     2      0
+code 2         54          22       1       9206      9206     2      0
 Memory (zp: zero page bytes, other: the rest; the measured function's variables and the program's globals):
   code 1: n $0002 u8, main.i $0003 u8
   code 2: n $0002 u8, main.i $0003 u8

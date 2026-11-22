@@ -119,7 +119,7 @@ fn main() {
 
 ```console
 $ tern run --target c64 bad.tern
-Main returned: 249 cycles (153 in main)
+Main returned: 243 cycles (147 in main)
 ...
 Index check (the program has no check; the emulator found these):
   bad.tern:7: Index 8 is outside 'hits', which has 8 elements
@@ -320,7 +320,10 @@ Functions (cycles include the functions they call):
   "Functions with memory reachable from two roots". A global used by both becomes volatile. A
   module's `private` variable used from both is an error: `math.mul8`'s work bytes and `random`'s
   state are private, so a handler cannot call them while main does.
-- **Inside `for ... using X`, only routines that keep X may be called** (`keeps X`); likewise Y.
+- **Inside `for ... using X`, only functions that keep X may be called** (`keeps X`); likewise Y.
+  A function with a body says so after its return type, `fn hits(o: u8) -> bool keeps Y { ... }`, and
+  the compiler checks it (the body indexes with X; `p[i]`, or a call to a function without `keeps Y`,
+  is an error there). On an `asm fn` it is a promise, as on a KERNAL routine.
 - **A `bool` can live in a flag.** `-> bool using carry` returns in the carry; an `inline asm fn`
   with a flag result tests a flag its instructions set, with no call. After compiled code the flags
   are unspecified: `cpu.carry()` and friends are only for right after an `asm` block.

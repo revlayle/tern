@@ -261,8 +261,6 @@ public class RoutineTests
     [InlineData("var a: u16\nfn f() @ a\nfn main() { }", 2, 10, "The address must be known at compile time. Use a number or a constant")]
     [InlineData("fn f() @ $10000\nfn main() { }", 1, 10, "Address $10000 is outside memory. Use an address from $0000 to $FFFF")]
     [InlineData("fn main() @ $1000", 1, 1, "'main' must have a body. Remove the address and write the body")]
-    [InlineData("fn f() keeps X { }\nfn main() { }", 1, 8, "'keeps' is only for routines at a fixed address: fn f(...) @ $addr keeps X. Remove 'keeps' here")]
-    [InlineData("fn f() -> u8 keeps X { return 1 }\nfn main() { }", 1, 14, "'keeps' is only for routines at a fixed address: fn f(...) @ $addr keeps X. Remove 'keeps' here")]
     [InlineData("fn f() @ $C000 keeps\nfn main() { }", 2, 1, "Expected a register or flag (A, X, Y, AX, AY, XY, carry, zero, negative, overflow), found 'fn'")]
     [InlineData("fn f(v: u8 using A) @ $C000 keeps Y\nfn main() { for i in 0..3 using X { f(i) } }", 2, 13, "The loop body calls a function, which can change X. Remove 'using X', or call only routines that keep X")]
     [InlineData("fn f(v: u8 using X) @ $C000 keeps X\nfn main() { for i in 0..3 using X { f(1) } }", 2, 37, "'f' takes 'v' in X, which holds the loop variable. Remove 'using X' from the loop")]

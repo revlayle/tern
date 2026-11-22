@@ -434,6 +434,8 @@ public sealed partial class Checker
         }
         else if (decl.ReturnUsing is not null)
             throw new CompileError(decl.Pos, "'using' needs a return type. Write it before 'using': -> u8 using A");
+        // A routine at a fixed address lists them after its address (DeclareRoutine).
+        if (decl.Address is null) DeclareKeeps(decl, fn);
 
         Declare(fn, decl.Name);
     }
@@ -478,6 +480,15 @@ public sealed partial class Checker
         foreach (var p in decl.Parameters.Where(p => p.FixedValue is not null))
             DeclareFixedInput(fn, p, usedRegisters);
 
+        DeclareKeeps(decl, fn);
+    }
+
+    /// <summary>
+    /// The registers after <c>keeps</c>: a promise on a routine at a fixed address or an <c>asm fn</c>
+    /// (6.6), checked in the code of a compiled function (6.1).
+    /// </summary>
+    private static void DeclareKeeps(FnDecl decl, FunctionSymbol fn)
+    {
         foreach (var (reg, pos) in decl.Keeps)
         {
             if (reg is not (Register.A or Register.X or Register.Y))

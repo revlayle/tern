@@ -68,4 +68,19 @@ public sealed partial class CodeGen
         if (!AssignsVar(body, v))
             CheckUnchanged(from, reg == Register.X ? CpuState.X : CpuState.Y, $"nothing changes {reg}, which holds '{v.Name}'", to);
     }
+
+    /// <summary>
+    /// A compiled function's <c>keeps</c> (spec 6.1) was checked on the generated code, statement by
+    /// statement (<see cref="CheckKeeps"/>); the optimizer must not add a write to a kept register.
+    /// Unlike the checks above, this one runs in every build (review V1 fixes, suggestion 2): it costs
+    /// one pass over a function with <c>keeps</c>, and the callers' loops rely on the promise, so a
+    /// broken one is an internal error, never wrong code.
+    /// </summary>
+    private void CheckKeptAfterOptimizer(FunctionSymbol f)
+    {
+        foreach (var reg in f.Keeps)
+            foreach (var i in _out.OfType<Instr>())
+                if (i.Mnemonic != Jsr && (Instructions.Effects(i.Mnemonic, i.Mode).Writes & State(reg)) != 0)
+                    throw new InvalidOperationException($"The optimizer changed '{f.Name}', which keeps {reg}, so that '{i.Mnemonic.ToString().ToLowerInvariant()}' changes it");
+    }
 }

@@ -427,6 +427,10 @@ r $0002 u8 = 84 ($54)
 - Parameters `using A`, `X` or `Y`; 16-bit ones `using AX`, `AY` or `XY` (low byte first).
 - Recursion is an error. Function addresses: `addr(f)` is a `u16` constant (for vectors and tables).
 - `inline fn` has no `jsr`/`rts`; its locals go in each caller's frame.
+- `keeps X` after the return type (`fn hits(o: u8) -> bool keeps Y { ... }`) promises the body leaves
+  X alone, so a `for ... using X` loop may call it. The compiler checks it on `fn` and `inline fn`
+  (the body indexes with the other register; a statement that needs X is an error); on `asm fn` it
+  is a promise. Nothing is saved and restored.
 - **Routines at a fixed address** (the KERNAL) are declared without a body; a call is one `jsr`.
   Parameters must be registers. A constant in a parameter's place is passed on every call.
   `keeps` lists the registers the routine leaves alone (a promise the compiler trusts):

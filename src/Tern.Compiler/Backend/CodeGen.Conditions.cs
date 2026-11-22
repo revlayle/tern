@@ -113,6 +113,11 @@ public sealed partial class CodeGen
         // Unsigned, x > 0 is x != 0 and x <= 0 is x == 0: the load sets Z, no cmp needed (F9).
         if (type.Size == 1 && !signed && right.ConstValue == 0 && op is TokenKind.Greater or TokenKind.LessEq)
             op = op == TokenKind.Greater ? TokenKind.NotEq : TokenKind.EqEq;
+        if (signed && right.ConstValue == 0 && op is TokenKind.Greater or TokenKind.LessEq)
+        {
+            SignedPositive(left, op == TokenKind.Greater, target);
+            return;
+        }
         if (type.Size == 1 && op is TokenKind.Greater or TokenKind.LessEq && right.ConstValue is long c && c < type.MaxValue)
         {
             right = new NumberExpr(right.Pos, c + 1) { Type = right.Type, ConstValue = c + 1 };
@@ -176,6 +181,39 @@ public sealed partial class CodeGen
 
         if (type.Size == 1) Compare8(left, right, op, signed, target);
         else Compare16(left, right, op, signed, target);
+    }
+
+    /// <summary>
+    /// A signed <c>s &gt; 0</c> (<paramref name="positive"/>) or <c>s &lt;= 0</c> from the flags of the
+    /// load, with no compare (spec 11): <c>lda s / beq / bmi</c>; for an i16 the sign of the high byte,
+    /// then <c>ora s</c> for zero (<c>lda s+1 / bmi / ora s / beq</c>).
+    /// </summary>
+    private void SignedPositive(Expr left, bool positive, Label target)
+    {
+        var notPositive = positive ? NewLabel("np") : target;
+        if (left.Type.Size == 1)
+        {
+            GenA(left);
+            if (!FlagsMatchA()) Op(Cmp, Byte(0));
+            Branch(Beq, notPositive);
+            Branch(positive ? Bpl : Bmi, target);
+        }
+        else
+        {
+            VariableSymbol? temp = null;
+            if (Simple2(left) is not var (lo, hi))
+            {
+                temp = AcquireTemp(2);
+                Gen16(left, new Loc(temp));
+                (lo, hi) = (Var(temp), Var(temp, 1));
+            }
+            Op(Lda, hi);
+            Branch(Bmi, notPositive);
+            Op(Ora, lo);
+            Branch(positive ? Bne : Beq, target);
+            if (temp is not null) Release(temp);
+        }
+        if (positive) Place(notPositive);
     }
 
     /// <summary>

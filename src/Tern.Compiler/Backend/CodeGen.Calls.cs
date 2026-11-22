@@ -57,7 +57,9 @@ public sealed partial class CodeGen
         if (byteIndex > 0 && !iny) offset += ix.SecondByte;
         if (PlainPointerIndex(ix) && index is NameExpr { Symbol.Register: Register.Y }) return;
         if (_reserved.Contains(Register.Y))
-            throw new CompileError(ix.Pos, "p[i] needs the Y register, which holds a loop variable. Use 'using X' for that loop");
+            throw new CompileError(ix.Pos, KeptBy(Register.Y) is { } keeper
+                ? $"p[i] needs the Y register, which '{keeper.Name}' keeps. Remove 'keeps Y' from '{keeper.Name}', or read the pointer outside it"
+                : "p[i] needs the Y register, which holds a loop variable. Use 'using X' for that loop");
         if (index.ConstValue is long c)
         {
             Op(Ldy, Byte(offset + c * stride + (iny ? 1 : 0)));

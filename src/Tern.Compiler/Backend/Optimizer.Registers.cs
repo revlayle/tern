@@ -257,10 +257,20 @@ public static partial class Optimizer
     /// jumps and both ways of a branch; gives up (true) on anything it cannot follow, and after a
     /// fixed number of steps.
     /// </summary>
-    private static bool NzLiveAfter(List<AsmItem> code, int k, FunctionSymbol function, Dictionary<Label, int> positions)
+    private static bool NzLiveAfter(List<AsmItem> code, int k, FunctionSymbol function, Dictionary<Label, int> positions) =>
+        FlagsLiveAfter(code, k, function, positions, CpuState.N | CpuState.Z);
+
+    /// <summary>As <see cref="NzLiveAfter"/>, for any of <paramref name="flags"/>: true if one may be read before something sets them all.</summary>
+    private static bool FlagsLiveAfter(List<AsmItem> code, int k, FunctionSymbol function, Dictionary<Label, int> positions, CpuState flags)
     {
-        // A bool returned in Z or N (-> bool using zero) is read after rts.
-        bool returnsInNz = function.ReturnRegister is Register.Zero or Register.Negative;
+        // A bool returned in a flag (-> bool using zero, a bool in the carry) is read after rts.
+        bool returnsInNz = function.ReturnRegister switch
+        {
+            Register.Zero or Register.Negative => (flags & (CpuState.N | CpuState.Z)) != 0,
+            Register.Carry => flags.HasFlag(CpuState.C),
+            Register.Overflow => flags.HasFlag(CpuState.V),
+            _ => false,
+        };
         var visited = new HashSet<int>();
         var paths = new Stack<int>();
         paths.Push(k + 1);
@@ -275,8 +285,8 @@ public static partial class Optimizer
                 if (code[j] is not Instr i) continue;
                 // A call and rti set N and Z (the callee, the flags pulled).
                 var (reads, writes) = Instructions.Effects(i.Mnemonic, i.Mode);
-                if ((reads & (CpuState.N | CpuState.Z)) != 0) return true;
-                if (writes.HasFlag(CpuState.N) && writes.HasFlag(CpuState.Z)) break;
+                if ((reads & flags) != 0) return true;
+                if ((writes & flags) == flags) break;
                 var exits = ExitsOf(code, j, positions);
                 if (exits.Elsewhere) return true;
                 if (exits.Returns)
@@ -428,6 +438,87 @@ public static partial class Optimizer
             code[k] = new Instr(Asl, Accumulator);
             code[b] = new Instr(branch.Mnemonic == Beq ? Bcc : Bcs, branch.Mode, branch.Operand);
             foreach (int remove in new[] { a2, l2, a1, l1 }.OrderByDescending(r => r)) code.RemoveAt(remove);
+            return true;
+        }
+        return false;
+    }
+
+    // ---------- Flags ----------
+
+    /// <summary>
+    /// <c>inc</c> or <c>dec</c> of a byte, then a load of the same byte that is there only for N and Z
+    /// (the register it loads is not read after it): the load goes, since the <c>inc</c> or <c>dec</c>
+    /// set N and Z for the same value (spec 11: <c>x -= 1</c> then <c>if x == 0</c> is <c>dec x / bne skip</c>).
+    /// Not for volatile memory, which covers hardware (the platform's volatile areas); a fixed address outside
+    /// them is ordinary memory (spec 4), such as a table at <c>@ $C600</c>. Returns true if a load was removed.
+    /// </summary>
+    private static bool ReuseIncDecFlags(List<AsmItem> code, FunctionSymbol function)
+    {
+        Dictionary<Label, int>? positions = null;
+        CpuState[]? live = null;
+        for (int k = 0; k < code.Count; k++)
+        {
+            if (code[k] is not Instr { Mnemonic: Inc or Dec, AsmPos: null } step || step.Mode == Accumulator
+                || step.Operand is not VarOperand { Variable.IsVolatile: false })
+                continue;
+            int j = NextReal(code, k + 1);
+            if (j >= code.Count || code[j] is not Instr { AsmPos: null } load || Loaded(load.Mnemonic) is not Reg r
+                || load.Mode != step.Mode || load.Operand != step.Operand)
+                continue;
+            positions ??= Positions(code);
+            live ??= RegistersLive(code, function, positions);
+            if ((live[j + 1] & Flag(r)) != 0) continue;
+            code.RemoveAt(j);
+            return true;
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// <c>lda #0 / rol a / beq else</c>: a bool in the carry made 0 or 1 only to be tested (<c>if f()</c>
+    /// through a bool variable held in A). When A, the carry, N and Z are not read on either path after
+    /// the branch, the three become <c>bcc else</c> (<c>bne</c>: <c>bcs</c>). Returns true if any changed.
+    /// </summary>
+    private static bool TestCarryDirectly(List<AsmItem> code, FunctionSymbol function)
+    {
+        const CpuState flags = CpuState.C | CpuState.N | CpuState.Z;
+        for (int k = 0; k < code.Count; k++)
+        {
+            if (code[k] is not Instr { Mnemonic: Lda, Mode: Immediate, Operand: Imm { Value: 0 }, AsmPos: null }) continue;
+            int r = NextReal(code, k + 1);
+            if (r >= code.Count || code[r] is not Instr { Mnemonic: Rol, Mode: Accumulator, AsmPos: null }) continue;
+            int b = NextReal(code, r + 1);
+            if (b >= code.Count || code[b] is not Instr { Mnemonic: Beq or Bne, AsmPos: null } branch
+                || Target(branch) is not { } label) continue;
+            var positions = Positions(code);
+            if (!positions.TryGetValue(label, out int at)
+                || (RegistersLive(code, function, positions)[b] & CpuState.A) != 0
+                || FlagsLiveAfter(code, b, function, positions, flags) || FlagsLiveAfter(code, at, function, positions, flags))
+                continue;
+            code[b] = new Instr(branch.Mnemonic == Beq ? Bcc : Bcs, branch.Mode, branch.Operand);
+            code.RemoveAt(r);
+            code.RemoveAt(k);
+            return true;
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// A transfer (<c>tax</c>, <c>tay</c>, <c>txa</c>, <c>tya</c>) whose register and N and Z are not read
+    /// after it: a parameter moved on entry to X that the code read from A after all. Returns true if
+    /// any was removed.
+    /// </summary>
+    private static bool RemoveDeadTransfers(List<AsmItem> code, FunctionSymbol function)
+    {
+        Dictionary<Label, int>? positions = null;
+        CpuState[]? live = null;
+        for (int k = 0; k < code.Count; k++)
+        {
+            if (code[k] is not Instr { Mnemonic: Tax or Tay or Txa or Tya, AsmPos: null } i || Transfer(i.Mnemonic) is not var (_, to)) continue;
+            positions ??= Positions(code);
+            live ??= RegistersLive(code, function, positions);
+            if ((live[k + 1] & Flag(to)) != 0 || NzLiveAfter(code, k, function, positions)) continue;
+            code.RemoveAt(k);
             return true;
         }
         return false;

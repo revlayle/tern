@@ -169,8 +169,7 @@ public sealed partial class CodeGen
         (Operand Lo, Operand Hi) bound;
         if (to is not null)
             bound = (Byte(to.Value), Byte(to.Value >> 8));
-        else if (f.To is NameExpr { Symbol: { InMemory: true, AliasOf: null, Kind: VariableKind.Local or VariableKind.Parameter } bv }
-                 && bv.Type.Size == type.Size && bv != c && !bv.AddressTaken && !AssignsVar(f.Body, bv))
+        else if (f.To is NameExpr { Symbol: { } bv } && bv.Type.Size == type.Size && BoundStays(f.Body, bv, c))
             bound = (Var(bv), Var(bv, 1));
         else if (type.Size == 1 && f.To is MemberExpr { Target: NameExpr { Symbol: { InMemory: true, AliasOf: null, Kind: VariableKind.Local or VariableKind.Parameter } mv } }
                  && mv != c && !mv.AddressTaken && !AssignsVar(f.Body, mv) && Simple1(f.To) is { } half)
@@ -183,6 +182,20 @@ public sealed partial class CodeGen
             bound = (Var(boundTemp), Var(boundTemp, 1));
         }
         return bound;
+    }
+
+    /// <summary>
+    /// A variable the loop's end is read from on every pass, with no copy (spec 11): the body never
+    /// assigns it, and for a global (not volatile, not at a fixed address) it calls nothing and writes
+    /// through no pointer, either of which might change it.
+    /// </summary>
+    private static bool BoundStays(Stmt body, VariableSymbol v, VariableSymbol counter)
+    {
+        if (!v.InMemory || v.AliasOf is not null || v == counter || v.AddressTaken || AssignsVar(body, v)) return false;
+        if (v.Kind is VariableKind.Local or VariableKind.Parameter) return true;
+        return v.Kind == VariableKind.Global && !v.IsVolatile && v.FixedAddress is null
+            && !body.Descendants().Any(n => n is CallExpr or AsmStmt
+                || (n is AssignStmt a && a.Target is not (NameExpr or IndexExpr { Target: NameExpr { Symbol: VariableSymbol { Type.Kind: not TypeKind.Ptr } } })));
     }
 
     /// <summary>A variable step, evaluated once: a local the body does not change, or else a temporary, <paramref name="stepTemp"/>.</summary>
@@ -209,8 +222,10 @@ public sealed partial class CodeGen
         long? from = f.From.ConstValue, to = f.To.ConstValue;
         // Skip the loop if the range is empty, unless the bounds prove it is not.
         long max = type.MaxValue;
+        // An inclusive range from the lowest value counting up (0..=n), or from the highest counting down, has the start.
         bool provablyNonEmpty = (from is not null && to is not null)
             || (inclusive && up && to == max) || (inclusive && !up && to == type.MinValue) || _nonEmpty.Contains(f)
+            || (inclusive && up && from == type.MinValue) || (inclusive && !up && from == max)
             || (!inclusive && up && to == max + 1);   // start..256 with a u8 start: every start is below the end
 
         // A down-count to 0 tests only the start's zero (and sign), which a plain ldx n has set: test it

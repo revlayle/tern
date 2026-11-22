@@ -51,6 +51,8 @@ public sealed partial class CodeGen
     private int _loopDepth;
     private readonly List<(Label Break, Label Continue)> _loops = [];
     private readonly HashSet<Register> _reserved = [];
+    /// <summary>The registers the functions being generated keep (<c>keeps</c>, spec 6.1), checked after each statement.</summary>
+    private readonly List<(FunctionSymbol Function, Register Register, bool Reserved)> _keeping = [];
     /// <summary>The largest value each enclosing <c>for</c> counter can have in the body, where its bounds prove one (spec 3.2).</summary>
     private readonly Dictionary<VariableSymbol, long> _counterMax = [];
     private int _tempCounter;
@@ -93,6 +95,7 @@ public sealed partial class CodeGen
             // main runs once, right after the startup code has cleared memory.
             bool startsProgram = f == _program.Main && !_program.IsBinary && !f.AddressTaken;
             if (_optimize && !f.Declaration!.IsAsm && !(f.IsInterrupt && !f.IsPart)) Optimizer.Run(_out, f, _instructions, startsProgram);
+            if (!f.Declaration!.IsAsm && !(f.IsInterrupt && !f.IsPart)) CheckKeptAfterOptimizer(f);
             FunctionItems[f] = _out.ToList();
             all.AddRange(_out);
         }
@@ -193,7 +196,9 @@ public sealed partial class CodeGen
     private Register FreeIndexRegister(SourcePos pos) =>
         !_reserved.Contains(Register.X) ? Register.X
         : !_reserved.Contains(Register.Y) ? Register.Y
-        : throw new CompileError(pos, "No free index register: X and Y are both used by loop variables. Remove 'using' from one of the loops");
+        : throw new CompileError(pos, _keeping.Any(k => k.Register is Register.X or Register.Y)
+            ? "No free index register: X and Y are both held, by a loop variable or a function's 'keeps'. Remove 'using' from the loop or a register from 'keeps'"
+            : "No free index register: X and Y are both used by loop variables. Remove 'using' from one of the loops");
 
     // ---------- Functions ----------
 
@@ -222,6 +227,9 @@ public sealed partial class CodeGen
 
         if (handler)
         {
+            if (f.Declaration.Keeps.Count > 0)
+                throw new CompileError(f.Declaration.Keeps[0].Pos,
+                    $"'{f.Name}' is an interrupt fn that only the CPU runs, and it saves and restores what it changes, so 'keeps' has no use. Remove 'keeps'");
             GenInterrupt(f);
             return;
         }
@@ -229,7 +237,9 @@ public sealed partial class CodeGen
         var inA = f.Parameters.FirstOrDefault(p => p.InMemory && p.PassedIn is Register.A or Register.AX);
         _ctx.AParameter = inA is null ? null : (inA, _out.Count);
         int bodyStart = _out.Count;
+        int keeps = StartKeeping(f);
         GenBlock(f.Declaration!.Body);
+        EndKeeping(keeps);
         CheckHeld(bodyStart, _out.Count, kept is null ? null : f.Parameters.First(p => p.Register == kept), f.Declaration!.Body);
         _ctx.AParameter = null;
         if (kept is { } r) _reserved.Remove(r);
@@ -266,8 +276,10 @@ public sealed partial class CodeGen
     {
         if (_keptRegisters.TryGetValue(f, out var decided)) return decided;
         var body = f.Declaration!.Body;
+        // Not when the function keeps the other index register (keeps, spec 6.1), which would leave none for the body.
         var p = f.Parameters.FirstOrDefault(p => p.PassedIn is Register.X or Register.Y && p.Type.Size == 1
-            && !p.AddressTaken && !AssignsVar(body, p) && !(f.ReturnRegister is { } ret && ret.Uses(p.PassedIn!.Value)));
+            && !p.AddressTaken && !AssignsVar(body, p) && !(f.ReturnRegister is { } ret && ret.Uses(p.PassedIn!.Value))
+            && !f.Keeps.Contains(p.PassedIn == Register.X ? Register.Y : Register.X));
         Register? kept = null;
         // In Y, every pointer access must be exactly p[param]; others need to load Y.
         if (p is not null && KeepsIndexRegistersFree(body) && (p.PassedIn != Register.Y || PointerIndexes(body, p).Other == 0))
@@ -393,7 +405,9 @@ public sealed partial class CodeGen
         var kept = isAsm ? null : KeptRegister(f);
         if (!isAsm) StoreRegisterParameters(f);
         if (kept is { } k) _reserved.Add(k);
+        int keeps = isAsm ? 0 : StartKeeping(f);
         GenBlock(f.Declaration!.Body);
+        EndKeeping(keeps);
         if (kept is { } r) _reserved.Remove(r);
         if (_out[^1] is Instr { Mnemonic: Mnemonic.Jmp, Operand: LabelOperand { Label: var l } } && l == end)
             _out.RemoveAt(_out.Count - 1);

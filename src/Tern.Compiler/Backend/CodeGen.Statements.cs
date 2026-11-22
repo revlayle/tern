@@ -32,6 +32,13 @@ public sealed partial class CodeGen
     private void GenStmt(Stmt stmt)
     {
         Source(stmt);
+        int from = _out.Count;
+        GenStmtCode(stmt);
+        if (_keeping.Count > 0) CheckKeeps(stmt, from);
+    }
+
+    private void GenStmtCode(Stmt stmt)
+    {
         switch (stmt)
         {
             case VarDecl v:

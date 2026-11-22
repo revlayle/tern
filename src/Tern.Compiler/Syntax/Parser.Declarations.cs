@@ -639,6 +639,8 @@ public sealed partial class Parser
         var f = ParseFn(first: start);
         if (f.Address is not null)
             throw new CompileError(fn, "A const fn runs at compile time and has no address. Remove '@' and the address, and give it a body");
+        if (f.Keeps.Count > 0)
+            throw new CompileError(f.Keeps[0].Pos, "A const fn runs at compile time, so it has no registers to keep. Remove 'keeps'");
         // A generator is called from asm lines, where a mnemonic is read as the instruction (review code-quality-syntax 13).
         if (f.ReturnType is null && Enum.GetNames<Mnemonic>().Contains(f.Name, StringComparer.OrdinalIgnoreCase))
             throw new CompileError(fn, $"'{f.Name}' is a 6502 instruction, so an asm line cannot call a generator of that name. Use another name");
@@ -684,8 +686,10 @@ public sealed partial class Parser
             returnType = ParseType();
             if (Accept(TokenKind.Using)) returnUsing = ParseRegister();
         }
-        if (At(TokenKind.Keeps))
-            throw new CompileError(Current.Pos, $"'keeps' is only for routines at a fixed address: fn {name.Text}(...) @ $addr keeps X. Remove 'keeps' here");
+        // keeps on a function with a body (spec 6.1): after the return type, before the body.
+        var bodyKeeps = ParseKeeps();
+        if (bodyKeeps.Count > 0 && At(TokenKind.At))
+            throw new CompileError(Current.Pos, $"For a routine at a fixed address, 'keeps' comes after the address. Write fn {name.Text}(...) @ $addr keeps {bodyKeeps[0].Register}");
 
         // A routine that already exists at a fixed address: no body.
         if (At(TokenKind.At))
@@ -694,11 +698,7 @@ public sealed partial class Parser
             if (isAsm)
                 throw new CompileError(at.Pos, "An asm fn at a fixed address is not supported yet. Remove 'asm' and the body to declare a routine that is already there, or remove the address");
             var address = ParseExpr();
-            var keeps = new List<(Register, SourcePos)>();
-            if (Accept(TokenKind.Keeps))
-            {
-                do keeps.Add((ParseRegister(), PeekAt(-1).Pos)); while (Accept(TokenKind.Comma));
-            }
+            var keeps = ParseKeeps();
             if (At(TokenKind.LBrace))
                 throw new CompileError(at.Pos, "A function with a body at a fixed address is not supported yet. Without a body, it declares a routine that is already there. Remove the address or the body");
             ExpectEndOfStatement();
@@ -710,7 +710,18 @@ public sealed partial class Parser
         }
 
         var body = isAsm ? new BlockStmt(Current.Pos, [ParseAsmBody(isFn: true)]) : ParseBlock();
-        return new FnDecl(start.Pos, name.Text, parameters, returnType, returnUsing, body) { IsAsm = isAsm };
+        return new FnDecl(start.Pos, name.Text, parameters, returnType, returnUsing, body) { IsAsm = isAsm, Keeps = bodyKeeps };
+    }
+
+    /// <summary><c>keeps A, X, Y</c>, or nothing.</summary>
+    private List<(Register Register, SourcePos Pos)> ParseKeeps()
+    {
+        var keeps = new List<(Register, SourcePos)>();
+        if (Accept(TokenKind.Keeps))
+        {
+            do keeps.Add((ParseRegister(), PeekAt(-1).Pos)); while (Accept(TokenKind.Comma));
+        }
+        return keeps;
     }
 
     private Register ParseRegister()
