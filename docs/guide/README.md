@@ -33,6 +33,7 @@ Read chapters 1 to 3 in order, then the chapter for your machine; the others whe
 | [9. NES](09-nes.md) | Cartridges, boards, tiles, interrupt vectors, ROM banks, the `nes` library |
 | [10. How Tern programs behave](10-behavior.md) | The developer guide: what the machine does with your code, each behavior with an example |
 | [11. Writing fast Tern](11-fast.md) | Measured advice, and measuring with `tern run` and `tern bench` |
+| [12. Running and measuring](12-run-and-bench.md) | `tern run` and `tern bench` in full: options, output, input and frames, profiles, the index check, JSON, runs as tests |
 
 ## Not supported yet
 

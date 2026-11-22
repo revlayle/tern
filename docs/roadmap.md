@@ -902,6 +902,7 @@ Done when: the benchmarks and a sprite example build for the C128 and run in VIC
 
 Each has a reason to wait; the spec session schedules one when that reason changes.
 
+- **A release package** (decision 2026-11-22): the compiled `tern` executable for Windows, Linux and macOS, the library and the support files it needs, attached to a GitHub release. Until then the guide (1.1) gives the `dotnet publish` commands for a self-contained single file. With it, `JsonOutput` moves to source-generated JSON, so a trimmed build (about 15 MB against 70) keeps `--json` working. Waits for the developer to decide to publish releases.
 - **The developer's horizontal shooter in Tern** (decision 2026-11-21): the unfinished game whose Prog8 frame rate started Tern. Not in V1: about ten phases of work in Prog8 and half done, too big for a validation program, and a one-frame slice still needs its whole frame engine. Scheduled when the developer wants to finish it in Tern.
 - **Question 63 (b)** (deferred 2026-11-07): folding `a[i + c]` proved from another access (no benchmark needs it, and it makes one line's cost depend on another, rule 4). Reconsider when a real program needs it. F20 is rejected and F14 is replaced by `indexed match` (decision 2026-11-08).
 - **Arrays of structs as struct fields** (spec 3.3, decision 2026-11-12): designed; built after the first release or when a program needs it. (Second copies of functions called from two roots, 14.2, are not planned: decision 2026-11-12.)
