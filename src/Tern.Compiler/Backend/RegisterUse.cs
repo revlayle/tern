@@ -32,6 +32,9 @@ public sealed class RegisterUse(CodeGen gen, IEnumerable<FunctionSymbol> functio
             }
             changed |= Instructions.Effects(i.Mnemonic, i.Mode).Writes & Registers;
         }
+        // keeps on an asm fn is a promise, as on a routine at a fixed address (it may save and restore
+        // the register); on a compiled function the code generator checked it.
+        if (f.Declaration?.IsAsm == true) changed &= ~Kept(f);
         return _known[f] = changed;
     }
 

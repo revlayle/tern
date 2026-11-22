@@ -255,7 +255,8 @@ public sealed partial class Checker
     private void AddRegisterEffects(AsmInstruction ins, AsmEffects effects)
     {
         var (reads, writes) = Instructions.Effects(ins.Mnemonic, ins.Mode);
-        var routine = ins.Mnemonic == Mnemonic.Jsr && ins.Value?.Function is { FixedAddress: not null } r ? r : null;
+        // A routine at a fixed address or a function with 'keeps' leaves those registers alone (6.1, 6.6).
+        var routine = ins.Mnemonic == Mnemonic.Jsr ? ins.Value?.Function : null;
         if (routine is not null)
             foreach (var kept in routine.Keeps)
                 writes &= ~(kept switch { Register.A => CpuState.A, Register.X => CpuState.X, _ => CpuState.Y });

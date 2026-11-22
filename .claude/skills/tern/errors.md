@@ -327,8 +327,10 @@ example.tern:6:5: error: The loop body calls a function, which can change X. Rem
 ```
 
 Fix: leave out `using X` (the compiler still puts the counter in a register when it can), or write
-the work in the loop without a call. A call to an `inline fn` counts as a call here too. Only
-routines declared with `keeps X` (KERNAL routines) may be called in such a loop.
+the work in the loop without a call, or write `keeps X` on the function you call, after its return
+type (`fn f(o: u8) -> u8 keeps X { ... }`). A call to an `inline fn` counts as a call here too. Only
+functions declared with `keeps X` (KERNAL routines, or functions whose `keeps X` the compiler has
+checked) may be called in such a loop.
 
 A function called from main and from an interrupt handler is not an error, even with memory of its
 own (memory parameters, locals, temporaries): it has one frame, shared by both sides, which overlaps
