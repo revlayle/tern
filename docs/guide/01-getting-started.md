@@ -14,6 +14,16 @@ dotnet run --project src/Tern.Cli -- --target c64 game.tern -o out/game.prg
 
 In this guide, `tern` is short for `dotnet run --project src/Tern.Cli --`.
 
+**A `tern` command of your own.** To call the compiler as `tern` from anywhere, publish it as one file that needs no .NET installed, then put the folder on your `PATH`:
+
+```
+dotnet publish src/Tern.Cli -c Release -r win-x64 --self-contained -p:PublishSingleFile=true -o dist/win-x64
+dotnet publish src/Tern.Cli -c Release -r linux-x64 --self-contained -p:PublishSingleFile=true -o dist/linux-x64
+dotnet publish src/Tern.Cli -c Release -r osx-arm64 --self-contained -p:PublishSingleFile=true -o dist/osx-arm64
+```
+
+Each folder holds `tern.exe` (Windows) or `tern` (Linux, macOS) and the `lib/` folder with the standard library, which the compiler finds next to itself: copy them together. Any of the three can be built on any of the systems; on Linux and macOS, `chmod +x tern` after copying from another system. The file is about 70 MB, since it carries the .NET runtime. Do not add `-p:PublishTrimmed=true`: the trimmed file is smaller, but `--json` fails in it. `dist/` is not part of the repository. A release package with the executable, the library and what else it needs is planned for later (roadmap, "Not scheduled").
+
 ## 1.2 Targets
 
 Every command names the machine it builds for, with `--target`:
@@ -59,7 +69,7 @@ Mesen game.nes                                             # NES: Mesen
 
 The compiler makes no disk images: `apple2-disk.ps1` copies the ProDOS boot disk and puts the program on it as the first system file, and any `.bin` overlays after it with their load address (`level1.bin@$6000`).
 
-`tern run --target c64 game.tern` runs a program in the compiler's built-in emulator, with stand-ins for a few ROM routines on each machine, and `tern bench` compares two ways of writing the same code ([Measuring](11-fast.md#1111-measuring)).
+`tern run --target c64 game.tern` runs a program in the compiler's built-in emulator, with stand-ins for a few ROM routines on each machine, and `tern bench` compares two ways of writing the same code ([12. Running and measuring](12-run-and-bench.md)).
 
 ## 1.5 Errors and warnings
 

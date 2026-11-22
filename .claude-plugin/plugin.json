@@ -2,5 +2,6 @@
   "name": "tern",
   "description": "The Tern skill: writing, checking and measuring Tern programs for the 6502 (Commodore 64, Atari 8-bit, Apple II, NES) with the tern compiler's tools",
   "author": { "name": "layle" },
+  "license": "MIT",
   "skills": ["./.claude/skills/"]
 }

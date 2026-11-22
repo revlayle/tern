@@ -50,3 +50,4 @@ tests/benchmarks/*/*.lines
 examples/*.prg
 examples/*.lst
 examples/*.vs
+dist/

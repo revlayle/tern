@@ -107,7 +107,7 @@ The `bubble.direct` (comparing the elements, no locals) and `bubble.minus` (`i -
 
 ## 11.11 Measuring
 
-`tern bench` runs two or more versions in the built-in emulator and prints the bytes and cycles of each:
+`tern bench` runs two or more versions in the built-in emulator and prints the bytes and cycles of each ([12. Running and measuring](12-run-and-bench.md) has every option, the output explained, and using a run as a test):
 
 ```
 tern bench --target c64 --decl "var n: u8" --code "for i in 0..200 { n += i }" --code "for i in 0..200 using X { n += i }" --dump n
