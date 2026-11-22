@@ -1,5 +1,20 @@
 # Review V1 fixes: code from Galaxy Stars
 
+## Re-review (branch at `376aff4`)
+
+Commits `7d8a633` (finding 1, suggestion 2), `fe5a0a6` (suggestion 3) and `376aff4` (status), after `main` was merged in at `43c7a10`.
+
+**The code is ready to merge. The milestone is not, until its last "done when" item is done:** Galaxy Stars' plain routines measured again with this compiler, and the numbers recorded in the port's `gaps.md`. The status lists it as open. Merging before it is done would need the developer's or spec session's agreement to move it into batch 2.
+
+- **Finding 1, fixed.** `Optimizer.Returned` (what `rts` reads) now includes the kept registers, so `RegistersLive` counts them as in use at the end of the function. That covers `MoveParameterToIndex` and any other pass that chooses a register by liveness, which is the wider of the two fixes the review offered. Checked on a Release build of the branch: the review's program runs its loop 4 times (`count` 4, `out2` 9), and `f` is now `tay / lda #3 / sta out / tya / sta out2 / rts`. With `keeps X, Y` and nested `using X` / `using Y` loops, `f` keeps the parameter in A (`sta out`), and `count` is 8. `KeepsTests.The_optimizer_leaves_a_kept_register_alone` has four rows (keeps X; keeps Y with X taken by a parameter; keeps X, Y with either loop). Each runs the loop and checks the listing for no write to the kept register.
+- **Suggestion 2, done.** `CheckKeptAfterOptimizer` runs in every build.
+- **Suggestion 3, done.** `LoopBoundTests` has a `pointer` case with `r1` not address-taken. It reaches the pointer rule, and the bound is read from a copy. The status explains why the rule stays: a pointer from a constant address, or from another variable's address plus an offset, can reach a global without `addr()`. That is right.
+- The suite passes in `../6502-language-dev` at `376aff4`: 11,740 compiler tests, 1 skipped (`TERN_COMPARE`), 50 CPU tests.
+
+Done when, now: every item checked except the Galaxy Stars remeasurement (below, last line), which is still open.
+
+## First review (branch at `e253c01`)
+
 Branch `v1-fixes` at `e253c01`, from `main` at `3625a31`: `ef0b4d5` (gap 27), `089387c` (gap 26), `0ed5385` and `2208eda` (gap 28), `59e91e4` (gap 29, `keeps` on a function with a body), `3d46254`, `e191a0a`, `f9e7a6d` (the small shapes) and `e253c01` (status). Roadmap "V1 fixes"; decision 2026-11-21 (questions 180, 181); spec 6.1, 6.6, 11.
 
 ## Verdict
