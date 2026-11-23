@@ -492,4 +492,43 @@ public class PointerTests
     {
         Expect.Error(source, line, column, expected);
     }
+
+    // Smashy smashy gap 1 (spec 3.4): an untyped address constant plus a u8 where a pointer is expected.
+    private const string AddressConstant = "const SCREEN = $C000\nvar col: u8 = 3\nvar p: ptr u8\nfn put(at: ptr u8, v: u8) { at[0] = v }\n";
+    private const string DoesNotFit = "49152 does not fit in u8 (0 to 255), the type of 'col', which it is combined with. ";
+    private const string Declare = "Declare 'SCREEN' as a pointer: 'const SCREEN: ptr u8 = $C000'";
+    private const string Convert = "Convert 'col' with 'as u16'";
+
+    [Theory]
+    [InlineData(AddressConstant + "fn main() { put(SCREEN + col, 1) }", 5, 17, Declare)]
+    [InlineData(AddressConstant + "fn main() { p = SCREEN + col }", 5, 17, Declare)]
+    [InlineData(AddressConstant + "fn main() { var q: ptr u8 = SCREEN + col\n q[0] = 1 }", 5, 29, Declare)]
+    [InlineData(AddressConstant + "fn main() { p = SCREEN + col + 40 }", 5, 17, Declare)]
+    // Not a pointer destination, or the constant inside a conversion: the message is as before.
+    [InlineData(AddressConstant + "fn main() { p = (col - SCREEN) as ptr u8 }", 5, 24, Convert)]
+    [InlineData(AddressConstant + "var w: u16\nfn main() { w = SCREEN + col }", 6, 17, Convert)]
+    public void An_address_constant_where_a_pointer_is_expected_is_declared_as_a_pointer(string source, int line, int column, string fix)
+    {
+        var e = Expect.Error(source, line, column, DoesNotFit + fix);
+        Assert.Equal(fix, Tools.Diagnostic.Split(e.Description).Suggestion);
+    }
+
+    [Trait("Shape", "nmos6502")]
+    [Fact]
+    public void An_address_constant_declared_as_a_pointer_is_the_plain_pointer_add()
+    {
+        var r = Run.Program("""
+            const SCREEN: ptr u8 = $C000
+            var col: u8 = 3
+            var p: ptr u8
+            fn put(at: ptr u8, v: u8) { at[0] = v }
+            fn main() {
+                put(SCREEN + col, 7)
+                p = SCREEN + col
+            }
+            """);
+        Assert.Equal(7, r.Ram.Bytes[0xC003]);
+        Assert.Equal(0xC003, r.U16("p"));
+        Assert.Contains("lda col|sta p|lda #$C0|sta p+1|rts", Listing.Code(r));
+    }
 }

@@ -145,9 +145,33 @@ public sealed partial class Checker
                 ? $"{v} does not fit in {target} ({target.MinValue} to {target.MaxValue}), the type of the constant '{setBy}' in it, which sets the operation's type. " +
                   (wider is null ? "Use a smaller value" : $"Give '{setBy}' the type {wider}")
                 : $"{v} does not fit in {target} ({target.MinValue} to {target.MaxValue}), the type of '{setBy}', which it is combined with. " +
-                  (wider is null ? "Use a smaller value" : $"Convert '{setBy}' with 'as {wider}'"));
+                  (wider is null ? "Use a smaller value" : $"Convert '{setBy}' with 'as {wider}'")) { Reason = new DoesNotFit(v) };
         }
     }
+
+    /// <summary>
+    /// Checks a value that goes where a <paramref name="target"/> is expected. Where that is a pointer and an
+    /// untyped constant in a <c>+</c> / <c>-</c> chain does not fit the byte it is combined with
+    /// (<c>SCREEN + col</c>), the fix is to declare the constant as a pointer (spec 3.4; smashy smashy gap 1).
+    /// </summary>
+    private void CheckValueFor(Expr value, TernType target)
+    {
+        try { CheckExpr(value); }
+        catch (CompileError error) when (error.Reason is DoesNotFit && target.IsPointer && AddressConstantAt(value, error.Pos) is { } c)
+        {
+            // The problem as CoerceNamed says it, which always ends with a fix; this fix replaces that one.
+            string problem = error.Description[..Tools.Diagnostic.FixStart(error.Description)];
+            throw new CompileError(error.Pos, $"{problem}. Declare '{c.Name}' as a pointer: 'const {c.Name}: {target} = ${c.ConstValue:X4}'") { Reason = error.Reason };
+        }
+    }
+
+    /// <summary>The untyped named constant at <paramref name="pos"/> in a chain of <c>+</c> and <c>-</c>, if there is one.</summary>
+    private static NameExpr? AddressConstantAt(Expr e, SourcePos pos) => e switch
+    {
+        NameExpr { Symbol: null, ConstType: null, IsBitPattern: false, ConstValue: not null } n when n.Pos == pos => n,
+        BinaryExpr { Op: TokenKind.Plus or TokenKind.Minus } b => AddressConstantAt(b.Left, pos) ?? AddressConstantAt(b.Right, pos),
+        _ => null,
+    };
 
     /// <summary>A type of the same signedness as <paramref name="t"/> that holds <paramref name="v"/>, if one is wider.</summary>
     private static TernType? WiderFor(long v, TernType t)

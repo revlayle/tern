@@ -615,7 +615,7 @@ public sealed partial class Checker
             throw new CompileError(c.Pos, $"'{fn.Name}' takes {fn.Parameters.Count} argument(s), not {c.Args.Count}. Pass {fn.Parameters.Count}: {fn.Name}({Signature.Parameters(fn)})");
         for (int i = 0; i < c.Args.Count; i++)
         {
-            CheckExpr(c.Args[i]);
+            CheckValueFor(c.Args[i], fn.Parameters[i].Type);
             Coerce(c.Args[i], fn.Parameters[i].Type);
         }
         foreach (var p in fn.Parameters)

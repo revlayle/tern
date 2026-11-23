@@ -136,7 +136,7 @@ public sealed partial class Checker
                     throw new CompileError(decl.Init.Pos, "A struct cannot have an initial value. Assign its fields");
                 if (type.IsArray && IsCompileTimeArray(decl.Init)) CheckExpr(decl.Init);
                 if (type.IsArray) throw new CompileError(decl.Init.Pos, "An initial value for a local array is not supported yet. Assign the elements, or use a global or data");
-                CheckExpr(decl.Init);
+                CheckValueFor(decl.Init, type);
                 Coerce(decl.Init, type);
                 v.Weight += Weight();
             }
@@ -167,7 +167,8 @@ public sealed partial class Checker
         if (!target.Type.IsScalar)
             throw new CompileError(target.Pos, "Whole arrays cannot be assigned. Assign the elements in a loop, or copy the memory with mem.copy");
 
-        CheckExpr(a.Value);
+        if (a.Op == TokenKind.Eq) CheckValueFor(a.Value, target.Type);
+        else CheckExpr(a.Value);
         if (a.Op == TokenKind.Eq)
         {
             Coerce(a.Value, target.Type);

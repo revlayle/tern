@@ -831,6 +831,13 @@ public sealed partial class CodeGen
         }
         if (leftIsDest && (k & 0xFF00) == 0) return true;
         if (!leftIsDest) { left(Lda, 0); Op(Sta, d.Lo); }
+        // A widened byte's high byte is 0, so the sum's is K's: SCREEN + col is lda col / sta p / lda #$C0 / sta p+1.
+        if (Simple2(b.Left) is { Hi: Imm { Value: var h } })
+        {
+            Op(Lda, Byte((b.Op == TokenKind.Plus ? h + (k >> 8) : h - (k >> 8)) & 0xFF));
+            Op(Sta, d.Hi);
+            return true;
+        }
         left(Lda, 1);
         if ((k & 0xFF00) != 0) { CarryFor(b.Op); Op(ArithMnemonic(b.Op), Byte(k >> 8)); }
         Op(Sta, d.Hi);
