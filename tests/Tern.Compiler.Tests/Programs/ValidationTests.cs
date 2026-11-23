@@ -147,12 +147,15 @@ public class ValidationTests
     {
         // V1 batch 3, step 1: the shared logic with the Atari front end (src/atari/) builds with no warning, and
         // the front end's aligned screen memory is where ANTIC can read it: the screen inside one 4 KB block,
-        // the character set on a 1 KB boundary, the display list inside one 1 KB block. Played in Altirra.
+        // the character set on a 1 KB boundary, the display list inside one 1 KB block, the player-missile memory on
+        // 2 KB (review finding 4). Played in Altirra.
         string dir = FindValidation("c64", "smashy-smashy");
         string path = Path.Combine(dir, "src", "main.tern");
         var result = TernCompiler.Compile(File.ReadAllText(path), Platform.Atari, sourcePath: path);
         Assert.Empty(result.Warnings);
         int screen = result.Symbols["video.screen"], charset = result.Symbols["video.charset"], dlist = result.Symbols["video.dlist"];
+        int pm = result.Symbols["sprites.pm"];   // two copies of single-line player-missile memory, each on 2 KB (PMBASE)
+        Assert.Equal(0, pm % 2048);
         Assert.Equal(screen / 4096, (screen + 1039) / 4096);
         Assert.Equal(0, charset % 1024);
         Assert.Equal(dlist / 1024, (dlist + 47) / 1024);

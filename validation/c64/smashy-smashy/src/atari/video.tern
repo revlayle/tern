@@ -1,6 +1,8 @@
 // The Atari front end's screen: a display list of its own (a HUD row of ROM-font text, then 24 rows of
 // ANTIC mode 4, the C64's multicolour character format), the tiles, the HUD, messages over the playfield,
-// the shake through VSCROL and the frame interrupt (the OS's deferred vertical blank).
+// the shake through VSCROL and the frame interrupt (the OS's deferred vertical blank). The sprites are
+// player-missile graphics reused down the screen (sprites.tern); the DLI at the end of each playfield row
+// moves them.
 // The same interface as c64/video.tern (the shared modules call it).
 //
 // Colours: ANTIC mode 4's pixel values are the C64's (01 = PF0, the C64's $D022; 10 = PF1, $D023; 11 =
@@ -11,6 +13,7 @@ import atari
 import mem
 import assets
 import sound
+import sprites
 import tilemap
 
 // ---- colours (Atari: hue in the high nibble, luminance in the low one) ----
@@ -28,8 +31,6 @@ const ENEMY_COLOR: u8 = $34         // 2, red
 const ENEMY_CARRY_COLOR: u8 = $1C   // 7, yellow
 
 // ---- memory ----
-// Single-line player-missile graphics: missiles at +$300, players 0-3 at +$400, +$500, +$600, +$700.
-noinit var pm: [u8; 2048] @ align(2048)
 // 128 characters: the tiles (chars.bin) from 0, then the message font.
 noinit var charset: [u8; 1024] @ align(1024)
 // 25 rows of 40 (the HUD row, then the 24 playfield rows), then a blank row the display list shows above
@@ -118,6 +119,8 @@ fn init() {
     atari.color[3] = COLOR_GOLD
     atari.color[4] = COLOR_BORDER
     atari.chbas = ROM_FONT_PAGE
+    sprites.init()
+    atari.sdmctl = $3E              // normal playfield, players and missiles, single-line resolution
     atari.set_display_list(addr(dlist))
 }
 
@@ -137,12 +140,14 @@ fn make_font() {
 }
 
 // The display list: 16 blank lines, the HUD row (a DLI at its end switches to the game's character set
-// and colours), a blank mode 4 row and the 24 playfield rows, all vertically scrolled, a DLI at the end of
-// row 22 (the floor's colour), then the blank row once more, unscrolled, which ends the scrolled area.
+// and colours), a blank mode 4 row and the 24 playfield rows, all vertically scrolled, with a DLI at the end
+// of playfield rows 0-22 (the sprites' moves, and the floor's colour), then the blank row once more,
+// unscrolled, which ends the scrolled area.
 // With VSCROL = v the first blank row shows lines v-7 and the last lines 0-v, so the screen keeps its
 // height and the playfield moves down as v goes from NORMAL_SCROLL to 0.
 const DL_MODE4: u8 = 4
-const FLOOR_DLI_ROW: u8 = 22        // the DLI at the end of this char row sets the floor's colour
+const FLOOR_DLI_ROW: u8 = 21        // the DLI at the end of this playfield row sets the floor's colour
+const LAST_DLI_ROW: u8 = 22         // playfield rows 0-22 end with a DLI
 
 fn make_display_list() {
     var d: ptr u8 = addr(dlist)
@@ -157,13 +162,13 @@ fn make_display_list() {
     d[5] = DL_MODE4 | atari.DL_LMS | atari.DL_VSCROLL
     d[6] = blank.lo
     d[7] = blank.hi
-    d[8] = DL_MODE4 | atari.DL_LMS | atari.DL_VSCROLL
+    d[8] = DL_MODE4 | atari.DL_LMS | atari.DL_VSCROLL | atari.DL_DLI
     d[9] = play.lo
     d[10] = play.hi
     var i: u8 = 11
-    for r in 2..ROWS {
+    for r in 1..ROWS - 1 {          // playfield rows 1-23
         var op: u8 = DL_MODE4 | atari.DL_VSCROLL
-        if r == FLOOR_DLI_ROW {
+        if r <= LAST_DLI_ROW {
             op |= atari.DL_DLI
         }
         d[i] = op
@@ -178,27 +183,53 @@ fn make_display_list() {
     d[i + 5] = at.hi
 }
 
-// The HUD's DLI comes on scan line 31 (VCOUNT 15), the floor's near line 214 (VCOUNT 107): the DLI tells
-// them apart by VCOUNT, so it needs no state that a skipped VBI could leave wrong (review finding 1).
-const DLI_SPLIT_VCOUNT: u8 = 64
+// The HUD's DLI comes on scan line 31 (VCOUNT 15), playfield row 0's on line 45 or, in a shake, 47
+// (VCOUNT 22-23). The DLI tells the HUD's apart by VCOUNT, and counts the playfield rows from there, so it
+// needs no state that a skipped VBI could leave wrong (review finding 1).
+const HUD_DLI_LIMIT: u8 = 19
+var dli_row: u8                     // the playfield row whose DLI comes next
 
 interrupt fn dli() {
-    // At the end of the HUD row: the game's characters and colours. At the end of row 22: the floor's.
-    // WSYNC first, so the change lands in the horizontal blank.
-    if atari.antic.vcount >= DLI_SPLIT_VCOUNT {
+    // WSYNC first, so the changes land in the horizontal blank (the first moves; a row that moves several
+    // slots may finish a little into its next line, where an object's first row is usually blank).
+    if atari.antic.vcount < HUD_DLI_LIMIT {
+        // the end of the HUD row: the game's characters and colours
         atari.antic.wsync = 0
-        atari.gtia.colpf[2] = COLOR_FLOOR
+        atari.antic.chbase = addr(charset).hi
+        atari.gtia.colpf[1] = COLOR_MC2
+        atari.gtia.colpf[2] = COLOR_OWN
+        dli_row = 0
         return
     }
+    // the end of playfield row r: the sprites' moves for the row below, and the floor's colour
+    var r: u8 = dli_row
+    dli_row = r + 1
+    var i: u8 = sprites.row_first[sprites.shown_rows + r]
+    var e: u8 = sprites.row_first[sprites.shown_rows + r + 1]
     atari.antic.wsync = 0
-    atari.antic.chbase = addr(charset).hi
-    atari.gtia.colpf[1] = COLOR_MC2
-    atari.gtia.colpf[2] = COLOR_OWN
+    while i != e {
+        var s: u8 = sprites.ent_slot[i]
+        if s == sprites.MISSILES {
+            // as sprites.set_missiles(), which the VBI calls: written out, so the two share no memory
+            var h: u8 = sprites.ent_hpos[i]
+            atari.gtia.hposm[3] = h
+            atari.gtia.hposm[2] = h + 2
+            atari.gtia.hposm[1] = h + 4
+            atari.gtia.hposm[0] = h + 6
+        } else {
+            atari.gtia.hposp[s] = sprites.ent_hpos[i]
+            atari.gtia.colpm[s] = sprites.ent_col[i]
+        }
+        i += 1
+    }
+    if r == FLOOR_DLI_ROW {
+        atari.gtia.colpf[2] = COLOR_FLOOR
+    }
 }
 
 fn set_title_mode() {
     // A blank screen, no sprites.
-    spr_ena = 0
+    sprites.ena = 0
     mem.fill(addr(screen), 0, len(screen))
 }
 
@@ -247,9 +278,8 @@ fn put_digits(dst: ptr u8, bcd: u16, digits: u8, zero: u8) {
     }
 }
 
-fn hud_digits(col: u8, bcd: u16, digits: u8) {
-    // HUD digits keep the score flash's inverse bit (hud_score_flash).
-    put_digits(text_row[0] + col, bcd, digits, HUD_0 | hud_flash)
+fn hud_digits(col: u8, bcd: u16, digits: u8, zero: u8) {
+    put_digits(text_row[0] + col, bcd, digits, zero)
 }
 
 fn message(row: u8, col: u8, s: ptr u8, n: u8) {
@@ -298,37 +328,27 @@ fn message_score(row: u8, col: u8, bcd_hundreds: u16) {
 }
 
 fn hud_score(bcd_hundreds: u16) {
-    hud_digits(HUD_SCORE_COL, bcd_hundreds, 4)
-    hud_digits(HUD_SCORE_COL + 4, 0, 2)
+    // The score's digits keep the flash's inverse bit (hud_score_flash).
+    hud_digits(HUD_SCORE_COL, bcd_hundreds, 4, HUD_0 | hud_flash)
+    hud_digits(HUD_SCORE_COL + 4, 0, 2, HUD_0 | hud_flash)
 }
 
 fn hud_time(bcd: u16) {
-    hud_digits(HUD_TIME_COL, bcd, 3)
+    hud_digits(HUD_TIME_COL, bcd, 3, HUD_0)
 }
 
 fn hud_level(bcd: u8) {
-    hud_digits(HUD_LEVEL_COL, bcd as u16, 2)
+    hud_digits(HUD_LEVEL_COL, bcd as u16, 2, HUD_0)
 }
 
-// ---- sprites (shadows only in this step: not shown yet) ----
-var spr_ptr: [u8; 8]
-var spr_col: [u8; 8]
-var spr_x: [u16; 8]
-var spr_y: [u8; 8]
-var spr_ena: u8
-data sprite_bit: [u8; _] = [1, 2, 4, 8, 16, 32, 64, 128]
-
+// ---- sprites (sprites.tern draws them) ----
 fn set_sprite(n: u8, frame: u8, color: u8, px: u16, py: u8) {
     // Playfield coordinates of the sprite's top-left.
-    spr_ptr[n] = frame
-    spr_col[n] = color
-    spr_x[n] = px
-    spr_y[n] = py
-    spr_ena |= sprite_bit[n]
+    sprites.set_actor(n, frame, color, px, py)
 }
 
 fn hide_sprite(n: u8) {
-    spr_ena &= ~sprite_bit[n]
+    sprites.hide(n)
 }
 
 // ---- the shake: the playfield drops SHAKE_PX lines on alternate frames ----
@@ -337,8 +357,7 @@ const SHAKE_PX: u8 = 2
 const SHAKE_CRACK: u8 = 4           // frames: fast-fall cracks a tile
 const SHAKE_SMASH: u8 = 8           // frames: fast-fall destroys a tile, or kills an enemy
 var shake_left: u8
-var scroll: u8 = NORMAL_SCROLL      // VSCROL, written by the frame interrupt
-var spr_dy: u8                      // added to every sprite's y, so sprites shake with the screen
+var scroll: u8 = NORMAL_SCROLL      // VSCROL, written by the frame interrupt; sprites.dy moves the sprites with it
 
 fn shake(n: u8) {
     // Start a shake, or restart it if this one is longer than what is left (shakes don't stack).
@@ -354,10 +373,10 @@ fn shake_step() {
     }
     if shake_left & 1 != 0 {
         scroll = NORMAL_SCROLL - SHAKE_PX
-        spr_dy = SHAKE_PX
+        sprites.dy = SHAKE_PX
     } else {
         scroll = NORMAL_SCROLL
-        spr_dy = 0
+        sprites.dy = 0
     }
 }
 
@@ -383,6 +402,7 @@ fn start_frame_irq() {
 interrupt fn frame_vbi() {
     // After the OS's frame work, which has copied the shadow registers (the HUD's font and colours).
     atari.antic.vscrol = scroll
+    sprites.vbi()
     atari.atract = 0                // no attract mode: the game is never idle long enough to need it
     sound.step()
     frame_ready = true
@@ -403,6 +423,8 @@ fn frame_lines() -> u8 {
 }
 
 fn wait_frame() {
+    // First the sprites as the frame left them, into the copy the next VBI shows.
+    sprites.render()
     while !frame_ready { }
     frame_ready = false
 }

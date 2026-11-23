@@ -274,3 +274,18 @@ compiles to `lda #video.charset.hi` / `sta video.dli.page`, then after the WSYNC
 `sta atari.antic+9`: the local holds nothing in a register over the volatile store, so it is 6 bytes and 2 cycles
 (in the DLI, after WSYNC) more than writing `atari.antic.chbase = addr(charset).hi`, which the front end now does.
 A local that is only ever set from a constant (here a link-time one, `addr(x).hi`) could be folded into its uses.
+
+## V1 batch 3, Atari step 2: sprites (in progress, 2026-11-23)
+
+Player-missile graphics reused down the screen, chosen by measuring the C64 build's own play in the test
+harness (30,000 frames of the suite's joystick script, 26,641 play frames): the most sprites touching one
+8-line character row was 1-4 in 26,396 frames, 5 in 220, 6 in 25, never more; counting each popup as two slots
+(it is two players wide on the Atari), more than 5 in 37 frames (0.14%), more than 4 in 257 (1.0%). So 5 slots (4
+players and the missiles as a fifth player) leave an object out in about 1 frame in 700. Software sprites in a
+character mode were not built: 117 of ANTIC mode 4's 128 characters already hold the tiles and the message font,
+and an object needs about 9.
+
+No new gap. The DLI is plain Tern; its moves land a few lines into the next row (about 100 cycles before its
+WSYNC: the OS's NMI dispatch, the `interrupt fn`'s saves of A, X and Y, the HUD test, two table lookups), which
+the slot rule allows for rather than the code. Whether an assembly DLI would reach WSYNC within the line is not
+measured yet.

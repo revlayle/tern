@@ -24,8 +24,9 @@ validation program, batch 2; roadmap V1, decisions 2026-11-21). MIT license (`LI
   the cell colours become one own colour per row (display-list interrupts: red, blue on the floor's rows) and PF3,
   the inverse characters' colour, for treasures and the fast-fall target. Messages use a 3-pixel font made from
   the ROM font at startup; the shake is VSCROL; sound is POKEY channel 1 with the C64's effect tables; Esc pauses.
-  Not yet: the sprites (the game plays, but the player and enemies are not shown), popups, the title's animation
-  and the two attract pages (placeholders). Checked in Altirra on an 800 (48 KB, PAL) and an 800XL (NTSC).
+  Sprites (step 2): player-missile graphics reused down the screen by the DLIs, 5 slots (4 players and the
+  missiles as a fifth) for the player, 5 enemies and 2 popups, one colour each (`atari/sprites.tern`); popups
+  in `atari/popup.tern`. Not yet: the title's animation and the two attract pages (placeholders). Checked in Altirra on an 800 (48 KB, PAL) and an 800XL (NTSC).
 - **Known result:** `expected/frame-2500.txt`, the score, time, level, treasures, kills and high score, the screen
   (`$C000`), colour RAM and VIC registers after 2,500 frames of a scripted joystick (through the title into a
   game, running, jumping and smashing; the first game ends and the second is being played), checked by

@@ -1,16 +1,174 @@
-// Score popups, a placeholder for Atari step 1: nothing is shown. The rising digits (c64/popup.tern)
-// come with the sprites, in a later step.
+// Score popups (spec section 8): the points of a score event rising from where it happened, as
+// c64/popup.tern does them, in player-missile graphics: each popup is a wide object of sprites.tern (two
+// slots side by side, 16 colour clocks), its 4 digits 3 pixels wide with a 1-pixel gap.
+// Events close together in time merge into one popup; a popup that would overlap the other one starts
+// directly above it.
+import bcd
+import sprites
 
-const TREASURE: u8 = 0              // rank of a treasure; a kill's rank is its chain step + 1
+const SLOTS: u8 = 2
+const FIRST_SPRITE: u8 = sprites.FIRST_WIDE
+const BLANK: u8 = 10                        // digit_nib entry with no pixels
+
+// [TUNE] as on the C64
+const LIFE: u8 = 50                         // frames; rises 1 px every 2 frames
+const BLINK_AT: u8 = 10                     // the last frames blink, 2 on and 2 off
+const MERGE_FRAMES: u8 = 8                  // an event this soon after the newest popup's latest one adds to it
+const STACK_GAP: u8 = 9                     // 7-line digits + 2 lines gap
+const TREASURE: u8 = 0                      // rank of a treasure; a kill's rank is its chain step + 1
+// treasure yellow, then kills by chain step: white, light red, orange, red, red (the C64's 7, 1, 10, 8, 2, 2)
+data rank_color: [u8; 6] = [$1C, $0E, $3A, $26, $34, $34]
+
+const RISE: u8 = LIFE / 2
+const WIDTH: u8 = 32                        // hi-res pixels: 2 slots of 8 colour clocks
+const MAX_X: u16 = 320 - WIDTH              // the whole popup stays on the playfield
+const MAX_Y: u8 = 192 - sprites.WIDE_H
+
+var timer: [u8; SLOTS]                      // frames left, 0 = free
+var value: [u8; SLOTS]                      // BCD hundreds shown
+var rank: [u8; SLOTS]                       // highest rank merged so far (the colour)
+var pos_x: [u16; SLOTS]                     // playfield x of the popup
+var dirty: [bool; SLOTS]                    // digits to draw in update()
+var newest: u8                              // slot of the last popup started
+
+// 3 x 7 digits (pixels in bits 3-1, a gap in bit 0), row 7 blank: digit d's row r at d * 8 + r. The ROM
+// font's 0 has a slash, which reads as 8 at this width.
+data digit_nib: [u8; 11 * 8] = [
+    $E, $A, $A, $A, $A, $A, $E, $0, // 0
+    $4, $C, $4, $4, $4, $4, $E, $0, // 1
+    $E, $2, $2, $E, $8, $8, $E, $0, // 2
+    $E, $2, $2, $E, $2, $2, $E, $0, // 3
+    $A, $A, $A, $E, $2, $2, $2, $0, // 4
+    $E, $8, $8, $E, $2, $2, $E, $0, // 5
+    $E, $8, $8, $E, $A, $A, $E, $0, // 6
+    $E, $2, $2, $4, $4, $4, $4, $0, // 7
+    $E, $A, $A, $E, $A, $A, $E, $0, // 8
+    $E, $A, $A, $E, $2, $2, $E, $0, // 9
+    0, 0, 0, 0, 0, 0, 0, 0,             // blank
+]
 
 fn init() {
+    clear()
 }
 
 fn clear() {
+    timer[0] = 0
+    timer[1] = 0
+    dirty[0] = false
+    dirty[1] = false
+    sprites.hide(FIRST_SPRITE)
+    sprites.hide(FIRST_SPRITE + 1)
 }
 
 fn show(cx: u16, cy: u8, points: u8, rk: u8) {
+    // points: BCD hundreds ($01-$99), shown as 3 or 4 digits centred on (cx, cy), playfield coordinates.
+    // rk: TREASURE or chain step + 1. Only sets the slot up; update() draws the digits, at most once a frame.
+    // Within MERGE_FRAMES of the newest popup's latest event (a free slot has timer 0, so never): adds to it
+    // and restarts its life where it is. Otherwise takes a free slot, else the oldest (least time left).
+    var s: u8 = newest
+    if LIFE - timer[s] <= MERGE_FRAMES {
+        bcd.add_byte(addr(value) + s, 1, points)
+        if rk > rank[s] {
+            rank[s] = rk
+            sprites.color[FIRST_SPRITE + s] = rank_color[rk]
+        }
+        timer[s] = LIFE
+        dirty[s] = true
+        return
+    }
+    s = 0
+    if timer[0] != 0 && (timer[1] == 0 || timer[1] < timer[0]) {
+        s = 1
+    }
+    sprites.hide(FIRST_SPRITE + s)          // a reused slot must not show the new digits at the old spot
+    newest = s
+    value[s] = points
+    rank[s] = rk
+    dirty[s] = true
+
+    // 4 digits fill pixels 0-29 of the 32; 3 digits get a blank first digit and fill 8-29
+    var half: u8 = 15
+    if points < $10 {
+        half = 19
+    }
+    var x: u16 = 0
+    if cx > half as u16 {
+        x = cx - half
+    }
+    if x > MAX_X {
+        x = MAX_X
+    }
+    var y: u8 = RISE                        // low enough that the rise ends below the HUD row
+    if cy > RISE + 3 {
+        y = cy - 3
+    }
+    if y > MAX_Y {
+        y = MAX_Y
+    }
+    // Closer than 2 px to the other popup: start directly above it, or below if above would rise into the
+    // HUD row.
+    var o: u8 = s ^ 1
+    if timer[o] != 0 {
+        var dx: u16 = x - pos_x[o]
+        if x < pos_x[o] {
+            dx = pos_x[o] - x
+        }
+        var oy: u8 = sprites.y[FIRST_SPRITE + o]
+        var dy: u8 = y - oy
+        if y < oy {
+            dy = oy - y
+        }
+        if dx < WIDTH as u16 && dy < STACK_GAP {
+            if oy >= RISE + STACK_GAP {
+                y = oy - STACK_GAP
+            } else {
+                y = oy + STACK_GAP
+            }
+        }
+    }
+    pos_x[s] = x
+    timer[s] = LIFE
+    sprites.set_wide(FIRST_SPRITE + s, rank_color[rk], x, y)
+}
+
+fn draw(s: u8) {
+    // The digits of value[s] into slot s's graphics: the left half "d0 d1", the right half "0 0".
+    var d0: u8 = value[s] >> 4
+    if d0 == 0 {
+        d0 = BLANK
+    }
+    var f0: u8 = d0 << 3
+    var f1: u8 = (value[s] & 15) << 3
+    var o: u8 = 0                           // the slot's graphics: 2 x WIDE_H bytes each
+    if s != 0 {
+        o = 2 * sprites.WIDE_H
+    }
+    for r in 0..sprites.WIDE_H {
+        sprites.wide_gfx[o + r] = digit_nib[f0 + r] << 4 | digit_nib[f1 + r]
+        sprites.wide_gfx[o + sprites.WIDE_H + r] = digit_nib[r] << 4 | digit_nib[r]
+    }
 }
 
 fn update() {
+    // Once per play frame, after every score event of the frame. show() set the popup up; this draws its
+    // digits if they changed, moves it up and blinks it.
+    for s in 0..SLOTS {
+        if dirty[s] {
+            dirty[s] = false
+            draw(s)
+        }
+        if timer[s] == 0 {
+            continue
+        }
+        timer[s] -= 1
+        var n: u8 = FIRST_SPRITE + s
+        if timer[s] & 1 == 0 && sprites.y[n] > 0 {     // a merge restarts the rise: stop at y 0
+            sprites.y[n] -= 1
+        }
+        if timer[s] == 0 || (timer[s] < BLINK_AT && timer[s] & 2 != 0) {
+            sprites.hide(n)
+        } else {
+            sprites.ena |= sprites.bit[n]
+        }
+    }
 }
