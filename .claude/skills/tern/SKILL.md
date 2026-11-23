@@ -157,6 +157,10 @@ Screen ($0400, 40 x 25):
 ```
 
 - `import` loads a library module; its names are always used with the module name (`c64.SCREEN`).
+  It also loads your own `name.tern` from the importing file's folder. A program for several machines
+  keeps each machine's modules in a subfolder named after the target (`c64/video.tern`,
+  `nes/video.tern`): `import video` finds the target's one first, and files in `nes/` import as if
+  they were in the folder above.
 - `data` is read-only bytes in the program; `screen"..."` gives screen codes, for writing straight to
   screen memory. `addr(x)` is a pointer to `x`, `len(x)` its length.
 - Globals without an initial value are zeroed at startup.
