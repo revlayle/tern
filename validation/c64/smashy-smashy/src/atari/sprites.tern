@@ -117,6 +117,7 @@ var ent_base: u8                    // ... into the entries: 0 or ENTRIES
 var slot_base: u8                   // ... into init_hpos/init_col/page_of: 0 or SLOTS
 var grp_base: u8                    // ... into grp_row/grp_first: 0 or GROUP_STRIDE
 var order: [u8; OBJECTS]            // shown objects, sorted by need row
+var order_key: [u8; OBJECTS]        // their need rows, in the same order (the sort reads one array, not two)
 var need_row: [u8; OBJECTS]         // the first row the object's slot must be free in: its top row, or the
                                     // row above when its top is in the first LATE_LINES lines of its row
 var last_row: [u8; OBJECTS]
@@ -126,7 +127,6 @@ var slot_end: [u8; SLOTS]           // top-down: the row after the slot's lowest
 var slot_top: [u8; SLOTS]           // bottom-up: the need row of the slot's highest object so far
 var bottom_up: bool                 // alternates, so a different object is left out each frame
 var prev_mark: u8                   // the mark take_slot() replaced, for give_back()
-var ent_row: [u8; ENTRIES]          // the row each entry is for
 var new_page: [u8; PARTS]           // where each part goes this time (page 0: not shown), and its picture
 var new_line: [u8; PARTS]
 var new_img: [u8; PARTS]
@@ -172,9 +172,8 @@ fn render() {
     }
     var n: u8 = sort_shown()
     assign(n)
-    var e: u8 = place(n)
+    place(n)
     draw_parts()
-    make_groups(e)
     ready = true
     rendered = true
 }
@@ -191,17 +190,20 @@ fn sort_shown() -> u8 {
         if k >= FIRST_WIDE {
             h = WIDE_H
         }
-        need_row[k] = 0
+        var key: u8 = 0
         if top >= LATE_LINES {
-            need_row[k] = (top - LATE_LINES) >> 3
+            key = (top - LATE_LINES) >> 3
         }
+        need_row[k] = key
         last_row[k] = (top + h - 1) >> 3
         var i: u8 = n
-        while i != 0 && need_row[order[i - 1]] > need_row[k] {
+        while i != 0 && order_key[i - 1] > key {
             order[i] = order[i - 1]
+            order_key[i] = order_key[i - 1]
             i -= 1
         }
         order[i] = k
+        order_key[i] = key
         n += 1
     }
     return n
@@ -259,15 +261,19 @@ fn give_back(s: u8) {
     }
 }
 
-fn place(n: u8) -> u8 {
+fn place(n: u8) {
     // In need-row order: where each placed object's parts go in this copy, and where each slot's objects
-    // are: the first for the VBI, the others for the DLI at the end of the row before their need row.
-    // Returns the number of entries.
+    // are: the first for the VBI, the others for the DLI at the end of the row before their need row. The
+    // entries come in row order, so they are grouped as they come: a group per row, and ALWAYS_ROW's group
+    // whether it has entries or not.
     for i in 0..PARTS {
         new_page[i] = 0
     }
     var used: u8 = 0                // bit s: slot s has its first object
-    var e: u8 = 0                   // entries so far
+    var e: u8 = ent_base            // the next entry
+    var g: u8 = grp_base            // the next group
+    var open_row: u8 = NONE         // the row of the last group
+    var always: bool = false        // ALWAYS_ROW's group is made
     var sb: u8 = slot_base
     for s in 0..SLOTS {
         init_hpos[sb + s] = 0       // an unused slot stays off the screen's left edge
@@ -295,11 +301,26 @@ fn place(n: u8) -> u8 {
                 used |= bit[s]
                 init_hpos[sb + s] = h
                 init_col[sb + s] = c
-            } else if e != ENTRIES {
-                ent_row[e] = need_row[k] - 1
-                ent_slot[ent_base + e] = s
-                ent_hpos[ent_base + e] = h
-                ent_col[ent_base + e] = c
+            } else if e != ent_base + ENTRIES {
+                var r: u8 = need_row[k] - 1
+                if r != open_row {
+                    if !always && ALWAYS_ROW < r {
+                        grp_row[g] = ALWAYS_ROW     // the floor's DLI, before this row's
+                        grp_first[g] = e
+                        g += 1
+                        always = true
+                    }
+                    grp_row[g] = r
+                    grp_first[g] = e
+                    g += 1
+                    open_row = r
+                    if r == ALWAYS_ROW {
+                        always = true
+                    }
+                }
+                ent_slot[e] = s
+                ent_hpos[e] = h
+                ent_col[e] = c
                 e += 1
             }
             if part < FIRST_WIDE || part & 1 != 0 {
@@ -310,7 +331,13 @@ fn place(n: u8) -> u8 {
             h += 8
         }
     }
-    return e
+    if !always {
+        grp_row[g] = ALWAYS_ROW
+        grp_first[g] = e
+        g += 1
+    }
+    grp_first[g] = e                // the end mark
+    grp_count[shown ^ 1] = g - grp_base
 }
 
 fn draw_parts() {
@@ -363,55 +390,6 @@ fn clear(page: u8, line: u8, tall: bool) {
     } else {
         clear8(at as ptr u8)
     }
-}
-
-fn make_groups(e: u8) {
-    // Sort the e entries by row (insertion sort, at most 12; they come nearly sorted) and group them by
-    // row, with ALWAYS_ROW's group whether it has entries or not.
-    var o: u8 = ent_base
-    for i in 1..e {
-        var j: u8 = i
-        while j != 0 && ent_row[j - 1] > ent_row[j] {
-            swap(j - 1, j, o)
-            j -= 1
-        }
-    }
-    var g: u8 = grp_base
-    var i: u8 = 0
-    var always: bool = false        // ALWAYS_ROW's group is made
-    while i != e || !always {
-        var r: u8 = NONE
-        if i != e {
-            r = ent_row[i]
-        }
-        if !always && ALWAYS_ROW <= r {
-            always = true
-            r = ALWAYS_ROW          // its group, with the entries for that row if there are any
-        }
-        grp_row[g] = r
-        grp_first[g] = o + i
-        while i != e && ent_row[i] == r {
-            i += 1
-        }
-        g += 1
-    }
-    grp_first[g] = o + e
-    grp_count[shown ^ 1] = g - grp_base
-}
-
-fn swap(i: u8, j: u8, o: u8) {
-    var t: u8 = ent_row[i]
-    ent_row[i] = ent_row[j]
-    ent_row[j] = t
-    t = ent_slot[o + i]
-    ent_slot[o + i] = ent_slot[o + j]
-    ent_slot[o + j] = t
-    t = ent_hpos[o + i]
-    ent_hpos[o + i] = ent_hpos[o + j]
-    ent_hpos[o + j] = t
-    t = ent_col[o + i]
-    ent_col[o + i] = ent_col[o + j]
-    ent_col[o + j] = t
 }
 
 // Unrolled: a loop over the rows took about 20 cycles a byte, these 11 (13 with the index load).

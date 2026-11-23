@@ -422,3 +422,16 @@ failed: the variables' block then started past a 2 KB boundary and the aligned p
 fitted. Each copy's first `$300` bytes are unused by ANTIC (single-line players start at +`$400`, missiles at
 +`$300`), and the padding before an aligned variable stays empty (spec 4: the compiler may place other variables
 in it but does not yet): about 3.5 KB in all. Recorded as a constraint, not a gap: the spec already names it.
+
+### PAL first (the developer: "lets get PAL working great - worry about NTSC later")
+
+The worst PAL frames in the harness (logic and `render()` over 19,000 cycles: 100 of 4,630 play frames) averaged
+11,500 cycles of the game's logic and 8,500 of `render()`: both matter, and only `render()` is the front end's.
+Two cuts in plain Tern: `place()` makes the DLIs' groups as it makes the entries, which come in row order already
+(no sort, no `make_groups` pass), and the sort compares a parallel array of keys instead of `need_row[order[i - 1]]`
+(34 cycles a test). `render()` 6,813 -> 6,385 cycles a frame on average (99%: 9,671 -> 9,041); frames over 19,000:
+100 -> 57; 247 bytes less. The decision's other follow-ups were not taken: compiled sprites would take about 2 KB
+(about 1,150 bytes are free), and chained DLIs, padded frames and values before WSYNC are each worth 100-200 cycles
+a frame at most. In Altirra on PAL, two runs of about 2,750 play frames: 15 and 12 frames ending with a tick owed
+(about 0.5%; the level layouts differ between runs), none during a rebuild. The developer: "pal version
+performance looking great".
