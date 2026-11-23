@@ -14,7 +14,8 @@
 // memory not on show and works out the DLIs' table: the rows whose DLI moves slots, in groups. The VBI
 // then shows that copy (PMBASE), sets each slot's first object and turns the display list's DLI bits on
 // for those rows only (and the floor's row, ALWAYS_ROW). Nothing is drawn where the beam is. An object
-// drawn at the same place with the same picture in that copy two frames before is not drawn again.
+// drawn at the same place with the same picture in that copy two frames before is not drawn again. Places
+// and pictures are kept as bytes (a memory page, a line, a frame number), which compare and copy cheaply.
 import atari
 import mem
 import assets
@@ -35,9 +36,10 @@ const DLI_BIT: u8 = $80             // in a display list instruction
 // Drawn parts: one per actor (0-5), two per wide object (6-7 for object 6, 8-9 for object 7).
 const PARTS: u8 = FIRST_WIDE + 2 * (OBJECTS - FIRST_WIDE)
 const NONE: u8 = $FF
+const WIDE_IMG: u8 = $FF            // a wide object's "frame": its digits change in place, so it is always drawn
 
 // ---- shadows, written by the game ----
-var gfx_of: [ptr u8; OBJECTS]       // each object's graphics: ACTOR_H bytes, or 2 x WIDE_H for a wide one
+var img: [u8; OBJECTS]              // each actor's sprite frame, from 0 (WIDE_IMG for a wide object)
 var color: [u8; OBJECTS]
 var hpos: [u8; OBJECTS]             // colour clock of the left edge
 var y: [u8; OBJECTS]                // playfield y of the top
@@ -59,10 +61,10 @@ const fn sprite_row(i: int) -> int {
 data gfx: [u8; _] = [sprite_row(i) for i in 0..assets.SPRITE_COUNT * 16]
 var frame_gfx: [ptr u8; assets.SPRITE_COUNT]    // each sprite frame's graphics, set by init() (gaps.md, gap 4)
 
-fn set_actor(n: u8, frame: u8, c: u8, px: u16, py: u8) {
+inline fn set_actor(n: u8, frame: u8, c: u8, px: u16, py: u8) {
     // px: playfield x of the left edge in hi-res pixels, a little negative at most; colour clock 48 is the
-    // playfield's left edge.
-    gfx_of[n] = frame_gfx[frame - assets.SPR_PLAYER_RUN_R_0]
+    // playfield's left edge. Inline: video.set_sprite() is all its caller.
+    img[n] = frame - assets.SPR_PLAYER_RUN_R_0
     color[n] = c
     hpos[n] = ((px + 96) >> 1) as u8
     y[n] = py
@@ -70,11 +72,7 @@ fn set_actor(n: u8, frame: u8, c: u8, px: u16, py: u8) {
 }
 
 fn set_wide(n: u8, c: u8, px: u16, py: u8) {
-    var g: ptr u8 = addr(wide_gfx)
-    if n != FIRST_WIDE {
-        g += 2 * WIDE_H
-    }
-    gfx_of[n] = g
+    img[n] = WIDE_IMG
     color[n] = c
     hpos[n] = ((px + 96) >> 1) as u8
     y[n] = py
@@ -107,13 +105,14 @@ var ent_col: [u8; 2 * ENTRIES]
 var grp_row: [u8; 2 * GROUP_STRIDE]
 var grp_first: [u8; 2 * GROUP_STRIDE]
 var grp_count: [u8; 2]
-// Per copy, per part: where it was drawn there and with which graphics (0: not drawn).
-var drawn_at: [ptr u8; 2 * PARTS]
-var drawn_src: [ptr u8; 2 * PARTS]
+// Per copy, per part: where it was drawn there (page 0: not drawn) and with which picture.
+var drawn_page: [u8; 2 * PARTS]
+var drawn_line: [u8; 2 * PARTS]
+var drawn_img: [u8; 2 * PARTS]
 var page_of: [u8; 2 * SLOTS]        // each copy's slots' memory pages, set by init()
 
 // render()'s working state
-var part_base: u8                   // the copy being drawn's offset into drawn_at/drawn_src: 0 or PARTS ...
+var part_base: u8                   // the copy being drawn's offset into drawn_page/line/img: 0 or PARTS ...
 var ent_base: u8                    // ... into the entries: 0 or ENTRIES
 var slot_base: u8                   // ... into init_hpos/init_col/page_of: 0 or SLOTS
 var grp_base: u8                    // ... into grp_row/grp_first: 0 or GROUP_STRIDE
@@ -128,8 +127,9 @@ var slot_top: [u8; SLOTS]           // bottom-up: the need row of the slot's hig
 var bottom_up: bool                 // alternates, so a different object is left out each frame
 var prev_mark: u8                   // the mark take_slot() replaced, for give_back()
 var ent_row: [u8; ENTRIES]          // the row each entry is for
-var new_at: [ptr u8; PARTS]         // where each part goes this time (0: not shown)
-var new_src: [ptr u8; PARTS]
+var new_page: [u8; PARTS]           // where each part goes this time (page 0: not shown), and its picture
+var new_line: [u8; PARTS]
+var new_img: [u8; PARTS]
 var redraw: [bool; PARTS]
 
 fn init(row0: ptr u8) {
@@ -264,7 +264,7 @@ fn place(n: u8) -> u8 {
     // are: the first for the VBI, the others for the DLI at the end of the row before their need row.
     // Returns the number of entries.
     for i in 0..PARTS {
-        new_at[i] = 0 as ptr u8
+        new_page[i] = 0
     }
     var used: u8 = 0                // bit s: slot s has its first object
     var e: u8 = 0                   // entries so far
@@ -281,17 +281,16 @@ fn place(n: u8) -> u8 {
         }
         var h: u8 = hpos[k]
         var c: u8 = color[k]
-        var at: u16 = 0
-        at.lo = TOP_LINE + y[k] + dy
-        var src: ptr u8 = gfx_of[k]
+        var line: u8 = TOP_LINE + y[k] + dy
+        var pic: u8 = img[k]
         var part: u8 = k            // an actor's part; a wide object's are 2k - 6 and 2k - 5
         if k >= FIRST_WIDE {
             part = k + k - FIRST_WIDE
         }
         while true {
-            at.hi = page_of[sb + s]
-            new_at[part] = at as ptr u8
-            new_src[part] = src
+            new_page[part] = page_of[sb + s]
+            new_line[part] = line
+            new_img[part] = pic
             if used & bit[s] == 0 {
                 used |= bit[s]
                 init_hpos[sb + s] = h
@@ -308,7 +307,6 @@ fn place(n: u8) -> u8 {
             }
             s = slot_b[k]
             part += 1
-            src += WIDE_H
             h += 8
         }
     }
@@ -316,36 +314,54 @@ fn place(n: u8) -> u8 {
 }
 
 fn draw_parts() {
-    // Clear what moved or went since this copy was drawn, then draw it at its new place. All clears come
-    // first: a part's new place may be where another part was. A wide part is always drawn again (its
+    // Clear what moved, changed or went since this copy was drawn, then draw it at its new place. All clears
+    // come first: a part's new place may be where another part was. A wide part is always drawn again (its
     // digits change in place).
     var d: u8 = part_base
     for i in 0..PARTS {
-        var old: ptr u8 = drawn_at[d + i]
-        redraw[i] = i >= FIRST_WIDE || new_at[i] != old || new_src[i] != drawn_src[d + i]
-        if redraw[i] && old != 0 as ptr u8 {
-            if i < FIRST_WIDE {
-                clear16(old)
-            } else {
-                clear8(old)
+        var old: u8 = drawn_page[d]
+        var now: u8 = new_page[i]
+        redraw[i] = false
+        if old | now != 0 {
+            if old != now || new_line[i] != drawn_line[d] || new_img[i] != drawn_img[d] || i >= FIRST_WIDE {
+                redraw[i] = true
+                if old != 0 {
+                    clear(old, drawn_line[d], i < FIRST_WIDE)
+                }
             }
         }
+        d += 1
     }
+    d = part_base
     for i in 0..PARTS {
-        if !redraw[i] {
-            continue
+        if redraw[i] {
+            var page: u8 = new_page[i]
+            drawn_page[d] = page
+            drawn_line[d] = new_line[i]
+            drawn_img[d] = new_img[i]
+            if page != 0 {
+                var at: u16 = 0
+                at.hi = page
+                at.lo = new_line[i]
+                if i < FIRST_WIDE {
+                    draw16(at as ptr u8, frame_gfx[new_img[i]])
+                } else {
+                    draw8(at as ptr u8, addr(wide_gfx) + ((i - FIRST_WIDE) << 3))   // parts 6-9: 8 rows each
+                }
+            }
         }
-        var at: ptr u8 = new_at[i]
-        drawn_at[d + i] = at
-        drawn_src[d + i] = new_src[i]
-        if at == 0 as ptr u8 {
-            continue
-        }
-        if i < FIRST_WIDE {
-            draw16(at, new_src[i])
-        } else {
-            draw8(at, new_src[i])
-        }
+        d += 1
+    }
+}
+
+fn clear(page: u8, line: u8, tall: bool) {
+    var at: u16 = 0
+    at.hi = page
+    at.lo = line
+    if tall {
+        clear16(at as ptr u8)
+    } else {
+        clear8(at as ptr u8)
     }
 }
 

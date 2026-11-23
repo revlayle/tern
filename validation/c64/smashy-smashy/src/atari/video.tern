@@ -552,12 +552,20 @@ fn stop_shake() {
 // ---- the frame interrupt ----
 var frame_ready: bool
 var frames: u8                      // counts frames
-var frame_tail: u8                  // scan lines from the vertical blank's start (line 248) to line 0
+var frame_tail: u8                  // scan lines from the vertical blank's start (line 248) to line 0, and on
+                                    // NTSC the rebuild's reserve
+// The map rebuild's budget on the Atari (question 189: each machine its own). nav.idle_build() starts a slice
+// while frame_lines() is under nav.BUILD_START_LINES (185), and a slice takes up to about 80 scan lines here
+// (the C64's 70 raster lines of work, with ANTIC's DMA and the DLIs taking their share of each line). On PAL
+// (312 lines) a slice started at 184 ends about line 264 after the VBI, before the next at 312. On NTSC (262
+// lines) it would run into the next VBI, so frame_lines() counts NTSC_RESERVE lines more there, and slices
+// start only until line 174: 174 + 80 = 254, 8 lines before the VBI.
+const NTSC_RESERVE: u8 = 11
 
 fn start_frame_irq() {
     frame_tail = 312 - 248          // PAL
     if atari.gtia_in.pal & $0E != 0 {
-        frame_tail = 262 - 248      // NTSC
+        frame_tail = 262 - 248 + NTSC_RESERVE      // NTSC
     }
     atari.set_vbi(addr(frame_vbi))
     atari.set_dli(addr(dli))
@@ -579,7 +587,8 @@ interrupt fn frame_vbi() {
 
 fn frame_lines() -> u8 {
     // Scan lines since the vertical blank started (0-255; later lines read as 255), as the C64's raster
-    // lines since its frame IRQ. Only meaningful while frame_ready is still false.
+    // lines since its frame IRQ (on NTSC, NTSC_RESERVE more once the display has started: the rebuild's
+    // budget, above). Only meaningful while frame_ready is still false.
     var v: u8 = atari.antic.vcount  // scan line / 2
     if v >= 124 {
         return (v - 124) << 1

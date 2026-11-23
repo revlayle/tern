@@ -361,3 +361,44 @@ at 15 s of HOW TO PLAY once caught the title still on screen (Altirra's start ta
 misses is tried once more.
 
 No new gap.
+
+## V1 batch 3, Atari step 5: the frame's time on the Atari (2026-11-23)
+
+**A correction to step 2's overrun counts:** the scratch counter showed 2 BCD digits, so its "9" on PAL and "none"
+on NTSC were counts modulo 100. Counted again with 3 digits and split by whether a map rebuild was in progress
+(the play loop only, about 2,000 play frames of the suite's joystick script in Altirra each):
+
+| Build | PAL: rebuilding / other | NTSC: rebuilding / other |
+|---|---|---|
+| step 2's (`render()` about 7,600 cycles) | 51 / 104+ | 35+ / 92+ (wrapped) |
+| now (`render()` about 6,900, the NTSC reserve) | 0 / 22 (about 1%) | 0 / 727 (about a third) |
+
+**The cycles of a play frame** in the test harness (no DMA; 4,568 play frames of 6,000), per frame:
+
+| Part | average | 90% | 99% | max |
+|---|---|---|---|---|
+| the game's logic, with the VBI and the DLIs | 8,143 | 9,635 | 12,422 | 13,786 |
+| `render()` | 6,923 | 8,261 | 9,964 | 11,881 |
+| logic and `render()` | 15,066 | 17,446 | 20,114 | 23,832 |
+
+A PAL frame is 35,568 cycles; ANTIC's DMA for this screen (the mode 4 rows' character and font fetches, the HUD,
+player-missile graphics on every line, refresh) takes about 13,000 and the OS's VBI about 1,500, so about
+19,000-20,000 are left; the 1% of PAL frames over it are the logic's and `render()`'s worst together. An NTSC frame
+is 29,868 cycles with the same DMA, about 15,000 left: the average frame does not fit, so on NTSC the game drops a
+frame in about three, and in effect runs at about PAL's speed (question 190's 20% is then mostly gone, by
+accident). The C64's frame IRQ copies 8 sprites' shadows to the VIC-II in about 300 cycles; the Atari's sprites cost
+`render()`, and this is the difference.
+
+**What was tried:** the parts' places and pictures as bytes instead of pointers, and `video.set_sprite` reaching
+`sprites.set_actor` inline (`render()` 7,592 -> 6,923, the logic 8,461 -> 8,143); keeping the last frame's slots
+while no object changed rows (taken back: objects change rows often, and the check cost as much as it saved). What
+is left is bookkeeping per object (the sort, the slot search, the tables for the DLIs and the drawn parts: about 40
+cycles for each empty part of 10 and some hundreds per object), and plain Tern's code for it is about what one
+would write by hand for the same tables; the cut that NTSC needs (to about 3,000) means fewer passes over fewer
+tables, or assembly. Question 191.
+
+**The rebuild's budget** (decision 189): `nav.BUILD_START_LINES` (185) stays; `video.frame_lines()` counts scan lines
+since the VBI, and on NTSC 11 more (`NTSC_RESERVE`), so a slice (up to about 80 scan lines here) starts only while
+it ends before the next VBI. With it, no overrun came during a rebuild on either.
+
+No new gap.
