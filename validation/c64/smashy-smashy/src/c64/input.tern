@@ -2,6 +2,7 @@
 // Port of ../src/input.p8. SCRIPTED = true replays the `script` table instead of reading $DC00 (self-testing
 // only; keep false in builds for the designer).
 import c64
+import levelgen
 
 const SCRIPTED: bool = false
 
@@ -67,4 +68,13 @@ fn scripted() -> u8 {
     }
     script_left -= 1
     return script[script_pos - 1]
+}
+
+fn seed_random() {
+    // Seed the level generator's random numbers when fire starts a game on the title or an attract page
+    // (spec section 7). As math.rndseed(mkword(c64.CIA1TAL, c64.RASTER), mkword(c64.RASTER, c64.CIA1TAH)).
+    levelgen.rnd_b = c64.vic.raster
+    levelgen.rnd_a = c64.cia1.timer_a.hi
+    levelgen.rnd_c = c64.cia1.timer_a.lo
+    levelgen.rnd_x = c64.vic.raster
 }

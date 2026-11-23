@@ -7,9 +7,16 @@ validation program, batch 2; roadmap V1, decisions 2026-11-21). MIT license (`LI
   `tern-port` at `295793c`. The Prog8 original, the art tool (`tools/gfx.py`), the port's `tools/assets.py` and
   its comparison with the Prog8 build (`tools/compare.py`, `compare_game.py`) stay there.
 - **Copied:** `src/` (the Tern source, with `assets.tern`, which `tools/assets.py` generates there), `data/`
-  (`chars.bin` and `sprites.bin`, which `gfx.py` writes; `video.tern` reads them from `../data/` here, from
+  (`chars.bin` and `sprites.bin`, which `gfx.py` writes; `c64/video.tern` reads them from `../../data/` here, from
   `../../build/` in the game's repository), `gaps.md` (the port's gap log).
-- **Build:** `tern --target c64 src/main.tern -o smashy-smashy.prg`: 21,436 bytes, `$0801-$5BBC`.
+- **Layout** (V1 batch 3, spec 2.2's platform folders): the game logic in `src/` (`main`, `actors`, `player`,
+  `enemies`, `nav`, `levelgen`, `score`, `tilemap`), the C64 front end in `src/c64/` (`video`, `sound`, `input`,
+  `title`, `pages`, `popup`, `assets`). A shared module imports `video` and gets the target's. The shared modules
+  name no C64 address: the tile map moved from `video` into `tilemap` (no longer at `$C400`), and the score
+  flash (`video.hud_score_flash`), the game-over high score (`video.message_score`) and the random seed
+  (`input.seed_random`, from the raster line and CIA 1's timer) are front-end calls. `c64/video.tern` reads the
+  art from `../../data/`.
+- **Build:** `tern --target c64 src/main.tern -o smashy-smashy.prg`: 20,985 bytes (20,946 before the split).
 - **Known result:** `expected/frame-2500.txt`, the score, time, level, treasures, kills and high score, the screen
   (`$C000`), colour RAM and VIC registers after 2,500 frames of a scripted joystick (through the title into a
   game, running, jumping and smashing; the first game ends and the second is being played), checked by

@@ -2,10 +2,9 @@
 // (nav.tern), a reachability BFS over standing cells, treasure placement, retries and a fixed fallback layout.
 // Port of ../src/levelgen.p8, with Prog8's math.rnd and math.rndseed (rnd, seed), so a seed gives the same
 // level. Not ported: FORCE_FAIL and FRAME_SEED (self-tests).
-import c64
 import mem
-import video
 import nav
+import tilemap
 
 const MAX_ATTEMPTS: u8 = 30
 const MIN_REACHABLE: u8 = 30
@@ -42,7 +41,7 @@ var cell: [u8; CELLS]
 data cell_col: [u8; CELLS] = [i % 20 for i in 0..220]
 data cell_row: [u8; CELLS] = [i / 20 for i in 0..220]
 var queue: [u8; CELLS]              // reachable cells in BFS order, `reached` of them
-var row_stand: [u8; video.MAP_H - 1]   // standing cells per row (a jump only lands in rows that have some)
+var row_stand: [u8; tilemap.MAP_H - 1]   // standing cells per row (a jump only lands in rows that have some)
 var reached: u8
 var start_cells: u8                 // queue[0] (and queue[1]): where the player lands from the spawn point
 var tr_count: u8
@@ -55,19 +54,11 @@ data fb_end: [u8; BANDS * MAX_SEGS] = [6, 18, 0, 0,   15, 0, 0, 0,   4, 19, 0, 0
 data fb_row: [u8; BANDS * MAX_SEGS] = [2, 2, 0, 0,   5, 0, 0, 0,   8, 8, 0, 0]
 
 // ---- random numbers: Prog8's math.rnd (the x-abc generator), so the game's random choices match ----
+// Each machine's input.seed_random() seeds it when fire starts a game (spec section 7).
 var rnd_x: u8
 var rnd_c: u8 = $C2
 var rnd_a: u8 = $11
 var rnd_b: u8 = $37
-
-fn seed() {
-    // Called when fire starts a game on the title or an attract page (spec section 7).
-    // As math.rndseed(mkword(c64.CIA1TAL, c64.RASTER), mkword(c64.RASTER, c64.CIA1TAH)).
-    rnd_b = c64.vic.raster
-    rnd_a = c64.cia1.timer_a.hi
-    rnd_c = c64.cia1.timer_a.lo
-    rnd_x = c64.vic.raster
-}
 
 asm fn rnd() -> u8 {
     // Assembly: the carry from lsr goes into the last adc, which plain Tern cannot say.
@@ -113,7 +104,7 @@ fn rand_below(n: u8) -> u8 {
 }
 
 fn generate(level: u8) {
-    // Fill video.tiles with a new level for `level` (1-based). Does not draw it.
+    // Fill tilemap.tiles with a new level for `level` (1-based). Does not draw it.
     used_fallback = false
     attempts = 0
     for _ in 0..MAX_ATTEMPTS {
@@ -152,12 +143,12 @@ fn make_layout() {
 
 fn fill_tiles() {
     // Tile map from the segment lists: empty, platforms, full floor row.
-    mem.fill(addr(video.tiles), video.T_EMPTY, CELLS)
-    mem.fill(addr(video.tiles) + CELLS, video.T_FLOOR, video.MAP_W)
+    mem.fill(addr(tilemap.tiles), tilemap.T_EMPTY, CELLS)
+    mem.fill(addr(tilemap.tiles) + CELLS, tilemap.T_FLOOR, tilemap.MAP_W)
     for band in 0..BANDS {
         var i: u8 = band << 2
         for _ in 0..seg_count[band] {
-            mem.fill(addr(video.tiles) + video.row_start[seg_row[i]] + seg_start[i], video.T_SOLID,
+            mem.fill(addr(tilemap.tiles) + tilemap.row_start[seg_row[i]] + seg_start[i], tilemap.T_SOLID,
                 seg_end[i] - seg_start[i] + 1)
             i += 1
         }
@@ -167,7 +158,7 @@ fn fill_tiles() {
 fn make_band(band: u8) {
     // 2-4 segments, 3-8 tiles long, at least 2 tiles apart, each jittered +-1 row from the band's base row.
     var n: u8 = 2 + rand_below(3)
-    var free: i8 = (video.MAP_W - ((n - 1) << 1)) as i8
+    var free: i8 = (tilemap.MAP_W - ((n - 1) << 1)) as i8
     for s in 0..n {
         seg_len[s] = 3 + rand_below(6)
         free -= seg_len[s] as i8
@@ -224,7 +215,7 @@ fn band_connected(band: u8) -> bool {
     var i: u8 = band << 2
     for _ in 0..seg_count[band] {
         if band == BANDS - 1 {
-            if seg_row[i] >= video.MAP_H - 4 {
+            if seg_row[i] >= tilemap.MAP_H - 4 {
                 return true         // 3 or fewer rows above the floor
             }
         } else {
@@ -249,18 +240,18 @@ fn explore() -> bool {
     // Returns true when at least MIN_REACHABLE cells are reachable.
 
     // standing cells: all of row 10 (platforms are in rows 1-9), and the empty cells on top of each segment
-    mem.fill(addr(cell), C_NONE, CELLS - video.MAP_W)
-    mem.fill(addr(cell) + (CELLS - video.MAP_W), C_STAND, video.MAP_W)
+    mem.fill(addr(cell), C_NONE, CELLS - tilemap.MAP_W)
+    mem.fill(addr(cell) + (CELLS - tilemap.MAP_W), C_STAND, tilemap.MAP_W)
     mem.fill(addr(row_stand), 0, len(row_stand))
-    row_stand[video.MAP_H - 2] = video.MAP_W
+    row_stand[tilemap.MAP_H - 2] = tilemap.MAP_W
     var idx: u8 = 0
     for band in 0..BANDS {
         var i: u8 = band << 2
         for _ in 0..seg_count[band] {
             var r: u8 = seg_row[i] - 1
-            idx = video.row_start[r] + seg_start[i]
+            idx = tilemap.row_start[r] + seg_start[i]
             for _ in 0..seg_end[i] - seg_start[i] + 1 {
-                if video.tiles[idx] == video.T_EMPTY {
+                if tilemap.tiles[idx] == tilemap.T_EMPTY {
                     cell[idx] = C_STAND
                     row_stand[r] += 1
                 }
@@ -274,7 +265,7 @@ fn explore() -> bool {
     // the player's box spans columns 9 and 10 while it drops from the spawn point
     idx = START_COL_L
     while cell[idx] == C_NONE && cell[idx + 1] == C_NONE {
-        idx += video.MAP_W          // the spawn zone is clear and row 10 always stands, so this stops
+        idx += tilemap.MAP_W          // the spawn zone is clear and row 10 always stands, so this stops
     }
     if cell[idx] == C_STAND {
         reach(idx)
@@ -294,20 +285,20 @@ fn explore() -> bool {
         // walk, or walk off the edge and fall straight down
         if c != 0 {
             p = idx - 1
-            if video.tiles[p] == video.T_EMPTY {
+            if tilemap.tiles[p] == tilemap.T_EMPTY {
                 while cell[p] == C_NONE {
-                    p += video.MAP_W
+                    p += tilemap.MAP_W
                 }
                 if cell[p] == C_STAND {
                     reach(p)
                 }
             }
         }
-        if c != video.MAP_W - 1 {
+        if c != tilemap.MAP_W - 1 {
             p = idx + 1
-            if video.tiles[p] == video.T_EMPTY {
+            if tilemap.tiles[p] == tilemap.T_EMPTY {
                 while cell[p] == C_NONE {
-                    p += video.MAP_W
+                    p += tilemap.MAP_W
                 }
                 if cell[p] == C_STAND {
                     reach(p)
@@ -320,7 +311,7 @@ fn explore() -> bool {
         // clear as high: it is reached by walking, and its jump covers the same targets.
         // Rows without standing cells are skipped too (except k = 1, which also lands across gaps).
         var left_covered: bool = c != 0 && cell[idx - 1] != C_NONE
-        var right_covered: bool = c != video.MAP_W - 1 && cell[idx + 1] != C_NONE
+        var right_covered: bool = c != tilemap.MAP_W - 1 && cell[idx + 1] != C_NONE
         var rr: u8 = cell_row[idx]
         var top: u8 = rr
         if top > MAX_JUMP_UP {
@@ -329,15 +320,15 @@ fn explore() -> bool {
         var rise: u8 = idx
         var k: u8 = 1
         while k <= top {
-            rise -= video.MAP_W
-            if video.tiles[rise] != video.T_EMPTY {
+            rise -= tilemap.MAP_W
+            if tilemap.tiles[rise] != tilemap.T_EMPTY {
                 break
             }
             rr -= 1
-            if video.tiles[rise + 1] != video.T_EMPTY {
+            if tilemap.tiles[rise + 1] != tilemap.T_EMPTY {
                 right_covered = false
             }
-            if video.tiles[rise - 1] != video.T_EMPTY {
+            if tilemap.tiles[rise - 1] != tilemap.T_EMPTY {
                 left_covered = false
             }
             if k != 1 && row_stand[rr] == 0 {
@@ -349,18 +340,18 @@ fn explore() -> bool {
                 p = rise
                 for _ in 0..MAX_JUMP_SIDE {
                     cc += 1
-                    if cc == video.MAP_W {
+                    if cc == tilemap.MAP_W {
                         break
                     }
                     p += 1
-                    if video.tiles[p] != video.T_EMPTY {
+                    if tilemap.tiles[p] != tilemap.T_EMPTY {
                         break
                     }
                     if cell[p] == C_STAND {
                         reach(p)
                     }
-                    if k == 1 && cell[p + video.MAP_W] == C_STAND {
-                        reach(p + video.MAP_W)  // across a gap on the same row
+                    if k == 1 && cell[p + tilemap.MAP_W] == C_STAND {
+                        reach(p + tilemap.MAP_W)  // across a gap on the same row
                     }
                 }
             }
@@ -373,14 +364,14 @@ fn explore() -> bool {
                     }
                     cc -= 1
                     p -= 1
-                    if video.tiles[p] != video.T_EMPTY {
+                    if tilemap.tiles[p] != tilemap.T_EMPTY {
                         break
                     }
                     if cell[p] == C_STAND {
                         reach(p)
                     }
-                    if k == 1 && cell[p + video.MAP_W] == C_STAND {
-                        reach(p + video.MAP_W)
+                    if k == 1 && cell[p + tilemap.MAP_W] == C_STAND {
+                        reach(p + tilemap.MAP_W)
                     }
                 }
             }
@@ -405,8 +396,8 @@ fn place_treasures(level: u8) -> bool {
         if cell[i] == C_REACHED {
             cell[i] = C_BLOCKED
         }
-        if cell[i + video.MAP_W] == C_REACHED {
-            cell[i + video.MAP_W] = C_BLOCKED
+        if cell[i + tilemap.MAP_W] == C_REACHED {
+            cell[i + tilemap.MAP_W] = C_BLOCKED
         }
     }
     cell[queue[0]] = C_BLOCKED
@@ -444,7 +435,7 @@ fn put_treasure(idx: u8, level: u8) {
     if t > 14 {
         t = 14
     }
-    video.tiles[idx] = video.T_TREASURE + t
+    tilemap.tiles[idx] = tilemap.T_TREASURE + t
 
     // block every cell less than TREASURE_SPACING rows and columns away, this one included
     const RADIUS: u8 = TREASURE_SPACING - 1
@@ -457,17 +448,17 @@ fn put_treasure(idx: u8, level: u8) {
     if r >= RADIUS {
         r0 = r - RADIUS
     }
-    if r1 > video.MAP_H - 2 {
-        r1 = video.MAP_H - 2
+    if r1 > tilemap.MAP_H - 2 {
+        r1 = tilemap.MAP_H - 2
     }
     if c >= RADIUS {
         c0 = c - RADIUS
     }
-    if c1 > video.MAP_W - 1 {
-        c1 = video.MAP_W - 1
+    if c1 > tilemap.MAP_W - 1 {
+        c1 = tilemap.MAP_W - 1
     }
     for rr in r0..=r1 {
-        var p: u8 = video.row_start[rr] + c0
+        var p: u8 = tilemap.row_start[rr] + c0
         for _ in 0..c1 - c0 + 1 {
             if cell[p] == C_REACHED {
                 cell[p] = C_BLOCKED

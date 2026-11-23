@@ -5,6 +5,7 @@ import mem
 import text
 import assets
 import sound
+import tilemap
 
 // ---- all colors ----
 const COLOR_BORDER: u8 = 0
@@ -43,17 +44,6 @@ data tri_chars: [u8; _] = [
     $01, $03, $07, $0F, $1F, $3F, $7F, $FF,     // 3: x + row >= 7
 ]
 
-// ---- tile map (spec section 4) ----
-const MAP_W: u8 = 20
-const MAP_H: u8 = 12
-const T_EMPTY: u8 = 0
-const T_SOLID: u8 = 1
-const T_DAMAGED: u8 = 2
-const T_FLOOR: u8 = 3
-const T_TREASURE: u8 = 16           // 16 + type (0-14)
-
-var tiles: [u8; MAP_W * MAP_H] @ $C400
-data row_start: [u8; _] = [0, 20, 40, 60, 80, 100, 120, 140, 160, 180, 200, 220]
 // screen address of the top-left char of tile column 0 in each tile row (char row 1 + 2*row)
 data tile_row_addr: [ptr u8; _] = [SCREEN + 40, SCREEN + 120, SCREEN + 200, SCREEN + 280,
                                    SCREEN + 360, SCREEN + 440, SCREEN + 520, SCREEN + 600,
@@ -100,8 +90,8 @@ var cpu_port: u8 @ $01              // memory configuration (bits 0-2)
 var hibase: u8 @ $0288              // the KERNAL's screen page (cbm.HIBASE)
 var sprite_ptrs: [u8; 8] @ $C3F8    // read by the VIC, so written every frame
 
-data chars_bin = include_bytes("../data/chars.bin")
-data sprites_bin = include_bytes("../data/sprites.bin")
+data chars_bin = include_bytes("../../data/chars.bin")
+data sprites_bin = include_bytes("../../data/sprites.bin")
 
 fn init() {
     c64.vic.sprite_enable = 0
@@ -153,7 +143,7 @@ fn set_game_mode() {
 }
 
 fn draw_tile(col: u8, row: u8) {
-    var t: u8 = tiles[row_start[row] + col]
+    var t: u8 = tilemap.tiles[tilemap.row_start[row] + col]
     var ch: u8 = tile_char[t]
     var co: u8 = tile_color[t]
     var scr: ptr u8 = tile_row_addr[row] + (col << 1)
@@ -178,8 +168,8 @@ fn highlight_tile(col: u8, row: u8) {
 }
 
 fn draw_level() {
-    for row in 0..MAP_H {
-        for col in 0..MAP_W {
+    for row in 0..tilemap.MAP_H {
+        for col in 0..tilemap.MAP_W {
             draw_tile(col, row)
         }
     }
@@ -223,6 +213,25 @@ fn draw_hud_labels() {
     text.put(SCREEN + 3, addr(SCORE_LABEL), len(SCORE_LABEL))
     text.put(SCREEN + 18, addr(TIME_LABEL), len(TIME_LABEL))
     text.put(SCREEN + 29, addr(LEVEL_LABEL), len(LEVEL_LABEL))
+}
+
+const FLASH_COLOR: u8 = 7           // the HUD score flash: yellow; COLOR_HUD is white (1); use 1 if that changes
+
+fn hud_score_flash(on: bool) {
+    // The score's colour while it flashes (score.FLASH_FRAMES after each score event), or its plain colour.
+    var color: u8 = COLOR_HUD
+    if on {
+        color = FLASH_COLOR
+    }
+    mem.fill(COLOR_RAM + HUD_SCORE_COL, color, 6)
+}
+
+fn message_score(row: u8, col: u8, bcd_hundreds: u16) {
+    // A score (4 BCD digits and "00") in the HUD colour over the playfield, as message() writes text.
+    var scr: ptr u8 = text_row[row] + col
+    put_digits(scr, bcd_hundreds, 4)
+    put_digits(scr + 4, 0, 2)
+    mem.fill(scr + (COLOR_RAM - SCREEN), COLOR_HUD, 6)
 }
 
 fn hud_score(bcd_hundreds: u16) {

@@ -9,6 +9,7 @@ import input
 import score
 import enemies
 import popup
+import tilemap
 
 // [TUNE] frames each page is shown
 const TITLE_FRAMES: u16 = 500
@@ -56,7 +57,7 @@ const HOW_SPR_X: u16 = 8
 // tiles: (char row, column, tile)
 data how_tile_row: [u8; _] = [13, 13, 20]
 data how_tile_col: [u8; _] = [1, 3, 1]
-data how_tile: [u8; _] = [video.T_SOLID, video.T_DAMAGED, video.T_TREASURE]
+data how_tile: [u8; _] = [tilemap.T_SOLID, tilemap.T_DAMAGED, tilemap.T_TREASURE]
 
 // ---- SCORING ----
 data S0 = screen"scoring"
@@ -109,7 +110,7 @@ fn scoring() -> bool {
     var row: u8 = GRID_ROW
     var col: u8 = GRID_COL
     for i in 0..15 {
-        put_tile(row, col, video.T_TREASURE + i)
+        put_tile(row, col, tilemap.T_TREASURE + i)
         var p: u8 = score.treasure_points[i]
         var at: ptr u8 = video.text_row[row + 2] + col
         if p >= $10 {

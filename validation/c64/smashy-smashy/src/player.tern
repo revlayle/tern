@@ -8,6 +8,7 @@ import popup
 import score
 import sound
 import video
+import tilemap
 
 const GROUNDED: u8 = 0
 const RISING: u8 = 1
@@ -187,13 +188,13 @@ fn update_target() {
         var right: u8 = ((actors.x[0] + (actors.BOX_W - 1)) >> 4) as u8
         col = ((actors.x[0] + actors.BOX_W / 2) >> 4) as u8
         row = ((actors.y[0] + actors.BOX_H - 1) >> 4) + 1
-        while video.tiles[video.row_start[row] + left] - 1 >= 3 &&
-            video.tiles[video.row_start[row] + right] - 1 >= 3 {
+        while tilemap.tiles[tilemap.row_start[row] + left] - 1 >= 3 &&
+            tilemap.tiles[tilemap.row_start[row] + right] - 1 >= 3 {
             row += 1                // row 11 is floor, so this stops
         }
-        var idx: u8 = video.row_start[row] + col
-        var t: u8 = video.tiles[idx]
-        if t == video.T_SOLID || t == video.T_DAMAGED {
+        var idx: u8 = tilemap.row_start[row] + col
+        var t: u8 = tilemap.tiles[idx]
+        if t == tilemap.T_SOLID || t == tilemap.T_DAMAGED {
             new_idx = idx
         }
     }
@@ -216,10 +217,10 @@ fn damage_below() -> bool {
     // Returns true when the tile was destroyed. The floor and non-solid tiles are left alone.
     var col: u8 = ((actors.x[0] + actors.BOX_W / 2) >> 4) as u8
     var row: u8 = (actors.y[0] + actors.BOX_H) >> 4
-    var idx: u8 = video.row_start[row] + col
-    match video.tiles[idx] {
-        video.T_SOLID => video.tiles[idx] = video.T_DAMAGED
-        video.T_DAMAGED => video.tiles[idx] = video.T_EMPTY
+    var idx: u8 = tilemap.row_start[row] + col
+    match tilemap.tiles[idx] {
+        tilemap.T_SOLID => tilemap.tiles[idx] = tilemap.T_DAMAGED
+        tilemap.T_DAMAGED => tilemap.tiles[idx] = tilemap.T_EMPTY
         _ => return false
     }
     video.draw_tile(col, row)
@@ -227,7 +228,7 @@ fn damage_below() -> bool {
         target_idx = NO_TARGET      // the redraw removed the highlight
     }
     sound.play(sound.DAMAGE)
-    if video.tiles[idx] != video.T_EMPTY {
+    if tilemap.tiles[idx] != tilemap.T_EMPTY {
         video.shake(video.SHAKE_CRACK)
         return false                // was solid, now damaged: normal landing
     }
@@ -261,13 +262,13 @@ fn collect_treasures() {
 }
 
 fn check_treasure(col: u8, row: u8) {
-    var idx: u8 = video.row_start[row] + col
-    var t: u8 = video.tiles[idx]
-    if t >= video.T_TREASURE {
-        video.tiles[idx] = video.T_EMPTY
+    var idx: u8 = tilemap.row_start[row] + col
+    var t: u8 = tilemap.tiles[idx]
+    if t >= tilemap.T_TREASURE {
+        tilemap.tiles[idx] = tilemap.T_EMPTY
         video.draw_tile(col, row)
-        score.collect(t - video.T_TREASURE)
-        popup.show(((col as u16) << 4) + 8, (row << 4) + 8, score.treasure_points[t - video.T_TREASURE], popup.TREASURE)
+        score.collect(t - tilemap.T_TREASURE)
+        popup.show(((col as u16) << 4) + 8, (row << 4) + 8, score.treasure_points[t - tilemap.T_TREASURE], popup.TREASURE)
         sound.play(sound.COLLECT)
     }
 }

@@ -11,6 +11,7 @@ import popup
 import score
 import sound
 import video
+import tilemap
 
 const FIRST: u8 = 1
 const LAST: u8 = 5
@@ -96,7 +97,7 @@ fn place_all() {
     fall_count = 0
     spot_count = 0
     for idx in 0..levelgen.CELLS {
-        if video.tiles[idx] == video.T_EMPTY && video.tiles[idx + video.MAP_W] - 1 < 3 {
+        if tilemap.tiles[idx] == tilemap.T_EMPTY && tilemap.tiles[idx + tilemap.MAP_W] - 1 < 3 {
             spots[spot_count] = idx
             spot_count += 1
         }
@@ -189,7 +190,7 @@ fn pick(i: u8) -> bool {
 }
 
 fn standing(idx: u8) -> bool {
-    return video.tiles[idx] == video.T_EMPTY && video.tiles[idx + video.MAP_W] - 1 < 3
+    return tilemap.tiles[idx] == tilemap.T_EMPTY && tilemap.tiles[idx + tilemap.MAP_W] - 1 < 3
 }
 
 fn dist(idx: u8) -> u8 {
@@ -279,7 +280,7 @@ fn update() {
 fn pick_up(i: u8) {
     // Take the first treasure tile the box overlaps (up to 2 x 2 tiles).
     var left: u8 = (actors.x[i] >> 4) as u8
-    var idx: u8 = video.row_start[actors.y[i] >> 4] + left
+    var idx: u8 = tilemap.row_start[actors.y[i] >> 4] + left
     var two_cols: bool = ((actors.x[i] + (actors.BOX_W - 1)) >> 4) as u8 != left
     if take(i, idx) {
         return
@@ -288,7 +289,7 @@ fn pick_up(i: u8) {
         return
     }
     if actors.y[i] & 15 != 0 {
-        idx += video.MAP_W
+        idx += tilemap.MAP_W
         if take(i, idx) {
             return
         }
@@ -299,13 +300,13 @@ fn pick_up(i: u8) {
 }
 
 fn take(i: u8, idx: u8) -> bool {
-    var t: u8 = video.tiles[idx]
-    if t < video.T_TREASURE {
+    var t: u8 = tilemap.tiles[idx]
+    if t < tilemap.T_TREASURE {
         return false
     }
-    carrying[i] = t - video.T_TREASURE + 1
+    carrying[i] = t - tilemap.T_TREASURE + 1
     nav.hideout[i] = nav.NONE       // pick a hideout at the next decision
-    video.tiles[idx] = video.T_EMPTY
+    tilemap.tiles[idx] = tilemap.T_EMPTY
     video.draw_tile(levelgen.cell_col[idx], levelgen.cell_row[idx])
     return true
 }
@@ -316,23 +317,23 @@ fn drop(i: u8) {
     if carrying[i] == 0 {
         return
     }
-    var t: u8 = video.T_TREASURE + carrying[i] - 1
+    var t: u8 = tilemap.T_TREASURE + carrying[i] - 1
     carrying[i] = 0
     nav.hideout[i] = nav.NONE       // no longer claimed
     cooldown[i] = PICKUP_COOLDOWN
-    var idx: u8 = video.row_start[(actors.y[i] + actors.BOX_H / 2) >> 4] + col_of(i)
-    while video.tiles[idx] != video.T_EMPTY {
-        if idx < video.MAP_W {
+    var idx: u8 = tilemap.row_start[(actors.y[i] + actors.BOX_H / 2) >> 4] + col_of(i)
+    while tilemap.tiles[idx] != tilemap.T_EMPTY {
+        if idx < tilemap.MAP_W {
             // the whole column above is taken: the first empty tile of the map instead
             idx = 0
-            while video.tiles[idx] != video.T_EMPTY {
+            while tilemap.tiles[idx] != tilemap.T_EMPTY {
                 idx += 1
             }
             break
         }
-        idx -= video.MAP_W
+        idx -= tilemap.MAP_W
     }
-    video.tiles[idx] = t
+    tilemap.tiles[idx] = t
     video.draw_tile(levelgen.cell_col[idx], levelgen.cell_row[idx])
     if fall_count < len(falling) {
         falling[fall_count] = idx
@@ -348,15 +349,15 @@ fn fall_treasures() {
     while k != 0 {
         k -= 1
         var idx: u8 = falling[k]
-        var t: u8 = video.tiles[idx]
-        var done: bool = t < video.T_TREASURE
+        var t: u8 = tilemap.tiles[idx]
+        var done: bool = t < tilemap.T_TREASURE
         if !done {
-            var below: u8 = video.tiles[idx + video.MAP_W]
-            if below == video.T_EMPTY {
-                video.tiles[idx] = video.T_EMPTY
+            var below: u8 = tilemap.tiles[idx + tilemap.MAP_W]
+            if below == tilemap.T_EMPTY {
+                tilemap.tiles[idx] = tilemap.T_EMPTY
                 video.draw_tile(levelgen.cell_col[idx], levelgen.cell_row[idx])
-                idx += video.MAP_W
-                video.tiles[idx] = t
+                idx += tilemap.MAP_W
+                tilemap.tiles[idx] = t
                 video.draw_tile(levelgen.cell_col[idx], levelgen.cell_row[idx])
                 falling[k] = idx
             } else if below - 1 < 3 {

@@ -2,7 +2,6 @@
 // Port of ../src/score.p8. Prog8's bcd.adduw and friends return the sum; Tern's bcd library adds to a
 // counter in memory, so the values are added in place.
 import bcd
-import mem
 import video
 
 const START_TIME: u16 = $0060       // BCD seconds
@@ -14,9 +13,8 @@ const NO_KILL_BONUS: u8 = $25       // BCD hundreds, level completed without des
 
 const MAX_POINTS: u16 = $9999       // BCD hundreds, shown as 999900
 
-// HUD score flash on every score event [TUNE]. HUD cells are hi-res (colours 0-7).
+// HUD score flash on every score event [TUNE]; the machine's video module draws it.
 const FLASH_FRAMES: u8 = 8
-const FLASH_COLOR: u8 = 7           // yellow: COLOR_HUD is white (1); use 1 if that changes
 var flash_left: u8
 
 var points: u16                     // BCD, in units of 100 points (4 digits, shown with a fixed "00")
@@ -75,7 +73,7 @@ fn add_points(bcd_hundreds: u8) {
     }
     video.hud_score(points)
     flash_left = FLASH_FRAMES
-    mem.fill(video.COLOR_RAM + video.HUD_SCORE_COL, FLASH_COLOR, 6)
+    video.hud_score_flash(true)
 }
 
 fn flash_step() {
@@ -83,7 +81,7 @@ fn flash_step() {
     if flash_left != 0 {
         flash_left -= 1
         if flash_left == 0 {
-            mem.fill(video.COLOR_RAM + video.HUD_SCORE_COL, video.COLOR_HUD, 6)
+            video.hud_score_flash(false)
         }
     }
 }
