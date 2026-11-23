@@ -513,6 +513,7 @@ public class PointerTests
         Assert.Equal(fix, Tools.Diagnostic.Split(e.Description).Suggestion);
     }
 
+    [Trait("Platform", "c64")]
     [Trait("Shape", "nmos6502")]
     [Fact]
     public void An_address_constant_declared_as_a_pointer_is_the_plain_pointer_add()
