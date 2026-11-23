@@ -81,7 +81,7 @@ fn main() {
 
 ```console
 $ tern run --target c64 arith.tern --dump offset --dump product --dump q --dump r --dump low
-Main returned: 606 cycles (554 in main)
+Main returned: 585 cycles (533 in main)
 A=$1B X=$00 Y=$C3 SP=$FF PC=$0831
 offset $0007 u16 = 283 ($011B)
 product $0009 u16 = 21 ($0015)

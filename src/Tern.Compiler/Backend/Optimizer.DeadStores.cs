@@ -560,6 +560,62 @@ public static partial class Optimizer
     }
 
     /// <summary>
+    /// A byte of the function's own memory copied on (<c>sta t / ... / lda t / sta z</c>, straight-line code):
+    /// z is stored where t is, while A holds the value, so the reload and then t itself can go (V1 fixes 2,
+    /// gap 31; spec 11, <c>var t: u16 = a + b</c> then <c>x = t as u8</c>). Only when the code in between
+    /// does not touch z's memory, its index register or its pointer, and reads or writes no memory through a
+    /// pointer or at a number. The <c>lda t</c> stays (A and the flags as before); other passes remove it and
+    /// the dead store. Returns true if a store moved.
+    /// </summary>
+    private static bool StoreWhereComputed(List<AsmItem> code, FunctionSymbol function)
+    {
+        for (int s = 0; s < code.Count; s++)
+        {
+            if (code[s] is not Instr { Mnemonic: Sta, AsmPos: null, Mode: Absolute or ZeroPage, Operand: VarOperand t } || !OwnMemory(t.Variable, function))
+                continue;
+            for (int k = s + 1; k < code.Count; k++)
+            {
+                if (code[k] is Comment or SourceLine) continue;
+                if (code[k] is not Instr i || FromAsm(i) || !Straight(i) || ChangesAnything(i)) break;
+                var use = MemoryUse.Of(i);
+                if (use.Target is MemoryTarget.Pointer or MemoryTarget.Number or MemoryTarget.Code) break;
+                // t's byte written again (or perhaps, through an index): the reload reads another value.
+                if (use.Writes && use.Operand is { } w && w.Variable.Storage == t.Variable.Storage
+                    && (use.Target == MemoryTarget.Element || w.Variable.AliasOffset + w.Offset == t.Variable.AliasOffset + t.Offset))
+                    break;
+                if (!(i.Mnemonic == Lda && i.Mode is Absolute or ZeroPage && i.Operand == t)) continue;
+                int z = NextReal(code, k + 1);
+                if (z < code.Count && code[z] is Instr { Mnemonic: Sta, AsmPos: null } store && CanMoveStore(code, s, z, store, t))
+                {
+                    code.RemoveAt(z);
+                    code.Insert(s + 1, store);
+                    return true;
+                }
+                break;
+            }
+        }
+        return false;
+    }
+
+    /// <summary>True if the store at <paramref name="z"/> can go right after <paramref name="s"/>: nothing in between touches its memory or what chooses it.</summary>
+    private static bool CanMoveStore(List<AsmItem> code, int s, int z, Instr store, VarOperand t)
+    {
+        var use = MemoryUse.Of(store);
+        if (use.Target is not (MemoryTarget.Byte or MemoryTarget.Element) || use.Operand is not { } target) return false;
+        var storage = target.Variable.Storage;
+        if (storage == t.Variable.Storage || storage.IsVolatile || storage.FixedAddress is not null || storage.InOverlayArea) return false;
+        var index = Instructions.IndexOf(store.Mode);
+        for (int k = s + 1; k < z; k++)
+        {
+            if (code[k] is not Instr i) continue;
+            if (i.Operand is VarOperand o && o.Variable.Storage == storage) return false;
+            if (i.Operand is ImmVarByte b && b.Variable.Storage == storage) return false;
+            if (index != CpuState.None && (Instructions.Effects(i.Mnemonic, i.Mode).Writes & index) != 0) return false;
+        }
+        return true;
+    }
+
+    /// <summary>
     /// At the start of main, before any label, branch, call or assembly, a store of 0 into a global
     /// the startup code cleared, and that main has not written yet, changes nothing (<c>fib[0] = 0</c>).
     /// </summary>

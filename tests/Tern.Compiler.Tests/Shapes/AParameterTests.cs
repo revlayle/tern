@@ -249,7 +249,8 @@ public class AParameterTests
         Assert.Equal(7, r.U8("xs", v));
         Assert.Equal(7, r.U8("ys", v));
         Assert.Equal((v + 7) & 0xFF, r.U8("q"));
-        Assert.Equal("tax|lda q|sta u|txa|sta w|rts", Listing.Code(r, "later"));
+        // v stored while it is still in A (V1 fixes 2, StoreWhereComputed).
+        Assert.Equal("sta w|lda q|sta u|rts", Listing.Code(r, "later"));
         Assert.Equal("tax|lda q|sta xs,x|rts", Listing.Code(r, "index"));
         Assert.Equal("tay|lda q|sta (p),y|rts", Listing.Code(r, "pointer"));
         // Read first, from A: nothing to move.

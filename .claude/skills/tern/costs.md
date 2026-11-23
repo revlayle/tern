@@ -534,7 +534,7 @@ and widening after; or use a `data` table, which is fastest at two bytes per ent
 $ tern bench --target c64 --decl 'import math' --decl 'var offset: u16' --decl 'data rows: [u16; 25] = [0, 40, 80, 120, 160, 200, 240, 280, 320, 360, 400, 440, 480, 520, 560, 600, 640, 680, 720, 760, 800, 840, 880, 920, 960]' --code 'for row in 0..25 { var w: u16 = (row << 2) + row; offset += w << 3 }' --code 'for row in 0..25 { var w: u16 = row; offset += (w << 5) + (w << 3) }' --code 'for row in 0..25 { offset += math.mul8(row, 40) }' --code 'for row in 0..25 { offset += rows[row] }' --dump offset
 variant   program  main bytes   calls     cycles  per call    zp  other
 code 1        118          43       1       1707      1707     4      0
-code 2        164          89       1       4032      4032     4      0
+code 2        152          77       1       3582      3582     4      0
 code 3        135          31       1       4860      4860     3      0
 code 4         98          23       1        732       732     2      0
 Memory (zp: zero page bytes, other: the rest; the measured function's variables and the program's globals):
