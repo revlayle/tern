@@ -104,7 +104,7 @@ public sealed partial class Checker
                 else
                 {
                     if (r.Value is null) throw new CompileError(r.Pos, $"'{_body.Function.Name}' must return a {ret} value. Write the value after 'return'");
-                    CheckExpr(r.Value);
+                    CheckValueFor(r.Value, ret);
                     Coerce(r.Value, ret);
                 }
                 break;

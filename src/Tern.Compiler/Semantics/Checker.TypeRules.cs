@@ -165,13 +165,20 @@ public sealed partial class Checker
         }
     }
 
-    /// <summary>The untyped named constant at <paramref name="pos"/> in a chain of <c>+</c> and <c>-</c>, if there is one.</summary>
+    /// <summary>
+    /// The untyped named constant at <paramref name="pos"/> in a chain of <c>+</c> and <c>-</c>, if there is one: the
+    /// constant itself, or the only one inside a constant part folded there (<c>SCREEN + 1 + col</c>).
+    /// </summary>
     private static NameExpr? AddressConstantAt(Expr e, SourcePos pos) => e switch
     {
-        NameExpr { Symbol: null, ConstType: null, IsBitPattern: false, ConstValue: not null } n when n.Pos == pos => n,
+        NameExpr n when n.Pos == pos && UntypedNamedConstant(n) => n,
+        BinaryExpr { Op: TokenKind.Plus or TokenKind.Minus, ConstValue: not null } b when b.Pos == pos
+            => b.Descendants().OfType<NameExpr>().Where(UntypedNamedConstant).ToList() is [var only] ? only : null,
         BinaryExpr { Op: TokenKind.Plus or TokenKind.Minus } b => AddressConstantAt(b.Left, pos) ?? AddressConstantAt(b.Right, pos),
         _ => null,
     };
+
+    private static bool UntypedNamedConstant(NameExpr n) => n is { Symbol: null, ConstType: null, IsBitPattern: false, ConstValue: not null };
 
     /// <summary>A type of the same signedness as <paramref name="t"/> that holds <paramref name="v"/>, if one is wider.</summary>
     private static TernType? WiderFor(long v, TernType t)

@@ -504,6 +504,7 @@ public class PointerTests
     [InlineData(AddressConstant + "fn main() { p = SCREEN + col }", 5, 17, Declare)]
     [InlineData(AddressConstant + "fn main() { var q: ptr u8 = SCREEN + col\n q[0] = 1 }", 5, 29, Declare)]
     [InlineData(AddressConstant + "fn main() { p = SCREEN + col + 40 }", 5, 17, Declare)]
+    [InlineData(AddressConstant + "fn get() -> ptr u8 { return SCREEN + col }\nfn main() { p = get() }", 5, 29, Declare)]
     // Not a pointer destination, or the constant inside a conversion: the message is as before.
     [InlineData(AddressConstant + "fn main() { p = (col - SCREEN) as ptr u8 }", 5, 24, Convert)]
     [InlineData(AddressConstant + "var w: u16\nfn main() { w = SCREEN + col }", 6, 17, Convert)]
@@ -511,6 +512,18 @@ public class PointerTests
     {
         var e = Expect.Error(source, line, column, DoesNotFit + fix);
         Assert.Equal(fix, Tools.Diagnostic.Split(e.Description).Suggestion);
+    }
+
+    /// <summary>The constant folded with another one (SCREEN + 1) is still the one to declare (review V1 fixes 2, finding 2).</summary>
+    [Fact]
+    public void An_address_constant_folded_with_a_number_is_found()
+    {
+        var e = Expect.Error(AddressConstant + "fn main() { p = SCREEN + 1 + col }", 5, 24,
+            "49153 does not fit in u8 (0 to 255), the type of 'col', which it is combined with. " + Declare);
+        Assert.Equal(Declare, Tools.Diagnostic.Split(e.Description).Suggestion);
+        // Two named constants in the folded part: no single one to name, so the message is as before.
+        Expect.Error("const SCREEN = $C000\nconst ROW = $0028\nvar col: u8 = 3\nvar p: ptr u8\nfn main() { p = SCREEN + ROW + col }", 5, 24,
+            "49192 does not fit in u8 (0 to 255), the type of 'col', which it is combined with. " + Convert);
     }
 
     [Trait("Platform", "c64")]
