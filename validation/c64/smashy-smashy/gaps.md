@@ -205,3 +205,29 @@ random play rarely collects all 10 treasures.
 Result: 3 runs of 15,000 frames, 39,620 `wait_frame()` calls, the game state (every actor, the enemy AI and its
 routes, tiles, score and timer, popups, sprite shadows, the random generator), the screen, colour RAM and the
 popup digits the same at every call; levels 1-9 reached in each run, game over in two.
+
+## V1 fixes 2: measured again (2026-11-22)
+
+Roadmap "V1 fixes 2", with the compiler of Tern's `v1-fixes-2` branch (gaps 1 and 3 above fixed, and Galaxy
+Stars' gaps 30-33 and some small shapes). The source is unchanged; the port has no assembly left to measure, so the
+numbers are the whole game's. 21,436 -> 20,944 bytes. `compare.py --scenario play` (40 levels, 52,340 frames, every
+frame the same):
+
+| Part | Prog8 | Tern before | Tern now |
+|---|---|---|---|
+| `score.flash_step` | 13 | 12 | 12 |
+| `player.update` | 812 | 757 | 737 |
+| `enemies.update` | 4,526 | 3,741 | 3,623 |
+| `enemies.contact` | 556 | 414 | 414 |
+| `player.draw` | 305 | 276 | 256 |
+| `enemies.draw` | 2,173 | 1,647 | 1,544 |
+| `popup.update` | 93 | 86 | 81 |
+| `video.shake_step` | 34 | 30 | 30 |
+| `score.tick` | 54 | 38 | 37 |
+| `nav.idle_build` | 84 | 52 | 51 |
+| all parts | 8,654 | 7,056 | 6,789 |
+
+Most of it is zero page: temporaries and register parameters that no instruction names no longer get memory, so
+more variables fit in zero page (4-cycle stores become 3-cycle ones, a byte shorter); then gap 31's fix (the 16-bit
+temporaries in `nav.steer` and `nav.link_done` go, 60 bytes, 42 cycles a frame). Gap 3 changes nothing here, since
+the port stores the index first; gap 1 is a message. `compare.py --scenario game`: see Tern's `docs/status.md`.
