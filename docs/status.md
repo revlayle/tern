@@ -24,7 +24,8 @@ Owned by the coding session. Updated at the end of every coding session.
   - Altirra: the title, and (a scratch build whose title starts a game after 100 frames) a level with the HUD counting down, on an 800 (48 KB, PAL) and an 800XL (64 KB, NTSC).
   - `gaps.md`, section "V1 batch 3, Atari step 1": gap 4, a comprehension cannot build a table of `addr(var) + offset` (a written-out list can), and its message suggests `round()`.
 - **Provisional (front-end choices the developer may change):** colours (red bricks look magenta on PAL's palette; `$34`); treasures and the fast-fall target share PF3 (gold), so a target tile turns gold instead of white; the HUD's score flash is inverse video; Esc pauses. The game steps once a frame, so on NTSC it runs 20% faster than on PAL, the timer included (question 190).
-- **Next step:** step 2, the sprites (above). Before it, play step 1 in Altirra by hand (joystick, Esc, the sounds), which the screenshots could not check.
+- **Played by the developer** in Altirra (800, 48 KB, PAL), 2026-11-23: "looking good".
+- **Next step:** step 2, the sprites (above).
 - **Methods over 100 lines:** none (no compiler change).
 
 ### V1 batch 3 on `v1-smashy-nes` (the C64 split; carried into `v1-smashy-atari`)
