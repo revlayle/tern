@@ -74,6 +74,25 @@ The OS takes every interrupt and calls the program's handlers through vectors; a
 
 `examples/atari/dli.tern` gives each row of text its own background color: a DLI sets the next row's color, and a VBI starts the colors again each frame.
 
+**Frame time.** ANTIC's DMA takes its cycles from the CPU: a full-width character mode with player-missile graphics on every line leaves about 20,000 of a PAL frame's 35,568 cycles, and about 15,000 of an NTSC frame's 29,868. A game whose frame runs long now and then should not lose a tick for it. Count ticks in the VBI and run one whenever one is owed, so a long frame borrows from the next:
+
+```tern
+var owed: u8
+
+interrupt fn frame() {
+    if owed < 2 {
+        owed += 1
+    }
+}
+
+fn wait_tick() {
+    while owed == 0 { }
+    owed -= 1
+}
+```
+
+A game timed for PAL keeps its speed on NTSC when the VBI adds no tick every sixth frame. The OS's frame work costs about 1,500 cycles; a handler installed with `set_vbi_immediate` replaces it, and copies only the shadow registers the program uses and reads the joystick itself (`atari.pia.porta`, `atari.gtia_in.trig`).
+
 ## 7.5 Files: `io`
 
 The Atari's `io` works through CIO, on one file at a time (IOCB 1). Names are ATASCII with their device, `"D1:SCORES.DAT"`:
