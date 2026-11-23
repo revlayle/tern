@@ -450,13 +450,23 @@ public sealed partial class CodeGen
             Assign(a.Target, a.Value);
             return;
         }
+        // a[f()] += v: the index computed first into a statement temporary (spec 5), then a[t] += v.
+        if (OutermostCallIndex(a.Target) is { } called)
+        {
+            var index = called.Index;
+            var t = AcquireTemp(1);
+            GenA(index);
+            Op(Sta, Var(t));
+            called.Index = new NameExpr(index.Pos, t.Name) { Symbol = t, Type = index.Type };
+            try { GenAssign(a); }
+            finally { called.Index = index; }
+            Release(t);
+            return;
+        }
         // The shorter forms, in order (spec 11).
         if (StepHeldRegister(a) || StepMemory(a) || StepByteTwice(a) || StepHighByte(a) || StepElementInX(a) || ShiftInPlace(a)) return;
 
         var target = a.Target;
-        if (ContainsCall(target))
-            throw new CompileError(a.Pos, "Compound assignment to an element whose index calls a function is not supported. Store the index in a variable first");
-
         if (CompoundThroughPointer(a) || CompoundAtExpensiveIndex(a)) return;
 
         var op = a.Op switch
@@ -467,6 +477,15 @@ public sealed partial class CodeGen
         };
         Assign(target, new BinaryExpr(a.Pos, op, target, a.Value) { Type = target.Type });
     }
+
+    /// <summary>The outermost element of an assignment's target whose index calls a function (<c>a[f()]</c>, <c>e[pick()].hp</c>, <c>a[b[f()]]</c>), or null.</summary>
+    private static IndexExpr? OutermostCallIndex(Expr target) => target switch
+    {
+        IndexExpr ix when ContainsCall(ix.Index) => ix,
+        IndexExpr ix => OutermostCallIndex(ix.Target),
+        MemberExpr m => OutermostCallIndex(m.Target),
+        _ => null,
+    };
 
     /// <summary>x += 1 / x -= 1 on a variable held in a register for a loop: inx / dex / iny / dey; x += 2 / x -= 2 twice (spec 11). False when it does not apply.</summary>
     private bool StepHeldRegister(AssignStmt a)
