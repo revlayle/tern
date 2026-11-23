@@ -327,6 +327,17 @@ public sealed partial class CodeGen
             Op(m, left);
             return;
         }
+        // x - v with v in A (a using A parameter), or v needing code and x in place: eor #$FF / sec / adc x,
+        // which is x + ~v + 1 with the carry of sbc, so v is not stored (V1 fixes 2).
+        if (b.Op == TokenKind.Minus && (AHolds(b.Right) || (right is null && IndexedOperand(b.Right) is null))
+            && (Simple1(b.Left) is { } l ? m2 => Op(m2, l) : IndexedOperand(b.Left) is { } el ? (Action<Mnemonic>)(m2 => el(m2, 0)) : null) is { } useLeft)
+        {
+            GenA(b.Right);
+            Op(Eor, Byte(0xFF));
+            Emit(Sec);
+            useLeft(Adc);
+            return;
+        }
         if (right is not null)
         {
             GenA(b.Left);

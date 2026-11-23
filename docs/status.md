@@ -1051,7 +1051,7 @@ Cycles including `jsr` and `rts`, best and worst over the test values (`FloatTes
 | `to_i16` / `round_i16` | 13 / 13, + 76 + `int_part` | 164-469 / 164-495 | |
 | `trunc` | 31 + 60 + 8 | 94-307 | `chop` and a mask table |
 | `floor` | 116 + `chop` + 8 | 94-395 | |
-| `dec` | 225 + 363 + 16 | 1251-7633 below 65536; up to 91222 | the most for 39-digit values near 1.7e38; the 16 are `text_digits.DIGITS`, shared with `text` and `wide` |
+| `dec` | 225 + 363 + 16 | 1239-7618 below 65536; up to 91101 (V1 fixes 2; was 1251-7633, 91222) | the most for 39-digit values near 1.7e38; the 16 are `text_digits.DIGITS`, shared with `text` and `wide` |
 | `of` | none | none | compile time |
 
 ## Known limitations and technical debt

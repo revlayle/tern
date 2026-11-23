@@ -367,7 +367,8 @@ public class AsmTests
             """);
         Assert.Equal(42 + 9, r.U8("out"));
         Assert.NotEqual(r.Address("main.keep"), r.Address("twice.t"));
-        Assert.NotEqual(r.Address("main.keep"), r.Address("twice.v"));
+        // v is read from A only: it has no memory (V1 fixes 2).
+        Assert.DoesNotContain("twice.v", r.Result.Symbols.Keys);
     }
 
     [Fact]
