@@ -844,9 +844,52 @@ public sealed partial class CodeGen
         return true;
     }
 
+    /// <summary>
+    /// A sum of two unsigned bytes widened to 16 bits, <c>(a as u16) + e</c> (V1 fixes 2, gap 30; spec 11): a byte
+    /// add with the carry into the high byte, <c>e in A / clc / adc a / sta s / lda #0 / adc #0 / sta s+1</c>,
+    /// with no 16-bit temporary. The operand that needs code goes in A, the other is the <c>adc</c> operand; when
+    /// both need code, one goes through a byte temporary. Not when both call a function or read volatile memory
+    /// (spec 5 orders them). False if the expression is not of this form.
+    /// </summary>
+    private bool WidenedByteSum(BinaryExpr b, Loc d)
+    {
+        static Expr? Widened(Expr e) => e switch
+        {
+            { Type: { Size: 1, IsSigned: false } } => e,
+            CastExpr { Operand.Type: { Size: 1, IsSigned: false } } c when !e.Type.IsSigned => c.Operand,
+            _ => null,
+        };
+        if (b.Op != TokenKind.Plus || b.Type.IsSigned || Widened(b.Left) is not { } left || Widened(b.Right) is not { } right
+            || left.ConstValue is not null || right.ConstValue is not null || (HasEffect(left) && HasEffect(right)))
+            return false;
+        // The operand used in place: a plain byte, or an element (adc a,x).
+        Action<Mnemonic>? Operand(Expr e) =>
+            Simple1(e) is { } op ? m => Op(m, op) : IndexedOperand(e) is { } element ? m => element(m, 0) : null;
+        var (inA, other) = Operand(right) is null && Operand(left) is not null ? (right, left) : (left, right);
+        VariableSymbol? temp = null;
+        var use = Operand(other);
+        if (use is null)
+        {
+            temp = AcquireTemp(1);
+            GenA(other);
+            Op(Sta, Var(temp));
+            use = m => Op(m, Var(temp));
+        }
+        GenA(inA);
+        CarryFor(TokenKind.Plus, inA);
+        use(Adc);
+        Op(Sta, d.Lo);
+        Op(Lda, Byte(0));
+        Op(Adc, Byte(0));
+        Op(Sta, d.Hi);
+        if (temp is not null) Release(temp);
+        return true;
+    }
+
     /// <summary>Any other 16-bit <c>+</c>, <c>-</c>, <c>&amp;</c>, <c>|</c> or <c>^</c>: both operands in place, or the left side into the destination and the right side as the operand.</summary>
     private void Arith16(BinaryExpr b, Loc d)
     {
+        if (WidenedByteSum(b, d)) return;
         if (ShiftedOperand16(b, d)) return;
         // K + a is a + K, so the order of the operands does not change the code (spec 11).
         if (b.Op == TokenKind.Plus && b.Left.ConstValue is not null && b.Right.ConstValue is null)
