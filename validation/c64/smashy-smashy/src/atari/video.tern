@@ -119,7 +119,7 @@ fn init() {
     atari.color[3] = COLOR_GOLD
     atari.color[4] = COLOR_BORDER
     atari.chbas = ROM_FONT_PAGE
-    sprites.init()
+    sprites.init(addr(dlist) + 8)   // playfield row 0's instruction (make_display_list)
     atari.sdmctl = $3E              // normal playfield, players and missiles, single-line resolution
     atari.set_display_list(addr(dlist))
 }
@@ -140,14 +140,13 @@ fn make_font() {
 }
 
 // The display list: 16 blank lines, the HUD row (a DLI at its end switches to the game's character set
-// and colours), a blank mode 4 row and the 24 playfield rows, all vertically scrolled, with a DLI at the end
-// of playfield rows 0-22 (the sprites' moves, and the floor's colour), then the blank row once more,
-// unscrolled, which ends the scrolled area.
+// and colours), a blank mode 4 row and the 24 playfield rows, all vertically scrolled, then the blank row
+// once more, unscrolled, which ends the scrolled area. Playfield rows 0-22 get their DLI bits from
+// sprites.vbi(): the rows whose DLI moves sprites, and FLOOR_DLI_ROW (the floor's colour) always.
 // With VSCROL = v the first blank row shows lines v-7 and the last lines 0-v, so the screen keeps its
 // height and the playfield moves down as v goes from NORMAL_SCROLL to 0.
 const DL_MODE4: u8 = 4
-const FLOOR_DLI_ROW: u8 = 21        // the DLI at the end of this playfield row sets the floor's colour
-const LAST_DLI_ROW: u8 = 22         // playfield rows 0-22 end with a DLI
+const FLOOR_DLI_ROW: u8 = sprites.ALWAYS_ROW     // the DLI at the end of this playfield row sets the floor's colour
 
 fn make_display_list() {
     var d: ptr u8 = addr(dlist)
@@ -162,14 +161,14 @@ fn make_display_list() {
     d[5] = DL_MODE4 | atari.DL_LMS | atari.DL_VSCROLL
     d[6] = blank.lo
     d[7] = blank.hi
-    d[8] = DL_MODE4 | atari.DL_LMS | atari.DL_VSCROLL | atari.DL_DLI
+    d[8] = DL_MODE4 | atari.DL_LMS | atari.DL_VSCROLL    // sprites.ROW0_OP
     d[9] = play.lo
     d[10] = play.hi
     var i: u8 = 11
-    for r in 1..ROWS - 1 {          // playfield rows 1-23
+    for r in 1..ROWS - 1 {          // playfield rows 1-23: sprites.ROW_OP
         var op: u8 = DL_MODE4 | atari.DL_VSCROLL
-        if r <= LAST_DLI_ROW {
-            op |= atari.DL_DLI
+        if r == FLOOR_DLI_ROW {
+            op |= atari.DL_DLI      // until the first frame's sprites.vbi()
         }
         d[i] = op
         i += 1
@@ -187,7 +186,7 @@ fn make_display_list() {
 // (VCOUNT 22-23). The DLI tells the HUD's apart by VCOUNT, and counts the playfield rows from there, so it
 // needs no state that a skipped VBI could leave wrong (review finding 1).
 const HUD_DLI_LIMIT: u8 = 19
-var dli_row: u8                     // the playfield row whose DLI comes next
+var dli_grp: u8                     // the group (sprites.grp_row) whose DLI comes next
 
 interrupt fn dli() {
     // WSYNC first, so the changes land in the horizontal blank (the first moves; a row that moves several
@@ -198,14 +197,16 @@ interrupt fn dli() {
         atari.antic.chbase = addr(charset).hi
         atari.gtia.colpf[1] = COLOR_MC2
         atari.gtia.colpf[2] = COLOR_OWN
-        dli_row = 0
+        dli_grp = 0
         return
     }
-    // the end of playfield row r: the sprites' moves for the row below, and the floor's colour
-    var r: u8 = dli_row
-    dli_row = r + 1
-    var i: u8 = sprites.row_first[sprites.shown_rows + r]
-    var e: u8 = sprites.row_first[sprites.shown_rows + r + 1]
+    // the end of a playfield row with moves: the sprites' moves for the rows below, and on the floor's row
+    // its colour
+    var g: u8 = sprites.shown_grp + dli_grp
+    dli_grp += 1
+    var r: u8 = sprites.grp_row[g]
+    var i: u8 = sprites.grp_first[g]
+    var e: u8 = sprites.grp_first[g + 1]
     atari.antic.wsync = 0
     while i != e {
         var s: u8 = sprites.ent_slot[i]
@@ -367,7 +368,9 @@ fn shake(n: u8) {
 }
 
 fn shake_step() {
-    // Once per play frame.
+    // Once per play frame, after the frame's drawing: so the sprites are drawn here, before nav.idle_build()
+    // spends the rest of the frame (its budget counts on the drawing being done, as on the C64, where the
+    // frame IRQ only copies shadows).
     if shake_left != 0 {
         shake_left -= 1
     }
@@ -378,6 +381,7 @@ fn shake_step() {
         scroll = NORMAL_SCROLL
         sprites.dy = 0
     }
+    sprites.render()
 }
 
 fn stop_shake() {
@@ -423,8 +427,11 @@ fn frame_lines() -> u8 {
 }
 
 fn wait_frame() {
-    // First the sprites as the frame left them, into the copy the next VBI shows.
-    sprites.render()
+    // First the sprites as the frame left them, into the copy the next VBI shows, unless shake_step() drew
+    // them already (the play loop).
+    if !sprites.rendered {
+        sprites.render()
+    }
     while !frame_ready { }
     frame_ready = false
 }

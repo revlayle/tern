@@ -289,3 +289,26 @@ No new gap. The DLI is plain Tern; its moves land a few lines into the next row 
 WSYNC: the OS's NMI dispatch, the `interrupt fn`'s saves of A, X and Y, the HUD test, two table lookups), which
 the slot rule allows for rather than the code. Whether an assembly DLI would reach WSYNC within the line is not
 measured yet.
+
+**The cost** (`tern run --profile` on a scratch program that places 6 actors and 2 popups and calls `render()`
+and `vbi()` 3 times):
+
+| Version | `render()` per frame |
+|---|---|
+| first: a loop per row to draw, `mem.fill` to clear, a 25-row index for the DLIs, every row's DLI | about 13,300 |
+| the copies and clears unrolled (`draw16`, `clear16`, ...: about 11 cycles a byte against 20) | about 12,100 |
+| a part drawn at the same place with the same picture in that copy is not drawn again; the DLI bits only on rows with moves, set by the VBI; the position in colour clocks and the graphics pointer worked out in `set_actor` | about 9,000 when nothing moved vertically or changed picture, 10,800 averaged over the 3 calls |
+
+What is left is bookkeeping, about 1,000 cycles per object: the insertion sort, the slot search, and in
+`draw_parts` the compares of two pointers per part (`new_at[i] != old || new_src[i] != drawn_src[d + i]` is 86
+cycles) and the copies of pointers between arrays. The DLIs now cost only on the rows with moves and the floor's
+row (typically 2 to 5 a frame, against 23).
+
+**Where the frame's time went:** the first version drew the sprites in `video.wait_frame()`, after
+`nav.idle_build()`, which fills the frame's spare time up to its budget (`BUILD_START_LINES`, as on the C64, where
+the frame IRQ only copies shadows), so `render()` ran past the next VBI: a scratch build that counted the frames
+where `wait_frame()` found the next frame already begun showed hundreds in about 1,000 play frames on PAL. Drawn
+in `video.shake_step()`, the play loop's last drawing call before `idle_build()`, and with the cheaper version:
+9 in about 1,250 frames on PAL (levels, game over and rebuild slices together; step 5 measures the rebuild's
+budget) and none on NTSC. Every map rebuild gets less of the frame than on the C64 (decision 189: each machine
+its own budget).
