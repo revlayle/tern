@@ -549,9 +549,18 @@ fn stop_shake() {
     shake_step()
 }
 
-// ---- the frame interrupt ----
+// ---- the frame interrupt and the game's ticks (decision 2026-11-23, questions 190-191) ----
+// The VBI owes the game a tick (at most 2 owed); wait_frame() runs one whenever one is owed, so a frame that runs
+// long borrows from the next instead of losing a tick (its sprites then show a frame late; the double buffer
+// keeps them whole). On NTSC the VBI owes no tick every sixth frame: the game, timed for PAL, runs at PAL's 50
+// ticks a second there too, its timer and sound included, and each tick has about a fifth more time.
+// frame_ready is true while a tick is owed: nav.idle_build() starts a rebuild slice only when it is false.
+// (main.level_start() clears it to start on a fresh frame; the owed ticks stay, and are run at once.)
 var frame_ready: bool
-var frames: u8                      // counts frames
+var owed: u8                        // ticks owed by the VBI, 0-2
+var frames: u8                      // counts ticks (50 a second on PAL and NTSC)
+var ntsc: bool
+var ntsc_count: u8                  // NTSC: frames since the last frame with no tick, 0-5
 var frame_tail: u8                  // scan lines from the vertical blank's start (line 248) to line 0, and on
                                     // NTSC the rebuild's reserve
 // The map rebuild's budget on the Atari (question 189: each machine its own). nav.idle_build() starts a slice
@@ -564,25 +573,47 @@ const NTSC_RESERVE: u8 = 11
 
 fn start_frame_irq() {
     frame_tail = 312 - 248          // PAL
-    if atari.gtia_in.pal & $0E != 0 {
-        frame_tail = 262 - 248 + NTSC_RESERVE      // NTSC
+    ntsc = atari.gtia_in.pal & $0E != 0
+    if ntsc {
+        frame_tail = 262 - 248 + NTSC_RESERVE
     }
-    atari.set_vbi(addr(frame_vbi))
+    atari.set_vbi_immediate(addr(frame_vbi))
     atari.set_dli(addr(dli))
 }
 
 interrupt fn frame_vbi() {
-    // After the OS's frame work, which has copied the shadow registers (the HUD's font and colours).
+    // The immediate VBI, in place of the OS's frame work (about 1,500 cycles): it copies the few shadow
+    // registers the game sets to the chips and nothing else. The OS's clock, attract mode, joystick copies
+    // and key repeat stop; the game reads the joystick from the chips (input.tern), and the keyboard still
+    // works (CH comes from the keyboard IRQ).
+    atari.antic.dlist = atari.sdlst
+    atari.antic.dmactl = atari.sdmctl
+    atari.antic.chbase = atari.chbas
+    atari.gtia.prior = atari.gprior
+    atari.gtia.colpf[0] = atari.color[0]
+    atari.gtia.colpf[1] = atari.color[1]
+    atari.gtia.colpf[2] = atari.color[2]
+    atari.gtia.colpf[3] = atari.color[3]
+    atari.gtia.colbk = atari.color[4]
     atari.antic.vscrol = scroll
     sprites.vbi()
     if title_mode {
         title_dli_bits()
         next_color = title_color[1]
     }
-    atari.atract = 0                // no attract mode: the game is never idle long enough to need it
+    if ntsc {
+        ntsc_count += 1
+        if ntsc_count == 6 {
+            ntsc_count = 0
+            return                  // no tick this frame
+        }
+    }
     sound.step()
-    frame_ready = true
     frames += 1
+    if owed < 2 {
+        owed += 1
+    }
+    frame_ready = true
 }
 
 fn frame_lines() -> u8 {
@@ -605,6 +636,9 @@ fn wait_frame() {
     if !sprites.rendered {
         sprites.render()
     }
-    while !frame_ready { }
-    frame_ready = false
+    while owed == 0 { }
+    owed -= 1
+    if owed == 0 {
+        frame_ready = false         // a VBI may set it again at once: then a rebuild slice starts with a tick
+    }                               // owed, and the tick waits for it (bounded by the slice's line budget)
 }

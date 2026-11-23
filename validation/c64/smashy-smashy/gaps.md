@@ -402,3 +402,23 @@ since the VBI, and on NTSC 11 more (`NTSC_RESERVE`), so a slice (up to about 80 
 it ends before the next VBI. With it, no overrun came during a rebuild on either.
 
 No new gap.
+
+### The frame-time decision built (decision 2026-11-23, questions 190-191)
+
+`video.tern`: the VBI owes ticks (at most 2) and `wait_frame()` runs one whenever one is owed; `frame_ready` is
+true while one is owed (`nav.idle_build()`'s test); on NTSC the VBI owes no tick every sixth frame, and `frames` and
+`sound.step()` follow ticks, so the game, its timer and its sounds run at PAL's 50 a second on both. The game's own
+immediate VBI (`atari.set_vbi_immediate`) copies the shadows it uses (`SDLST`, `SDMCTL`, `CHBAS`, `GPRIOR`, the
+colours) in place of the OS's frame work; `input.tern` reads `PORTA` and `TRIG0`. Nothing in play read the OS's
+clock or other shadows (checked). `AtariChips` gives `PORTA` and `TRIG0` too.
+
+Counted in Altirra as play frames that ended with a tick already owed (about 2,000 each): PAL 6, none during a
+rebuild; NTSC 612 (108 during a rebuild). No tick is lost now, but such a frame's sprites show a frame late, and
+the developer still sees that under heavy activity. An NTSC frame leaves about 15,000 cycles; the skipped tick
+every sixth frame gives the game time to catch up, not more time per frame.
+
+Memory: variables reach `$B7A5`, about 1,150 bytes under `$BC1F`. A scratch build with about 300 bytes more code
+failed: the variables' block then started past a 2 KB boundary and the aligned player-missile memory no longer
+fitted. Each copy's first `$300` bytes are unused by ANTIC (single-line players start at +`$400`, missiles at
++`$300`), and the padding before an aligned variable stays empty (spec 4: the compiler may place other variables
+in it but does not yet): about 3.5 KB in all. Recorded as a constraint, not a gap: the spec already names it.

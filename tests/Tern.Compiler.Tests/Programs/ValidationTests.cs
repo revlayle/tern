@@ -122,23 +122,30 @@ public class ValidationTests
     }
 
     [Fact]
-    public void AtariChips_gives_the_joystick_through_the_os_copies_and_no_key()
+    public void AtariChips_gives_the_joystick_from_the_chips_and_the_os_copies_and_no_key()
     {
-        // The script's bits as the OS's STICK0 (0 = pressed) and STRIG0, per frame; SKSTAT with no key down.
+        // The script's bits, per frame, as the PIA's PORTA (port 1 in bits 0-3, 0 = pressed; port 2 idle) and
+        // GTIA's TRIG0, and as the OS's STICK0 and STRIG0; SKSTAT with no key down.
         var result = Run.Compile("""
             import atari
             var stick: u8
             var trig: u8
+            var porta: u8
+            var trig0: u8
             var skstat: u8
             fn main() {
                 stick = atari.stick[0]
                 trig = atari.strig[0]
+                porta = atari.pia.porta
+                trig0 = atari.gtia_in.trig[0]
                 skstat = atari.pokey_in.skstat
             }
             """, platform: Platform.Atari);
         var r = Run.Of(result, setup: AtariChips.Os, standIns: true, bus: b => new AtariChips(b, _ => 0b1_0101));
         Assert.Equal(0x0A, r.U8("stick"));      // up and left held
         Assert.Equal(0, r.U8("trig"));          // fire held
+        Assert.Equal(0xFA, r.U8("porta"));
+        Assert.Equal(0, r.U8("trig0"));
         Assert.Equal(0xFF, r.U8("skstat"));
     }
 

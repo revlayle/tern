@@ -1,10 +1,11 @@
 // Joystick 1 and the Esc key (the C64's Run/Stop: pause), with edge detection. The same interface as
-// c64/input.tern. The joystick comes from the OS's copies (STICK0, STRIG0), read every vertical blank;
-// the key from POKEY (key down in SKSTAT, its code in KBCODE), so it reads as held for as long as it is.
+// c64/input.tern. The joystick comes from the chips (the PIA's PORTA, GTIA's TRIG0): the game's own VBI
+// replaces the OS's, which made the copies STICK0 and STRIG0. The key from POKEY (key down in SKSTAT, its code
+// in KBCODE), so it reads as held for as long as it is.
 import atari
 import levelgen
 
-// joystick bits, 1 = active: STICK0's bits 0-3 are up, down, left and right, as the C64's port bits
+// joystick bits, 1 = active: PORTA's bits 0-3 are up, down, left and right, as the C64's port bits
 const UP: u8 = 0b00001
 const DOWN: u8 = 0b00010
 const LEFT: u8 = 0b00100
@@ -21,8 +22,8 @@ var pressed: u8     // bits that went from released to held this frame (fire, do
 var prev: u8
 
 fn read() {
-    var joy: u8 = ~atari.stick[0] & $0F
-    if atari.strig[0] == 0 {
+    var joy: u8 = ~atari.pia.porta & $0F     // joystick 1: PORTA's low bits, 0 = pressed
+    if atari.gtia_in.trig[0] == 0 {
         joy |= FIRE
     }
     if atari.pokey_in.skstat & 4 == 0 && atari.pokey_in.kbcode & $3F == KEY_ESC {

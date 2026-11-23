@@ -22,8 +22,9 @@ public interface INmiSource
 /// each frame from <c>SDLST</c> (<c>$0230</c>; the OS copies it to ANTIC in each vertical blank), with each
 /// mode's lines and the vertical scroll (<c>VSCROL</c>, <c>$D405</c>, as the program last wrote it) of rows with
 /// bit 5 set: the first such row shows lines VSCROL to the end, the row after the last one lines 0 to VSCROL.</item>
-/// <item>The joystick in port 1 through the OS's copies, <c>STICK0</c> (<c>$0278</c>, 0 = pressed, bits 0-3 up, down,
-/// left, right) and <c>STRIG0</c> (<c>$0284</c>), which the OS reads in each vertical blank; no key held
+/// <item>The joystick in port 1, from the chips (the PIA's <c>PORTA</c>, <c>$D300</c>, bits 0-3 up, down, left,
+/// right, 0 = pressed, port 2 idle; GTIA's <c>TRIG0</c>, <c>$D010</c>) and through the OS's copies (<c>STICK0</c>,
+/// <c>$0278</c>, and <c>STRIG0</c>, <c>$0284</c>, which the OS makes in each vertical blank); no key held
 /// (<c>SKSTAT</c> <c>$D20F</c> reads <c>$FF</c>).</item>
 /// <item>A PAL machine (GTIA's <c>PAL</c>, <c>$D014</c>, reads 1), and POKEY's <c>RANDOM</c> (<c>$D20A</c>) the next
 /// byte of a fixed sequence on each read, so a run repeats exactly and a seed read from it does not change when
@@ -38,6 +39,7 @@ public sealed class AtariChips(IBus inner, Func<long, byte> joystick) : IBus, IN
     private const int FirstDisplayLine = 8;
     private const ushort Vcount = 0xD40B, Wsync = 0xD40A, Nmien = 0xD40E, Nmist = 0xD40F, Vscrol = 0xD405;
     private const ushort Sdlst = 0x0230, Stick0 = 0x0278, Strig0 = 0x0284, Skstat = 0xD20F, Random = 0xD20A, Pal = 0xD014;
+    private const ushort Porta = 0xD300, Trig0 = 0xD010;
     /// <summary>The scan lines of each ANTIC mode's rows (modes 2-15).</summary>
     private static readonly int[] ModeLines = [0, 0, 8, 10, 8, 16, 8, 16, 8, 4, 4, 2, 1, 2, 1, 1];
 
@@ -59,7 +61,8 @@ public sealed class AtariChips(IBus inner, Func<long, byte> joystick) : IBus, IN
         Vcount => (byte)(Cycles % FrameCycles / LineCycles / 2),
         Nmist => _nmist,
         Stick0 => (byte)(~joystick(Frame) & 0x0F),
-        Strig0 => (byte)((joystick(Frame) & 0x10) != 0 ? 0 : 1),
+        Strig0 or Trig0 => (byte)((joystick(Frame) & 0x10) != 0 ? 0 : 1),
+        Porta => (byte)(~joystick(Frame) & 0x0F | 0xF0),
         Skstat => 0xFF,
         Random => NextRandom(),
         Pal => 1,
