@@ -259,3 +259,18 @@ elements written out as a list (`[addr(screen), addr(screen) + 40, ...]`) compil
 and `addr(screen).lo` / `.hi` work in a list. The message's fix is about real numbers and does not apply. Worked
 around: `video.init()` fills `text_row` and `tile_row_addr` at startup (the C64's `video` builds the same tables
 from the constant `SCREEN` at compile time).
+
+### 5. A local set once from a link-time constant is stored and reloaded
+
+Review V1 batch 3 Atari step 1, finding 2. In the DLI,
+
+```
+var page: u8 = addr(charset).hi
+atari.antic.wsync = 0
+atari.antic.chbase = page
+```
+
+compiles to `lda #video.charset.hi` / `sta video.dli.page`, then after the WSYNC store `lda video.dli.page` /
+`sta atari.antic+9`: the local holds nothing in a register over the volatile store, so it is 6 bytes and 2 cycles
+(in the DLI, after WSYNC) more than writing `atari.antic.chbase = addr(charset).hi`, which the front end now does.
+A local that is only ever set from a constant (here a link-time one, `addr(x).hi`) could be folded into its uses.

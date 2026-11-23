@@ -14,12 +14,12 @@ Owned by the coding session. Updated at the end of every coding session.
   4. The test harness's Atari pieces (a VBI and DLIs on the cycle clock, VCOUNT, STICK0/STRIG0 from a script) and the Atari known result: the shared logic's state after a set number of ticks; with `TERN_REAL=1`, an Altirra screenshot. Then the cross-machine known result of question 189 (generated levels and finished route tables, the same as the C64's).
   5. The map rebuild's budget measured on the Atari (decision 189: its own budget from VCOUNT): step 1 keeps `nav.BUILD_START_LINES` (185) and makes `video.frame_lines()` count scan lines from the VBI's start as the C64 counts raster lines from its IRQ; check in Altirra that a frame with a rebuild slice ends before the next VBI, on PAL and NTSC.
 - **Done (step 1):**
-  - `assets.tern` moved from `src/c64/` to `src/`: both front ends use the art's names (C64 build byte for byte the same, 20,983 bytes).
+  - `assets.tern` moved from `src/c64/` to `src/`: both front ends use the art's names (the C64 `.prg` byte for byte the same, 20,985 bytes with its load address; the compiler reports 20,983 bytes of code and data).
   - `src/atari/video.tern`: a display list built at startup (16 blank lines; the HUD in ANTIC mode 2 with the ROM font; a blank row, the 24 playfield rows in ANTIC mode 4 and the blank row again, vertically scrolled, so the shake is VSCROL 2 -> 0 with the screen's height kept); `chars.bin` used as it is (ANTIC mode 4's pixel values are the C64's multicolour ones); a DLI after the HUD (the game's character set, PF1, PF2) and one after row 22 (the floor's blue); treasures and the fast-fall target as inverse characters (PF3); the score flash as inverse HUD digits (the HUD row has one colour); messages from the shared modules' C64 screen codes into a 3-pixel font built from the ROM font at startup (pixel pairs 1-2, 3-4, 5-6 of each row); the frame interrupt as the OS's deferred VBI (`atari.set_vbi`); `frame_lines()` from VCOUNT, PAL or NTSC from GTIA. Screen, character set and player-missile memory are `noinit var`s with `@ align(n)` (the only `memory` block is in the shared `main.tern`).
   - `src/atari/sound.tern`: POKEY channel 1 with the C64's tables; the SID pitch's high byte picks the divider from a table built at compile time; the envelope as the sustain level, then a fall in about the SID's release time. Not heard yet (the screenshots are silent).
   - `src/atari/input.tern`: STICK0 (the same bit order as the C64's port), STRIG0, Esc held (SKSTAT/KBCODE) as Run/Stop; the random seed from POKEY's RANDOM. Not driven in Altirra yet (the checks use a scratch build that starts a game by itself).
   - Placeholders: `title` (SMASHY SMASHY, PRESS FIRE and the high score in the message font), `pages` (no pages), `popup` (nothing shown); `set_sprite`/`hide_sprite` keep shadows only.
-  - 16,554 bytes of code and data; variables to `$929B`.
+  - 16,542 bytes of code and data (after the review's DLI changes); variables to `$929B`.
   - `ValidationTests.Smashy_smashy_builds_for_the_atari`: builds with no warning, the screen inside one 4 KB block, the character set on 1 KB, the display list inside 1 KB.
   - Altirra: the title, and (a scratch build whose title starts a game after 100 frames) a level with the HUD counting down, on an 800 (48 KB, PAL) and an 800XL (64 KB, NTSC).
   - `gaps.md`, section "V1 batch 3, Atari step 1": gap 4, a comprehension cannot build a table of `addr(var) + offset` (a written-out list can), and its message suggests `round()`.
@@ -27,6 +27,15 @@ Owned by the coding session. Updated at the end of every coding session.
 - **Played by the developer** in Altirra (800, 48 KB, PAL), 2026-11-23: "looking good".
 - **Next step:** step 2, the sprites (above).
 - **Methods over 100 lines:** none (no compiler change).
+
+### Review findings handled (`docs/reviews/v1-batch-3-atari-step-1.md`, interim, no must-fix)
+
+| Finding | Commit | Guarded by | State |
+|---|---|---|---|
+| 1 (the DLI's branch from a flag only the deferred VBI clears) | this commit | | fixed: the DLI tells the HUD's from the floor's by VCOUNT (below 64: the HUD's, on VCOUNT 15; the floor's on about 107); no state, and `frame_vbi` no longer resets anything for it. Step 2's DLIs follow the same rule |
+| 2 (`var page` stored and reloaded in the DLI) | this commit | | fixed: `atari.antic.chbase = addr(charset).hi`; the shape logged as gap 5 in `gaps.md` |
+| 3 (two byte counts for the C64 build) | this commit | | fixed: 20,985 bytes is the `.prg` with its load address, 20,983 the compiler's code and data; the status says which |
+| 4 (the build test could check `video.pm`) | | | with step 2, when `pm` is used |
 
 ### V1 batch 3 on `v1-smashy-nes` (the C64 split; carried into `v1-smashy-atari`)
 

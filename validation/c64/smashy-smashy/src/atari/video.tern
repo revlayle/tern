@@ -178,22 +178,22 @@ fn make_display_list() {
     d[i + 5] = at.hi
 }
 
-var dli_floor: bool                 // the next DLI is the floor's (the VBI clears it)
+// The HUD's DLI comes on scan line 31 (VCOUNT 15), the floor's near line 214 (VCOUNT 107): the DLI tells
+// them apart by VCOUNT, so it needs no state that a skipped VBI could leave wrong (review finding 1).
+const DLI_SPLIT_VCOUNT: u8 = 64
 
 interrupt fn dli() {
     // At the end of the HUD row: the game's characters and colours. At the end of row 22: the floor's.
     // WSYNC first, so the change lands in the horizontal blank.
-    if dli_floor {
+    if atari.antic.vcount >= DLI_SPLIT_VCOUNT {
         atari.antic.wsync = 0
         atari.gtia.colpf[2] = COLOR_FLOOR
         return
     }
-    var page: u8 = addr(charset).hi
     atari.antic.wsync = 0
-    atari.antic.chbase = page
+    atari.antic.chbase = addr(charset).hi
     atari.gtia.colpf[1] = COLOR_MC2
     atari.gtia.colpf[2] = COLOR_OWN
-    dli_floor = true
 }
 
 fn set_title_mode() {
@@ -383,7 +383,6 @@ fn start_frame_irq() {
 interrupt fn frame_vbi() {
     // After the OS's frame work, which has copied the shadow registers (the HUD's font and colours).
     atari.antic.vscrol = scroll
-    dli_floor = false
     atari.atract = 0                // no attract mode: the game is never idle long enough to need it
     sound.step()
     frame_ready = true
