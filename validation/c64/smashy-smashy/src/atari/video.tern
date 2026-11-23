@@ -328,13 +328,19 @@ interrupt fn dli() {
     }
     // the end of a playfield row with moves: the sprites' moves for the rows below, and on the floor's row
     // its colour
+    if dli_grp >= sprites.grp_count[sprites.shown] {
+        return                      // a DLI with no group (a row's bit set by something else): nothing to do
+    }
     var g: u8 = sprites.shown_grp + dli_grp
     dli_grp += 1
     var r: u8 = sprites.grp_row[g]
     var i: u8 = sprites.grp_first[g]
     var e: u8 = sprites.grp_first[g + 1]
     atari.antic.wsync = 0
-    while i != e {
+    if r == FLOOR_DLI_ROW {
+        atari.gtia.colpf[2] = COLOR_FLOOR   // first: the floor's top lines are drawn now; the moves are allowed
+    }                                       // to land late (sprites.LATE_LINES)
+    while i < e {
         var s: u8 = sprites.ent_slot[i]
         if s == sprites.MISSILES {
             // as sprites.set_missiles(), which the VBI calls: written out, so the two share no memory
@@ -348,9 +354,6 @@ interrupt fn dli() {
             atari.gtia.colpm[s] = sprites.ent_col[i]
         }
         i += 1
-    }
-    if r == FLOOR_DLI_ROW {
-        atari.gtia.colpf[2] = COLOR_FLOOR
     }
 }
 
@@ -381,10 +384,10 @@ fn set_game_mode() {
     // A blank screen in the game's colours. Leaving the title: the DLI bits back to the sprites' rows.
     mem.fill(addr(screen), 0, len(screen))
     if title_mode {
+        // In this order: out of title mode (the VBI no longer sets every row's DLI bit), the title's bits
+        // off, and only then the game's DLI. With the game's DLI on every row's bit it ran past the frame's
+        // groups (the developer's black screen after fire on the title).
         title_mode = false
-        atari.set_dli(addr(dli))
-        atari.chbas = ROM_FONT_PAGE
-        atari.color[1] = COLOR_HUD
         // The sprites have been hidden since the title started, so their groups are the floor's row only.
         // (Not sprites.dli_bits(), which the VBI calls: the two would share its memory.)
         dlist[8] &= ~atari.DL_DLI
@@ -392,6 +395,9 @@ fn set_game_mode() {
             dlist[r] &= ~atari.DL_DLI
         }
         dlist[10 + FLOOR_DLI_ROW] |= atari.DL_DLI
+        atari.set_dli(addr(dli))
+        atari.chbas = ROM_FONT_PAGE
+        atari.color[1] = COLOR_HUD
     }
 }
 

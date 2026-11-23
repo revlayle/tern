@@ -289,6 +289,36 @@ public class ValidationTests
     }
 
     [Fact]
+    public void Smashy_smashy_on_the_atari_ignores_dlis_with_no_sprite_group()
+    {
+        // The developer's black screen after fire on the title: leaving the title installed the game's DLI while
+        // every row's DLI bit was still on, the DLI ran past the frame's groups into a long loop over stale
+        // entries, and nested DLIs filled the stack. Here every row's bit is turned on in each frame of play:
+        // the game goes on (the DLI ignores a DLI with no group) and the stack stays shallow.
+        string dir = FindValidation("c64", "smashy-smashy");
+        string path = Path.Combine(dir, "src", "main.tern");
+        var result = TernCompiler.Compile(File.ReadAllText(path), Platform.Atari, sourcePath: path);
+        AtariChips? chips = null;
+        int dl = result.Symbols["video.dlist"];
+        int lowestStack = 0xFF, lastFrame = -1;
+        var r = Run.Of(result, maxCycles: 1300 * (long)AtariChips.FrameCycles, setup: AtariChips.Os, standIns: true,
+            until: run =>
+            {
+                if (chips!.Frames != lastFrame && chips.Frames > 300 && run.U8("video.title_mode") == 0)
+                {
+                    lastFrame = chips.Frames;
+                    run.Ram.Bytes[dl + 8] |= 0x80;                          // playfield rows 0-22
+                    for (int row = 11; row < 11 + 22; row++) run.Ram.Bytes[dl + row] |= 0x80;
+                }
+                if (chips.Frames > 300) lowestStack = Math.Min(lowestStack, run.Cpu.SP);
+                return chips.Frames >= 1200;
+            }, bus: b => chips = new AtariChips(b, SmashyJoystick));
+        Assert.Equal(1200, chips!.Frames);
+        Assert.True(lowestStack > 0xC0, $"the stack went down to ${lowestStack:X2}");
+        Assert.NotEqual(0, r.U8("video.frames"));
+    }
+
+    [Fact]
     public void Smashy_smashy_builds_for_the_atari()
     {
         // V1 batch 3, step 1: the shared logic with the Atari front end (src/atari/) builds with no warning, and
