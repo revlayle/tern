@@ -123,6 +123,14 @@ public sealed partial class CodeGen
             right = new NumberExpr(right.Pos, c + 1) { Type = right.Type, ConstValue = c + 1 };
             op = op == TokenKind.Greater ? TokenKind.GreaterEq : TokenKind.Less;
         }
+        // An unsigned u16 w > K or w <= K with K's low byte $FF is w >= K + 1 or w < K + 1, whose low byte
+        // is 0, so only the high byte is compared (Compare16; spec 11).
+        if (type.Size == 2 && !signed && op is TokenKind.Greater or TokenKind.LessEq && left.ConstValue is null
+            && right.ConstValue is long k && (k & 0xFF) == 0xFF && k < 0xFFFF && !ReadsVolatile(left))
+        {
+            right = new NumberExpr(right.Pos, k + 1) { Type = right.Type, ConstValue = k + 1 };
+            op = op == TokenKind.Greater ? TokenKind.GreaterEq : TokenKind.Less;
+        }
 
         // A signed s < 0 or s >= 0 is the sign bit (spec 11): lda s / bmi, lda s+1 / bpl for an i16.
         if (signed && right.ConstValue == 0 && op is TokenKind.Less or TokenKind.GreaterEq)
@@ -351,6 +359,17 @@ public sealed partial class CodeGen
             case TokenKind.NotEq:
                 LoadAndCompare(0); Branch(Bne, target);
                 LoadAndCompare(1); Branch(Bne, target);
+                break;
+            // Unsigned w < K or w >= K with K's low byte 0: the high byte decides (spec 11). For K = 256 it
+            // is the high byte against 0, which the load tests.
+            case TokenKind.Less or TokenKind.GreaterEq when !signed && right.ConstValue is long k && (k & 0xFF) == 0 && k > 0 && !ReadsVolatile(left):
+                l(Lda, 1);
+                if (k == 0x100) Branch(op == TokenKind.Less ? Beq : Bne, target);
+                else
+                {
+                    r(Cmp, 1);
+                    Branch(op == TokenKind.Less ? Bcc : Bcs, target);
+                }
                 break;
             default: // < or >=
                 l(Lda, 0); r(Cmp, 0);
