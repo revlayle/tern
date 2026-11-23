@@ -1,0 +1,409 @@
+// The Atari front end's screen: a display list of its own (a HUD row of ROM-font text, then 24 rows of
+// ANTIC mode 4, the C64's multicolour character format), the tiles, the HUD, messages over the playfield,
+// the shake through VSCROL and the frame interrupt (the OS's deferred vertical blank).
+// The same interface as c64/video.tern (the shared modules call it).
+//
+// Colours: ANTIC mode 4's pixel values are the C64's (01 = PF0, the C64's $D022; 10 = PF1, $D023; 11 =
+// PF2, the cell's own colour), so chars.bin is used as it is. The own colour is one per row instead of
+// one per cell: red down to the floor, blue on the floor's rows (a display-list interrupt sets it), and
+// PF3, the inverse characters' own colour, for treasures and the fast-fall target.
+import atari
+import mem
+import assets
+import sound
+import tilemap
+
+// ---- colours (Atari: hue in the high nibble, luminance in the low one) ----
+const COLOR_BORDER: u8 = $00
+const COLOR_BG: u8 = $00
+const COLOR_MC1: u8 = $04           // PF0: the C64's colour 11, dark grey
+const COLOR_MC2: u8 = $0A           // PF1: the C64's colour 15, light grey; also the messages' text
+const COLOR_OWN: u8 = $34           // PF2 down to the floor: red, the bricks' own colour
+const COLOR_FLOOR: u8 = $84         // PF2 on the floor's rows: blue
+const COLOR_GOLD: u8 = $1C          // PF3: treasures and the fast-fall target
+const COLOR_HUD_BG: u8 = $00        // the HUD row (ANTIC mode 2): PF2 is its background ...
+const COLOR_HUD: u8 = $0E           // ... and PF1's luminance its text
+const PLAYER_COLOR: u8 = $8A        // the C64's 14, light blue
+const ENEMY_COLOR: u8 = $34         // 2, red
+const ENEMY_CARRY_COLOR: u8 = $1C   // 7, yellow
+
+// ---- memory ----
+// Single-line player-missile graphics: missiles at +$300, players 0-3 at +$400, +$500, +$600, +$700.
+noinit var pm: [u8; 2048] @ align(2048)
+// 128 characters: the tiles (chars.bin) from 0, then the message font.
+noinit var charset: [u8; 1024] @ align(1024)
+// 25 rows of 40 (the HUD row, then the 24 playfield rows), then a blank row the display list shows above
+// and below the playfield. Aligned to 2 KB, so it never crosses a 4 KB boundary (ANTIC's counter wraps).
+const ROWS: u8 = 25
+const BLANK_ROW = 1000
+noinit var screen: [u8; 1040] @ align(2048)
+noinit var dlist: [u8; 48] @ align(64)       // built by init(), inside one 1 KB block
+
+const ROM_FONT = $E000              // the OS's character set, in internal code order
+const ROM_FONT_PAGE: u8 = $E0
+
+// Characters of the message font, after the tiles. Messages arrive as C64 screen codes (the shared
+// modules' screen"..." strings), and font_char maps them: 0 for a code with no glyph (a blank cell).
+const FONT_FIRST: u8 = assets.TILE_COUNT * 4
+data font_codes = screen"abcdefghijklmnopqrstuvwxyz0123456789?+-/!"
+const INVERSE: u8 = $80             // ANTIC mode 4: own pixels in PF3 instead of PF2
+
+// tile value -> top-left char (as c64/video.tern's tile_char, with this charset's numbers)
+const fn tl(c64_char: int) -> int {
+    return c64_char - assets.TILE_FIRST_CHAR
+}
+data tile_char: [u8; _] = [
+    tl(assets.TILE_EMPTY_TL), tl(assets.TILE_SOLID_TL), tl(assets.TILE_DAMAGED_TL), tl(assets.TILE_FLOOR_TL),
+    tl(assets.TILE_EMPTY_TL), tl(assets.TILE_EMPTY_TL), tl(assets.TILE_EMPTY_TL), tl(assets.TILE_EMPTY_TL),
+    tl(assets.TILE_EMPTY_TL), tl(assets.TILE_EMPTY_TL), tl(assets.TILE_EMPTY_TL), tl(assets.TILE_EMPTY_TL),
+    tl(assets.TILE_EMPTY_TL), tl(assets.TILE_EMPTY_TL), tl(assets.TILE_EMPTY_TL), tl(assets.TILE_EMPTY_TL),
+    tl(assets.TILE_TREASURE_0_TL) | INVERSE, tl(assets.TILE_TREASURE_1_TL) | INVERSE,
+    tl(assets.TILE_TREASURE_2_TL) | INVERSE, tl(assets.TILE_TREASURE_3_TL) | INVERSE,
+    tl(assets.TILE_TREASURE_4_TL) | INVERSE, tl(assets.TILE_TREASURE_5_TL) | INVERSE,
+    tl(assets.TILE_TREASURE_6_TL) | INVERSE, tl(assets.TILE_TREASURE_7_TL) | INVERSE,
+    tl(assets.TILE_TREASURE_8_TL) | INVERSE, tl(assets.TILE_TREASURE_9_TL) | INVERSE,
+    tl(assets.TILE_TREASURE_10_TL) | INVERSE, tl(assets.TILE_TREASURE_11_TL) | INVERSE,
+    tl(assets.TILE_TREASURE_12_TL) | INVERSE, tl(assets.TILE_TREASURE_13_TL) | INVERSE,
+    tl(assets.TILE_TREASURE_14_TL) | INVERSE,
+]
+
+// Screen addresses, filled by init(): a table of addr(screen) plus a multiple of 40 cannot be built
+// with a comprehension yet (gaps.md, Atari step 1).
+var text_row: [ptr u8; ROWS]        // each char row, for message()
+var tile_row_addr: [ptr u8; tilemap.MAP_H]   // the top-left char of tile column 0 in each tile row
+
+// A ROM font row (8 hi-res pixels) -> a row of the message font (4 PF1 pixels, value 10). The ROM's
+// strokes are 2 pixels wide in pixels 1-2, 3-4 and 5-6, so those pairs become the font's 3 pixels and
+// pixel 7 its gap.
+const fn halve(b: int) -> int {
+    var r = 0
+    var c = (b << 1) & $FF
+    for k in 0..4 {
+        if (c >> (2 * k)) & 3 != 0 {
+            r = r | (2 << (2 * k))
+        }
+    }
+    return r
+}
+data halve_tab: [u8; 256] = [halve(b) for b in 0..256]
+var font_char: [u8; 64]             // C64 screen code -> char of the message font (0: blank)
+
+// ---- HUD layout (char row 0): "SCORE 000000   TIME 060   LEVEL 01", as on the C64 ----
+const HUD_SCORE_COL: u8 = 9
+const HUD_TIME_COL: u8 = 23
+const HUD_LEVEL_COL: u8 = 35
+const HUD_0: u8 = $10               // the ROM font's 0 (internal code)
+data SCORE_LABEL = atari_screen"SCORE"
+data TIME_LABEL = atari_screen"TIME"
+data LEVEL_LABEL = atari_screen"LEVEL"
+
+data chars_bin = include_bytes("../../data/chars.bin")
+
+fn init() {
+    mem.fill(addr(screen), 0, len(screen))
+    mem.copy(addr(charset), addr(chars_bin), len(chars_bin))
+    make_font()
+    var p: ptr u8 = addr(screen)
+    for r in 0..ROWS {
+        text_row[r] = p
+        p += 40
+    }
+    for r in 0..tilemap.MAP_H {
+        tile_row_addr[r] = text_row[1 + (r << 1)]
+    }
+    make_display_list()
+    atari.color[0] = COLOR_MC1
+    atari.color[1] = COLOR_HUD
+    atari.color[2] = COLOR_HUD_BG
+    atari.color[3] = COLOR_GOLD
+    atari.color[4] = COLOR_BORDER
+    atari.chbas = ROM_FONT_PAGE
+    atari.set_display_list(addr(dlist))
+}
+
+fn make_font() {
+    // The message font: each glyph of font_codes from the ROM font, halved across into 4 PF1 pixels.
+    mem.fill(addr(font_char), 0, len(font_char))
+    var dst: ptr u8 = addr(charset) + (FONT_FIRST as u16 << 3)
+    for i in 0..len(font_codes) {
+        var code: u8 = font_codes[i]
+        font_char[code] = FONT_FIRST + i
+        var src: ptr u8 = (ROM_FONT + ((code ^ $20) as u16 << 3)) as ptr u8   // C64 screen code -> internal
+        for r in 0..8 {
+            dst[r] = halve_tab[src[r]]
+        }
+        dst += 8
+    }
+}
+
+// The display list: 16 blank lines, the HUD row (a DLI at its end switches to the game's character set
+// and colours), a blank mode 4 row and the 24 playfield rows, all vertically scrolled, a DLI at the end of
+// row 22 (the floor's colour), then the blank row once more, unscrolled, which ends the scrolled area.
+// With VSCROL = v the first blank row shows lines v-7 and the last lines 0-v, so the screen keeps its
+// height and the playfield moves down as v goes from NORMAL_SCROLL to 0.
+const DL_MODE4: u8 = 4
+const FLOOR_DLI_ROW: u8 = 22        // the DLI at the end of this char row sets the floor's colour
+
+fn make_display_list() {
+    var d: ptr u8 = addr(dlist)
+    var blank: u16 = addr(screen) + BLANK_ROW
+    var top: u16 = addr(screen)
+    var play: u16 = top + 40
+    d[0] = atari.DL_BLANK8
+    d[1] = atari.DL_BLANK8
+    d[2] = atari.MODE_TEXT | atari.DL_LMS | atari.DL_DLI
+    d[3] = top.lo
+    d[4] = top.hi
+    d[5] = DL_MODE4 | atari.DL_LMS | atari.DL_VSCROLL
+    d[6] = blank.lo
+    d[7] = blank.hi
+    d[8] = DL_MODE4 | atari.DL_LMS | atari.DL_VSCROLL
+    d[9] = play.lo
+    d[10] = play.hi
+    var i: u8 = 11
+    for r in 2..ROWS {
+        var op: u8 = DL_MODE4 | atari.DL_VSCROLL
+        if r == FLOOR_DLI_ROW {
+            op |= atari.DL_DLI
+        }
+        d[i] = op
+        i += 1
+    }
+    d[i] = DL_MODE4 | atari.DL_LMS
+    d[i + 1] = blank.lo
+    d[i + 2] = blank.hi
+    var at: u16 = addr(dlist)
+    d[i + 3] = atari.DL_JVB
+    d[i + 4] = at.lo
+    d[i + 5] = at.hi
+}
+
+var dli_floor: bool                 // the next DLI is the floor's (the VBI clears it)
+
+interrupt fn dli() {
+    // At the end of the HUD row: the game's characters and colours. At the end of row 22: the floor's.
+    // WSYNC first, so the change lands in the horizontal blank.
+    if dli_floor {
+        atari.antic.wsync = 0
+        atari.gtia.colpf[2] = COLOR_FLOOR
+        return
+    }
+    var page: u8 = addr(charset).hi
+    atari.antic.wsync = 0
+    atari.antic.chbase = page
+    atari.gtia.colpf[1] = COLOR_MC2
+    atari.gtia.colpf[2] = COLOR_OWN
+    dli_floor = true
+}
+
+fn set_title_mode() {
+    // A blank screen, no sprites.
+    spr_ena = 0
+    mem.fill(addr(screen), 0, len(screen))
+}
+
+fn set_game_mode() {
+    mem.fill(addr(screen), 0, len(screen))
+}
+
+fn draw_tile(col: u8, row: u8) {
+    var ch: u8 = tile_char[tilemap.tiles[tilemap.row_start[row] + col]]
+    var scr: ptr u8 = tile_row_addr[row] + (col << 1)
+    scr[0] = ch
+    scr[1] = ch + 1
+    scr[40] = ch + 2
+    scr[41] = ch + 3
+}
+
+fn highlight_tile(col: u8, row: u8) {
+    // Own pixels in PF3 (inverse characters). draw_tile() restores the tile.
+    var scr: ptr u8 = tile_row_addr[row] + (col << 1)
+    scr[0] |= INVERSE
+    scr[1] |= INVERSE
+    scr[40] |= INVERSE
+    scr[41] |= INVERSE
+}
+
+fn draw_level() {
+    for row in 0..tilemap.MAP_H {
+        for col in 0..tilemap.MAP_W {
+            draw_tile(col, row)
+        }
+    }
+}
+
+fn put_digits(dst: ptr u8, bcd: u16, digits: u8, zero: u8) {
+    // The low `digits` BCD nibbles of bcd, most significant first, from dst; `zero` is the char of 0, the
+    // other digits follow it. Only digits that differ from what is on screen are written.
+    var scr: ptr u8 = dst + (digits - 1)
+    var b: u16 = bcd
+    for _ in 0..digits {
+        var ch: u8 = zero + ((b as u8) & 15)
+        if scr[0] != ch {
+            scr[0] = ch
+        }
+        b >>= 4
+        scr -= 1
+    }
+}
+
+fn hud_digits(col: u8, bcd: u16, digits: u8) {
+    // HUD digits keep the score flash's inverse bit (hud_score_flash).
+    put_digits(text_row[0] + col, bcd, digits, HUD_0 | hud_flash)
+}
+
+fn message(row: u8, col: u8, s: ptr u8, n: u8) {
+    // Text over the playfield in the message font. draw_level() or restore_tiles() erases it.
+    var scr: ptr u8 = text_row[row] + col
+    for i in 0..n {
+        scr[i] = font_char[s[i] & 63]
+    }
+}
+
+fn restore_tiles(row: u8, col: u8, n: u8) {
+    // Redraw the tiles under n chars of a message at char row 1-24, starting at col.
+    var trow: u8 = (row - 1) >> 1
+    for tcol in col >> 1..=(col + n - 1) >> 1 {
+        draw_tile(tcol, trow)
+    }
+}
+
+fn draw_hud_labels() {
+    var hud: ptr u8 = text_row[0]
+    mem.copy(hud + 3, addr(SCORE_LABEL), len(SCORE_LABEL))
+    mem.copy(hud + 18, addr(TIME_LABEL), len(TIME_LABEL))
+    mem.copy(hud + 29, addr(LEVEL_LABEL), len(LEVEL_LABEL))
+}
+
+var hud_flash: u8                   // INVERSE while the score flashes
+
+fn hud_score_flash(on: bool) {
+    // The C64 flashes the score in yellow; the HUD row has one colour, so here it shows in inverse.
+    hud_flash = 0
+    if on {
+        hud_flash = INVERSE
+    }
+    var scr: ptr u8 = text_row[0] + HUD_SCORE_COL
+    for i in 0..6 {
+        scr[i] = (scr[i] & $7F) | hud_flash
+    }
+}
+
+fn message_score(row: u8, col: u8, bcd_hundreds: u16) {
+    // A score (4 BCD digits and "00") over the playfield, as message() writes text.
+    var scr: ptr u8 = text_row[row] + col
+    var zero: u8 = font_char[$30]
+    put_digits(scr, bcd_hundreds, 4, zero)
+    put_digits(scr + 4, 0, 2, zero)
+}
+
+fn hud_score(bcd_hundreds: u16) {
+    hud_digits(HUD_SCORE_COL, bcd_hundreds, 4)
+    hud_digits(HUD_SCORE_COL + 4, 0, 2)
+}
+
+fn hud_time(bcd: u16) {
+    hud_digits(HUD_TIME_COL, bcd, 3)
+}
+
+fn hud_level(bcd: u8) {
+    hud_digits(HUD_LEVEL_COL, bcd as u16, 2)
+}
+
+// ---- sprites (shadows only in this step: not shown yet) ----
+var spr_ptr: [u8; 8]
+var spr_col: [u8; 8]
+var spr_x: [u16; 8]
+var spr_y: [u8; 8]
+var spr_ena: u8
+data sprite_bit: [u8; _] = [1, 2, 4, 8, 16, 32, 64, 128]
+
+fn set_sprite(n: u8, frame: u8, color: u8, px: u16, py: u8) {
+    // Playfield coordinates of the sprite's top-left.
+    spr_ptr[n] = frame
+    spr_col[n] = color
+    spr_x[n] = px
+    spr_y[n] = py
+    spr_ena |= sprite_bit[n]
+}
+
+fn hide_sprite(n: u8) {
+    spr_ena &= ~sprite_bit[n]
+}
+
+// ---- the shake: the playfield drops SHAKE_PX lines on alternate frames ----
+const NORMAL_SCROLL: u8 = 2
+const SHAKE_PX: u8 = 2
+const SHAKE_CRACK: u8 = 4           // frames: fast-fall cracks a tile
+const SHAKE_SMASH: u8 = 8           // frames: fast-fall destroys a tile, or kills an enemy
+var shake_left: u8
+var scroll: u8 = NORMAL_SCROLL      // VSCROL, written by the frame interrupt
+var spr_dy: u8                      // added to every sprite's y, so sprites shake with the screen
+
+fn shake(n: u8) {
+    // Start a shake, or restart it if this one is longer than what is left (shakes don't stack).
+    if n > shake_left {
+        shake_left = n
+    }
+}
+
+fn shake_step() {
+    // Once per play frame.
+    if shake_left != 0 {
+        shake_left -= 1
+    }
+    if shake_left & 1 != 0 {
+        scroll = NORMAL_SCROLL - SHAKE_PX
+        spr_dy = SHAKE_PX
+    } else {
+        scroll = NORMAL_SCROLL
+        spr_dy = 0
+    }
+}
+
+fn stop_shake() {
+    shake_left = 0
+    shake_step()
+}
+
+// ---- the frame interrupt ----
+var frame_ready: bool
+var frames: u8                      // counts frames
+var frame_tail: u8                  // scan lines from the vertical blank's start (line 248) to line 0
+
+fn start_frame_irq() {
+    frame_tail = 312 - 248          // PAL
+    if atari.gtia_in.pal & $0E != 0 {
+        frame_tail = 262 - 248      // NTSC
+    }
+    atari.set_vbi(addr(frame_vbi))
+    atari.set_dli(addr(dli))
+}
+
+interrupt fn frame_vbi() {
+    // After the OS's frame work, which has copied the shadow registers (the HUD's font and colours).
+    atari.antic.vscrol = scroll
+    dli_floor = false
+    atari.atract = 0                // no attract mode: the game is never idle long enough to need it
+    sound.step()
+    frame_ready = true
+    frames += 1
+}
+
+fn frame_lines() -> u8 {
+    // Scan lines since the vertical blank started (0-255; later lines read as 255), as the C64's raster
+    // lines since its frame IRQ. Only meaningful while frame_ready is still false.
+    var v: u8 = atari.antic.vcount  // scan line / 2
+    if v >= 124 {
+        return (v - 124) << 1
+    }
+    if v > (255 - frame_tail) >> 1 {
+        return 255
+    }
+    return (v << 1) + frame_tail
+}
+
+fn wait_frame() {
+    while !frame_ready { }
+    frame_ready = false
+}

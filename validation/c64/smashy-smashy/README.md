@@ -10,13 +10,22 @@ validation program, batch 2; roadmap V1, decisions 2026-11-21). MIT license (`LI
   (`chars.bin` and `sprites.bin`, which `gfx.py` writes; `c64/video.tern` reads them from `../../data/` here, from
   `../../build/` in the game's repository), `gaps.md` (the port's gap log).
 - **Layout** (V1 batch 3, spec 2.2's platform folders): the game logic in `src/` (`main`, `actors`, `player`,
-  `enemies`, `nav`, `levelgen`, `score`, `tilemap`), the C64 front end in `src/c64/` (`video`, `sound`, `input`,
-  `title`, `pages`, `popup`, `assets`). A shared module imports `video` and gets the target's. The shared modules
+  `enemies`, `nav`, `levelgen`, `score`, `tilemap`, and `assets`, the art's names), the C64 front end in `src/c64/`
+  (`video`, `sound`, `input`, `title`, `pages`, `popup`), the Atari front end in `src/atari/` (V1 batch 3, in
+  progress; below). A shared module imports `video` and gets the target's. The shared modules
   name no C64 address: the tile map moved from `video` into `tilemap` (no longer at `$C400`), and the score
   flash (`video.hud_score_flash`), the game-over high score (`video.message_score`) and the random seed
   (`input.seed_random`, from the raster line and CIA 1's timer) are front-end calls. `c64/video.tern` reads the
   art from `../../data/`.
 - **Build:** `tern --target c64 src/main.tern -o smashy-smashy.prg`: 20,985 bytes (20,946 before the split).
+- **The Atari version** (V1 batch 3, step 1 of the Atari front end): `tern --target atari src/main.tern -o
+  smashy-smashy.xex`. Its own display list: a HUD row of ROM-font text (ANTIC mode 2), then the playfield in ANTIC
+  mode 4, whose characters are the C64's multicolour ones, so `atari/video.tern` loads `data/chars.bin` as it is;
+  the cell colours become one own colour per row (display-list interrupts: red, blue on the floor's rows) and PF3,
+  the inverse characters' colour, for treasures and the fast-fall target. Messages use a 3-pixel font made from
+  the ROM font at startup; the shake is VSCROL; sound is POKEY channel 1 with the C64's effect tables; Esc pauses.
+  Not yet: the sprites (the game plays, but the player and enemies are not shown), popups, the title's animation
+  and the two attract pages (placeholders). Checked in Altirra on an 800 (48 KB, PAL) and an 800XL (NTSC).
 - **Known result:** `expected/frame-2500.txt`, the score, time, level, treasures, kills and high score, the screen
   (`$C000`), colour RAM and VIC registers after 2,500 frames of a scripted joystick (through the title into a
   game, running, jumping and smashing; the first game ends and the second is being played), checked by

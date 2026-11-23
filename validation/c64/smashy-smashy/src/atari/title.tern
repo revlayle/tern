@@ -1,0 +1,30 @@
+// The title screen, a placeholder for Atari step 1: SMASHY SMASHY, PRESS FIRE and the high score in the
+// message font. The C64's falling letters and colour bands (c64/title.tern) come in a later step.
+import video
+import input
+import score
+
+data TITLE = screen"smashy smashy"
+data PRESS_FIRE = screen"press fire"
+data HIGH_SCORE = screen"high score"
+
+fn init() {
+}
+
+fn run(frames: u16) -> bool {
+    // Shown for `frames` frames, or until fire (true).
+    video.set_title_mode()
+    video.message(6, 13, addr(TITLE), len(TITLE))
+    video.message(19, 15, addr(PRESS_FIRE), len(PRESS_FIRE))
+    video.message(22, 11, addr(HIGH_SCORE), len(HIGH_SCORE))
+    video.message_score(22, 22, score.high)
+    video.frame_ready = false
+    for _ in 0..frames {
+        video.wait_frame()
+        input.read()
+        if input.pressed & input.FIRE != 0 {
+            return true
+        }
+    }
+    return false
+}

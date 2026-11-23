@@ -1,0 +1,12 @@
+// The attract pages, a placeholder for Atari step 1: HOW TO PLAY and SCORING (c64/pages.tern) come in a
+// later step, so the attract cycle shows the title only.
+
+const TITLE_FRAMES: u16 = 500
+
+fn how_to_play() -> bool {
+    return false
+}
+
+fn scoring() -> bool {
+    return false
+}

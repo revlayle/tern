@@ -1,0 +1,16 @@
+// Score popups, a placeholder for Atari step 1: nothing is shown. The rising digits (c64/popup.tern)
+// come with the sprites, in a later step.
+
+const TREASURE: u8 = 0              // rank of a treasure; a kill's rank is its chain step + 1
+
+fn init() {
+}
+
+fn clear() {
+}
+
+fn show(cx: u16, cy: u8, points: u8, rk: u8) {
+}
+
+fn update() {
+}

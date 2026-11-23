@@ -142,6 +142,22 @@ public class ValidationTests
             ("VIC $D000-$D02E", Rows(r.Ram, 0xD000, 0x2F, 0x2F, 0xFF)));
     }
 
+    [Fact]
+    public void Smashy_smashy_builds_for_the_atari()
+    {
+        // V1 batch 3, step 1: the shared logic with the Atari front end (src/atari/) builds with no warning, and
+        // the front end's aligned screen memory is where ANTIC can read it: the screen inside one 4 KB block,
+        // the character set on a 1 KB boundary, the display list inside one 1 KB block. Played in Altirra.
+        string dir = FindValidation("c64", "smashy-smashy");
+        string path = Path.Combine(dir, "src", "main.tern");
+        var result = TernCompiler.Compile(File.ReadAllText(path), Platform.Atari, sourcePath: path);
+        Assert.Empty(result.Warnings);
+        int screen = result.Symbols["video.screen"], charset = result.Symbols["video.charset"], dlist = result.Symbols["video.dlist"];
+        Assert.Equal(screen / 4096, (screen + 1039) / 4096);
+        Assert.Equal(0, charset % 1024);
+        Assert.Equal(dlist / 1024, (dlist + 47) / 1024);
+    }
+
     [Trait("Platform", "c64")]
     [FactWhen("TERN_REAL", "it runs smashy smashy in VICE and compares the screenshot")]
     public void Smashy_smashy_shows_its_scoring_page_in_vice()

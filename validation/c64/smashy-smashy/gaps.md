@@ -231,3 +231,31 @@ Most of it is zero page: temporaries and register parameters that no instruction
 more variables fit in zero page (4-cycle stores become 3-cycle ones, a byte shorter); then gap 31's fix (the 16-bit
 temporaries in `nav.steer` and `nav.link_done` go, 60 bytes, 42 cycles a frame). Gap 3 changes nothing here, since
 the port stores the index first; gap 1 is a message. `compare.py --scenario game`: see Tern's `docs/status.md`.
+
+## V1 batch 3, Atari step 1: the screen, HUD, input and sound (2026-11-22)
+
+Kept in this copy (`validation/c64/smashy-smashy/`; the batch works here, not in the game repository). The shared
+modules with a new front end in `src/atari/`: `video` (a display list built at startup, the C64's `chars.bin` as
+ANTIC mode 4 characters, the HUD in ANTIC mode 2, messages in a 3-pixel font made from the ROM font, two DLIs, the
+shake through VSCROL, the frame interrupt as the OS's deferred VBI, `frame_lines()` from VCOUNT), `sound` (POKEY,
+the C64's effect tables), `input` (STICK0/STRIG0 and Esc from POKEY); `title`, `pages` and `popup` are placeholders,
+and sprites are not shown yet. `assets.tern` moved from `src/c64/` to `src/`: both front ends use the art's names
+(the C64 build is byte for byte the same). It compiled on the first try; Altirra shows the title and a level being
+played (no sprites) on an 800 and an 800XL.
+
+The screen, character set and player-missile memory are `noinit var`s with `@ align(n)`, since `main.tern`, the
+only file that may have a `memory` block, is shared: a `var` at a fixed address inside the Atari's program area is
+an error once the variables reach it, and `align` lets the compiler place them.
+
+### 4. A table of a variable's address plus an offset cannot be built with a comprehension
+
+```
+noinit var screen: [u8; 1040] @ align(2048)
+data rows: [ptr u8; _] = [addr(screen) + r * 40 for r in 0..25]
+```
+
+gives "Element 0 is a label, but the table holds ptr u8. Use round() or floor() for a real number". The same
+elements written out as a list (`[addr(screen), addr(screen) + 40, ...]`) compile, for `ptr u8` and `u16` tables,
+and `addr(screen).lo` / `.hi` work in a list. The message's fix is about real numbers and does not apply. Worked
+around: `video.init()` fills `text_row` and `tile_row_addr` at startup (the C64's `video` builds the same tables
+from the constant `SCREEN` at compile time).
