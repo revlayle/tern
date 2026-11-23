@@ -68,6 +68,14 @@ public sealed partial class CodeGen
             else if (i.Else is not null) GenStmt(i.Else);
             return;
         }
+        // if c { break } / { continue }: one branch to the loop's label (spec 11). The assembler makes it
+        // a long branch when the label is out of reach.
+        if (i.Else is null && i.Then.Code is [var jump] && jump is BreakStmt or ContinueStmt)
+        {
+            Source(jump);
+            GenCond(i.Condition, jump is BreakStmt ? _loops[^1].Break : _loops[^1].Continue, true);
+            return;
+        }
         var end = NewLabel("endif");
         if (i.Else is null)
         {

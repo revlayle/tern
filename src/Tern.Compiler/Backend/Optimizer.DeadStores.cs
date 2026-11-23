@@ -306,6 +306,31 @@ public static partial class Optimizer
         return removed;
     }
 
+    /// <summary>
+    /// A branch over a jmp (<c>bcs over / jmp top / over:</c>) becomes the opposite branch to where the jmp
+    /// goes (<c>bcc top</c>; V1 fixes 2, gap 33). The jmp must have no label of its own; when its target is out
+    /// of reach the assembler makes the branch a long one, the same code as before.
+    /// </summary>
+    private static bool InvertBranchesOverJumps(List<AsmItem> code)
+    {
+        bool changed = false;
+        for (int k = 0; k < code.Count; k++)
+        {
+            if (code[k] is not Instr { Mode: Relative } b || FromAsm(b) || !Instructions.IsBranch(b.Mnemonic) || Target(b) is not { } over) continue;
+            int j = k + 1;
+            while (j < code.Count && code[j] is Comment or SourceLine) j++;
+            if (j >= code.Count || code[j] is not Instr { Mnemonic: Mnemonic.Jmp, Mode: Absolute } jump || FromAsm(jump) || Target(jump) is not { } to)
+                continue;
+            int n = j + 1;
+            while (n < code.Count && code[n] is Comment or SourceLine or LabelDef && !(code[n] is LabelDef d && d.Label == over)) n++;
+            if (n >= code.Count || code[n] is not LabelDef) continue;
+            code[k] = b with { Mnemonic = Instructions.Inverse(b.Mnemonic), Operand = new LabelOperand(to) };
+            code.RemoveAt(j);
+            changed = true;
+        }
+        return changed;
+    }
+
     /// <summary>Assembly that calls a subroutine of its own block (<c>jsr .sub</c>): its <c>rts</c> returns into this code.</summary>
     private static bool CallsOwnSubroutine(List<AsmItem> code, Dictionary<Label, int> positions) =>
         code.Any(item => item is Instr { Operand: LabelOperand { Label: var l } } i && Instructions.Of(i.Mnemonic).Flow == Flow.Call && positions.ContainsKey(l));

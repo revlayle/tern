@@ -108,7 +108,7 @@ public class InterruptTests
     [InlineData("interrupt fn handler() { f() }", "cld|pha|txa|pha|tya|pha|jsr f|pla|tay|pla|tax|pla|rti")]
     // return goes to the code that restores the registers.
     [InlineData("interrupt fn handler() {\n if count == 0 { return }\n count = 0\n }",
-        "pha|lda count|bne handler.endif1|jmp handler.exit0|lda #$00|sta count|pla|rti")]
+        "pha|lda count|beq handler.exit0|lda #$00|sta count|pla|rti")]
     public void Code_shapes(string handler, string expected)
     {
         var r = Run.Program($$"""
