@@ -115,3 +115,71 @@ The built-in emulator has no ANTIC, GTIA, POKEY or PIA. CIO's screen output has 
 In `examples/atari/`: `hello.tern` (text and numbers), `dli.tern` (a display list and display-list interrupts), `files.tern` with `greet.tern` (files and an overlay).
 
 Not built yet: the 130XE's extra memory banks and cartridge images.
+
+## 7.8 Techniques for games
+
+What Atari programmers have worked out over the years, as Tern. Cycle facts come from the playermissile.com tutorials, De Re Atari and the Altirra Hardware Reference Manual; costs marked as measured come from Tern's listings.
+
+**The frame's cycles.** A scan line is 114 cycles; a PAL frame has 312 lines (35,568 cycles), an NTSC frame 262 (29,868). ANTIC takes its share before the program gets any: 9 cycles a line for memory refresh, 1 per display-list instruction (3 with `DL_LMS`), 5 a line for player-missile graphics, and the screen's own bytes. A character mode (`MODE_TEXT`, mode 4) fetches its 40 character codes on a row's first line and 40 font bytes on every line, so a 40-column text screen of 24 rows takes about 8,600 cycles a frame; a narrow playfield (32 columns, `sdmctl` bits 0-1 = 1) takes a fifth less, a wide one (48) a fifth more. On a mode 4 line the CPU keeps about 60 cycles, and on a row's first line, with scrolling and players on, fewer than 10. Section 7.4 gives what is left of a whole frame, and how a game paces itself when a frame runs long.
+
+**DLIs.**
+
+- A DLI runs at the end of its row's last line; the next row's first line is the busiest, so a DLI does its stores right after `WSYNC` and leaves the rest. `WSYNC` lets the CPU go near cycle 105 of 114, in the horizontal blank, where color and position changes do not show.
+- Work out the values before the `WSYNC` store, and store the value itself to `WSYNC` (any value works), so it is already in A:
+
+  ```tern
+  interrupt fn dli() {
+      var c: u8 = row_color[row]
+      row += 1
+      atari.antic.wsync = c           // any value works; storing c leaves it in A
+      atari.gtia.colpf[2] = c         // sta COLPF2, 4 cycles after WSYNC lets go
+  }
+  ```
+
+- **Chain handlers** instead of testing `VCOUNT`: each DLI sets `atari.vdslst` to the next row's handler, and the VBI sets it back to the first. Handlers in one page need only the low byte changed (6 cycles less).
+- Keep the VBI short: a long VBI delays the first DLI.
+- A DLI may change `chbase` too, so each band of rows has its own 128 characters: more tiles, or software sprites in a character mode, than one set allows.
+
+**Player-missile graphics.**
+
+- Memory: single-line resolution takes 2 KB on a 2 KB boundary (`noinit var pm: [u8; 2048] @ align(2048)`; missiles at `+$300`, players 0-3 at `+$400` to `+$700`), double-line 1 KB on a 1 KB boundary (missiles at `+$180`, players at `+$200` to `+$380`). `atari.antic.pmbase = addr(pm).hi` has no shadow register; then `atari.sdmctl = $3E` (single line; `$2E` for double) and `atari.gtia.gractl = 3`.
+- Horizontal moves are free (`hposp`); a vertical move rewrites the player's bytes. Pad each frame with blank rows above and below, as many as the most it moves between two draws, and a move overwrites the old image with no clear. When a move is larger, clear only the rows between the old and the new place, not the whole image.
+- **Compiled sprites:** a frame as code, made by a generator ([4.3](04-compile-time.md#43-generators)): each row an immediate, rows with the same value sharing one load. The padded 11-row ship below takes about 98 cycles against 186 for a copy loop (measured), and its blank rows clear as it draws. The cost is memory: about 4 bytes of code per row.
+
+  ```tern
+  var dst: ptr u8 @ zp                // a player's memory at the sprite's top line
+
+  const fn compiled_sprite(rows: [int; _], to: label) {
+      var done = [false for i in 0..len(rows)]
+      for k in 0..len(rows) {
+          if !done[k] {
+              emit { lda #rows[k] }
+              for j in k..len(rows) {
+                  if rows[j] == rows[k] {
+                      done[j] = true
+                      emit {
+                          ldy #j
+                          sta (to), y
+                      }
+                  }
+              }
+          }
+      }
+  }
+
+  asm fn draw_ship() {
+      compiled_sprite([0, 0, $18, $3C, $7E, $FF, $7E, $3C, $18, 0, 0], addr(dst))
+  }
+  ```
+
+- **More objects than players:** a DLI moves a player (`hposp`, `colpm`) after its last line, so it shows again lower down. The work is in the VBI or the main loop: sort the objects by their top row, give each a player no object in its rows has, and build the DLIs' tables; each DLI only copies its entries. General-purpose multiplexers flicker once more than four objects share a line. A flicker-free one is designed around the game's own limits (how many objects can share a row, which never move vertically), and the object the player controls keeps a player of its own and is never the one left out.
+- The four missiles side by side make a fifth player: `atari.gprior` bit 4 (`$10`) gives them `color[3]`, and their `hposm` are set 2 apart. `gprior` bit 5 (`$20`) gives a third color where players 0 and 1 (or 2 and 3) overlap.
+- Collisions (`gtia_in.ppf`, `ppl`, ...) are read once a frame and cleared with `atari.gtia.hitclr`; with players reused down the screen they no longer say which object hit, so games compare positions instead.
+
+**Scrolling.** A coarse scroll rewrites the screen addresses in the display list (an `DL_LMS` on every row), never copies the screen: 2 bytes a row. A fine scroll sets `atari.antic.hscrol` (0-15 color clocks) or `vscrol` (lines) on rows marked `DL_HSCROLL` / `DL_VSCROLL`; a horizontally scrolled row fetches the next wider playfield's bytes, so its screen rows are laid out wider and its DMA grows.
+
+**The vertical blank.** `set_vbi` runs after the OS's frame work, about 1,500 cycles a frame (shadow registers, the clock, controllers, attract mode); the OS skips it while time-critical I/O runs. A game that needs those cycles uses `set_vbi_immediate`, copies only the shadow registers it uses, and reads the joystick from `atari.pia.porta` (player 0 in bits 0-3) and `atari.gtia_in.trig[0]`; the keyboard (`ch`) still works, since an IRQ sets it. `atari.atract = 0` once a frame keeps the colors from cycling under the OS's VBI.
+
+**PAL and NTSC.** `atari.gtia_in.pal & $0E == 0` on a PAL machine. Colors differ a little between the two (PAL's reds lean to magenta), and a game timed in frames runs 20% faster on NTSC unless it skips a tick every sixth frame (7.4).
+
+**Sound and random numbers.** POKEY's four channels (`atari.pokey.audf1`, `audc1`, ...) are set from the VBI from effect tables; `audctl` joins two channels for finer pitch. `atari.pokey_in.random` gives a new random byte on each read, at no cost; a game that must repeat a run (a test, a replay) keeps its own generator and seeds it from `random`.

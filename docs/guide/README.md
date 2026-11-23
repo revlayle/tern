@@ -28,7 +28,7 @@ Read chapters 1 to 3 in order, then the chapter for your machine; the others whe
 | [4. Compile-time code](04-compile-time.md) | `const fn` for tables, and generators that write assembly |
 | [5. Standard library](05-library.md) | The platform-independent modules: `math`, `mem`, `text`, `wide`, `bcd`, `float`, `random`, `cpu` |
 | [6. Commodore 64](06-c64.md) | The C64 target, its library (`c64`, `io`, `sprites`, `scroll`) and examples |
-| [7. Atari 8-bit](07-atari.md) | The Atari target, its library (`atari`, `io`), display lists and interrupts |
+| [7. Atari 8-bit](07-atari.md) | The Atari target, its library (`atari`, `io`), display lists and interrupts, frame time, techniques for games |
 | [8. Apple II](08-apple2.md) | The Apple II target under ProDOS, its library (`apple2`, `io`), disks |
 | [9. NES](09-nes.md) | Cartridges, boards, tiles, interrupt vectors, ROM banks, the `nes` library |
 | [10. How Tern programs behave](10-behavior.md) | The developer guide: what the machine does with your code, each behavior with an example |
