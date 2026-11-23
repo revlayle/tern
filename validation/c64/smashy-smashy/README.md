@@ -18,15 +18,17 @@ validation program, batch 2; roadmap V1, decisions 2026-11-21). MIT license (`LI
   (`input.seed_random`, from the raster line and CIA 1's timer) are front-end calls. `c64/video.tern` reads the
   art from `../../data/`.
 - **Build:** `tern --target c64 src/main.tern -o smashy-smashy.prg`: 20,985 bytes (20,946 before the split).
-- **The Atari version** (V1 batch 3, step 1 of the Atari front end): `tern --target atari src/main.tern -o
-  smashy-smashy.xex`. Its own display list: a HUD row of ROM-font text (ANTIC mode 2), then the playfield in ANTIC
-  mode 4, whose characters are the C64's multicolour ones, so `atari/video.tern` loads `data/chars.bin` as it is;
-  the cell colours become one own colour per row (display-list interrupts: red, blue on the floor's rows) and PF3,
-  the inverse characters' colour, for treasures and the fast-fall target. Messages use a 3-pixel font made from
-  the ROM font at startup; the shake is VSCROL; sound is POKEY channel 1 with the C64's effect tables; Esc pauses.
-  Sprites (step 2): player-missile graphics reused down the screen by the DLIs, 5 slots (4 players and the
-  missiles as a fifth) for the player, 5 enemies and 2 popups, one colour each (`atari/sprites.tern`); popups
-  in `atari/popup.tern`. Not yet: the title's animation and the two attract pages (placeholders). Checked in Altirra on an 800 (48 KB, PAL) and an 800XL (NTSC).
+- **The Atari version** (V1 batch 3): `tern --target atari src/main.tern -o smashy-smashy.xex`, about 22 KB. Its
+  own display list: a HUD row of ROM-font text (ANTIC mode 2), then the playfield in ANTIC mode 4, whose characters
+  are the C64's multicolour ones, so `atari/video.tern` loads `data/chars.bin` as it is; the cell colours become
+  one own colour per row (display-list interrupts: red, blue on the floor's rows) and PF3, the inverse characters'
+  colour, for treasures and the fast-fall target. Messages and page text use a hand-made 3 x 7 font; the shake is
+  VSCROL; sound is POKEY channel 1 with the C64's effect tables; Esc pauses. Sprites (`atari/sprites.tern`):
+  player-missile graphics reused down the screen by the DLIs, 5 slots (4 players and the missiles as a fifth) for
+  the player, 5 enemies and 2 popups, one colour each, converted from `data/sprites.bin` at compile time; popups in
+  `atari/popup.tern`. The title (`atari/title.tern`): the C64's falling block letters, with the colour bands set
+  per row by a DLI of its own; HOW TO PLAY and SCORING (`atari/pages.tern`) as on the C64. Checked in Altirra on an
+  800 (48 KB, PAL) and an 800XL (NTSC).
 - **Known result:** `expected/frame-2500.txt`, the score, time, level, treasures, kills and high score, the screen
   (`$C000`), colour RAM and VIC registers after 2,500 frames of a scripted joystick (through the title into a
   game, running, jumping and smashing; the first game ends and the second is being played), checked by
@@ -40,7 +42,7 @@ validation program, batch 2; roadmap V1, decisions 2026-11-21). MIT license (`LI
   the screen after 2,500 frames of the same joystick script, checked by
   `ValidationTests.Smashy_smashy_plays_a_scripted_game_on_the_atari` with `AtariChips` (VCOUNT, WSYNC, the VBI and
   DLIs from the display list, the joystick through STICK0/STRIG0) and an OS stub for the NMIs; with `TERN_REAL=1`,
-  `Smashy_smashy_shows_its_title_in_altirra` against `expected/altirra-800-pal-title.png`.
+  `Smashy_smashy_shows_its_scoring_page_in_altirra` against `expected/altirra-800-pal-scoring.png`.
   With `TERN_REAL=1`, `Smashy_smashy_shows_its_scoring_page_in_vice` runs it in VICE (`C:/Vice/bin/x64sc.exe`)
   for 25 million cycles with no input (the SCORING page, whose chain values need its raster split) and compares
   the screenshot with `expected/vice-25M-cycles.png`, up to 1% of the pixels apart.

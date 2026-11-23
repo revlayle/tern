@@ -233,19 +233,24 @@ public class ValidationTests
     }
 
     [FactWhen("TERN_REAL", "it runs smashy smashy in Altirra and compares the screenshot")]
-    public void Smashy_smashy_shows_its_title_in_altirra()
+    public void Smashy_smashy_shows_its_scoring_page_in_altirra()
     {
         // An 800 with 48 KB, PAL, the OS Altirra has (AltirraOS: no OS ROM images are installed). Altirra runs by the
-        // clock, not by cycles, so the shot is of the title, which stands for 10 s: 6 s after the start it is on
-        // screen in every run (two runs gave the same pixels). tests/tools/altirra-shot.ps1 captures the screen.
+        // clock, not by cycles, so the shot is of the page that stands still longest: SCORING, from 20 s to 32 s
+        // after the program starts (the title's colours roll every 2 frames), taken at 26 s. Altirra's start takes
+        // a varying time (one run's shot at 15 s still showed the title), so a run that misses is tried once more.
+        // tests/tools/altirra-shot.ps1 captures the screen.
         string dir = FindValidation("c64", "smashy-smashy");
         string path = Path.Combine(dir, "src", "main.tern");
         var result = TernCompiler.Compile(File.ReadAllText(path), Platform.Atari, sourcePath: path);
         string work = Directory.CreateTempSubdirectory("tern-real-").FullName;
         string xex = Path.Combine(work, "smashy-smashy.xex"), shot = Path.Combine(work, "altirra.png");
         File.WriteAllBytes(xex, result.File);
-        RunAltirra(xex, 6, shot, "/hardware:800", "/memsize:48K", "/pal");
-        ExpectScreenshot(shot, Path.Combine(dir, "expected", "altirra-800-pal-title.png"));
+        string expected = Path.Combine(dir, "expected", "altirra-800-pal-scoring.png");
+        RunAltirra(xex, 26, shot, "/hardware:800", "/memsize:48K", "/pal");
+        if (File.Exists(expected) && Png.Difference(shot, expected) > ScreenshotTolerance)
+            RunAltirra(xex, 26, shot, "/hardware:800", "/memsize:48K", "/pal");
+        ExpectScreenshot(shot, expected);
         Directory.Delete(work, recursive: true);   // kept when the check fails, to look at
     }
 
@@ -315,6 +320,7 @@ public class ValidationTests
             Assert.Fail($"Altirra did not stop within 2 minutes running {xex}");
         }
         Assert.True(File.Exists(screenshot), $"Altirra gave no screenshot running {xex}");
+        Assert.Equal(0, run.ExitCode);
     }
 
     /// <summary>A folder of the repository, found above the test's binaries.</summary>

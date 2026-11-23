@@ -340,3 +340,24 @@ made within the row (`c != 0`, `c != MAP_W - 1`), which gives the same result: t
 
 The message font's digits are the popups' hand-made 3 x 7 digits now (the ROM font's slashed 0 read as 8 in
 "HIGH SCORE 000000").
+
+## V1 batch 3, Atari step 3: the title and the attract pages (2026-11-23)
+
+`atari/title.tern` is `c64/title.tern` with the same shapes, drop order, timing and shake; the letters are 5 new
+characters (a block and four corner triangles, the C64's hi-res triangles made 4 pixels wide), all PF2. The C64
+colours each letter cell from its screen row (colour RAM); here a DLI on every row sets PF2, so a step of the
+colour sweep is a table of 25 colours, not a pass over the letter cells. The title has its own DLI: through the
+game's DLI (its title test, then a VCOUNT lookup before WSYNC) each band's first line showed the colour above; the
+title's DLI writes a colour worked out on the DLI before and looks the next one up after WSYNC, 12 cycles from its
+entry to WSYNC, and the bands' edges are clean. `atari/pages.tern` is `c64/pages.tern` without its raster split
+(text and tiles share one mode here); the chain values are in the text's colour. Both compiled on the first try.
+
+The message font is hand-made, 3 x 7 (`video.letter_nib`, `digit_nib`, `punct_nib`): the ROM font halved across
+read R as A and made M, N and W blocks. N is a lowercase n at full height, to tell it from H and M (the developer's
+suggestion; a usual way on 8-bit machines).
+
+`TERN_REAL=1`: the Altirra check photographs SCORING at 26 s (the page that stands still longest, 20-32 s); a shot
+at 15 s of HOW TO PLAY once caught the title still on screen (Altirra's start takes a varying time), so a run that
+misses is tried once more.
+
+No new gap.

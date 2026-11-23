@@ -29,6 +29,9 @@ const COLOR_HUD: u8 = $0E           // ... and PF1's luminance its text
 const PLAYER_COLOR: u8 = $8A        // the C64's 14, light blue
 const ENEMY_COLOR: u8 = $34         // 2, red
 const ENEMY_CARRY_COLOR: u8 = $1C   // 7, yellow
+// The C64's 16 colours as Atari colours (for the title's colour bands): black, white, red, cyan, purple, green,
+// blue, yellow, orange, brown, light red, dark grey, grey, light green, light blue, light grey.
+data c64_color: [u8; 16] = [$00, $0E, $34, $A8, $56, $C6, $84, $1C, $26, $F2, $3A, $04, $08, $CA, $8A, $0A]
 
 // ---- memory ----
 // 128 characters: the tiles (chars.bin) from 0, then the message font.
@@ -40,7 +43,6 @@ const BLANK_ROW = 1000
 noinit var screen: [u8; 1040] @ align(2048)
 noinit var dlist: [u8; 48] @ align(64)       // built by init(), inside one 1 KB block
 
-const ROM_FONT = $E000              // the OS's character set, in internal code order
 const ROM_FONT_PAGE: u8 = $E0
 
 // Characters of the message font, after the tiles. Messages arrive as C64 screen codes (the shared
@@ -48,6 +50,38 @@ const ROM_FONT_PAGE: u8 = $E0
 const FONT_FIRST: u8 = assets.TILE_COUNT * 4
 data font_codes = screen"abcdefghijklmnopqrstuvwxyz0123456789?+-/!"
 const INVERSE: u8 = $80             // ANTIC mode 4: own pixels in PF3 instead of PF2
+// The title's letters (title.tern), after the font: a solid block and corner triangles, all PF2 (11), named
+// by the filled corner like the numpad: 7 = upper left. 123 of the 128 characters are then used.
+const CHAR_BLOCK: u8 = FONT_FIRST + 41
+const CHAR_TRI_7: u8 = CHAR_BLOCK + 1
+const CHAR_TRI_9: u8 = CHAR_BLOCK + 2
+const CHAR_TRI_1: u8 = CHAR_BLOCK + 3
+const CHAR_TRI_3: u8 = CHAR_BLOCK + 4
+const CHAR_SPACE: u8 = 0            // the empty tile's top-left: no pixels
+// The C64's hi-res triangles (c64/video.tern), each half including the diagonal, made 4 pixels wide: a
+// pixel is on where either of its 2 hi-res pixels is.
+data tri_hires: [u8; _] = [
+    $FF, $FE, $FC, $F8, $F0, $E0, $C0, $80,     // 7: pixel x + row <= 7
+    $FF, $7F, $3F, $1F, $0F, $07, $03, $01,     // 9: x >= row
+    $80, $C0, $E0, $F0, $F8, $FC, $FE, $FF,     // 1: x <= row
+    $01, $03, $07, $0F, $1F, $3F, $7F, $FF,     // 3: x + row >= 7
+]
+const fn fat11(b: int) -> int {
+    var r = 0
+    for k in 0..4 {
+        if (b >> (2 * k)) & 3 != 0 {
+            r = r | (3 << (2 * k))
+        }
+    }
+    return r
+}
+const fn title_row(i: int) -> int {
+    if i < 8 {
+        return $FF                  // the block
+    }
+    return fat11(tri_hires[i - 8])
+}
+data title_chars: [u8; _] = [title_row(i) for i in 0..40]
 
 // tile value -> top-left char (as c64/video.tern's tile_char, with this charset's numbers)
 const fn tl(c64_char: int) -> int {
@@ -73,20 +107,6 @@ data tile_char: [u8; _] = [
 var text_row: [ptr u8; ROWS]        // each char row, for message()
 var tile_row_addr: [ptr u8; tilemap.MAP_H]   // the top-left char of tile column 0 in each tile row
 
-// A ROM font row (8 hi-res pixels) -> a row of the message font (4 PF1 pixels, value 10). The ROM's
-// strokes are 2 pixels wide in pixels 1-2, 3-4 and 5-6, so those pairs become the font's 3 pixels and
-// pixel 7 its gap.
-const fn halve(b: int) -> int {
-    var r = 0
-    var c = (b << 1) & $FF
-    for k in 0..4 {
-        if (c >> (2 * k)) & 3 != 0 {
-            r = r | (2 << (2 * k))
-        }
-    }
-    return r
-}
-data halve_tab: [u8; 256] = [halve(b) for b in 0..256]
 var font_char: [u8; 64]             // C64 screen code -> char of the message font (0: blank)
 
 // 3 x 7 digits (pixels in bits 3-1, a gap in bit 0), row 7 blank: digit d's row r at d * 8 + r, then a blank.
@@ -115,7 +135,55 @@ const fn nib_to_pf1(n: int) -> int {
     }
     return r
 }
-data digit_pf1: [u8; 80] = [nib_to_pf1(digit_nib[i]) for i in 0..80]
+// The message font's letters and punctuation in the same form, hand-made: the ROM font halved across lost
+// its strokes (R read as A; M, N and W as blocks).
+data letter_nib: [u8; 26 * 8] = [
+    $4, $A, $A, $E, $A, $A, $A, $0,  // a
+    $C, $A, $A, $C, $A, $A, $C, $0,  // b
+    $6, $8, $8, $8, $8, $8, $6, $0,  // c
+    $C, $A, $A, $A, $A, $A, $C, $0,  // d
+    $E, $8, $8, $C, $8, $8, $E, $0,  // e
+    $E, $8, $8, $C, $8, $8, $8, $0,  // f
+    $6, $8, $8, $A, $A, $A, $6, $0,  // g
+    $A, $A, $A, $E, $A, $A, $A, $0,  // h
+    $E, $4, $4, $4, $4, $4, $E, $0,  // i
+    $2, $2, $2, $2, $2, $A, $4, $0,  // j
+    $A, $A, $C, $8, $C, $A, $A, $0,  // k
+    $8, $8, $8, $8, $8, $8, $E, $0,  // l
+    $A, $E, $E, $A, $A, $A, $A, $0,  // m
+    $C, $A, $A, $A, $A, $A, $A, $0,  // n: a lowercase n at full height, apart from H and M
+    $4, $A, $A, $A, $A, $A, $4, $0,  // o
+    $C, $A, $A, $C, $8, $8, $8, $0,  // p
+    $4, $A, $A, $A, $A, $C, $6, $0,  // q
+    $C, $A, $A, $C, $C, $A, $A, $0,  // r
+    $6, $8, $8, $4, $2, $2, $C, $0,  // s
+    $E, $4, $4, $4, $4, $4, $4, $0,  // t
+    $A, $A, $A, $A, $A, $A, $E, $0,  // u
+    $A, $A, $A, $A, $A, $A, $4, $0,  // v
+    $A, $A, $A, $A, $E, $E, $A, $0,  // w
+    $A, $A, $A, $4, $A, $A, $A, $0,  // x
+    $A, $A, $A, $4, $4, $4, $4, $0,  // y
+    $E, $2, $2, $4, $8, $8, $E, $0,  // z
+]
+data punct_nib: [u8; 5 * 8] = [
+    $C, $2, $2, $4, $4, $0, $4, $0,  // ?
+    $0, $0, $4, $E, $4, $0, $0, $0,  // +
+    $0, $0, $0, $E, $0, $0, $0, $0,  // -
+    $2, $2, $4, $4, $4, $8, $8, $0,  // /
+    $4, $4, $4, $4, $4, $0, $4, $0,  // !
+]
+// The message font in font_codes' order: letters, digits, punctuation.
+const fn font_row(i: int) -> int {
+    var g = i >> 3
+    if g < 26 {
+        return nib_to_pf1(letter_nib[i])
+    }
+    if g < 36 {
+        return nib_to_pf1(digit_nib[i - 26 * 8])
+    }
+    return nib_to_pf1(punct_nib[i - 36 * 8])
+}
+data font_pf1: [u8; _] = [font_row(i) for i in 0..len(font_codes) * 8]
 
 // ---- HUD layout (char row 0): "SCORE 000000   TIME 060   LEVEL 01", as on the C64 ----
 const HUD_SCORE_COL: u8 = 9
@@ -132,6 +200,7 @@ fn init() {
     mem.fill(addr(screen), 0, len(screen))
     mem.copy(addr(charset), addr(chars_bin), len(chars_bin))
     make_font()
+    mem.copy(addr(charset) + (CHAR_BLOCK as u16 << 3), addr(title_chars), len(title_chars))
     var p: ptr u8 = addr(screen)
     for r in 0..ROWS {
         text_row[r] = p
@@ -153,25 +222,11 @@ fn init() {
 }
 
 fn make_font() {
-    // The message font: each glyph of font_codes from the ROM font, halved across into 4 PF1 pixels; the
-    // digits from digit_nib.
+    // The message font into the character set, and font_char from the C64 screen codes.
+    mem.copy(addr(charset) + (FONT_FIRST as u16 << 3), addr(font_pf1), len(font_pf1))
     mem.fill(addr(font_char), 0, len(font_char))
-    var dst: ptr u8 = addr(charset) + (FONT_FIRST as u16 << 3)
     for i in 0..len(font_codes) {
-        var code: u8 = font_codes[i]
-        font_char[code] = FONT_FIRST + i
-        if code >= $30 && code <= $39 {
-            var d: u8 = (code - $30) << 3
-            for r in 0..8 {
-                dst[r] = digit_pf1[d + r]
-            }
-        } else {
-            var src: ptr u8 = (ROM_FONT + ((code ^ $20) as u16 << 3)) as ptr u8   // C64 screen code -> internal
-            for r in 0..8 {
-                dst[r] = halve_tab[src[r]]
-            }
-        }
-        dst += 8
+        font_char[font_codes[i]] = FONT_FIRST + i
     }
 }
 
@@ -219,10 +274,45 @@ fn make_display_list() {
 }
 
 // The HUD's DLI comes on scan line 31 (VCOUNT 15), playfield row 0's on line 45 or, in a shake, 47
-// (VCOUNT 22-23). The DLI tells the HUD's apart by VCOUNT, and counts the playfield rows from there, so it
-// needs no state that a skipped VBI could leave wrong (review finding 1).
+// (VCOUNT 22-23). The DLI tells the HUD's apart by VCOUNT, and counts the groups of sprite moves from there
+// (each row with a DLI has one), so it needs no state that a skipped VBI could leave wrong (review finding 1).
 const HUD_DLI_LIMIT: u8 = 19
+
+// ---- title mode: a DLI on every row sets PF2, the title letters' colour ----
+// title.tern fills title_color (screen row s's colour at s) and calls update_title_colors(). The title has its
+// own DLI, title_dli(), as short as it can be before its WSYNC: the general one's tests put the change a line
+// late (each band's first line in the colour above). It writes next_color, then looks up the colour for the
+// next DLI in by_vcount, by VCOUNT after its WSYNC: the HUD's DLI (line 31) is past WSYNC on line 32 (VCOUNT
+// 16), playfield row p's (line 45 + 8p, 2 lines later in a shake) on line 46 + 8p or 48 + 8p, VCOUNT 23 + 4p
+// or 24 + 4p. The VBI sets next_color to screen row 1's (a skipped VBI leaves the bands wrong for a frame).
+var title_mode: bool
+var title_color: [u8; ROWS + 1]
+var by_vcount: [u8; 128]
+var next_color: u8
+const DLI_ROWS: u8 = 23             // playfield rows 0-22 may end with a DLI (as in sprites.tern)
 var dli_grp: u8                     // the group (sprites.grp_row) whose DLI comes next
+
+interrupt fn title_dli() {
+    // The title's colour bands (above).
+    var c: u8 = next_color
+    atari.antic.wsync = c
+    atari.gtia.colpf[2] = c
+    next_color = by_vcount[atari.antic.vcount]
+}
+
+fn update_title_colors() {
+    // by_vcount from title_color (above): after the DLI that sets screen row s's colour comes row s + 1's.
+    var c: u8 = title_color[2]
+    by_vcount[16] = c
+    by_vcount[17] = c
+    var v: u8 = 23
+    for row in 3..ROWS + 1 {
+        c = title_color[row]
+        by_vcount[v] = c
+        by_vcount[v + 1] = c
+        v += 4
+    }
+}
 
 interrupt fn dli() {
     // WSYNC first, so the changes land in the horizontal blank (the first moves; a row that moves several
@@ -265,13 +355,42 @@ interrupt fn dli() {
 }
 
 fn set_title_mode() {
-    // A blank screen, no sprites.
+    // A blank screen, no sprites, the HUD row unused: the shadows give the game's characters and the text
+    // colour from the top, and a DLI on every row sets PF2 from title_color (title.tern fills it).
     sprites.ena = 0
     mem.fill(addr(screen), 0, len(screen))
+    mem.fill(addr(title_color), 0, len(title_color))
+    atari.chbas = addr(charset).hi
+    atari.color[1] = COLOR_MC2
+    atari.set_dli(addr(title_dli))
+    title_mode = true               // the next VBI sets the DLI bits (title_dli_bits)
+}
+
+fn title_dli_bits() {
+    // In the VBI, in title mode: a DLI at the end of playfield rows 0-22 (sprites.vbi() turns the bits of its
+    // groups' rows off and on, so they are set again each frame).
+    dlist[8] |= atari.DL_DLI
+    for r in 11..11 + DLI_ROWS - 1 {
+        dlist[r] |= atari.DL_DLI
+    }
 }
 
 fn set_game_mode() {
+    // A blank screen in the game's colours. Leaving the title: the DLI bits back to the sprites' rows.
     mem.fill(addr(screen), 0, len(screen))
+    if title_mode {
+        title_mode = false
+        atari.set_dli(addr(dli))
+        atari.chbas = ROM_FONT_PAGE
+        atari.color[1] = COLOR_HUD
+        // The sprites have been hidden since the title started, so their groups are the floor's row only.
+        // (Not sprites.dli_bits(), which the VBI calls: the two would share its memory.)
+        dlist[8] &= ~atari.DL_DLI
+        for r in 11..11 + DLI_ROWS - 1 {
+            dlist[r] &= ~atari.DL_DLI
+        }
+        dlist[10 + FLOOR_DLI_ROW] |= atari.DL_DLI
+    }
 }
 
 fn draw_tile(col: u8, row: u8) {
@@ -325,6 +444,11 @@ fn message(row: u8, col: u8, s: ptr u8, n: u8) {
     for i in 0..n {
         scr[i] = font_char[s[i] & 63]
     }
+}
+
+fn clear_text(row: u8, col: u8, n: u8) {
+    // n blank cells from col of char row `row` (where no tiles are: the title).
+    mem.fill(text_row[row] + col, CHAR_SPACE, n as u16)
 }
 
 fn restore_tiles(row: u8, col: u8, n: u8) {
@@ -443,6 +567,10 @@ interrupt fn frame_vbi() {
     // After the OS's frame work, which has copied the shadow registers (the HUD's font and colours).
     atari.antic.vscrol = scroll
     sprites.vbi()
+    if title_mode {
+        title_dli_bits()
+        next_color = title_color[1]
+    }
     atari.atract = 0                // no attract mode: the game is never idle long enough to need it
     sound.step()
     frame_ready = true
