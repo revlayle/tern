@@ -262,6 +262,33 @@ public class ValidationTests
     }
 
     [Fact]
+    public void Smashy_smashy_on_the_atari_shows_no_sprites_on_the_title_after_a_game()
+    {
+        // The developer saw an enemy on the title after a game over: the title paces itself by VCOUNT and never
+        // calls wait_frame(), so render() did not run and the VBI went on showing the game's last sprites. Run the
+        // scripted game until the title follows a game, 10 frames into it: the copy of
+        // player-missile memory on show is empty and no slot has an object.
+        string dir = FindValidation("c64", "smashy-smashy");
+        string path = Path.Combine(dir, "src", "main.tern");
+        var result = TernCompiler.Compile(File.ReadAllText(path), Platform.Atari, sourcePath: path);
+        AtariChips? chips = null;
+        int titleFrames = -1;
+        bool played = false;        // a game was under way (not the title, well after the startup cleared memory)
+        var r = Run.Of(result, maxCycles: 4000 * (long)AtariChips.FrameCycles, setup: AtariChips.Os, standIns: true,
+            until: run =>
+            {
+                if (chips!.Frames > 100 && run.U8("video.title_mode") == 0) played = true;
+                if (titleFrames < 0 && played && run.U8("video.title_mode") != 0) titleFrames = chips.Frames;
+                return titleFrames >= 0 && chips!.Frames >= titleFrames + 10;
+            }, bus: b => chips = new AtariChips(b, SmashyJoystick));
+        Assert.True(titleFrames >= 0, "the scripted game never came back to the title");
+        int shown = r.U8("sprites.shown");
+        int copy = r.Address("sprites.pm") + shown * 2048;
+        Assert.All(Enumerable.Range(copy + 0x300, 0x500), a => Assert.Equal(0, r.Ram.Bytes[a]));
+        Assert.All(Enumerable.Range(0, 5), s => Assert.Equal(0, r.U8("sprites.init_hpos", shown * 5 + s)));
+    }
+
+    [Fact]
     public void Smashy_smashy_builds_for_the_atari()
     {
         // V1 batch 3, step 1: the shared logic with the Atari front end (src/atari/) builds with no warning, and

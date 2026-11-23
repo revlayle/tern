@@ -358,6 +358,8 @@ fn set_title_mode() {
     // A blank screen, no sprites, the HUD row unused: the shadows give the game's characters and the text
     // colour from the top, and a DLI on every row sets PF2 from title_color (title.tern fills it).
     sprites.ena = 0
+    sprites.render()                // the title never calls wait_frame(): draw the empty set once, so the
+                                    // next VBI shows no sprites (the game's last ones stayed on the title)
     mem.fill(addr(screen), 0, len(screen))
     mem.fill(addr(title_color), 0, len(title_color))
     atari.chbas = addr(charset).hi
