@@ -89,6 +89,34 @@ const fn halve(b: int) -> int {
 data halve_tab: [u8; 256] = [halve(b) for b in 0..256]
 var font_char: [u8; 64]             // C64 screen code -> char of the message font (0: blank)
 
+// 3 x 7 digits (pixels in bits 3-1, a gap in bit 0), row 7 blank: digit d's row r at d * 8 + r, then a blank.
+// The ROM font's 0 has a slash, which reads as 8 at this width, so the message font's digits and the popups'
+// (popup.tern) are these.
+data digit_nib: [u8; 11 * 8] = [
+    $E, $A, $A, $A, $A, $A, $E, $0, // 0
+    $4, $C, $4, $4, $4, $4, $E, $0, // 1
+    $E, $2, $2, $E, $8, $8, $E, $0, // 2
+    $E, $2, $2, $E, $2, $2, $E, $0, // 3
+    $A, $A, $A, $E, $2, $2, $2, $0, // 4
+    $E, $8, $8, $E, $2, $2, $E, $0, // 5
+    $E, $8, $8, $E, $A, $A, $E, $0, // 6
+    $E, $2, $2, $4, $4, $4, $4, $0, // 7
+    $E, $A, $A, $E, $A, $A, $E, $0, // 8
+    $E, $A, $A, $E, $2, $2, $E, $0, // 9
+    0, 0, 0, 0, 0, 0, 0, 0,             // blank
+]
+// A row of digit_nib (pixels in bits 3-0) -> a row of the message font (each pixel PF1, value 10).
+const fn nib_to_pf1(n: int) -> int {
+    var r = 0
+    for k in 0..4 {
+        if (n >> k) & 1 != 0 {
+            r = r | (2 << (2 * k))
+        }
+    }
+    return r
+}
+data digit_pf1: [u8; 80] = [nib_to_pf1(digit_nib[i]) for i in 0..80]
+
 // ---- HUD layout (char row 0): "SCORE 000000   TIME 060   LEVEL 01", as on the C64 ----
 const HUD_SCORE_COL: u8 = 9
 const HUD_TIME_COL: u8 = 23
@@ -125,15 +153,23 @@ fn init() {
 }
 
 fn make_font() {
-    // The message font: each glyph of font_codes from the ROM font, halved across into 4 PF1 pixels.
+    // The message font: each glyph of font_codes from the ROM font, halved across into 4 PF1 pixels; the
+    // digits from digit_nib.
     mem.fill(addr(font_char), 0, len(font_char))
     var dst: ptr u8 = addr(charset) + (FONT_FIRST as u16 << 3)
     for i in 0..len(font_codes) {
         var code: u8 = font_codes[i]
         font_char[code] = FONT_FIRST + i
-        var src: ptr u8 = (ROM_FONT + ((code ^ $20) as u16 << 3)) as ptr u8   // C64 screen code -> internal
-        for r in 0..8 {
-            dst[r] = halve_tab[src[r]]
+        if code >= $30 && code <= $39 {
+            var d: u8 = (code - $30) << 3
+            for r in 0..8 {
+                dst[r] = digit_pf1[d + r]
+            }
+        } else {
+            var src: ptr u8 = (ROM_FONT + ((code ^ $20) as u16 << 3)) as ptr u8   // C64 screen code -> internal
+            for r in 0..8 {
+                dst[r] = halve_tab[src[r]]
+            }
         }
         dst += 8
     }

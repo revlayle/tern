@@ -312,3 +312,31 @@ in `video.shake_step()`, the play loop's last drawing call before `idle_build()`
 9 in about 1,250 frames on PAL (levels, game over and rebuild slices together; step 5 measures the rebuild's
 budget) and none on NTSC. Every map rebuild gets less of the frame than on the C64 (decision 189: each machine
 its own budget).
+
+## V1 batch 3, Atari step 4: the known result in the test harness (2026-11-23)
+
+The harness's Atari pieces (`AtariChips`, Tern's `tests/Tern.Compiler.Tests/Harness/`): ANTIC's `VCOUNT` and
+`WSYNC`, the VBI at line 248 and the DLIs where the display list asks for them (read each frame, with its vertical
+scroll), the joystick through the OS's `STICK0`/`STRIG0`, no key, a PAL GTIA, `RANDOM` a fixed sequence (one byte per read, so the seed does not move with the timing); an OS
+stub for the NMI entry, `SYSVBV` and `XITVBV`. `ValidationTests.Smashy_smashy_plays_a_scripted_game_on_the_atari`
+runs 2,500 frames with the C64 test's joystick script and compares the game state, the sprite shadows and the
+screen with `expected/atari-frame-2500.txt`. ANTIC's DMA is not modelled (every line gives the CPU 114 cycles), so
+the rebuild slices get more of a frame than on the machine: the result is the harness's (question 189).
+`TERN_REAL=1`: `Smashy_smashy_shows_its_title_in_altirra`, the title on an 800 (PAL) 6 s after the start,
+against `expected/altirra-800-pal-title.png` (two runs gave the same pixels).
+
+No new gap.
+
+### Not a Tern gap: a read outside the tile map in `levelgen`, found by the emulator's index check
+
+The first run of the Atari known result stopped on "Index 255 is outside 'tilemap.tiles', which has 240 elements"
+at `if tilemap.tiles[rise - 1] != tilemap.T_EMPTY` in `levelgen.reachable`'s jump search: a standing cell in column
+0 of map row 1 rises into row 0, where `rise - 1` is -1. The Prog8 game reads there too (`video.tiles[rise - 1]`,
+the byte before the map). It changes nothing: at column 0 `left_covered` is already false, and the read at column
+19 (`rise + 1`, the next row's first cell) can only clear `right_covered`, which is false there too. The C64 runs
+never generated such a level; the Atari run's seed (POKEY's `RANDOM` in the harness) did. Both reads are now only
+made within the row (`c != 0`, `c != MAP_W - 1`), which gives the same result: the C64 known result is unchanged
+(20,983 -> 20,993 bytes). Tern's index check in the emulator did its job: the read was silent in Prog8.
+
+The message font's digits are the popups' hand-made 3 x 7 digits now (the ROM font's slashed 0 read as 8 in
+"HIGH SCORE 000000").

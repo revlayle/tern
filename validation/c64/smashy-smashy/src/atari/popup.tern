@@ -5,10 +5,11 @@
 // directly above it.
 import bcd
 import sprites
+import video
 
 const SLOTS: u8 = 2
 const FIRST_SPRITE: u8 = sprites.FIRST_WIDE
-const BLANK: u8 = 10                        // digit_nib entry with no pixels
+const BLANK: u8 = 10                        // video.digit_nib entry with no pixels
 
 // [TUNE] as on the C64
 const LIFE: u8 = 50                         // frames; rises 1 px every 2 frames
@@ -31,21 +32,6 @@ var pos_x: [u16; SLOTS]                     // playfield x of the popup
 var dirty: [bool; SLOTS]                    // digits to draw in update()
 var newest: u8                              // slot of the last popup started
 
-// 3 x 7 digits (pixels in bits 3-1, a gap in bit 0), row 7 blank: digit d's row r at d * 8 + r. The ROM
-// font's 0 has a slash, which reads as 8 at this width.
-data digit_nib: [u8; 11 * 8] = [
-    $E, $A, $A, $A, $A, $A, $E, $0, // 0
-    $4, $C, $4, $4, $4, $4, $E, $0, // 1
-    $E, $2, $2, $E, $8, $8, $E, $0, // 2
-    $E, $2, $2, $E, $2, $2, $E, $0, // 3
-    $A, $A, $A, $E, $2, $2, $2, $0, // 4
-    $E, $8, $8, $E, $2, $2, $E, $0, // 5
-    $E, $8, $8, $E, $A, $A, $E, $0, // 6
-    $E, $2, $2, $4, $4, $4, $4, $0, // 7
-    $E, $A, $A, $E, $A, $A, $E, $0, // 8
-    $E, $A, $A, $E, $2, $2, $E, $0, // 9
-    0, 0, 0, 0, 0, 0, 0, 0,             // blank
-]
 
 fn init() {
     clear()
@@ -144,8 +130,8 @@ fn draw(s: u8) {
         o = 2 * sprites.WIDE_H
     }
     for r in 0..sprites.WIDE_H {
-        sprites.wide_gfx[o + r] = digit_nib[f0 + r] << 4 | digit_nib[f1 + r]
-        sprites.wide_gfx[o + sprites.WIDE_H + r] = digit_nib[r] << 4 | digit_nib[r]
+        sprites.wide_gfx[o + r] = video.digit_nib[f0 + r] << 4 | video.digit_nib[f1 + r]
+        sprites.wide_gfx[o + sprites.WIDE_H + r] = video.digit_nib[r] << 4 | video.digit_nib[r]
     }
 }
 

@@ -76,6 +76,72 @@ public class ValidationTests
         Assert.InRange(r.Cpu.Cycles, 7 * C64Chips.FrameCycles + 100 * 63, 8 * C64Chips.FrameCycles + 100 * 63);
     }
 
+    [Fact]
+    public void AtariChips_raises_the_vertical_blank_and_the_display_lists_interrupts()
+    {
+        // V1 batch 3, Atari step 4: the VBI once a frame through the OS stub's SYSVBV and the deferred vector, and a
+        // DLI at the last line of each display-list row with bit 7. The list is 24 blank lines from line 8, then
+        // rows of 8 lines from line 32: row 0 ends on line 39 (VCOUNT 19), row 5 on line 79 (VCOUNT 39).
+        var result = Run.Compile("""
+            import atari
+            const SCREEN = $4000
+            const LIST = $3C00
+            memory { SCREEN..=SCREEN + 959 reserved }
+            data list: [u8; _] @ LIST = atari.display_list(atari.MODE_TEXT, 24, SCREEN, LIST, 1 | (1 << 5))
+            var seen: [u8; 8]
+            var n: u8
+            var frames: u8
+            interrupt fn dli() {
+                if n < 8 {
+                    seen[n] = atari.antic.vcount
+                    n += 1
+                }
+            }
+            interrupt fn frame() {
+                frames += 1
+            }
+            fn main() {
+                atari.set_vbi(addr(frame))
+                atari.set_display_list(addr(list))
+                atari.set_dli(addr(dli))
+                while frames < 3 { }
+            }
+            """, platform: Platform.Atari);
+        AtariChips? chips = null;
+        var r = Run.Of(result, maxCycles: 4 * AtariChips.FrameCycles, setup: AtariChips.Os, standIns: true,
+            bus: b => chips = new AtariChips(b, _ => 0));
+        Assert.Equal(3, r.U8("frames"));
+        Assert.Equal(3, chips!.Frames);
+        Assert.Equal(6, r.U8("n"));
+        for (int i = 0; i < 6; i += 2)
+        {
+            Assert.Equal(19, r.U8("seen", i));
+            Assert.Equal(39, r.U8("seen", i + 1));
+        }
+        Assert.InRange(r.Cpu.Cycles, 2 * AtariChips.FrameCycles + 248 * 114, 3 * AtariChips.FrameCycles);
+    }
+
+    [Fact]
+    public void AtariChips_gives_the_joystick_through_the_os_copies_and_no_key()
+    {
+        // The script's bits as the OS's STICK0 (0 = pressed) and STRIG0, per frame; SKSTAT with no key down.
+        var result = Run.Compile("""
+            import atari
+            var stick: u8
+            var trig: u8
+            var skstat: u8
+            fn main() {
+                stick = atari.stick[0]
+                trig = atari.strig[0]
+                skstat = atari.pokey_in.skstat
+            }
+            """, platform: Platform.Atari);
+        var r = Run.Of(result, setup: AtariChips.Os, standIns: true, bus: b => new AtariChips(b, _ => 0b1_0101));
+        Assert.Equal(0x0A, r.U8("stick"));      // up and left held
+        Assert.Equal(0, r.U8("trig"));          // fire held
+        Assert.Equal(0xFF, r.U8("skstat"));
+    }
+
     [Trait("Platform", "c64")]
     [FactWhen("TERN_REAL", "it runs Galaxy Stars in VICE and compares the screenshot")]
     public void Galaxy_stars_plays_its_demo_in_vice()
@@ -143,6 +209,47 @@ public class ValidationTests
     }
 
     [Fact]
+    public void Smashy_smashy_plays_a_scripted_game_on_the_atari()
+    {
+        // V1 batch 3, Atari step 4: the shared logic with the Atari front end, through the title to a game under the
+        // C64 test's joystick script, with the VBI, the DLIs, VCOUNT and the joystick from AtariChips and the OS's NMI
+        // handling from its stub. The rebuild budget and the frame's timing are the harness's (no ANTIC DMA), so the
+        // run is this harness's known result, not a real Atari's frame for frame (question 189: each machine its own).
+        string dir = FindValidation("c64", "smashy-smashy");
+        string path = Path.Combine(dir, "src", "main.tern");
+        var result = TernCompiler.Compile(File.ReadAllText(path), Platform.Atari, sourcePath: path);
+        const int frames = 2500;
+        AtariChips? chips = null;
+        var r = Run.Of(result, maxCycles: (frames + 10) * (long)AtariChips.FrameCycles, setup: AtariChips.Os, standIns: true,
+            until: _ => chips!.Frames >= frames, bus: b => chips = new AtariChips(b, SmashyJoystick));
+        string state = $"score {r.U16("score.points"):X4}00, time {r.U16("score.time"):X3}, level {r.U8("score.level")}, "
+            + $"treasures left {r.U8("score.treasures_left")}, kills {r.U8("enemies.kills")}, high score {r.U16("score.high"):X4}00";
+        string sprites = "shown " + Convert.ToString(r.U8("sprites.ena"), 2).PadLeft(8, '0') + "; "
+            + string.Join(", ", Enumerable.Range(0, 8).Select(n => $"{n}: x {r.U8("sprites.hpos", n)} y {r.U8("sprites.y", n)} colour ${r.U8("sprites.color", n):X2}"));
+        Expect(Path.Combine(dir, "expected", $"atari-frame-{frames}.txt"), $"Smashy smashy on the Atari after {frames} frames in the emulator",
+            ("state", [state]),
+            ("sprites (shadows)", [sprites]),
+            ("screen (video.screen, ANTIC's codes)", Rows(r.Ram, r.Address("video.screen"), 1000, 40, 0xFF)));
+    }
+
+    [FactWhen("TERN_REAL", "it runs smashy smashy in Altirra and compares the screenshot")]
+    public void Smashy_smashy_shows_its_title_in_altirra()
+    {
+        // An 800 with 48 KB, PAL, the OS Altirra has (AltirraOS: no OS ROM images are installed). Altirra runs by the
+        // clock, not by cycles, so the shot is of the title, which stands for 10 s: 6 s after the start it is on
+        // screen in every run (two runs gave the same pixels). tests/tools/altirra-shot.ps1 captures the screen.
+        string dir = FindValidation("c64", "smashy-smashy");
+        string path = Path.Combine(dir, "src", "main.tern");
+        var result = TernCompiler.Compile(File.ReadAllText(path), Platform.Atari, sourcePath: path);
+        string work = Directory.CreateTempSubdirectory("tern-real-").FullName;
+        string xex = Path.Combine(work, "smashy-smashy.xex"), shot = Path.Combine(work, "altirra.png");
+        File.WriteAllBytes(xex, result.File);
+        RunAltirra(xex, 6, shot, "/hardware:800", "/memsize:48K", "/pal");
+        ExpectScreenshot(shot, Path.Combine(dir, "expected", "altirra-800-pal-title.png"));
+        Directory.Delete(work, recursive: true);   // kept when the check fails, to look at
+    }
+
+    [Fact]
     public void Smashy_smashy_builds_for_the_atari()
     {
         // V1 batch 3, step 1: the shared logic with the Atari front end (src/atari/) builds with no warning, and
@@ -192,6 +299,33 @@ public class ValidationTests
             Assert.Fail($"VICE did not stop within 2 minutes running {prg}");
         }
         Assert.True(File.Exists(screenshot), $"VICE wrote no screenshot running {prg}");
+    }
+
+    /// <summary>Runs an Atari program in Altirra for some seconds and saves its screen (tests/tools/altirra-shot.ps1).</summary>
+    private static void RunAltirra(string xex, int seconds, string screenshot, params string[] machine)
+    {
+        string script = Path.Combine(FindRepositoryFolder("tests"), "tools", "altirra-shot.ps1");
+        var start = new System.Diagnostics.ProcessStartInfo("pwsh") { UseShellExecute = false };
+        foreach (string a in new[] { "-NoProfile", "-File", script, xex, screenshot, seconds.ToString(), "/skipsetup", "/kernel:default", "/nobasic" }.Concat(machine))
+            start.ArgumentList.Add(a);
+        using var run = System.Diagnostics.Process.Start(start)!;
+        if (!run.WaitForExit(TimeSpan.FromMinutes(2)))
+        {
+            run.Kill(entireProcessTree: true);
+            Assert.Fail($"Altirra did not stop within 2 minutes running {xex}");
+        }
+        Assert.True(File.Exists(screenshot), $"Altirra gave no screenshot running {xex}");
+    }
+
+    /// <summary>A folder of the repository, found above the test's binaries.</summary>
+    private static string FindRepositoryFolder(string name)
+    {
+        for (var dir = new DirectoryInfo(AppContext.BaseDirectory); dir is not null; dir = dir.Parent)
+        {
+            var path = Path.Combine(dir.FullName, name);
+            if (Directory.Exists(path) && File.Exists(Path.Combine(dir.FullName, "CLAUDE.md"))) return path;
+        }
+        throw new DirectoryNotFoundException($"{name} not found above {AppContext.BaseDirectory}");
     }
 
     /// <summary>Compares a screenshot with the expected one within the tolerance, or copies it there with TERN_UPDATE_VALIDATION=1.</summary>

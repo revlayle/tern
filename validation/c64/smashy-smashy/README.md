@@ -36,6 +36,11 @@ validation program, batch 2; roadmap V1, decisions 2026-11-21). MIT license (`LI
   and CIA 1 as the scripted joystick (ANDed with the keyboard row the game drives) and no keys. Its popups use
   the RAM under the KERNAL's IRQ entry at `$FF48`, so the run's KERNAL IRQ entry stub is at `$FFC0`
   (`ValidationTests.Kernal`). `tern run` has none of these, so this result is the harness's, not `tern run`'s.
+  The Atari version's (V1 batch 3, step 4): `expected/atari-frame-2500.txt`, the same state, the sprite shadows and
+  the screen after 2,500 frames of the same joystick script, checked by
+  `ValidationTests.Smashy_smashy_plays_a_scripted_game_on_the_atari` with `AtariChips` (VCOUNT, WSYNC, the VBI and
+  DLIs from the display list, the joystick through STICK0/STRIG0) and an OS stub for the NMIs; with `TERN_REAL=1`,
+  `Smashy_smashy_shows_its_title_in_altirra` against `expected/altirra-800-pal-title.png`.
   With `TERN_REAL=1`, `Smashy_smashy_shows_its_scoring_page_in_vice` runs it in VICE (`C:/Vice/bin/x64sc.exe`)
   for 25 million cycles with no input (the SCORING page, whose chain values need its raster split) and compares
   the screenshot with `expected/vice-25M-cycles.png`, up to 1% of the pixels apart.

@@ -325,10 +325,12 @@ fn explore() -> bool {
                 break
             }
             rr -= 1
-            if tilemap.tiles[rise + 1] != tilemap.T_EMPTY {
+            // Only within the row: at the edges the side is not covered already, and rise - 1 at column 0 of
+            // row 0 is outside the map (the emulator's index check found it on the Atari run; Prog8 reads there too).
+            if c != tilemap.MAP_W - 1 && tilemap.tiles[rise + 1] != tilemap.T_EMPTY {
                 right_covered = false
             }
-            if tilemap.tiles[rise - 1] != tilemap.T_EMPTY {
+            if c != 0 && tilemap.tiles[rise - 1] != tilemap.T_EMPTY {
                 left_covered = false
             }
             if k != 1 && row_stand[rr] == 0 {
