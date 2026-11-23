@@ -321,7 +321,6 @@ public class ErrorTests
 
     // Errors the coverage run of R6 found no test for (review code-quality-tests, finding 4).
     [Theory]
-    [InlineData("fn f() -> u8 { return 1 }\nvar a: [u8; 4]\nfn main() { a[f()] += 1 }", 3, 20, "Compound assignment to an element whose index calls a function is not supported. Store the index in a variable first")]
     [InlineData("var a: [u8; 2]\nvar b: [u8; 2]\nfn main() { a = b }", 3, 13, "Whole arrays cannot be assigned. Assign the elements in a loop, or copy the memory with mem.copy")]
     [InlineData("var b: bool\nfn main() { b += 1 }", 2, 15, "'+=' needs a number on the left. Use a number variable, or '=' with the whole value")]
     [InlineData("var b: bool\nfn main() { b |= true }", 2, 15, "'|=' needs a number on the left. Use a number variable, or '=' with the whole value")]

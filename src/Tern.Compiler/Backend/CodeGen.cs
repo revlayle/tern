@@ -101,8 +101,29 @@ public sealed partial class CodeGen
         }
         // An inline function has no frame of its own: what it used is in its callers' frames.
         foreach (var f in _program.Functions.Where(f => f.IsInline)) f.FrameVariables.Clear();
+        DropUnnamedFrameVariables(all);
         foreach (var ((_, original), copy) in _instances) copy.Weight = original.Weight;
         return all;
+    }
+
+    /// <summary>
+    /// A temporary or register parameter that no instruction names once the optimizer is done (a parameter
+    /// in A kept in X, a temporary whose value stayed in A) gets no memory (V1 fixes 2). A parameter in memory
+    /// keeps its byte, since callers store into it; so do locals, which a run can dump, and anything whose
+    /// address is taken or that is placed at an address.
+    /// </summary>
+    private void DropUnnamedFrameVariables(List<AsmItem> all)
+    {
+        var named = new HashSet<VariableSymbol>();
+        foreach (var item in all)
+        {
+            if (item is not Instr i) continue;
+            if (i.Operand is VarOperand o) named.Add(o.Variable.Storage);
+            else if (i.Operand is ImmVarByte b) named.Add(b.Variable.Storage);
+        }
+        foreach (var f in _program.Functions)
+            f.FrameVariables.RemoveAll(v => !named.Contains(v.Storage) && !v.AddressTaken && !v.Storage.AddressTaken && v.Storage.FixedAddress is null
+                && (v.Kind == VariableKind.Temp || (v.Kind == VariableKind.Parameter && v.PassedIn is not null)));
     }
 
     // ---------- Emission helpers ----------

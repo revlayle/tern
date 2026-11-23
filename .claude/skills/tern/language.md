@@ -81,7 +81,7 @@ fn main() {
 
 ```console
 $ tern run --target c64 arith.tern --dump offset --dump product --dump q --dump r --dump low
-Main returned: 606 cycles (554 in main)
+Main returned: 585 cycles (533 in main)
 A=$1B X=$00 Y=$C3 SP=$FF PC=$0831
 offset $0007 u16 = 283 ($011B)
 product $0009 u16 = 21 ($0015)
@@ -348,12 +348,12 @@ fn main() {
 
 ```console
 $ tern run --target c64 flow.tern --dump hits --dump n --dump 'log:10'
-Main returned: 799 cycles (615 in main)
+Main returned: 791 cycles (607 in main)
 A=$1F X=$00 Y=$12 SP=$FF PC=$0825
 hits $0003 u8 = 31 ($1F)
 n $0004 u8 = 18 ($12)
-log $08C0 [u8; 16] (10 bytes):
-  $08C0  01 02 03 04 05 06 07 08 08 09
+log $08BD [u8; 16] (10 bytes):
+  $08BD  01 02 03 04 05 06 07 08 08 09
 ```
 
 - There is no C-style `for (;;)` and no `do`/`until`. `a..b` excludes `b`, `a..=b` includes it.

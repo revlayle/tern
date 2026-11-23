@@ -615,13 +615,15 @@ public sealed partial class Checker
             throw new CompileError(c.Pos, $"'{fn.Name}' takes {fn.Parameters.Count} argument(s), not {c.Args.Count}. Pass {fn.Parameters.Count}: {fn.Name}({Signature.Parameters(fn)})");
         for (int i = 0; i < c.Args.Count; i++)
         {
-            CheckExpr(c.Args[i]);
+            CheckValueFor(c.Args[i], fn.Parameters[i].Type);
             Coerce(c.Args[i], fn.Parameters[i].Type);
         }
-        foreach (var p in fn.Parameters)
+        for (int i = 0; i < fn.Parameters.Count; i++)
             foreach (var held in _body.LoopRegisters)
-                if (p.PassedIn is { } pr && pr.Uses(held))
-                    throw new CompileError(c.Pos, $"'{fn.Name}' takes '{p.Name}' in {held}, which holds the loop variable. Remove 'using {held}' from the loop");
+                if (fn.Parameters[i].PassedIn is { } pr && pr.Uses(held)
+                    // The loop variable itself, to a function that keeps its register: already in place (spec 6.6).
+                    && !(pr == held && fn.Keeps.Contains(held) && c.Args[i] is NameExpr { Symbol: VariableSymbol { Register: var r } } && r == held))
+                    throw new CompileError(c.Pos, $"'{fn.Name}' takes '{fn.Parameters[i].Name}' in {held}, which holds the loop variable. Remove 'using {held}' from the loop");
         foreach (var (reg, _) in fn.FixedInputs)
             if (_body.LoopRegisters.Contains(reg))
                 throw new CompileError(c.Pos, $"'{fn.Name}' takes a fixed input in {reg}, which holds the loop variable. Remove 'using {reg}' from the loop");

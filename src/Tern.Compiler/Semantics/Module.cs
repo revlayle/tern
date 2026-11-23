@@ -62,6 +62,10 @@ public static class ModuleLoader
             Source = source,
             Syntax = Parser.Parse(source, sourcePath, errors),
         };
+        // A main file in another platform's folder (spec 2.2): its imports would come from that platform's modules.
+        if (sourcePath is not null && PlatformOfFolder(main.Directory) is { } other && other != platform.Name)
+            throw new CompileError(new SourcePos(1, 1, sourcePath),
+                $"This file is in the folder for the {other} platform ({main.Directory}); this program is compiled for {platform.Name}. Use --target {other} for it, or a main file outside {other}/");
         var loaded = new Dictionary<string, Module>();
         var order = new List<Module>();
 
@@ -130,19 +134,21 @@ public static class ModuleLoader
     }
 
     /// <summary>
-    /// The file for <c>import name</c>: the library's folder for the target platform, the library,
-    /// then the importing file's folder. A module in another platform's folder is an error.
+    /// The file for <c>import name</c>: the library's folder for the target platform, the library, then the
+    /// program's folder for the target and the program's folder (spec 2.2). The program's folder is the
+    /// importing file's, or the one above when that is a platform folder. A module only in another
+    /// platform's folder, of the library or of the program, is an error.
     /// </summary>
     private static string Find(ImportDecl import, Module importer, Platform platform, string library, Func<string, bool> isMainFile, SourceFiles files)
     {
         string file = import.Name + ".tern";
-        string[] candidates =
-        [
-            System.IO.Path.Combine(library, platform.Name, file),
-            System.IO.Path.Combine(library, file),
-            System.IO.Path.Combine(importer.Directory, file),
-        ];
-        for (int i = 0; i < candidates.Length; i++)
+        bool inLibrary = InLibrary(importer.Directory, library);
+        string program = !inLibrary && PlatformOfFolder(importer.Directory) is not null
+            ? System.IO.Path.GetDirectoryName(System.IO.Path.GetFullPath(importer.Directory))! : importer.Directory;
+        var candidates = new List<string> { System.IO.Path.Combine(library, platform.Name, file), System.IO.Path.Combine(library, file) };
+        if (!inLibrary) candidates.Add(System.IO.Path.Combine(program, platform.Name, file));
+        candidates.Add(System.IO.Path.Combine(program, file));
+        for (int i = 0; i < candidates.Count; i++)
         {
             var path = candidates[i];
             if (!files.Exists(path)) continue;
@@ -156,11 +162,11 @@ public static class ModuleLoader
             var full = System.IO.Path.GetFullPath(path);
             // A program's own module may not have a library module's name (spec 2.2), so the library
             // never silently hides it. A main file of that name is never imported, and is allowed.
-            var own = System.IO.Path.GetFullPath(candidates[^1]);
-            if (i < candidates.Length - 1 && files.Exists(own) && !isMainFile(own) && !InLibrary(importer.Directory, library)
-                && !string.Equals(own, full, StringComparison.OrdinalIgnoreCase))
-                throw new CompileError(import.Pos,
-                    $"'{import.Name}' is both a library module ({full}) and your file {own}. Rename your file, e.g. to my_{file}, and import it by its new name");
+            if (i < 2 && !inLibrary)
+                foreach (var own in candidates.Skip(2).Select(System.IO.Path.GetFullPath))
+                    if (files.Exists(own) && !isMainFile(own) && !string.Equals(own, full, StringComparison.OrdinalIgnoreCase))
+                        throw new CompileError(import.Pos,
+                            $"'{import.Name}' is both a library module ({full}) and your file {own}. Rename your file, e.g. to my_{file}, and import it by its new name");
             return full;
         }
 
@@ -169,10 +175,19 @@ public static class ModuleLoader
                 if (files.Exists(System.IO.Path.Combine(dir, file)))
                     throw new CompileError(import.Pos,
                         $"'{import.Name}' is a module for the {System.IO.Path.GetFileName(dir)} platform; this program is compiled for {platform.Name}. Remove the import, or use a module for {platform.Name}");
+        if (!inLibrary)
+            foreach (var other in Platform.All.Where(p => p != platform))
+                if (System.IO.Path.Combine(program, other.Name, file) is var there && files.Exists(there))
+                    throw new CompileError(import.Pos,
+                        $"'{import.Name}' is a module for the {other.Name} platform ({System.IO.Path.GetFullPath(there)}); this program is compiled for {platform.Name}. Add {platform.Name}/{file}, or remove the import");
 
         throw new CompileError(import.Pos,
-            $"Cannot find module '{import.Name}': there is no {file} in the library ({library}) or in {importer.Directory}. Check the spelling, or put {file} next to the importing file");
+            $"Cannot find module '{import.Name}': there is no {file} in the library ({library}) or in {program}. Check the spelling, or put {file} next to the importing file");
     }
+
+    /// <summary>The platform a folder is named after (a platform folder, spec 2.2), or null.</summary>
+    private static string? PlatformOfFolder(string folder) =>
+        Platform.ByName(System.IO.Path.GetFileName(System.IO.Path.GetFullPath(folder).TrimEnd(System.IO.Path.DirectorySeparatorChar)))?.Name;
 
     /// <summary>Module files: a file open in an editor, else the file on disk.</summary>
     private sealed class SourceFiles(Func<string, string?>? openFile)

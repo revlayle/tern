@@ -157,6 +157,10 @@ Screen ($0400, 40 x 25):
 ```
 
 - `import` loads a library module; its names are always used with the module name (`c64.SCREEN`).
+  It also loads your own `name.tern` from the importing file's folder. A program for several machines
+  keeps each machine's modules in a subfolder named after the target (`c64/video.tern`,
+  `nes/video.tern`): `import video` finds the target's one first, and files in `nes/` import as if
+  they were in the folder above.
 - `data` is read-only bytes in the program; `screen"..."` gives screen codes, for writing straight to
   screen memory. `addr(x)` is a pointer to `x`, `len(x)` its length.
 - Globals without an initial value are zeroed at startup.
@@ -323,7 +327,9 @@ Functions (cycles include the functions they call):
 - **Inside `for ... using X`, only functions that keep X may be called** (`keeps X`); likewise Y.
   A function with a body says so after its return type, `fn hits(o: u8) -> bool keeps Y { ... }`, and
   the compiler checks it (the body indexes with X; `p[i]`, or a call to a function without `keeps Y`,
-  is an error there). On an `asm fn` it is a promise, as on a KERNAL routine.
+  is an error there). On an `asm fn` it is a promise, as on a KERNAL routine. Such a function can take
+  the loop variable itself in that register (`fn hits(s: u8 using Y) -> bool keeps Y`, called as
+  `hits(s)` in a `using Y` loop): the call loads nothing. Any other argument there is an error.
 - **A `bool` can live in a flag.** `-> bool using carry` returns in the carry; an `inline asm fn`
   with a flag result tests a flag its instructions set, with no call. After compiled code the flags
   are unspecified: `cpu.carry()` and friends are only for right after an `asm` block.

@@ -108,7 +108,7 @@ public class InterruptTests
     [InlineData("interrupt fn handler() { f() }", "cld|pha|txa|pha|tya|pha|jsr f|pla|tay|pla|tax|pla|rti")]
     // return goes to the code that restores the registers.
     [InlineData("interrupt fn handler() {\n if count == 0 { return }\n count = 0\n }",
-        "pha|lda count|bne handler.endif1|jmp handler.exit0|lda #$00|sta count|pla|rti")]
+        "pha|lda count|beq handler.exit0|lda #$00|sta count|pla|rti")]
     public void Code_shapes(string handler, string expected)
     {
         var r = Run.Program($$"""
@@ -435,7 +435,8 @@ public class InterruptTests
     [InlineData("var v: u8\nfn f() { var t = v\n v = t + 1 }\nfn g() { f() }\ninterrupt fn h() { g() }\nfn main() { f() }", "f")]
     [InlineData("var v: u8\nfn f() { var t = v\n v = t + 1 }\ninterrupt fn h1() { var a: u8 = v\n f()\n v = a }\ninterrupt fn h2() { var b: u8 = v\n f()\n v = b }\nfn main() { }", "f")]
     [InlineData("var v: u8\nfn f(n: u8) { v = n }\ninterrupt fn h() { f(1) }\nfn main() { f(2) }", "f")]
-    [InlineData("var v: u8\nfn f(n: u8 using A) { v = n }\ninterrupt fn h() { f(1) }\nfn main() { f(2) }", "f")]
+    // n is needed after a call, so it has memory (one read only from A has none, V1 fixes 2).
+    [InlineData("var v: u8\nfn g() { }\nfn f(n: u8 using A) { v = n\n g()\n v += n }\ninterrupt fn h() { f(1) }\nfn main() { f(2) }", "f")]
     // The inner counter goes in X; the outer one stays in memory (its loop calls g).
     [InlineData("var v: u8\nfn g() {}\nfn f() {\n for _ in 0..v {\n for _ in 0..v { v += 1 }\n g()\n }\n}\ninterrupt fn h() { f() }\nfn main() { f() }", "f")]
     [InlineData("var v: u16\nvar w: u16\nfn g() -> u8 { return 1 }\nfn f() {\n v = w + (g() as u16)\n}\ninterrupt fn h() { f() }\nfn main() { f() }", "f")]

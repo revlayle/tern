@@ -82,7 +82,7 @@ public static partial class Optimizer
     {
         while (RemoveRedundant(code, function) | FoldShiftTests(code, function) | UseOperandInA(code, function)
             | RemoveDeadLoads(code, function) | RemoveDeadTransfers(code, function) | ReuseIncDecFlags(code, function) | TestCarryDirectly(code, function) | RemoveDeadStores(code, function) | ReadCopiesFromSource(code, function, instructions)
-            | SinkStoresFromLoops(code, function) | RemoveJumpsToNext(code) | GroupConstantStores(code)
+            | SinkStoresFromLoops(code, function) | StoreWhereComputed(code, function) | RemoveJumpsToNext(code) | InvertBranchesOverJumps(code) | GroupConstantStores(code)
             | ThreadJumpsAgain(code)) { }
     }
 }

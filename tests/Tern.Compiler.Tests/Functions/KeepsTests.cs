@@ -160,7 +160,7 @@ public class KeepsTests
     [InlineData("fn f() keeps X @ $C000\nfn main() { }", 1, 16, "For a routine at a fixed address, 'keeps' comes after the address. Write fn f(...) @ $addr keeps X")]
     [InlineData("const fn f() -> int keeps X { return 1 }\nfn main() { }", 1, 27, "A const fn runs at compile time, so it has no registers to keep. Remove 'keeps'")]
     [InlineData("fn f() keeps X { }\nfn main() { for i in 0..3 using Y { f() } }", 2, 13, "The loop body calls a function, which can change Y. Remove 'using Y', or call only routines that keep Y")]
-    [InlineData("fn f(v: u8 using Y) keeps Y { }\nfn main() { for i in 0..3 using Y { f(i) } }", 2, 37, "'f' takes 'v' in Y, which holds the loop variable. Remove 'using Y' from the loop")]
+    [InlineData("fn f(v: u8 using Y) keeps Y { }\nfn main() { for i in 0..3 using Y { f(i + 1) } }", 2, 37, "'f' takes 'v' in Y, which holds the loop variable. Remove 'using Y' from the loop")]
     public void Reports_errors(string source, int line, int column, string? expected)
     {
         if (expected is null) Run.Program(source);
