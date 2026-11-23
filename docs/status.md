@@ -6,7 +6,7 @@ Owned by the coding session. Updated at the end of every coding session.
 
 - **Milestone:** V1 fixes 2 (roadmap "V1 fixes 2": code from Galaxy Stars and smashy smashy; decisions 2026-11-22). V1 batch 2 was merged into `main` at `dc4f8ef`, and decision `95bc4ab` (questions 184-185) put smashy smashy's gaps 1 and 3 in this milestone.
 - **Branch:** `v1-fixes-2`, from `main` at `95bc4ab`. One commit per item, each with its benchmark, Galaxy Stars and smashy smashy numbers in the message. The suite passes: 11,868 compiler tests on the C64 (3 skipped: `TERN_COMPARE` and the two `TERN_REAL` checks) and 50 CPU tests; `TERN_TARGET=atari`, `apple2` and `nes` with `--filter "Platform!=c64"`: 11,287 each. The benchmarks did not move with any item (the baseline is unchanged).
-- **Done** (every item of the roadmap's list but one shape; question 187):
+- **Done** (every item of the roadmap's list; `q + c as u16 + 3` was dropped from it, decision 2026-11-22, question 187):
   - Gap 33, `if c { break }` / `continue` as one branch (`8893676`), and a pass that turns any branch over a `jmp` into the opposite branch (`InvertBranchesOverJumps`).
   - Gap 30, a 16-bit compare with a constant whose low byte is 0 (`85bd3a2`), and a sum of two widened bytes (`6e64641`).
   - Smashy smashy gap 1, the "Declare 'SCREEN' as a pointer" fix where a pointer is expected (`5a0126e`); with it, a widened byte plus a constant with a low byte of 0 loads the constant's high byte.
@@ -15,11 +15,20 @@ Owned by the coding session. Updated at the end of every coding session.
   - Gap 32, the loop variable passed in its own register (`11d93ce`).
   - Gap 31, a 16-bit local used for its bytes (`877ee61`): the optimizer pass `StoreWhereComputed` stores a copied byte where it was computed; the reload and the local's stores then go.
   - Platform folders (`b0af55c`; spec 2.2): `<folder>/<target>/` before `<folder>/`, a file in a platform folder imports from the folder above, another platform's folder is an error, the library-name check covers platform folders.
-  - The small shapes (`be6f4f0`): `q - v` from A as `eor #$FF` / `sec` / `adc q`; temporaries and register parameters no instruction names get no memory (the zero page they free made smashy smashy 374 bytes smaller and 217 cycles a play frame faster); `r[3] = a - b` was already direct. Not done: `t = q + c as u16 + 3` (question 187).
+  - The small shapes (`be6f4f0`): `q - v` from A as `eor #$FF` / `sec` / `adc q`; temporaries and register parameters no instruction names get no memory (the zero page they free made smashy smashy 374 bytes smaller and 217 cycles a play frame faster); `r[3] = a - b` was already direct. `t = q + c as u16 + 3` is not built: dropped from the milestone (question 187).
 - **Measured** (`compare.py`, all frames the same in every build): Galaxy Stars 18,750 -> 18,674 bytes, 4,706 -> 4,740 cycles per play frame (Prog8 5,586); the code only got shorter, and the 34 cycles are loop branches that now cross a page (after gap 33: `hostiles.explosion_hit`, `explode.draw_area`; after gap 31: `stars.next_busy`), found with a script over the listings. Smashy smashy 21,436 -> 20,944 bytes, 7,056 -> 6,789 cycles per play frame (Prog8 8,654). With the final build, smashy smashy's `compare.py --scenario game --frames 15000`: 3 runs, 39,620 `wait_frame()` calls the same, levels 1-9 reached in each. Galaxy Stars' plain routines measured again: none within 5% of the assembly on both the average and the worst frame, so none moves to plain Tern in batch 3; the closest is `explode.hits` with the asm's signature (2.6% / 3.0% on `check_player`, 7.3% on the worst `check_explosions` frame). Recorded in the port's `gaps.md`, section "V1 fixes 2", with two new forms in its `plain/` (`explode.hits.y`, `explode.hits.carry`), and in smashy smashy's `gaps.md`, section "V1 fixes 2"; **not committed in either game repository** (each commit there waits for the developer's approval), and `validation/c64/*/gaps.md` are not copied again yet.
-- **Next step:** `/review` of `v1-fixes-2`. After the review: commit the two game repositories' `gaps.md` sections (and Galaxy Stars' two `plain/` files) once the developer approves, then copy each `gaps.md` into `validation/c64/<game>/` again. Then V1 batch 3 (smashy smashy on the NES), which starts by splitting the C64 port into platform folders.
+- **Review** `docs/reviews/v1-fixes-2.md`: ready to merge, two suggestions, both done (table below); `main` merged in (decision `25c3ac1`, questions 186-187). The suite: 11,870 compiler tests on the C64, 11,289 on each other target.
+- **Next step:** `/merge v1-fixes-2`. Then, once the developer approves: commit the two game repositories' `gaps.md` sections (and Galaxy Stars' two `plain/` files), and copy each `gaps.md` into `validation/c64/<game>/` again. Then V1 batch 3 (smashy smashy on the NES), which starts by splitting the C64 port into platform folders.
 - **Tools used, not in either repository:** py65 for `compare.py` (`pip install --target <dir> py65`); this session's copy is in its scratchpad. A small script found the page-crossing branches: for each `bxx` in a listing, the page of the next instruction against the page of the target.
 - **Methods over 100 lines:** none added (the longest changed: `ModuleLoader.Find` 45 lines, `GenBinaryA` 64, `SubtractIsCompare` 49).
+
+### Review findings handled by V1 fixes 2 (`docs/reviews/v1-fixes-2.md`)
+
+| Finding | Commit | Guarded by | State |
+|---|---|---|---|
+| 1 (the pointer-constant fix misses `return`) | `119c9b1` | `PointerTests.An_address_constant_where_a_pointer_is_expected_is_declared_as_a_pointer` (the return row failed before) | fixed: return values go through `CheckValueFor` |
+| 2 (a named constant folded with a number is not found) | `119c9b1` | `PointerTests.An_address_constant_folded_with_a_number_is_found` (failed before) | fixed: at a folded constant part, the one untyped named constant inside it; with two, the message is as before |
+| 3 (notes for the spec session) | | | spec 2.2 and the five spec 11 rows still say "Planned"; questions 186-187 were settled on `main` (`25c3ac1`) |
 
 ### V1 batch 2 (merged into `main` at `dc4f8ef`)
 
@@ -1154,15 +1163,13 @@ Not bugs; things to improve, mostly in M7 (optimizer).
 - An asm `jmp` that leaves the function (a tail call into ROM, as `atari.put`'s `jmp CIOV`) adds no register effects to the block's summary: the listing says `put` changes only X. Callers are safe (the optimizer forgets every register after a `jsr`, and a register loop rejects any call), but the summary comment is wrong; it should count such a `jmp` like a `jsr`.
 - `w = addr(map) - 1` (or `+`) into a 16-bit variable stores `addr(map)` and then subtracts at run time; `CodeGen.AddressBytes` could make it two `lda #` / `sta` pairs, as it already does for `.lo` / `.hi`.
 
-- Seen while building V1 fixes: all four done in V1 fixes 2 but `t = q + c as u16 + 3` (question 187).
-- V1 fixes 2: a local no instruction names keeps its memory (a run can dump it, and tests of frame placement use such locals); only temporaries and register parameters are dropped. `StoreWhereComputed` does not move a store whose index register is loaded between the reload and the store (`lda t / ldx s / sta spr_x,x`), nor a volatile store (question 186).
+- Seen while building V1 fixes: three done in V1 fixes 2; `t = q + c as u16 + 3` dropped (question 187: no single carry chain; keeping the low byte in A with `inc t+1` for each carry would save 5 cycles, an optimizer idea for later).
+- V1 fixes 2: a local no instruction names keeps its memory (a run can dump it, and tests of frame placement use such locals); only temporaries and register parameters are dropped. `StoreWhereComputed` does not move a store whose index register is loaded between the reload and the store (`lda t / ldx s / sta spr_x,x`), nor a volatile store (question 186: as built, volatile accesses keep their place).
 - V1 fixes 2: code that got shorter can put a loop's branch across a page, a cycle per pass (Galaxy Stars' `stars.next_busy` after gap 31). The layout does not place code to avoid it.
 
 ## Questions for the spec session
 
-- **187 (V1 fixes 2): the "one chain" for `t = q + c as u16 + 3`.** The roadmap's last item lists it from this file: "`t = q + c as u16 + 3` adds the 3 after the byte add, through `t`, where one chain would do". Not built: no single carry chain gives it, since the byte add `q + c` and the `+ 3` can each carry into the high byte (`lda c` / `clc` / `adc q` / `sta t` / `lda q+1` / `adc #0` / `sta t+1`, then `clc` / `lda t` / `adc #3` / `sta t` / `bcc` / `inc t+1`, 32 cycles with no carry). What shape is meant? If the note was wrong, it can go from the roadmap.
-
-- **186 (V1 fixes 2): may a volatile store move earlier past code that touches no shared memory?** Gap 31's fix (`StoreWhereComputed`) stores a copied byte where it was computed, and leaves volatile stores where they are written. That keeps Galaxy Stars' plain `hostiles.draw` at `sta sx / lda x+6,x / adc #0 / sta _t2 / lda sx / sta video.spr_x,y / lda _t2` (about 12 cycles per hostile), since the raster interrupt reads `video.spr_x`, which makes it volatile. Moving `sta video.spr_x,y` up past a read of a non-volatile table and an add changes nothing the interrupt can see, but spec 4 says volatile memory is read and written "exactly as written". Provisional: not moved. Should a volatile access keep its place only relative to other volatile accesses, calls and code the analysis cannot follow?
+Questions 186-187 were settled on 2026-11-22 (decisions.md, `25c3ac1`): 186, a volatile access keeps its place, as built; 187, `q + c as u16 + 3` dropped from V1 fixes 2 (an optimizer idea for later).
 
 Questions 184-185 were settled on 2026-11-22 (decisions.md, `95bc4ab`): 184 as built; 185's gaps 1 and 3 built in V1 fixes 2, gap 2 a wording change (the test suite's emulator).
 
