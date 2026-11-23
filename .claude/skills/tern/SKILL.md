@@ -323,7 +323,9 @@ Functions (cycles include the functions they call):
 - **Inside `for ... using X`, only functions that keep X may be called** (`keeps X`); likewise Y.
   A function with a body says so after its return type, `fn hits(o: u8) -> bool keeps Y { ... }`, and
   the compiler checks it (the body indexes with X; `p[i]`, or a call to a function without `keeps Y`,
-  is an error there). On an `asm fn` it is a promise, as on a KERNAL routine.
+  is an error there). On an `asm fn` it is a promise, as on a KERNAL routine. Such a function can take
+  the loop variable itself in that register (`fn hits(s: u8 using Y) -> bool keeps Y`, called as
+  `hits(s)` in a `using Y` loop): the call loads nothing. Any other argument there is an error.
 - **A `bool` can live in a flag.** `-> bool using carry` returns in the carry; an `inline asm fn`
   with a flag result tests a flag its instructions set, with no call. After compiled code the flags
   are unspecified: `cpu.carry()` and friends are only for right after an `asm` block.

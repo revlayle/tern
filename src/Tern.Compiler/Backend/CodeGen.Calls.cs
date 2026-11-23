@@ -261,6 +261,8 @@ public sealed partial class CodeGen
             var p = fn.Parameters[i];
             if (p.PassedIn is not { } reg) continue;
             var arg = call.Args[i];
+            // A using loop's variable, passed in its own register: already there (spec 6.6; the checker allows it).
+            if (arg is NameExpr { Symbol.Register: { } held } && held == reg && !early.ContainsKey(i)) continue;
             if (p.Type.Size == 1)
             {
                 Operand op;
