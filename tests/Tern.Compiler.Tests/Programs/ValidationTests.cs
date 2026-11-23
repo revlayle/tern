@@ -76,6 +76,79 @@ public class ValidationTests
         Assert.InRange(r.Cpu.Cycles, 7 * C64Chips.FrameCycles + 100 * 63, 8 * C64Chips.FrameCycles + 100 * 63);
     }
 
+    [Fact]
+    public void AtariChips_raises_the_vertical_blank_and_the_display_lists_interrupts()
+    {
+        // V1 batch 3, Atari step 4: the VBI once a frame through the OS stub's SYSVBV and the deferred vector, and a
+        // DLI at the last line of each display-list row with bit 7. The list is 24 blank lines from line 8, then
+        // rows of 8 lines from line 32: row 0 ends on line 39 (VCOUNT 19), row 5 on line 79 (VCOUNT 39).
+        var result = Run.Compile("""
+            import atari
+            const SCREEN = $4000
+            const LIST = $3C00
+            memory { SCREEN..=SCREEN + 959 reserved }
+            data list: [u8; _] @ LIST = atari.display_list(atari.MODE_TEXT, 24, SCREEN, LIST, 1 | (1 << 5))
+            var seen: [u8; 8]
+            var n: u8
+            var frames: u8
+            interrupt fn dli() {
+                if n < 8 {
+                    seen[n] = atari.antic.vcount
+                    n += 1
+                }
+            }
+            interrupt fn frame() {
+                frames += 1
+            }
+            fn main() {
+                atari.set_vbi(addr(frame))
+                atari.set_display_list(addr(list))
+                atari.set_dli(addr(dli))
+                while frames < 3 { }
+            }
+            """, platform: Platform.Atari);
+        AtariChips? chips = null;
+        var r = Run.Of(result, maxCycles: 4 * AtariChips.FrameCycles, setup: AtariChips.Os, standIns: true,
+            bus: b => chips = new AtariChips(b, _ => 0));
+        Assert.Equal(3, r.U8("frames"));
+        Assert.Equal(3, chips!.Frames);
+        Assert.Equal(6, r.U8("n"));
+        for (int i = 0; i < 6; i += 2)
+        {
+            Assert.Equal(19, r.U8("seen", i));
+            Assert.Equal(39, r.U8("seen", i + 1));
+        }
+        Assert.InRange(r.Cpu.Cycles, 2 * AtariChips.FrameCycles + 248 * 114, 3 * AtariChips.FrameCycles);
+    }
+
+    [Fact]
+    public void AtariChips_gives_the_joystick_from_the_chips_and_the_os_copies_and_no_key()
+    {
+        // The script's bits, per frame, as the PIA's PORTA (port 1 in bits 0-3, 0 = pressed; port 2 idle) and
+        // GTIA's TRIG0, and as the OS's STICK0 and STRIG0; SKSTAT with no key down.
+        var result = Run.Compile("""
+            import atari
+            var stick: u8
+            var trig: u8
+            var porta: u8
+            var trig0: u8
+            var skstat: u8
+            fn main() {
+                stick = atari.stick[0]
+                trig = atari.strig[0]
+                porta = atari.pia.porta
+                trig0 = atari.gtia_in.trig[0]
+                skstat = atari.pokey_in.skstat
+            }
+            """, platform: Platform.Atari);
+        var r = Run.Of(result, setup: AtariChips.Os, standIns: true, bus: b => new AtariChips(b, _ => 0b1_0101));
+        Assert.Equal(0x0A, r.U8("stick"));      // up and left held
+        Assert.Equal(0, r.U8("trig"));          // fire held
+        Assert.Equal(0xFA, r.U8("porta"));
+        Assert.Equal(0, r.U8("trig0"));
+        Assert.Equal(0xFF, r.U8("skstat"));
+    }
+
     [Trait("Platform", "c64")]
     [FactWhen("TERN_REAL", "it runs Galaxy Stars in VICE and compares the screenshot")]
     public void Galaxy_stars_plays_its_demo_in_vice()
@@ -142,6 +215,128 @@ public class ValidationTests
             ("VIC $D000-$D02E", Rows(r.Ram, 0xD000, 0x2F, 0x2F, 0xFF)));
     }
 
+    [Fact]
+    public void Smashy_smashy_plays_a_scripted_game_on_the_atari()
+    {
+        // V1 batch 3, Atari step 4: the shared logic with the Atari front end, through the title to a game under the
+        // C64 test's joystick script, with the VBI, the DLIs, VCOUNT and the joystick from AtariChips and the OS's NMI
+        // handling from its stub. The rebuild budget and the frame's timing are the harness's (no ANTIC DMA), so the
+        // run is this harness's known result, not a real Atari's frame for frame (question 189: each machine its own).
+        string dir = FindValidation("c64", "smashy-smashy");
+        string path = Path.Combine(dir, "src", "main.tern");
+        var result = TernCompiler.Compile(File.ReadAllText(path), Platform.Atari, sourcePath: path);
+        const int frames = 2500;
+        AtariChips? chips = null;
+        var r = Run.Of(result, maxCycles: (frames + 10) * (long)AtariChips.FrameCycles, setup: AtariChips.Os, standIns: true,
+            until: _ => chips!.Frames >= frames, bus: b => chips = new AtariChips(b, SmashyJoystick));
+        string state = $"score {r.U16("score.points"):X4}00, time {r.U16("score.time"):X3}, level {r.U8("score.level")}, "
+            + $"treasures left {r.U8("score.treasures_left")}, kills {r.U8("enemies.kills")}, high score {r.U16("score.high"):X4}00";
+        string sprites = "shown " + Convert.ToString(r.U8("sprites.ena"), 2).PadLeft(8, '0') + "; "
+            + string.Join(", ", Enumerable.Range(0, 8).Select(n => $"{n}: x {r.U8("sprites.hpos", n)} y {r.U8("sprites.y", n)} colour ${r.U8("sprites.color", n):X2}"));
+        Expect(Path.Combine(dir, "expected", $"atari-frame-{frames}.txt"), $"Smashy smashy on the Atari after {frames} frames in the emulator",
+            ("state", [state]),
+            ("sprites (shadows)", [sprites]),
+            ("screen (video.screen, ANTIC's codes)", Rows(r.Ram, r.Address("video.screen"), 1000, 40, 0xFF)));
+    }
+
+    [FactWhen("TERN_REAL", "it runs smashy smashy in Altirra and compares the screenshot")]
+    public void Smashy_smashy_shows_its_scoring_page_in_altirra()
+    {
+        // An 800 with 48 KB, PAL, the OS Altirra has (AltirraOS: no OS ROM images are installed). Altirra runs by the
+        // clock, not by cycles, so the shot is of the page that stands still longest: SCORING, from 20 s to 32 s
+        // after the program starts (the title's colours roll every 2 frames), taken at 26 s. Altirra's start takes
+        // a varying time (one run's shot at 15 s still showed the title), so a run that misses is tried once more.
+        // tests/tools/altirra-shot.ps1 captures the screen.
+        string dir = FindValidation("c64", "smashy-smashy");
+        string path = Path.Combine(dir, "src", "main.tern");
+        var result = TernCompiler.Compile(File.ReadAllText(path), Platform.Atari, sourcePath: path);
+        string work = Directory.CreateTempSubdirectory("tern-real-").FullName;
+        string xex = Path.Combine(work, "smashy-smashy.xex"), shot = Path.Combine(work, "altirra.png");
+        File.WriteAllBytes(xex, result.File);
+        string expected = Path.Combine(dir, "expected", "altirra-800-pal-scoring.png");
+        RunAltirra(xex, 26, shot, "/hardware:800", "/memsize:48K", "/pal");
+        if (File.Exists(expected) && Png.Difference(shot, expected) > ScreenshotTolerance)
+            RunAltirra(xex, 26, shot, "/hardware:800", "/memsize:48K", "/pal");
+        ExpectScreenshot(shot, expected);
+        Directory.Delete(work, recursive: true);   // kept when the check fails, to look at
+    }
+
+    [Fact]
+    public void Smashy_smashy_on_the_atari_shows_no_sprites_on_the_title_after_a_game()
+    {
+        // The developer saw an enemy on the title after a game over: the title paces itself by VCOUNT and never
+        // calls wait_frame(), so render() did not run and the VBI went on showing the game's last sprites. Run the
+        // scripted game until the title follows a game, 10 frames into it: the copy of
+        // player-missile memory on show is empty and no slot has an object.
+        string dir = FindValidation("c64", "smashy-smashy");
+        string path = Path.Combine(dir, "src", "main.tern");
+        var result = TernCompiler.Compile(File.ReadAllText(path), Platform.Atari, sourcePath: path);
+        AtariChips? chips = null;
+        int titleFrames = -1;
+        bool played = false;        // a game was under way (not the title, well after the startup cleared memory)
+        var r = Run.Of(result, maxCycles: 4000 * (long)AtariChips.FrameCycles, setup: AtariChips.Os, standIns: true,
+            until: run =>
+            {
+                if (chips!.Frames > 100 && run.U8("video.title_mode") == 0) played = true;
+                if (titleFrames < 0 && played && run.U8("video.title_mode") != 0) titleFrames = chips.Frames;
+                return titleFrames >= 0 && chips!.Frames >= titleFrames + 10;
+            }, bus: b => chips = new AtariChips(b, SmashyJoystick));
+        Assert.True(titleFrames >= 0, "the scripted game never came back to the title");
+        int shown = r.U8("sprites.shown");
+        int copy = r.Address("sprites.pm") + shown * 2048;
+        Assert.All(Enumerable.Range(copy + 0x300, 0x500), a => Assert.Equal(0, r.Ram.Bytes[a]));
+        Assert.All(Enumerable.Range(0, 5), s => Assert.Equal(0, r.U8("sprites.init_hpos", shown * 5 + s)));
+    }
+
+    [Fact]
+    public void Smashy_smashy_on_the_atari_ignores_dlis_with_no_sprite_group()
+    {
+        // The developer's black screen after fire on the title: leaving the title installed the game's DLI while
+        // every row's DLI bit was still on, the DLI ran past the frame's groups into a long loop over stale
+        // entries, and nested DLIs filled the stack. Here every row's bit is turned on in each frame of play:
+        // the game goes on (the DLI ignores a DLI with no group) and the stack stays shallow.
+        string dir = FindValidation("c64", "smashy-smashy");
+        string path = Path.Combine(dir, "src", "main.tern");
+        var result = TernCompiler.Compile(File.ReadAllText(path), Platform.Atari, sourcePath: path);
+        AtariChips? chips = null;
+        int dl = result.Symbols["video.dlist"];
+        int lowestStack = 0xFF, lastFrame = -1;
+        var r = Run.Of(result, maxCycles: 1300 * (long)AtariChips.FrameCycles, setup: AtariChips.Os, standIns: true,
+            until: run =>
+            {
+                if (chips!.Frames != lastFrame && chips.Frames > 300 && run.U8("video.title_mode") == 0)
+                {
+                    lastFrame = chips.Frames;
+                    run.Ram.Bytes[dl + 8] |= 0x80;                          // playfield rows 0-22
+                    for (int row = 11; row < 11 + 22; row++) run.Ram.Bytes[dl + row] |= 0x80;
+                }
+                if (chips.Frames > 300) lowestStack = Math.Min(lowestStack, run.Cpu.SP);
+                return chips.Frames >= 1200;
+            }, bus: b => chips = new AtariChips(b, SmashyJoystick));
+        Assert.Equal(1200, chips!.Frames);
+        Assert.True(lowestStack > 0xC0, $"the stack went down to ${lowestStack:X2}");
+        Assert.NotEqual(0, r.U8("video.frames"));
+    }
+
+    [Fact]
+    public void Smashy_smashy_builds_for_the_atari()
+    {
+        // V1 batch 3, step 1: the shared logic with the Atari front end (src/atari/) builds with no warning, and
+        // the front end's aligned screen memory is where ANTIC can read it: the screen inside one 4 KB block,
+        // the character set on a 1 KB boundary, the display list inside one 1 KB block, the player-missile memory on
+        // 2 KB (review finding 4). Played in Altirra.
+        string dir = FindValidation("c64", "smashy-smashy");
+        string path = Path.Combine(dir, "src", "main.tern");
+        var result = TernCompiler.Compile(File.ReadAllText(path), Platform.Atari, sourcePath: path);
+        Assert.Empty(result.Warnings);
+        int screen = result.Symbols["video.screen"], charset = result.Symbols["video.charset"], dlist = result.Symbols["video.dlist"];
+        int pm = result.Symbols["sprites.pm"];   // two copies of single-line player-missile memory, each on 2 KB (PMBASE)
+        Assert.Equal(0, pm % 2048);
+        Assert.Equal(screen / 4096, (screen + 1039) / 4096);
+        Assert.Equal(0, charset % 1024);
+        Assert.Equal(dlist / 1024, (dlist + 47) / 1024);
+    }
+
     [Trait("Platform", "c64")]
     [FactWhen("TERN_REAL", "it runs smashy smashy in VICE and compares the screenshot")]
     public void Smashy_smashy_shows_its_scoring_page_in_vice()
@@ -173,6 +368,34 @@ public class ValidationTests
             Assert.Fail($"VICE did not stop within 2 minutes running {prg}");
         }
         Assert.True(File.Exists(screenshot), $"VICE wrote no screenshot running {prg}");
+    }
+
+    /// <summary>Runs an Atari program in Altirra for some seconds and saves its screen (tests/tools/altirra-shot.ps1).</summary>
+    private static void RunAltirra(string xex, int seconds, string screenshot, params string[] machine)
+    {
+        string script = Path.Combine(FindRepositoryFolder("tests"), "tools", "altirra-shot.ps1");
+        var start = new System.Diagnostics.ProcessStartInfo("pwsh") { UseShellExecute = false };
+        foreach (string a in new[] { "-NoProfile", "-File", script, xex, screenshot, seconds.ToString(), "/skipsetup", "/kernel:default", "/nobasic" }.Concat(machine))
+            start.ArgumentList.Add(a);
+        using var run = System.Diagnostics.Process.Start(start)!;
+        if (!run.WaitForExit(TimeSpan.FromMinutes(2)))
+        {
+            run.Kill(entireProcessTree: true);
+            Assert.Fail($"Altirra did not stop within 2 minutes running {xex}");
+        }
+        Assert.True(File.Exists(screenshot), $"Altirra gave no screenshot running {xex}");
+        Assert.Equal(0, run.ExitCode);
+    }
+
+    /// <summary>A folder of the repository, found above the test's binaries.</summary>
+    private static string FindRepositoryFolder(string name)
+    {
+        for (var dir = new DirectoryInfo(AppContext.BaseDirectory); dir is not null; dir = dir.Parent)
+        {
+            var path = Path.Combine(dir.FullName, name);
+            if (Directory.Exists(path) && File.Exists(Path.Combine(dir.FullName, "CLAUDE.md"))) return path;
+        }
+        throw new DirectoryNotFoundException($"{name} not found above {AppContext.BaseDirectory}");
     }
 
     /// <summary>Compares a screenshot with the expected one within the tolerance, or copies it there with TERN_UPDATE_VALIDATION=1.</summary>

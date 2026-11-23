@@ -1,0 +1,468 @@
+// Player-missile graphics reused down the screen: 8 objects (the player and 5 enemies, 8 x 16; two score
+// popups, 16 x 8, each two slots wide) on 5 slots (players 0-3, and the 4 missiles side by side as a fifth
+// player in PF3's colour). A slot shows another object lower down once a display-list interrupt has moved
+// it, at the end of the character row above that object, so two objects share a slot when no character
+// row has both. When a row would need more than 5 slots, one object is left out of that frame, a
+// different one each frame (measured on the C64 build's play: 37 frames in 26,641, gaps.md).
+//
+// The DLI's moves land a few lines into the next row: the OS's NMI dispatch, the handler's register saves
+// and its table lookups take about 100 cycles before its WSYNC, and a mode 4 line leaves the CPU about 60
+// (the first line of a row about 20). So an object whose top is in the first LATE_LINES lines of its row
+// is moved at the end of the row before, and needs its slot free from there ("need" row below).
+//
+// The game writes shadows (set_actor, set_wide, hide). render() draws them into the copy of player-missile
+// memory not on show and works out the DLIs' table: the rows whose DLI moves slots, in groups. The VBI
+// then shows that copy (PMBASE), sets each slot's first object and turns the display list's DLI bits on
+// for those rows only (and the floor's row, ALWAYS_ROW). Nothing is drawn where the beam is. An object
+// drawn at the same place with the same picture in that copy two frames before is not drawn again. Places
+// and pictures are kept as bytes (a memory page, a line, a frame number), which compare and copy cheaply.
+import atari
+import mem
+import assets
+
+const OBJECTS: u8 = 8
+const FIRST_WIDE: u8 = 6            // objects 6 and 7 are two slots wide (the popups)
+const SLOTS: u8 = 5
+const MISSILES: u8 = 4              // the fifth slot
+const TOP_LINE: u8 = 38             // the scan line of playfield y 0 (VSCROL 2; the shake adds dy)
+const ACTOR_H: u8 = 16
+const WIDE_H: u8 = 8
+const ENTRIES: u8 = 12              // per copy: at most one per object after the first in each slot
+const LATE_LINES: u8 = 4            // lines into a row by which the DLI's moves have landed
+const GROUPS: u8 = ENTRIES + 1      // per copy: one per row with moves, and ALWAYS_ROW's
+const GROUP_STRIDE: u8 = GROUPS + 1 // grp_first has an end mark after the last group
+const ALWAYS_ROW: u8 = 21           // this playfield row's DLI comes every frame: video sets the floor's colour
+const DLI_BIT: u8 = $80             // in a display list instruction
+// Drawn parts: one per actor (0-5), two per wide object (6-7 for object 6, 8-9 for object 7).
+const PARTS: u8 = FIRST_WIDE + 2 * (OBJECTS - FIRST_WIDE)
+const NONE: u8 = $FF
+const WIDE_IMG: u8 = $FF            // a wide object's "frame": its digits change in place, so it is always drawn
+
+// ---- shadows, written by the game ----
+var img: [u8; OBJECTS]              // each actor's sprite frame, from 0 (WIDE_IMG for a wide object)
+var color: [u8; OBJECTS]
+var hpos: [u8; OBJECTS]             // colour clock of the left edge
+var y: [u8; OBJECTS]                // playfield y of the top
+var ena: u8                         // bit n: object n is shown
+var dy: u8                          // the shake: lines added to every object
+var wide_gfx: [u8; 2 * 2 * WIDE_H]  // the popups' graphics: per popup the left half's rows, then the right's
+data bit: [u8; _] = [1, 2, 4, 8, 16, 32, 64, 128]
+
+// Actor graphics from sprites.bin: the C64 multicolour sprites' left 8 pixels, rows 0-15. A pixel is on
+// where the C64 shows its own colour (10) or the outline (11): the high bit of each pair.
+data sprites_bin = include_bytes("../../data/sprites.bin")
+const fn hi_bits(b: int) -> int {
+    return ((b >> 4) & 8) | ((b >> 3) & 4) | ((b >> 2) & 2) | ((b >> 1) & 1)
+}
+const fn sprite_row(i: int) -> int {
+    var at = (i >> 4) * 64 + (i & 15) * 3
+    return hi_bits(sprites_bin[at]) << 4 | hi_bits(sprites_bin[at + 1])
+}
+data gfx: [u8; _] = [sprite_row(i) for i in 0..assets.SPRITE_COUNT * 16]
+var frame_gfx: [ptr u8; assets.SPRITE_COUNT]    // each sprite frame's graphics, set by init() (gaps.md, gap 4)
+
+inline fn set_actor(n: u8, frame: u8, c: u8, px: u16, py: u8) {
+    // px: playfield x of the left edge in hi-res pixels, a little negative at most; colour clock 48 is the
+    // playfield's left edge. Inline: video.set_sprite() is all its caller.
+    img[n] = frame - assets.SPR_PLAYER_RUN_R_0
+    color[n] = c
+    hpos[n] = ((px + 96) >> 1) as u8
+    y[n] = py
+    ena |= bit[n]
+}
+
+fn set_wide(n: u8, c: u8, px: u16, py: u8) {
+    img[n] = WIDE_IMG
+    color[n] = c
+    hpos[n] = ((px + 96) >> 1) as u8
+    y[n] = py
+    ena |= bit[n]
+}
+
+fn hide(n: u8) {
+    ena &= ~bit[n]
+}
+
+// ---- two copies of everything the screen reads ----
+// Single-line player-missile memory: each copy 2 KB, missiles at +$300, players 0-3 at +$400 to +$700.
+noinit var pm: [u8; 4096] @ align(2048)
+data slot_page: [u8; SLOTS] = [4, 5, 6, 7, 3]
+
+var shown: u8                       // the copy on show, 0 or 1: set by vbi()
+var ready: bool                     // render() has finished the other copy: vbi() shows it
+var rendered: bool                  // render() ran since the last VBI (video.wait_frame() asks)
+var shown_grp: u8                   // the DLI's base into grp_row and grp_first: 0 or GROUP_STRIDE
+var dl_row0: ptr u8                 // playfield row 0's instruction in video's display list (from init);
+                                    // row r > 0's is at dl_row0 + 2 + r (after row 0's screen address)
+// Per copy: each slot's first object (set by the VBI), then the DLI's moves: entries in row order, in
+// groups, one per DLI: group g is for the DLI at the end of row grp_row[g] and applies the entries
+// grp_first[g] to grp_first[g + 1] (indexes into the entries, copy included).
+var init_hpos: [u8; 2 * SLOTS]
+var init_col: [u8; 2 * SLOTS]
+var ent_slot: [u8; 2 * ENTRIES]
+var ent_hpos: [u8; 2 * ENTRIES]
+var ent_col: [u8; 2 * ENTRIES]
+var grp_row: [u8; 2 * GROUP_STRIDE]
+var grp_first: [u8; 2 * GROUP_STRIDE]
+var grp_count: [u8; 2]
+// Per copy, per part: where it was drawn there (page 0: not drawn) and with which picture.
+var drawn_page: [u8; 2 * PARTS]
+var drawn_line: [u8; 2 * PARTS]
+var drawn_img: [u8; 2 * PARTS]
+var page_of: [u8; 2 * SLOTS]        // each copy's slots' memory pages, set by init()
+
+// render()'s working state
+var part_base: u8                   // the copy being drawn's offset into drawn_page/line/img: 0 or PARTS ...
+var ent_base: u8                    // ... into the entries: 0 or ENTRIES
+var slot_base: u8                   // ... into init_hpos/init_col/page_of: 0 or SLOTS
+var grp_base: u8                    // ... into grp_row/grp_first: 0 or GROUP_STRIDE
+var order: [u8; OBJECTS]            // shown objects, sorted by need row
+var order_key: [u8; OBJECTS]        // their need rows, in the same order (the sort reads one array, not two)
+var need_row: [u8; OBJECTS]         // the first row the object's slot must be free in: its top row, or the
+                                    // row above when its top is in the first LATE_LINES lines of its row
+var last_row: [u8; OBJECTS]
+var slot_a: [u8; OBJECTS]           // the object's slot (NONE: left out this frame) ...
+var slot_b: [u8; OBJECTS]           // ... and a wide object's right half
+var slot_end: [u8; SLOTS]           // top-down: the row after the slot's lowest object so far
+var slot_top: [u8; SLOTS]           // bottom-up: the need row of the slot's highest object so far
+var bottom_up: bool                 // alternates, so a different object is left out each frame
+var prev_mark: u8                   // the mark take_slot() replaced, for give_back()
+var new_page: [u8; PARTS]           // where each part goes this time (page 0: not shown), and its picture
+var new_line: [u8; PARTS]
+var new_img: [u8; PARTS]
+var redraw: [bool; PARTS]
+
+fn init(row0: ptr u8) {
+    // row0: playfield row 0's instruction in the display list, whose DLI bits are cleared but for ALWAYS_ROW.
+    dl_row0 = row0
+    mem.fill(addr(pm), 0, len(pm))
+    for s in 0..SLOTS {
+        page_of[s] = addr(pm).hi + slot_page[s]
+        page_of[SLOTS + s] = addr(pm).hi + 8 + slot_page[s]
+    }
+    var g: ptr u8 = addr(gfx)
+    for f in 0..assets.SPRITE_COUNT {
+        frame_gfx[f] = g
+        g += ACTOR_H
+    }
+    grp_row[0] = ALWAYS_ROW         // copy 0 until the first render(): the floor's DLI only, no moves
+    grp_first[0] = 0
+    grp_first[1] = 0
+    grp_count[0] = 1
+    atari.gtia.gractl = 3           // players and missiles from DMA
+    atari.gprior = $11              // players over the playfield; the missiles as a fifth player (PF3)
+    for s in 0..4 {
+        atari.gtia.sizep[s] = 0
+    }
+    atari.gtia.sizem = 0
+}
+
+fn render() {
+    // Draw the shadows into the copy not on show; the next VBI shows it.
+    ready = false                   // a copy finished earlier but not shown yet is drawn again
+    part_base = 0
+    ent_base = 0
+    slot_base = 0
+    grp_base = 0
+    if shown == 0 {
+        part_base = PARTS
+        ent_base = ENTRIES
+        slot_base = SLOTS
+        grp_base = GROUP_STRIDE
+    }
+    var n: u8 = sort_shown()
+    assign(n)
+    place(n)
+    draw_parts()
+    ready = true
+    rendered = true
+}
+
+fn sort_shown() -> u8 {
+    // The shown objects into `order` by need row (insertion sort; at most 8), with their rows. Returns how many.
+    var n: u8 = 0
+    for k in 0..OBJECTS {
+        if ena & bit[k] == 0 {
+            continue
+        }
+        var top: u8 = y[k]
+        var h: u8 = ACTOR_H
+        if k >= FIRST_WIDE {
+            h = WIDE_H
+        }
+        var key: u8 = 0
+        if top >= LATE_LINES {
+            key = (top - LATE_LINES) >> 3
+        }
+        need_row[k] = key
+        last_row[k] = (top + h - 1) >> 3
+        var i: u8 = n
+        while i != 0 && order_key[i - 1] > key {
+            order[i] = order[i - 1]
+            order_key[i] = order_key[i - 1]
+            i -= 1
+        }
+        order[i] = k
+        order_key[i] = key
+        n += 1
+    }
+    return n
+}
+
+fn assign(n: u8) {
+    // Give each object a slot (two for a wide one) that no object in its rows has. Top-down on one frame,
+    // bottom-up on the next: an object that does not fit is the last one met in a full row.
+    for s in 0..SLOTS {
+        slot_end[s] = 0
+        slot_top[s] = NONE
+    }
+    bottom_up = !bottom_up
+    for j in 0..n {
+        var k: u8 = order[j]
+        if bottom_up {
+            k = order[n - 1 - j]
+        }
+        slot_a[k] = take_slot(k)
+        slot_b[k] = NONE
+        if k >= FIRST_WIDE && slot_a[k] != NONE {
+            slot_b[k] = take_slot(k)
+            if slot_b[k] == NONE {
+                give_back(slot_a[k])
+                slot_a[k] = NONE
+            }
+        }
+    }
+}
+
+fn take_slot(k: u8) -> u8 {
+    // The first slot free for object k's rows, marked as taken; NONE when there is none.
+    for s in 0..SLOTS {
+        if bottom_up {
+            if last_row[k] < slot_top[s] {
+                prev_mark = slot_top[s]
+                slot_top[s] = need_row[k]
+                return s
+            }
+        } else if need_row[k] >= slot_end[s] {
+            prev_mark = slot_end[s]
+            slot_end[s] = last_row[k] + 1
+            return s
+        }
+    }
+    return NONE
+}
+
+fn give_back(s: u8) {
+    // Undo the last take_slot()'s mark on slot s (a wide object that found only one slot).
+    if bottom_up {
+        slot_top[s] = prev_mark
+    } else {
+        slot_end[s] = prev_mark
+    }
+}
+
+fn place(n: u8) {
+    // In need-row order: where each placed object's parts go in this copy, and where each slot's objects
+    // are: the first for the VBI, the others for the DLI at the end of the row before their need row. The
+    // entries come in row order, so they are grouped as they come: a group per row, and ALWAYS_ROW's group
+    // whether it has entries or not.
+    for i in 0..PARTS {
+        new_page[i] = 0
+    }
+    var used: u8 = 0                // bit s: slot s has its first object
+    var e: u8 = ent_base            // the next entry
+    var g: u8 = grp_base            // the next group
+    var open_row: u8 = NONE         // the row of the last group
+    var always: bool = false        // ALWAYS_ROW's group is made
+    var sb: u8 = slot_base
+    for s in 0..SLOTS {
+        init_hpos[sb + s] = 0       // an unused slot stays off the screen's left edge
+        init_col[sb + s] = 0
+    }
+    for j in 0..n {
+        var k: u8 = order[j]
+        var s: u8 = slot_a[k]
+        if s == NONE {
+            continue
+        }
+        var h: u8 = hpos[k]
+        var c: u8 = color[k]
+        var line: u8 = TOP_LINE + y[k] + dy
+        var pic: u8 = img[k]
+        var part: u8 = k            // an actor's part; a wide object's are 2k - 6 and 2k - 5
+        if k >= FIRST_WIDE {
+            part = k + k - FIRST_WIDE
+        }
+        while true {
+            new_page[part] = page_of[sb + s]
+            new_line[part] = line
+            new_img[part] = pic
+            if used & bit[s] == 0 {
+                used |= bit[s]
+                init_hpos[sb + s] = h
+                init_col[sb + s] = c
+            } else if e != ent_base + ENTRIES {
+                var r: u8 = need_row[k] - 1
+                if r != open_row {
+                    if !always && ALWAYS_ROW < r {
+                        grp_row[g] = ALWAYS_ROW     // the floor's DLI, before this row's
+                        grp_first[g] = e
+                        g += 1
+                        always = true
+                    }
+                    grp_row[g] = r
+                    grp_first[g] = e
+                    g += 1
+                    open_row = r
+                    if r == ALWAYS_ROW {
+                        always = true
+                    }
+                }
+                ent_slot[e] = s
+                ent_hpos[e] = h
+                ent_col[e] = c
+                e += 1
+            }
+            if part < FIRST_WIDE || part & 1 != 0 {
+                break               // an actor, or a wide object's right half done
+            }
+            s = slot_b[k]
+            part += 1
+            h += 8
+        }
+    }
+    if !always {
+        grp_row[g] = ALWAYS_ROW
+        grp_first[g] = e
+        g += 1
+    }
+    grp_first[g] = e                // the end mark
+    grp_count[shown ^ 1] = g - grp_base
+}
+
+fn draw_parts() {
+    // Clear what moved, changed or went since this copy was drawn, then draw it at its new place. All clears
+    // come first: a part's new place may be where another part was. A wide part is always drawn again (its
+    // digits change in place).
+    var d: u8 = part_base
+    for i in 0..PARTS {
+        var old: u8 = drawn_page[d]
+        var now: u8 = new_page[i]
+        redraw[i] = false
+        if old | now != 0 {
+            if old != now || new_line[i] != drawn_line[d] || new_img[i] != drawn_img[d] || i >= FIRST_WIDE {
+                redraw[i] = true
+                if old != 0 {
+                    clear(old, drawn_line[d], i < FIRST_WIDE)
+                }
+            }
+        }
+        d += 1
+    }
+    d = part_base
+    for i in 0..PARTS {
+        if redraw[i] {
+            var page: u8 = new_page[i]
+            drawn_page[d] = page
+            drawn_line[d] = new_line[i]
+            drawn_img[d] = new_img[i]
+            if page != 0 {
+                var at: u16 = 0
+                at.hi = page
+                at.lo = new_line[i]
+                if i < FIRST_WIDE {
+                    draw16(at as ptr u8, frame_gfx[new_img[i]])
+                } else {
+                    draw8(at as ptr u8, addr(wide_gfx) + ((i - FIRST_WIDE) << 3))   // parts 6-9: 8 rows each
+                }
+            }
+        }
+        d += 1
+    }
+}
+
+fn clear(page: u8, line: u8, tall: bool) {
+    var at: u16 = 0
+    at.hi = page
+    at.lo = line
+    if tall {
+        clear16(at as ptr u8)
+    } else {
+        clear8(at as ptr u8)
+    }
+}
+
+// Unrolled: a loop over the rows took about 20 cycles a byte, these 11 (13 with the index load).
+fn draw16(dst: ptr u8, src: ptr u8) {
+    dst[0] = src[0]; dst[1] = src[1]; dst[2] = src[2]; dst[3] = src[3]
+    dst[4] = src[4]; dst[5] = src[5]; dst[6] = src[6]; dst[7] = src[7]
+    dst[8] = src[8]; dst[9] = src[9]; dst[10] = src[10]; dst[11] = src[11]
+    dst[12] = src[12]; dst[13] = src[13]; dst[14] = src[14]; dst[15] = src[15]
+}
+
+fn draw8(dst: ptr u8, src: ptr u8) {
+    dst[0] = src[0]; dst[1] = src[1]; dst[2] = src[2]; dst[3] = src[3]
+    dst[4] = src[4]; dst[5] = src[5]; dst[6] = src[6]; dst[7] = src[7]
+}
+
+fn clear16(dst: ptr u8) {
+    dst[0] = 0; dst[1] = 0; dst[2] = 0; dst[3] = 0; dst[4] = 0; dst[5] = 0; dst[6] = 0; dst[7] = 0
+    dst[8] = 0; dst[9] = 0; dst[10] = 0; dst[11] = 0; dst[12] = 0; dst[13] = 0; dst[14] = 0; dst[15] = 0
+}
+
+fn clear8(dst: ptr u8) {
+    dst[0] = 0; dst[1] = 0; dst[2] = 0; dst[3] = 0; dst[4] = 0; dst[5] = 0; dst[6] = 0; dst[7] = 0
+}
+
+fn vbi() {
+    // In the frame interrupt: show the copy render() finished (its memory, and its rows' DLI bits in the
+    // display list in place of the old copy's), and set each slot's first object.
+    rendered = false
+    if ready {
+        ready = false
+        dli_bits(false)
+        shown ^= 1
+        shown_grp = 0
+        if shown != 0 {
+            shown_grp = GROUP_STRIDE
+        }
+        dli_bits(true)
+    }
+    var page: u8 = addr(pm).hi
+    var base: u8 = 0
+    if shown != 0 {
+        page += 8
+        base = SLOTS
+    }
+    atari.antic.pmbase = page
+    for s in 0..4 {
+        atari.gtia.hposp[s] = init_hpos[base + s]
+        atari.gtia.colpm[s] = init_col[base + s]
+    }
+    set_missiles(init_hpos[base + MISSILES])
+}
+
+fn dli_bits(on: bool) {
+    // The DLI bit of each group row of the shown copy, on or off.
+    var g: u8 = shown_grp
+    for _ in 0..grp_count[shown] {
+        var r: u8 = grp_row[g]
+        if r != 0 {
+            r += 2                  // past row 0's screen address
+        }
+        if on {
+            dl_row0[r] |= DLI_BIT
+        } else {
+            dl_row0[r] &= ~DLI_BIT
+        }
+        g += 1
+    }
+}
+
+fn set_missiles(h: u8) {
+    // The fifth player: missile 3 is its left 2 pixels (bits 7-6 of the missiles' byte), missile 0 its right.
+    atari.gtia.hposm[3] = h
+    atari.gtia.hposm[2] = h + 2
+    atari.gtia.hposm[1] = h + 4
+    atari.gtia.hposm[0] = h + 6
+}

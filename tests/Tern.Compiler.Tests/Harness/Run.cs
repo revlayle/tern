@@ -19,7 +19,7 @@ public sealed class Run
     /// <summary>Text tern run's stand-ins printed: in a run with <c>standIns</c>, and in every Apple II run.</summary>
     public System.Text.StringBuilder Output { get; } = new();
 
-    /// <summary>The number of interrupts the CPU took: the IRQs of <c>irqEvery</c>, and the NES's NMIs.</summary>
+    /// <summary>The number of interrupts the CPU took: the IRQs of <c>irqEvery</c>, a chip bus's IRQs and NMIs, and the NES's NMIs.</summary>
     public int Interrupts { get; }
 
     /// <summary>On the NES: the PPU's memory, OAM, frames and banks (<see cref="Tools.NesBus"/>); null elsewhere.</summary>
@@ -53,6 +53,7 @@ public sealed class Run
         s.Setup?.Invoke(Ram);
         if (s.Bus is not null) bus = s.Bus(bus);
         var irqSource = bus as IIrqSource;
+        var nmiSource = bus as INmiSource;
         if (s.Watch is not null) bus = Log = new BusLog(bus, s.Watch(Result));
         // As after reset: no IRQ until the program enables it.
         Cpu = new Cpu6502(bus, Result.Platform.Cpu) { PC = (ushort)Result.Entry, SP = 0xFF, I = true };
@@ -63,6 +64,12 @@ public sealed class Run
         Action<Run>? trap = null;
         while (Cpu.PC != Result.HaltAddress && s.Until?.Invoke(this) != true)
         {
+            // A chip's NMI (AtariChips' vertical blank and display-list interrupts), taken whatever I is.
+            if (nmiSource is not null && nmiSource.NmiPending())
+            {
+                Cpu.Nmi();
+                Interrupts++;
+            }
             // A chip's IRQ (C64Chips' raster interrupt), held until the program acknowledges it.
             if (irqSource is not null && irqSource.IrqPending() && Cpu.Irq()) Interrupts++;
             if (s.IrqEvery > 0 && Cpu.Cycles >= nextIrq)

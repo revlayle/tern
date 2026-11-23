@@ -1,0 +1,45 @@
+// Joystick 1 and the Esc key (the C64's Run/Stop: pause), with edge detection. The same interface as
+// c64/input.tern. The joystick comes from the chips (the PIA's PORTA, GTIA's TRIG0): the game's own VBI
+// replaces the OS's, which made the copies STICK0 and STRIG0. The key from POKEY (key down in SKSTAT, its code
+// in KBCODE), so it reads as held for as long as it is.
+import atari
+import levelgen
+
+// joystick bits, 1 = active: PORTA's bits 0-3 are up, down, left and right, as the C64's port bits
+const UP: u8 = 0b00001
+const DOWN: u8 = 0b00010
+const LEFT: u8 = 0b00100
+const RIGHT: u8 = 0b01000
+const FIRE: u8 = 0b10000
+// keys, in the same bit set
+const STOP: u8 = 0b0100000          // Esc
+const F1: u8 = 0b1000000            // not on the Atari: never set
+
+const KEY_ESC: u8 = $1C             // KBCODE, without Shift (bit 6) and Control (bit 7)
+
+var held: u8        // bits held this frame
+var pressed: u8     // bits that went from released to held this frame (fire, down and the keys use this)
+var prev: u8
+
+fn read() {
+    var joy: u8 = ~atari.pia.porta & $0F     // joystick 1: PORTA's low bits, 0 = pressed
+    if atari.gtia_in.trig[0] == 0 {
+        joy |= FIRE
+    }
+    if atari.pokey_in.skstat & 4 == 0 && atari.pokey_in.kbcode & $3F == KEY_ESC {
+        joy |= STOP
+    }
+    atari.ch = $FF                  // the OS's key buffer stays empty
+    pressed = joy & ~prev
+    held = joy
+    prev = joy
+}
+
+fn seed_random() {
+    // Seed the level generator's random numbers when fire starts a game (spec section 7): POKEY's random
+    // number register, which runs on every machine cycle.
+    levelgen.rnd_a = atari.pokey_in.random
+    levelgen.rnd_b = atari.pokey_in.random
+    levelgen.rnd_c = atari.pokey_in.random
+    levelgen.rnd_x = atari.pokey_in.random
+}

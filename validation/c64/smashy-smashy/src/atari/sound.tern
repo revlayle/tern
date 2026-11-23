@@ -1,0 +1,100 @@
+// Sound effects on POKEY channel 1, one at a time, table-driven: c64/sound.tern's effects with the same
+// pitches, slides and lengths. play() only leaves a request; the frame interrupt calls step(), which
+// starts it and then slides the pitch once per frame. A new effect cuts off the one playing.
+//
+// The pitch is kept as the SID's frequency value, so the tables and slides are the C64's; its high byte
+// picks POKEY's divider from `audf`. SID's envelope becomes a volume: the sustain level while the gate is
+// open, then a fall to 0 that takes about the SID's release time.
+import atari
+
+const JUMP: u8 = 0
+const DAMAGE: u8 = 1                // fast-fall cracks or destroys a tile
+const COLLECT: u8 = 2               // treasure
+const KILL: u8 = 3                  // fast-fall kills an enemy
+const HIT: u8 = 4                   // the player is hit
+const LEVEL_DONE: u8 = 5
+const EFFECTS: u8 = 6
+
+// [TUNE] the C64's tables (c64/sound.tern); a noise wave ($80) becomes POKEY's white noise, the others a
+// pure tone.
+//                               jump   damage collect kill  hit    done
+data wave: [u8; EFFECTS] =      [$40,   $80,   $40,   $20,   $20,   $40]
+data sr: [u8; EFFECTS] =        [$A2,   $A3,   $A3,   $A4,   $A5,   $A6]
+data pitch: [u16; EFFECTS] =    [$0C00, $0800, $3000, $3800, $1400, $0800]
+data slide: [i16; EFFECTS] =    [$0100, -$0040, $0400, -$0280, -$0060, $0060]
+data length: [u8; EFFECTS] =    [10,    8,     6,     14,    25,    50]
+
+const TONE: u8 = $A0                // AUDC distortion: pure tone
+const NOISE: u8 = $80               // ... white noise
+
+// SID frequency value f is f * 985248 / 2^24 Hz (PAL), about 15.03 Hz per step of its high byte h. POKEY's
+// 64 kHz clock (PAL: 63,337 Hz) gives 63337 / (2 * (N + 1)) Hz, so N = 2107 / h - 1, at most 255.
+const fn divider(h: int) -> int {
+    if h < 9 {
+        return 255
+    }
+    return 2107 / h - 1
+}
+data audf: [u8; 256] = [divider(h) for h in 0..256]
+
+// The SID's release times (ms) for the SR low nibble -> the volume's fall per frame (20 ms), in 1/16 steps,
+// from the sustain level 10 (160 sixteenths).
+data release_ms: [u16; 16] = [6, 24, 48, 72, 114, 168, 204, 240, 300, 750, 1500, 2400, 3000, 9000, 15000, 24000]
+const fn fall(ms: int) -> int {
+    var frames = ms / 20
+    if frames < 1 {
+        frames = 1
+    }
+    return (160 + frames - 1) / frames
+}
+data release_step: [u8; 16] = [fall(release_ms[n]) for n in 0..16]
+
+var request: u8                     // 1 + effect, taken by the next step()
+var left: u8                        // frames until the gate closes, 0 = released
+var cur_dist: u8
+var cur_pitch: u16
+var cur_slide: i16
+var volume: u8                      // in 1/16 steps
+var fall_step: u8
+
+fn init() {
+    atari.pokey.audctl = 0          // 64 kHz clock, no filters or joined channels
+    atari.pokey.audc1 = 0
+}
+
+fn play(effect: u8) {
+    request = effect + 1
+}
+
+fn step() {
+    // In the frame interrupt.
+    if request != 0 {
+        var e: u8 = request - 1
+        request = 0
+        cur_pitch = pitch[e]
+        cur_slide = slide[e]
+        left = length[e]
+        cur_dist = TONE
+        if wave[e] == $80 {
+            cur_dist = NOISE
+        }
+        volume = sr[e] & $F0        // the sustain level
+        fall_step = release_step[sr[e] & 15]
+    } else if left != 0 {
+        left -= 1
+        if left != 0 {
+            cur_pitch += cur_slide as u16
+        }
+    } else {
+        if volume == 0 {
+            return
+        }
+        if volume > fall_step {
+            volume -= fall_step
+        } else {
+            volume = 0
+        }
+    }
+    atari.pokey.audf1 = audf[cur_pitch.hi]
+    atari.pokey.audc1 = cur_dist | (volume >> 4)
+}

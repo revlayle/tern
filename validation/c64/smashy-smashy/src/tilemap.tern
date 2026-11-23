@@ -1,0 +1,13 @@
+// The tile map (spec section 4): the level's tiles, shared by the game logic and each machine's drawing.
+// Port of the tile map part of ../src/video.p8.
+
+const MAP_W: u8 = 20
+const MAP_H: u8 = 12
+const T_EMPTY: u8 = 0
+const T_SOLID: u8 = 1
+const T_DAMAGED: u8 = 2
+const T_FLOOR: u8 = 3
+const T_TREASURE: u8 = 16           // 16 + type (0-14)
+
+var tiles: [u8; MAP_W * MAP_H]
+data row_start: [u8; _] = [0, 20, 40, 60, 80, 100, 120, 140, 160, 180, 200, 220]

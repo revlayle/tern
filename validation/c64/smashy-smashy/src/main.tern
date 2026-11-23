@@ -15,6 +15,7 @@ import levelgen
 import nav
 import title
 import pages
+import tilemap
 
 // [TUNE]
 const READY_FRAMES: u8 = 150        // READY? pause, 3 s
@@ -66,7 +67,7 @@ fn attract() {
             break
         }
     }
-    levelgen.seed()
+    input.seed_random()
 }
 
 fn new_game() {
@@ -74,8 +75,8 @@ fn new_game() {
     video.draw_hud_labels()
     score.new_game()
     // empty playfield with the floor, the player at the start
-    mem.fill(addr(video.tiles), video.T_EMPTY, levelgen.CELLS)
-    mem.fill(addr(video.tiles) + levelgen.CELLS, video.T_FLOOR, video.MAP_W)
+    mem.fill(addr(tilemap.tiles), tilemap.T_EMPTY, levelgen.CELLS)
+    mem.fill(addr(tilemap.tiles) + levelgen.CELLS, tilemap.T_FLOOR, tilemap.MAP_W)
     video.draw_level()
     player.init()
 }
@@ -181,8 +182,8 @@ fn level_complete() {
             var idx: u8 = dissolve_order[j]
             dissolve_order[j] = dissolve_order[n]
             n += 1
-            if video.tiles[idx] != video.T_EMPTY {
-                video.tiles[idx] = video.T_EMPTY
+            if tilemap.tiles[idx] != tilemap.T_EMPTY {
+                tilemap.tiles[idx] = tilemap.T_EMPTY
                 video.draw_tile(levelgen.cell_col[idx], levelgen.cell_row[idx])
             }
         }
@@ -220,10 +221,7 @@ fn game_over() {
     score.update_high()
     video.message(10, 15, addr(GAME_OVER), len(GAME_OVER))
     video.message(14, 11, addr(HIGH_SCORE), len(HIGH_SCORE))
-    var hs: ptr u8 = video.SCREEN + 14 * 40 + 22
-    video.put_digits(hs, score.high, 4)
-    video.put_digits(hs + 4, 0, 2)
-    mem.fill(hs + (video.COLOR_RAM - video.SCREEN), video.COLOR_HUD, 6)
+    video.message_score(14, 22, score.high)
     for _ in 0..GAME_OVER_WAIT {
         video.wait_frame()
     }

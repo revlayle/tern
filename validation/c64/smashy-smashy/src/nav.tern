@@ -12,6 +12,7 @@ import actors
 import levelgen
 import player
 import enemies
+import tilemap
 
 const MAX_PLAT: u8 = 32
 const MAX_LINKS: u8 = 128           // per set; 127 usable, so a global link index is never NONE
@@ -64,7 +65,7 @@ const ST_ROUTES: u8 = 3             // BFS from each platform, ROUTE_WORK queue 
 const ROUTE_WORK: u8 = 24
 var stage: u8
 var pos: u8
-var row_first: [u8; video.MAP_H]    // first platform id of each row (ids are given in row order)
+var row_first: [u8; tilemap.MAP_H]    // first platform id of each row (ids are given in row order)
 var rebuilds: u8                    // time-sliced rebuilds finished this level (self-test readout)
 var build_frames: u8                // frames since the rebuild started
 var slowest_build: u8               // most frames a finished rebuild took (self-test readout)
@@ -109,7 +110,7 @@ fn new_level() {
     rebuilds = 0
     tr_count = 0
     for idx in 0..CELLS {
-        if video.tiles[idx] >= video.T_TREASURE && tr_count < len(tr_cell) {
+        if tilemap.tiles[idx] >= tilemap.T_TREASURE && tr_count < len(tr_cell) {
             tr_cell[tr_count] = idx
             tr_count += 1
         }
@@ -127,7 +128,7 @@ fn enemies_reach_top() -> bool {
         build_step()
     }
     stage = ST_IDLE
-    var fl: u8 = b_pof[video.row_start[video.MAP_H - 2]]   // the floor's standing row (row 10)
+    var fl: u8 = b_pof[tilemap.row_start[tilemap.MAP_H - 2]]   // the floor's standing row (row 10)
     if fl == NONE {
         return false                // over MAX_PLAT platforms before row 10
     }
@@ -178,7 +179,7 @@ fn build_step() -> bool {
             row_first[pos] = b_count
             scan_row(pos)
             pos += 1
-            if pos == video.MAP_H - 1 {
+            if pos == tilemap.MAP_H - 1 {
                 row_first[pos] = b_count
                 stage = ST_LINKS
                 pos = 0
@@ -239,12 +240,12 @@ fn scan_row(row: u8) {
     // Platforms are maximal runs of standing cells (not solid, solid tile below) on one row.
     // Plain Tern; the Prog8 version is assembly (it runs for every row of every map build and of the level
     // generator's check).
-    var idx: u8 = video.row_start[row]
+    var idx: u8 = tilemap.row_start[row]
     var run: u8 = NONE              // id of the current run, NONE outside one, OVERFLOW past MAX_PLAT
-    for col in 0..video.MAP_W {
+    for col in 0..tilemap.MAP_W {
         var id: u8 = NONE
         // tiles 1-3 are solid: (t - 1) < 3
-        if video.tiles[idx] - 1 >= 3 && video.tiles[idx + video.MAP_W] - 1 < 3 {
+        if tilemap.tiles[idx] - 1 >= 3 && tilemap.tiles[idx + tilemap.MAP_W] - 1 < 3 {
             if run == NONE {
                 // a new run: next platform id, or OVERFLOW when the table is full
                 run = OVERFLOW
@@ -273,13 +274,13 @@ fn make_links(p: u8) {
     var e: u8 = plat_end[bp + p]
     var first: u8 = b_links
     plat_link[bp + p] = bl + first
-    var rs: u8 = video.row_start[row]
+    var rs: u8 = tilemap.row_start[row]
 
     // walk off either end
     if s != 0 {
         walk_off(rs + s - 1, s - 1, WALK_LEFT)
     }
-    if e != video.MAP_W - 1 {
+    if e != tilemap.MAP_W - 1 {
         walk_off(rs + e + 1, e + 1, WALK_RIGHT)
     }
 
@@ -301,7 +302,7 @@ fn make_links(p: u8) {
                 }
             }
             t = plat_end[bp + q]
-            if t != video.MAP_W - 1 {
+            if t != tilemap.MAP_W - 1 {
                 t += 1
                 if t >= s && t <= e && jump_clear(t, row, qr, t - 1) {
                     add_link(t, JUMP_LEFT, q)
@@ -316,11 +317,11 @@ fn make_links(p: u8) {
 fn walk_off(idx0: u8, col: u8, kind: u8) {
     // From the cell past a platform end (idx0), if it is not a wall, fall straight down to a standing cell.
     var idx: u8 = idx0
-    if video.tiles[idx] - 1 < 3 {
+    if tilemap.tiles[idx] - 1 < 3 {
         return
     }
-    while video.tiles[idx + video.MAP_W] - 1 >= 3 {
-        idx += video.MAP_W          // row 11 is floor, so this stops
+    while tilemap.tiles[idx + tilemap.MAP_W] - 1 >= 3 {
+        idx += tilemap.MAP_W          // row 11 is floor, so this stops
     }
     var q: u8 = b_pof[idx]
     if q != NONE {
@@ -332,14 +333,14 @@ fn jump_clear(t: u8, row: u8, qr: u8, land: u8) -> bool {
     // The rise in column t from `row` up to one row above the target row qr must be clear, and so must the
     // cell above the target's end column (`land`). That headroom row gives the enemy time to move sideways
     // onto the target before it drops back below the target's tiles.
-    var idx: u8 = video.row_start[row] + t
+    var idx: u8 = tilemap.row_start[row] + t
     for _ in 0..row - qr + 1 {
-        idx -= video.MAP_W
-        if video.tiles[idx] - 1 < 3 {
+        idx -= tilemap.MAP_W
+        if tilemap.tiles[idx] - 1 < 3 {
             return false
         }
     }
-    return video.tiles[video.row_start[qr - 1] + land] - 1 >= 3
+    return tilemap.tiles[tilemap.row_start[qr - 1] + land] - 1 >= 3
 }
 
 fn add_link(col: u8, kind: u8, q: u8) {
@@ -419,7 +420,7 @@ fn treasure_settled(idx: u8) {
         if tr_cell[k] == idx {
             return
         }
-        if free == NONE && video.tiles[tr_cell[k]] < video.T_TREASURE {
+        if free == NONE && tilemap.tiles[tr_cell[k]] < tilemap.T_TREASURE {
             free = k
         }
         k += 1
@@ -451,10 +452,10 @@ fn platform_under(bx: u16, by: u8, grounded: bool) -> u8 {
     // The platform under a box. Grounded: the cell under the box centre, else under either box edge.
     // Airborne: the first standing cell straight down from the box centre.
     var row: u8 = (by + actors.BOX_H - 1) >> 4
-    if row >= video.MAP_H - 1 {
+    if row >= tilemap.MAP_H - 1 {
         return NONE
     }
-    var rs: u8 = video.row_start[row]
+    var rs: u8 = tilemap.row_start[row]
     var idx: u8 = rs + ((bx + actors.BOX_W / 2) >> 4) as u8
     var p: u8 = f_pof[idx]
     if p != NONE {
@@ -468,7 +469,7 @@ fn platform_under(bx: u16, by: u8, grounded: bool) -> u8 {
         return f_pof[rs + ((bx + (actors.BOX_W - 1)) >> 4) as u8]
     }
     while true {
-        idx += video.MAP_W
+        idx += tilemap.MAP_W
         if idx >= CELLS {
             return NONE
         }
@@ -510,7 +511,7 @@ fn decide(i: u8) {
                 while k != tr_count {
                     var idx: u8 = tr_cell[k]
                     k += 1
-                    if video.tiles[idx] >= video.T_TREASURE {
+                    if tilemap.tiles[idx] >= tilemap.T_TREASURE {
                         var q: u8 = f_pof[idx]
                         if q != NONE {
                             var h: u8 = hrow[q]

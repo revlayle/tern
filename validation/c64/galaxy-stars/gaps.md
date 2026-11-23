@@ -1021,3 +1021,44 @@ the compiler at `main` `9462661` (V1 fixes merged), `compare.py --scenario game`
 18,750 bytes (was 18,682 with all three in assembly) and 4,706 cycles per play frame (was 4,680; Prog8 5,586).
 `hostiles.update` 890 / 5,671 (was 861 / 5,561); `explode.update` 298 / 3,212 (was 298 / 3,228). The title
 screen shows in VICE. The other eleven routines stay assembly with the numbers in "V1 fixes".
+
+## V1 fixes 2: the assembly measured again (2026-11-22)
+
+Roadmap "V1 fixes 2", its "done when", with the compiler of Tern's `v1-fixes-2` branch (gaps 30-33 and smashy
+smashy's gaps 1 and 3 fixed, and the small shapes). The port as it is: 18,674 bytes (was 18,750), 4,740 cycles per
+play frame (was 4,706; Prog8 5,586), all 13,211 `compare.py` game frames the same. The source is unchanged. The
+34 cycles are layout, not code: the listings differ only by removed instructions, and the part that got slower
+(`stars.update`, +31) has the same code; with the code 76 bytes shorter, the loop branch of `stars.next_busy`
+(`bne for115`, back) now crosses a page, a cycle per slot it passes. Every plain version gave the same results again (all game frames,
+the same memory in the benches). New forms: `explode.hits.y` (the slot in Y, gap 32) and `explode.hits.carry`
+(the asm's signature, so it replaces the asm alone).
+
+| Routine | Measured | asm | best plain Tern | slower | V1 fixes | other forms |
+|---|---|---|---|---|---|---|
+| `stars.rnd` | per call | 23 B, 42 cycles | 33 B, 57 | 36% | 33 B, 57 | |
+| `video.draw_tile` | 240 tiles, average | 125 B, 153 | 156 B, 185 | 21% | 160 B, 191 | `.step`: 153 B, 185 |
+| `explode.draw_area` | 72 areas, average | 191 B, 1,410 | 213 B, 1,660 (`while`) | 18% | 223 B, 1,692 | `for`: 235 B, 1,751 |
+| `explode.draw_frame` | 72 areas, average | 142 B, 785 | 157 B, 886 (`while`) | 13% | 163 B, 900 | `for`: 173 B, 926 |
+| `explode.hits` + `hostiles.explosion_hit` | `check_explosions`, average / worst | 124 / 3,664 | 144 / 4,225 (`hits.y`) | 16% / 15% | 153 / 4,817 | s in memory: 148 / 4,465; `.branches`: 161 / 5,103 |
+| `explode.hits` alone (`hits.carry`) | `check_player`; `check_explosions` | 78 / 769; 124 / 3,664 | 80 / 792; 127 / 3,931 | 2.6% / 3.0%; 2.4% / 7.3% | 84 / 910 (`check_player`) | |
+| `hostiles.draw` | a frame | 242 / 582 | 265 / 660 | 9.5% / 13% | 262 / 648 | |
+| `demo.dist` | `demo.steer` | 657 / 4,865 | 706 / 5,202 (`.first`: `u16` sums and `dx < 256`) | 7.5% / 6.9% | 710 / 5,229 | one branch per axis: 709 / 5,230 |
+
+None is within 5% on both the average and the worst frame, so none moves to plain Tern in batch 3. The closest is
+`explode.hits` alone with the asm's signature: within 3% on `check_player`, but 7.3% on the worst
+`check_explosions` frame. What the fixes changed, from the listings:
+
+- Gap 30: `demo.dist.first`'s `(d_ay as u16) + (d_ax >> 1)` is the byte add with the carry into the high byte, and
+  `dx < 256` tests only the high byte, which made the first form the faster one (5,670 to 5,202 on the worst frame).
+- Gap 31: the 16-bit temporaries go in `stars.player_contact`, `hostiles.fly`, `hostiles.aim`, `video.row_addr`
+  and `title.parse_logo` (48 bytes of the 76).
+- Gap 32: `explosion_hit`'s loop passes the slot to `hits` in Y with no load (`hits.y`).
+- Gap 33: each `break` test in the explode loops is one branch.
+
+What the plain versions still lose:
+
+- `rnd`, `draw_tile`, `draw_area`, `draw_frame`: the carry (gap 16, unchanged).
+- `draw`: gap 31's fix does not reach it. `video.spr_x` is read by the raster interrupt, so it is volatile, and the
+  compiler does not move a volatile store up to where the byte was computed (`sta sx / lda x+6,x / adc #0 /
+  sta _t2 / lda sx / sta spr_x,y / lda _t2`); question 186 in Tern's `docs/status.md`.
+- `hits`, `dist`: the octagon test and the saturated sum; `hits` with the slot in memory also pays for the store.
