@@ -109,6 +109,7 @@ const AREA = BOX * 30           // 390, a plain number
 - next to a runtime value, it takes part in choosing the operation's type: `x + BIG` with `x: u8` and `const BIG: u16 = 200` is a 16-bit addition, where `x + 200` would be an 8-bit one,
 - signed and unsigned do not mix: with `const N: i8 = 5`, `x + N` is an error for `x: u8`, as with a variable,
 - with nothing to go by, it is its type: `var v = BOX` is a `u8`, and an `i8` constant as a `for` bound makes an `i8` counter.
+- **an address you add a variable to is best declared as a pointer**: with `const SCREEN: ptr u8 = $0400`, `SCREEN + col` (`col: u8`) is a pointer to that byte of the screen. With `const SCREEN = $0400`, the constant takes `col`'s type, and 1024 does not fit in a `u8`. `SCREEN + 40`, with a constant offset, works either way.
 
 A written type never cuts a constant down. Next to a wider value, the operation is wide, and the constant is computed at that width.
 

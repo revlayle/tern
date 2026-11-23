@@ -294,5 +294,6 @@ tern run --target c64 test_jump.tern --set $DC00=$6F --dump player.y --dump play
 
 - **Pictures and sound.** No chip is emulated. Sprites, colors, scrolling, display lists, PPU pixels and sound are checked on the machine's emulator.
 - **Timing against the video beam.** Code that waits for a raster line, or changes colors mid-line, runs differently or never ends; the cycle counts of the code itself are still exact.
+- **Ports that read something other than what was written.** I/O registers are plain RAM, so a value set with `--set` lasts only until the program writes that address. On the C64, `$DC00` is both joystick 2 and the keyboard's row select: a program that scans the keyboard writes `$DC00`, and the joystick held with `--set $DC00=$7B` is gone after the first scan, where a C64 would read the written value ANDed with the joystick. Check such a program's controls on the machine's emulator, or drive the logic from a test `main` that sets its input variables directly (12.9).
 - **ROM routines without a stand-in.** Calling one stops the run, with its address. Each machine's chapter lists the stand-ins.
 - **Disk writes.** Loading the program's own overlays works on the C64, the Atari and the Apple II; writing a file stops the run.
