@@ -448,6 +448,12 @@ fn hud_digits(col: u8, bcd: u16, digits: u8, zero: u8) {
 
 fn message(row: u8, col: u8, s: ptr u8, n: u8) {
     // Text over the playfield in the message font. draw_level() or restore_tiles() erases it.
+    // The sprites are drawn too if nothing drew them since the last VBI: the C64's frame IRQ copies the
+    // sprite shadows every frame, but here they show only when drawn, and the game's READY? (a message, then
+    // a wait without wait_frame()) would show the last screen's sprites instead of the player at the start.
+    if !sprites.rendered {
+        sprites.render()
+    }
     var scr: ptr u8 = text_row[row] + col
     for i in 0..n {
         scr[i] = font_char[s[i] & 63]
