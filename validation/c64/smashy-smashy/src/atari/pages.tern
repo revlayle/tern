@@ -5,6 +5,7 @@
 // share one mode, so there is no split, and the chain values are in the text's colour.
 import assets
 import video
+import sprites
 import input
 import score
 import enemies
@@ -143,6 +144,7 @@ fn wait(frames: u16) -> bool {
     for i in 0..len(how_frame) {
         video.hide_sprite(i)
     }
+    sprites.render()                // drawn now: the game's READY? waits without drawing a frame
     return fire
 }
 

@@ -319,6 +319,30 @@ public class ValidationTests
     }
 
     [Fact]
+    public void Smashy_smashy_on_the_atari_shows_only_the_player_during_ready()
+    {
+        // The developer's screenshot: fire on HOW TO PLAY, and the page's four sprites stayed on screen through
+        // READY? (the C64's frame IRQ copies the shadows every frame; here sprites are drawn only when the game
+        // draws, and READY? waits in a plain loop). Fire at frame 600 (the title shows 500 frames, then HOW TO
+        // PLAY), then 60 frames into READY?: on show, the player only.
+        string dir = FindValidation("c64", "smashy-smashy");
+        string path = Path.Combine(dir, "src", "main.tern");
+        var result = TernCompiler.Compile(File.ReadAllText(path), Platform.Atari, sourcePath: path);
+        AtariChips? chips = null;
+        int fireAt = -1;
+        var r = Run.Of(result, maxCycles: 900 * (long)AtariChips.FrameCycles, setup: AtariChips.Os, standIns: true,
+            until: run =>
+            {
+                if (fireAt < 0 && chips!.Frames > 600 && run.U8("video.title_mode") == 0 && run.U16("score.time") == 0x60) fireAt = chips.Frames;
+                return fireAt >= 0 && chips!.Frames >= fireAt + 60;
+            }, bus: b => chips = new AtariChips(b, f => (byte)(f >= 600 && f < 604 ? 16 : 0)));
+        Assert.True(fireAt >= 0, "no game started after fire on HOW TO PLAY");
+        int shown = r.U8("sprites.shown");
+        Assert.NotEqual(0, r.U8("sprites.drawn_page", shown * 10));                  // part 0: the player
+        Assert.All(Enumerable.Range(1, 9), part => Assert.Equal(0, r.U8("sprites.drawn_page", shown * 10 + part)));
+    }
+
+    [Fact]
     public void Smashy_smashy_builds_for_the_atari()
     {
         // V1 batch 3, step 1: the shared logic with the Atari front end (src/atari/) builds with no warning, and

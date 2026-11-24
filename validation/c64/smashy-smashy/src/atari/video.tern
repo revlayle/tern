@@ -196,9 +196,41 @@ data LEVEL_LABEL = atari_screen"LEVEL"
 
 data chars_bin = include_bytes("../../data/chars.bin")
 
+// Treasure marks (the developer's choice): on the C64 the five treasures of a tier have one shape and five
+// colours; a row here has one treasure colour, so each also gets 1 to 5 marks, gold, in its tile's top two
+// lines (0-1; every treasure leaves lines 0-2 empty, so a line stays between the marks and the shape, which
+// at the bottom ran into the trophies' base): one to four dots, and a bar for the fifth (five spaced dots do
+// not fit in 8 pixels). Made at compile time into the characters loaded at startup.
+const FIRST_TREASURE_CHAR = tl(assets.TILE_TREASURE_0_TL)   // the 15 treasures' characters follow, 4 each
+const fn mark_on(n: int, x: int) -> bool {
+    // Pixel x (0-7) of the mark for the n-th treasure of a tier (1-5).
+    if n == 5 {
+        return x <= 6
+    }
+    var first = 4 - n           // n dots 2 pixels apart, centred: 3; 2, 4; 1, 3, 5; 0, 2, 4, 6
+    return x >= first && x <= first + 2 * (n - 1) && (x - first) & 1 == 0
+}
+const fn marked_row(i: int) -> int {
+    // Byte i of chars.bin, with the marks: a treasure's top characters (its 1st and 2nd), rows 0-1.
+    var b = chars_bin[i]
+    var c = (i >> 3) - FIRST_TREASURE_CHAR
+    if c < 0 || c >= 15 * 4 || (c & 3) >= 2 || (i & 7) >= 2 {
+        return b
+    }
+    var n = (c >> 2) % 5 + 1
+    var left = (c & 3) * 4                // the tile's pixel at this character's left edge: 0 or 4
+    for k in 0..4 {
+        if mark_on(n, left + k) {
+            b = b | (3 << (6 - 2 * k))
+        }
+    }
+    return b
+}
+data chars_marked: [u8; _] = [marked_row(i) for i in 0..len(chars_bin)]
+
 fn init() {
     mem.fill(addr(screen), 0, len(screen))
-    mem.copy(addr(charset), addr(chars_bin), len(chars_bin))
+    mem.copy(addr(charset), addr(chars_marked), len(chars_marked))
     make_font()
     mem.copy(addr(charset) + (CHAR_BLOCK as u16 << 3), addr(title_chars), len(title_chars))
     var p: ptr u8 = addr(screen)
@@ -448,6 +480,12 @@ fn hud_digits(col: u8, bcd: u16, digits: u8, zero: u8) {
 
 fn message(row: u8, col: u8, s: ptr u8, n: u8) {
     // Text over the playfield in the message font. draw_level() or restore_tiles() erases it.
+    // The sprites are drawn too if nothing drew them since the last VBI: the C64's frame IRQ copies the
+    // sprite shadows every frame, but here they show only when drawn, and the game's READY? (a message, then
+    // a wait without wait_frame()) would show the last screen's sprites instead of the player at the start.
+    if !sprites.rendered {
+        sprites.render()
+    }
     var scr: ptr u8 = text_row[row] + col
     for i in 0..n {
         scr[i] = font_char[s[i] & 63]
