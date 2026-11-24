@@ -22,7 +22,8 @@ validation program, batch 2; roadmap V1, decisions 2026-11-21). MIT license (`LI
   own display list: a HUD row of ROM-font text (ANTIC mode 2), then the playfield in ANTIC mode 4, whose characters
   are the C64's multicolour ones, so `atari/video.tern` loads `data/chars.bin` as it is; the cell colours become
   one own colour per row (display-list interrupts: red, blue on the floor's rows) and PF3, the inverse characters'
-  colour, for treasures and the fast-fall target. Messages and page text use a hand-made 3 x 7 font; the shake is
+  colour, for treasures and the fast-fall target; each treasure also has 1-4 dots or a bar over it (made
+  at compile time), since the C64 tells the five treasures of a tier apart only by colour. Messages and page text use a hand-made 3 x 7 font; the shake is
   VSCROL; sound is POKEY channel 1 with the C64's effect tables; Esc pauses. Sprites (`atari/sprites.tern`):
   player-missile graphics reused down the screen by the DLIs, 5 slots (4 players and the missiles as a fifth) for
   the player, 5 enemies and 2 popups, one colour each, converted from `data/sprites.bin` at compile time; popups in
